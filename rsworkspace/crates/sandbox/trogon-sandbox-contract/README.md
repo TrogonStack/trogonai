@@ -51,7 +51,7 @@ provider.
 `ProviderCapabilityProfile` is the full profile a provider's worker declares:
 snapshot, volume, isolation, lifecycle, and performance axes, plus resource
 ranges, placement, and ingress limits that default when an older peer omits
-them. `CapabilityProfile` is the flattened tenant view derived from it, and
+them. `ResourceRange` rejects a minimum above its maximum. `CapabilityProfile` is the flattened tenant view derived from it, and
 `ListCapabilitiesRequest` and `ListCapabilitiesResponse` carry those views.
 `sdk_features` lists the `SdkFeature` values a profile vouches for, in a fixed
 order, leaving out any feature without a backing flag. `WorkerCapabilities`

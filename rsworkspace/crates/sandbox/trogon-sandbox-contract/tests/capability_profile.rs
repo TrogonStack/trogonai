@@ -6,8 +6,8 @@ use trogon_sandbox_contract::{
     ArtifactType, CapabilityProfile, Digest, DigestError, DormancyCapability, EgressCapability, EgressEnforcementLevel,
     EnvDigest, IngressCapability, IsolationCapability, IsolationTier, LifecycleCapability, ListCapabilitiesRequest,
     ListCapabilitiesResponse, PerformanceProfile, PlacementCapability, ProviderCapabilityProfile, ProviderKind,
-    ResourceCapability, ResourceLimitMechanism, ResourceRange, SdkFeature, SnapshotCapability, SuspendLevel,
-    SuspendRequestLevel, VolumeCapability, VolumeMode, WorkerCapabilities, WorkerCapabilitiesError,
+    ResourceCapability, ResourceLimitMechanism, ResourceRange, ResourceRangeError, SdkFeature, SnapshotCapability,
+    SuspendLevel, SuspendRequestLevel, VolumeCapability, VolumeMode, WorkerCapabilities, WorkerCapabilitiesError,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -56,7 +56,7 @@ fn isolation() -> IsolationCapability {
     }
 }
 
-fn profile() -> Result<ProviderCapabilityProfile, DigestError> {
+fn profile() -> Result<ProviderCapabilityProfile, Box<dyn std::error::Error>> {
     Ok(ProviderCapabilityProfile {
         provider: ProviderKind::Mock,
         snapshot: SnapshotCapability {
@@ -91,7 +91,7 @@ fn profile() -> Result<ProviderCapabilityProfile, DigestError> {
             max_concurrent_sandboxes: Some(32),
         },
         resources: ResourceCapability {
-            vcpu_millis: Some(ResourceRange { min: 100, max: 64_000 }),
+            vcpu_millis: Some(ResourceRange::new(100, 64_000)?),
             disk_mib: None,
             reports_usage_gauges: false,
         },
@@ -106,7 +106,7 @@ fn profile() -> Result<ProviderCapabilityProfile, DigestError> {
     })
 }
 
-fn fully_capable() -> Result<ProviderCapabilityProfile, DigestError> {
+fn fully_capable() -> Result<ProviderCapabilityProfile, Box<dyn std::error::Error>> {
     let mut p = profile()?;
     p.lifecycle.supports_pause_resume = true;
     p.lifecycle.supports_native_auto_stop = true;
@@ -436,10 +436,33 @@ fn dormancy_resolves_only_the_offered_suspend_level() -> TestResult {
 }
 
 #[test]
-fn resource_and_ingress_bounds_are_inclusive() {
-    let range = ResourceRange { min: 100, max: 200 };
+fn resource_and_ingress_bounds_are_inclusive() -> TestResult {
+    let range = ResourceRange::new(100, 200)?;
+    assert_eq!((range.min(), range.max()), (100, 200));
     assert!(range.contains(100) && range.contains(150) && range.contains(200));
     assert!(!range.contains(99) && !range.contains(201));
+    let single = ResourceRange::new(7, 7)?;
+    assert!(single.contains(7) && !single.contains(6) && !single.contains(8));
+    assert_eq!(
+        ResourceRange::new(200, 100),
+        Err(ResourceRangeError::Reversed { min: 200, max: 100 })
+    );
+    assert_eq!(
+        ResourceRangeError::Reversed { min: 200, max: 100 }.to_string(),
+        "resource range minimum 200 exceeds maximum 100"
+    );
+    assert_eq!(serde_json::to_value(range)?, json!({"min": 100, "max": 200}));
+    assert_eq!(
+        serde_json::from_value::<ResourceRange>(json!({"min": 7, "max": 7}))?,
+        single
+    );
+    let reversed = serde_json::from_value::<ResourceRange>(json!({"min": 200, "max": 100}))
+        .map(|_| None)
+        .unwrap_or_else(|error| Some(error.classify()));
+    assert_eq!(reversed, Some(Data));
+    let reversed_in_profile =
+        serde_json::from_value::<ResourceCapability>(json!({"vcpu_millis": {"min": 2, "max": 1}}));
+    assert!(reversed_in_profile.is_err());
 
     let unstated = IngressCapability::default();
     assert!(unstated.allows(u16::MAX));
@@ -451,6 +474,7 @@ fn resource_and_ingress_bounds_are_inclusive() {
         max_exposed_ports: Some(0),
     };
     assert!(none.allows(0) && !none.allows(1));
+    Ok(())
 }
 
 #[test]
@@ -486,18 +510,17 @@ fn changed_tenant_fields(
 
 #[test]
 fn each_profile_flag_backs_exactly_its_own_feature_bit_and_tenant_field() -> TestResult {
-    use SdkFeature as F;
     let none = WorkerCapabilities::empty();
     let cases: [(&str, &[SdkFeature], WorkerCapabilities, &[&str]); 33] = [
         (
             "/lifecycle/supports_pause_resume",
-            &[F::PauseResume],
+            &[SdkFeature::PauseResume],
             none,
             &["supports_pause_resume"],
         ),
         (
             "/lifecycle/supports_native_auto_stop",
-            &[F::NativeAutoStop],
+            &[SdkFeature::NativeAutoStop],
             none,
             &["supports_native_auto_stop"],
         ),
@@ -509,7 +532,7 @@ fn each_profile_flag_backs_exactly_its_own_feature_bit_and_tenant_field() -> Tes
         ),
         (
             "/snapshot/can_snapshot",
-            &[F::Snapshots],
+            &[SdkFeature::Snapshots],
             WorkerCapabilities::SUPPORTS_SNAPSHOT,
             &["can_snapshot"],
         ),
@@ -545,19 +568,19 @@ fn each_profile_flag_backs_exactly_its_own_feature_bit_and_tenant_field() -> Tes
         ),
         (
             "/isolation/supports_sandbox_users",
-            &[F::Users],
+            &[SdkFeature::Users],
             WorkerCapabilities::SUPPORTS_SANDBOX_USERS,
             &[],
         ),
         (
             "/isolation/supports_interactive_stdin",
-            &[F::WriteStdin],
+            &[SdkFeature::WriteStdin],
             WorkerCapabilities::SUPPORTS_INTERACTIVE_STDIN,
             &["supports_interactive_stdin"],
         ),
         (
             "/isolation/supports_named_processes",
-            &[F::NamedProcesses],
+            &[SdkFeature::NamedProcesses],
             WorkerCapabilities::SUPPORTS_NAMED_PROCESSES,
             &["supports_named_processes"],
         ),
@@ -569,111 +592,116 @@ fn each_profile_flag_backs_exactly_its_own_feature_bit_and_tenant_field() -> Tes
         ),
         (
             "/isolation/supports_graceful_stop",
-            &[F::GracefulStop],
+            &[SdkFeature::GracefulStop],
             none,
             &["supports_graceful_stop"],
         ),
         (
             "/isolation/supports_command_restart",
-            &[F::RestartCommand],
+            &[SdkFeature::RestartCommand],
             none,
             &["supports_command_restart"],
         ),
         (
             "/isolation/supports_command_cancellation",
-            &[F::CommandCancellation],
+            &[SdkFeature::CommandCancellation],
             none,
             &["supports_command_cancellation"],
         ),
         ("/isolation/supports_command_launch_cancellation", &[], none, &[]),
         (
             "/isolation/supports_port_preview",
-            &[F::SandboxDomain, F::PortPreview],
+            &[SdkFeature::SandboxDomain, SdkFeature::PortPreview],
             none,
             &["supports_port_preview"],
         ),
         (
             "/isolation/supports_expose_after_create",
-            &[F::ExposeAfterCreate],
+            &[SdkFeature::ExposeAfterCreate],
             none,
             &["supports_expose_after_create"],
         ),
         (
             "/isolation/supports_evidence_streaming",
-            &[F::EvidenceStreaming],
+            &[SdkFeature::EvidenceStreaming],
             none,
             &["supports_evidence_streaming"],
         ),
-        ("/isolation/supports_output_streaming", &[F::OutputStreaming], none, &[]),
+        (
+            "/isolation/supports_output_streaming",
+            &[SdkFeature::OutputStreaming],
+            none,
+            &[],
+        ),
         (
             "/isolation/supports_file_ops",
-            &[F::FileOps],
+            &[SdkFeature::FileOps],
             none,
             &["supports_file_ops"],
         ),
         (
             "/isolation/supports_file_search",
-            &[F::FileSearch],
+            &[SdkFeature::FileSearch],
             none,
             &["supports_file_search"],
         ),
         (
             "/isolation/supports_file_archive",
-            &[F::FileArchive],
+            &[SdkFeature::FileArchive],
             none,
             &["supports_file_archive"],
         ),
         (
             "/isolation/supports_terminal",
-            &[F::Terminal],
+            &[SdkFeature::Terminal],
             none,
             &["supports_terminal"],
         ),
         (
             "/isolation/supports_change_tracking",
-            &[F::ChangeTracking],
+            &[SdkFeature::ChangeTracking],
             none,
             &["supports_change_tracking"],
         ),
         (
             "/isolation/supports_file_watch",
-            &[F::FileWatch],
+            &[SdkFeature::FileWatch],
             none,
             &["supports_file_watch"],
         ),
         (
             "/isolation/supports_persistent_runtime",
-            &[F::PersistentRuntime],
+            &[SdkFeature::PersistentRuntime],
             none,
             &["supports_persistent_runtime"],
         ),
         (
             "/isolation/supports_dir_transfer",
-            &[F::DirTransfer],
+            &[SdkFeature::DirTransfer],
             none,
             &["supports_dir_transfer"],
         ),
         (
             "/isolation/supports_browser",
-            &[F::Browser],
+            &[SdkFeature::Browser],
             none,
             &["supports_browser"],
         ),
         (
             "/isolation/supports_network_policy_update",
-            &[F::UpdateNetworkPolicy],
+            &[SdkFeature::UpdateNetworkPolicy],
             none,
             &["supports_network_policy_update"],
         ),
         (
             "/isolation/supports_sandbox_groups",
-            &[F::Groups],
+            &[SdkFeature::Groups],
             none,
             &["supports_sandbox_groups"],
         ),
         (
             "/resources/reports_usage_gauges",
-            &[F::UsageGauges],
+            &[SdkFeature::UsageGauges],
             none,
             &["resources"],
         ),
@@ -697,23 +725,23 @@ fn each_profile_flag_backs_exactly_its_own_feature_bit_and_tenant_field() -> Tes
 
     let mut passthrough = baseline.clone();
     passthrough.placement.supports_native_passthrough = true;
-    assert_eq!(passthrough.sdk_features(), [F::NativePassthrough]);
+    assert_eq!(passthrough.sdk_features(), [SdkFeature::NativePassthrough]);
 
     let mut drives = baseline.clone();
     drives.volume.supported_modes = vec![VolumeMode::ReadOnly];
-    assert_eq!(drives.sdk_features(), [F::Drives]);
+    assert_eq!(drives.sdk_features(), [SdkFeature::Drives]);
 
     let mut fork = baseline.clone();
     fork.snapshot.can_checkpoint_running = true;
     fork.snapshot.can_restore = true;
-    assert_eq!(fork.sdk_features(), [F::Fork]);
+    assert_eq!(fork.sdk_features(), [SdkFeature::Fork]);
 
     let mut launch = baseline;
     launch.isolation.supports_command_cancellation = true;
     launch.isolation.supports_command_launch_cancellation = true;
     assert_eq!(
         launch.sdk_features(),
-        [F::CommandCancellation, F::CommandLaunchCancellation]
+        [SdkFeature::CommandCancellation, SdkFeature::CommandLaunchCancellation]
     );
     let tenant = CapabilityProfile::from(&launch);
     assert!(tenant.supports_command_launch_cancellation);
