@@ -46,7 +46,7 @@ jobs:
           # enough on hosted runners to fail the install without retries.
           CARGO_NET_RETRY: '10'
         with:
-          install_args: bazel buf go kubeconform node rust cargo:wasm-tools ubi:open-telemetry/weaver github:rhysd/actionlint cargo:protoc-gen-buffa cargo:protoc-gen-buffa-packaging cargo:cargo-deny
+          install_args: bazel buf go kubeconform node rust cargo:wasm-tools github:open-telemetry/weaver github:rhysd/actionlint cargo:protoc-gen-buffa cargo:protoc-gen-buffa-packaging cargo:cargo-deny
           cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
       # Self-hosted sunny-go runners have a bazel-remote cache on their private
