@@ -33,6 +33,7 @@ ard-catalog = { path = "crates/ard/ard-catalog" }
 ard-nats = { path = "crates/ard/ard-nats" }
 ard-registry = { path = "crates/ard/ard-registry" }
 a2a-redaction = { path = "crates/a2a/a2a-redaction" }
+trogon-a2ui = { path = "crates/a2ui/trogon-a2ui" }
 acp-nats = { path = "crates/acp/acp-nats" }
 grpc-nats-micro = { path = "crates/platform/grpc-nats-micro" }
 trogon-telemetry = { path = "crates/platform/trogon-telemetry" }
