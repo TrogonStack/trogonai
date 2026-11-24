@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run --script
-#MISE description="Local only: gate PR-changed rsworkspace .rs files vs main baseline (requires coverage.xml)"
+#MISE description="Local only: gate rsworkspace .rs files changed since main, including uncommitted work, vs the main baseline (requires coverage.xml)"
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["pycobertura==3.0.0"]
@@ -20,23 +20,29 @@ def normalize_rust_path(path: str) -> str:
     return path.strip().removeprefix("rsworkspace/")
 
 
+def git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], check=False, capture_output=True, text=True)
+
+
 def changed_rust_files(base_ref: str) -> set[str]:
-    for ref in (f"origin/{base_ref}...HEAD", f"{base_ref}...HEAD"):
-        result = subprocess.run(
-            ["git", "diff", "--name-only", ref, "--", "rsworkspace/"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
+    """Rust files that differ between the merge base and the working tree.
+
+    coverage.xml measures the working tree, so the files in scope are the
+    committed changes plus uncommitted and untracked ones, not just HEAD.
+    """
+    for ref in (f"origin/{base_ref}", base_ref):
+        merge_base = git("merge-base", ref, "HEAD")
+        if merge_base.returncode != 0:
             continue
-        paths = {
+        tracked = git("diff", "--name-only", merge_base.stdout.strip(), "--", "rsworkspace/")
+        untracked = git("ls-files", "--others", "--exclude-standard", "--", "rsworkspace/")
+        if tracked.returncode != 0 or untracked.returncode != 0:
+            continue
+        return {
             normalize_rust_path(line)
-            for line in result.stdout.splitlines()
+            for line in (tracked.stdout + untracked.stdout).splitlines()
             if line.strip().endswith(".rs")
         }
-        if paths or result.stdout.strip():
-            return paths
     return set()
 
 
