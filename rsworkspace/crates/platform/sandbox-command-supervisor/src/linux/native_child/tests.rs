@@ -52,9 +52,20 @@ impl ChildCustody {
     fn children(&self) -> Result<Vec<i32>, io::Error> {
         let mut file = self.children.borrow_mut();
         file.seek(SeekFrom::Start(0))?;
-        let mut text = String::new();
-        file.read_to_string(&mut text)?;
-        text.split_whitespace()
+        // `read_to_string` sizes each read from the text it already holds, so a
+        // two-digit child PID makes one of them five bytes long, which the
+        // readiness faults refuse for every read in the worker.
+        let mut text = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        loop {
+            match file.read(&mut chunk)? {
+                0 => break,
+                read => text.extend_from_slice(&chunk[..read]),
+            }
+        }
+        String::from_utf8(text)
+            .map_err(io::Error::other)?
+            .split_whitespace()
             .map(|pid| pid.parse().map_err(io::Error::other))
             .collect()
     }
