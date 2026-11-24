@@ -217,6 +217,7 @@ impl WorkloadHarness {
             audit,
             non_tls_ports: Vec::new(),
             limits: Limits::default(),
+            enforcement_mode: Default::default(),
         })
         .await?;
         let readiness = server.readiness();

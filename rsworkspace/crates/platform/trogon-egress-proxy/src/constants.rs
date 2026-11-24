@@ -6,6 +6,8 @@ pub(crate) const MAX_CONNECTION_LIMIT: usize = 4096;
 
 /// Longest agent identifier accepted, in bytes. It travels inside a URI SAN.
 pub(crate) const AGENT_ID_MAX_LEN: usize = 128;
+/// The longest certificate URI logged as a refused peer, the SPIFFE ID cap.
+pub(crate) const CLAIMED_URI_MAX_LEN: usize = 2048;
 
 /// Longest trust domain accepted, in bytes (the SPIFFE limit).
 pub(crate) const TRUST_DOMAIN_MAX_LEN: usize = 255;
@@ -105,3 +107,5 @@ pub(crate) const READINESS_MALFORMED_RESPONSE: &[u8] =
 pub(crate) const READINESS_TOO_LARGE_RESPONSE: &[u8] = b"HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
 pub(crate) const READINESS_TIMED_OUT_RESPONSE: &[u8] =
     b"HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n";
+
+pub(crate) const METER_NAME: &str = "trogon-egress-proxy";

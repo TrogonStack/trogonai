@@ -221,3 +221,48 @@ fn live_permit_audit_refuses_missing_or_cross_incarnation_evidence() {
         ));
     }
 }
+
+#[test]
+fn a_dry_run_forward_is_an_allow_in_dry_run_mode_that_would_have_been_denied() {
+    let destination = destination("api.example.com:443");
+    let record = record_for(Some(&destination), Decision::WouldDeny);
+    let attribution = &record.message().attribution;
+    assert_eq!(
+        attribution.decision,
+        EnumValue::from(AuditDecision::AUDIT_DECISION_ALLOW)
+    );
+    assert_eq!(
+        attribution.enforcement_mode,
+        EnumValue::from(EnforcementMode::ENFORCEMENT_MODE_DRY_RUN)
+    );
+    assert!(attribution.would_deny);
+    assert_eq!(attribution.reason_code.as_deref(), Some("no_permit"));
+}
+
+#[test]
+fn a_live_would_deny_needs_the_same_provenance_as_a_permit() {
+    let source = PolicySource::NatsKv {
+        bucket: "egress_policy".into(),
+        incarnation: std::num::NonZeroU64::new(7).unwrap(),
+    };
+    let agent = AgentId::new("agent-1").unwrap();
+    let target = destination("api.example.com:443");
+    let event = AuditEvent {
+        agent: &agent,
+        workload_peer: None,
+        destination: Some(&target),
+        resolved_address: None,
+        decision: Decision::WouldDeny,
+        snapshot_source: &source,
+        policy_revision: None,
+    };
+    assert!(matches!(
+        decision_record(
+            &event,
+            &AuditName::new("acme").unwrap(),
+            &NatsToken::new("payments").unwrap(),
+            Stamper::new(SystemClock, UuidV7Generator).stamp()
+        ),
+        Err(AuditError::PolicyEvidence)
+    ));
+}

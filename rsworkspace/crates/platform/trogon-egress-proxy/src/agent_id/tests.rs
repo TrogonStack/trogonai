@@ -33,3 +33,13 @@ fn rejects_characters_that_would_need_uri_escaping() {
         );
     }
 }
+
+#[test]
+fn rejects_the_dot_segments_a_path_cannot_carry() {
+    for raw in [".", ".."] {
+        assert_eq!(AgentId::new(raw), Err(AgentIdError::DotSegment), "{raw:?}");
+    }
+    for raw in ["...", ".a", "a.", "a..b", "..a"] {
+        assert!(AgentId::new(raw).is_ok(), "{raw:?} is an ordinary segment");
+    }
+}

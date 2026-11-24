@@ -23,8 +23,10 @@ use crate::policy_source::PolicySource;
 use crate::resolver::SystemResolver;
 use crate::static_snapshot::StaticSnapshot;
 
+mod accepted_connection_tests;
 mod connection_budget_tests;
 mod readiness_tests;
+mod refusal_log_tests;
 
 const WAIT: Duration = Duration::from_secs(5);
 const TRUST_DOMAIN: &str = "trogon.example";
@@ -84,6 +86,13 @@ struct Identity {
     key: PrivateKeyDer<'static>,
 }
 
+/// Validity that sits inside the one-hour X.509-SVID ceiling.
+fn one_hour_validity(params: &mut CertificateParams) {
+    let now = std::time::SystemTime::now();
+    params.not_before = (now - std::time::Duration::from_secs(60)).into();
+    params.not_after = (now + std::time::Duration::from_secs(1800)).into();
+}
+
 struct Pki {
     ca: CertifiedIssuer<'static, KeyPair>,
 }
@@ -111,7 +120,10 @@ impl Pki {
 
     fn server(&self) -> Identity {
         let mut params = CertificateParams::new(vec!["localhost".to_owned()]).expect("params");
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        params.is_ca = IsCa::ExplicitNoCa;
+        params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth, ExtendedKeyUsagePurpose::ClientAuth];
+        one_hour_validity(&mut params);
         self.issue(params)
     }
 
@@ -122,7 +134,10 @@ impl Pki {
             .iter()
             .map(|uri| SanType::URI(Ia5String::try_from(*uri).expect("ia5")))
             .collect();
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        params.is_ca = IsCa::ExplicitNoCa;
+        params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth, ExtendedKeyUsagePurpose::ClientAuth];
+        one_hour_validity(&mut params);
         self.issue(params)
     }
 
@@ -370,7 +385,10 @@ async fn an_established_tunnel_closes_when_the_authenticated_certificate_expires
     params.subject_alt_names = vec![SanType::URI(
         Ia5String::try_from("spiffe://trogon.example/agent/agent-1").expect("uri"),
     )];
-    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    params.is_ca = IsCa::ExplicitNoCa;
+    params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth, ExtendedKeyUsagePurpose::ClientAuth];
+    params.not_before = (std::time::SystemTime::now() - Duration::from_secs(60)).into();
     params.not_after = (std::time::SystemTime::now() + Duration::from_secs(2)).into();
     let identity = pki.issue(params);
     let tcp = TcpStream::connect(address).await.expect("connect");

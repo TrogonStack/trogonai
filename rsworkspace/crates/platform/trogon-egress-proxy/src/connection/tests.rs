@@ -31,6 +31,7 @@ use crate::static_snapshot::StaticSnapshot;
 use crate::writer_audit::WriterAudit;
 
 mod authority_join_tests;
+mod dry_run_tests;
 
 type Record = (Option<String>, Option<IpAddr>, Decision);
 

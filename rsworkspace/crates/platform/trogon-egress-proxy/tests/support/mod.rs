@@ -28,6 +28,7 @@ use trogon_egress_proxy::audit::{AuditEvent, AuditSink, Decision};
 use trogon_egress_proxy::audit_config::AuditConfig;
 use trogon_egress_proxy::audit_error::AuditError;
 use trogon_egress_proxy::config::{Config, PolicyInput};
+use trogon_egress_proxy::enforcement_mode::EnforcementMode;
 use trogon_egress_proxy::host_name::HostName;
 use trogon_egress_proxy::limits::Limits;
 use trogon_egress_proxy::mtls::TlsFiles;
@@ -41,6 +42,13 @@ pub const WAIT: Duration = Duration::from_secs(5);
 
 pub struct Pki {
     ca: CertifiedIssuer<'static, KeyPair>,
+}
+
+/// Validity that sits inside the one-hour X.509-SVID ceiling.
+pub fn one_hour_validity(params: &mut CertificateParams) {
+    let now = std::time::SystemTime::now();
+    params.not_before = (now - std::time::Duration::from_secs(60)).into();
+    params.not_after = (now + std::time::Duration::from_secs(1800)).into();
 }
 
 pub struct ClientIdentity {
@@ -71,7 +79,10 @@ impl Pki {
             .iter()
             .map(|uri| SanType::URI(Ia5String::try_from(*uri).expect("ia5")))
             .collect();
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+        params.is_ca = IsCa::ExplicitNoCa;
+        params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth, ExtendedKeyUsagePurpose::ClientAuth];
+        one_hour_validity(&mut params);
         let key = KeyPair::generate().expect("key");
         let leaf = params.signed_by(&key, &self.ca).expect("leaf");
         ClientIdentity {
@@ -97,12 +108,16 @@ impl Pki {
             audit: audit_config(),
             non_tls_ports: Vec::new(),
             limits: Limits::default(),
+            enforcement_mode: Default::default(),
         }
     }
 
     fn write_server_files(&self, dir: &std::path::Path) -> TlsFiles {
         let mut params = CertificateParams::new(vec!["localhost".to_owned()]).expect("params");
-        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        params.is_ca = IsCa::ExplicitNoCa;
+        params.key_usages = vec![KeyUsagePurpose::DigitalSignature];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth, ExtendedKeyUsagePurpose::ClientAuth];
+        one_hour_validity(&mut params);
         let key = KeyPair::generate().expect("key");
         let server = params.signed_by(&key, &self.ca).expect("server");
         let files = TlsFiles {
@@ -184,6 +199,10 @@ pub struct Setup<'a> {
 
 impl Harness {
     pub async fn start(setup: Setup<'_>) -> Self {
+        Self::start_in_mode(setup, EnforcementMode::default()).await
+    }
+
+    pub async fn start_in_mode(setup: Setup<'_>, mode: EnforcementMode) -> Self {
         let dir = tempfile::tempdir().expect("dir");
         let pki = Pki::new("test-ca");
         let mut config = pki.config(dir.path(), setup.policy, "127.0.0.1:0".parse().expect("addr"));
@@ -192,6 +211,7 @@ impl Harness {
             .iter()
             .map(|port| std::num::NonZeroU16::new(*port).expect("port"))
             .collect();
+        config.enforcement_mode = mode;
         config.limits = Limits {
             first_record_timeout: Duration::from_secs(1),
             ..Limits::default()

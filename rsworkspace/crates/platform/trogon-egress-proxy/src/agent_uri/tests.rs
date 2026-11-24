@@ -8,7 +8,7 @@ fn domain() -> TrustDomain {
 fn round_trips_every_agent_id() {
     for raw in ["a", "agent-1", "A_b.c-9"] {
         let agent = AgentId::new(raw).expect("agent");
-        let uri = agent_uri(&agent, &domain());
+        let uri = agent_uri(&agent, &domain()).expect("alias");
         assert_eq!(agent_id_from_uri(&uri, &domain()), Ok(agent));
     }
 }
@@ -16,7 +16,10 @@ fn round_trips_every_agent_id() {
 #[test]
 fn alias_has_the_documented_shape() {
     let agent = AgentId::new("agent-1").expect("agent");
-    assert_eq!(agent_uri(&agent, &domain()), "spiffe://trogon.example/agent/agent-1");
+    assert_eq!(
+        agent_uri(&agent, &domain()).as_deref(),
+        Ok("spiffe://trogon.example/agent/agent-1")
+    );
 }
 
 #[test]
@@ -87,5 +90,53 @@ fn rejects_malformed_agent_segments() {
             matches!(agent_id_from_uri(uri, &domain()), Err(AgentUriError::InvalidAgentId(_))),
             "{uri:?}"
         );
+    }
+}
+
+#[test]
+fn rejects_dot_segments_and_empty_or_trailing_segments() {
+    for uri in [
+        "spiffe://trogon.example/agent/.",
+        "spiffe://trogon.example/agent/..",
+        "spiffe://trogon.example/agent/./",
+        "spiffe://trogon.example/agent/../a",
+        "spiffe://trogon.example/agent//a",
+        "spiffe://trogon.example/agent/a//",
+    ] {
+        assert!(
+            matches!(agent_id_from_uri(uri, &domain()), Err(AgentUriError::InvalidAgentId(_))),
+            "{uri:?}"
+        );
+    }
+}
+
+/// `AgentId` is wider than a SPIFFE path segment (a policy document may key a
+/// `did:key:` id), so the SPIFFE boundary is strict in both directions.
+const DID: &str = "did:key:z6MkhaXgBZDvotDkL5257faiztiGi2sfKfzvuU5TVndZqquw";
+
+#[test]
+fn an_agent_id_outside_the_spiffe_path_alphabet_has_no_alias() {
+    let agent = AgentId::new(DID).expect("a general agent id");
+    assert_eq!(agent_uri(&agent, &domain()), Err(AgentUriError::NotSpiffeConformant));
+}
+
+#[test]
+fn a_certificate_uri_outside_the_spiffe_path_alphabet_names_no_agent() {
+    for segment in [DID, "a:b", "a:"] {
+        let uri = format!("spiffe://trogon.example/agent/{segment}");
+        assert_eq!(
+            agent_id_from_uri(&uri, &domain()),
+            Err(AgentUriError::NotSpiffeConformant),
+            "{uri:?}"
+        );
+    }
+}
+
+#[test]
+fn every_rendered_alias_is_a_valid_spiffe_id() {
+    for raw in ["a", "agent-1", "A_b.c-9", "...", ".a", "a."] {
+        let agent = AgentId::new(raw).expect("agent");
+        let uri = agent_uri(&agent, &domain()).expect("alias");
+        assert!(spiffe::SpiffeId::new(&uri).is_ok(), "{uri:?}");
     }
 }

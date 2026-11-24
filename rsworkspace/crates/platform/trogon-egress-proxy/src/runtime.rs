@@ -1,6 +1,7 @@
 //! Startup: policy first, then TLS, then the listener. Any failure is a typed
 //! error and the process does not serve (ADR#0084: enforce by default and
-//! refuse to start with no policy). Audit is part of the same bargain
+//! refuse to start with no policy). The mode is stated on the startup line, and
+//! the opt-in dry run adds a warning that denials are not enforced. Audit is part of the same bargain
 //! (ADR#0085 Decision 5): settings that cannot build an audit writer stop the
 //! process. A stream that is configured but not answering does not: NATS
 //! connects in the background, so the proxy keeps denying and refuses the
@@ -22,6 +23,7 @@ use crate::audit::AuditSink;
 use crate::config::{Config, PolicyInput, TlsInput};
 use crate::connection::Proxy;
 use crate::constants::AUDIT_CONNECT_TIMEOUT;
+pub use crate::enforcement_mode::EnforcementMode;
 use crate::live_policy::{KvPolicyConfig, KvSnapshot, LivePolicyError, PolicyTransportError};
 use crate::mtls::{TlsError, load_server_config};
 use crate::policy_snapshot::{PolicySnapshot, PolicyStatistics};
@@ -41,22 +43,6 @@ struct WorkloadRuntime {
     identity: IdentityStore,
     driver: IdentityDriver,
     registration: RegistrationDriver,
-}
-
-/// What the proxy does with a request the policy does not permit. Enforcement
-/// is the only mode; the startup line states it so a log never has to be
-/// interpreted to learn that the proxy is protecting anything.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EnforcementMode {
-    Enforce,
-}
-
-impl EnforcementMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Enforce => "enforce",
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -193,7 +179,7 @@ async fn start_with_sources(
             source,
         })?;
 
-    let mode = EnforcementMode::Enforce;
+    let mode = config.enforcement_mode;
     tracing::info!(
         policy_source = %snapshot.source(),
         policy_kind = snapshot.source().kind(),
@@ -204,6 +190,7 @@ async fn start_with_sources(
         trust_domain = %config.trust_domain,
         "egress proxy starting"
     );
+    crate::telemetry::startup::enforcement_notice(mode);
 
     let proxy = Proxy::new(
         snapshot,
@@ -211,7 +198,8 @@ async fn start_with_sources(
         audit,
         config.limits,
         config.non_tls_ports.into_iter().collect(),
-    );
+    )
+    .with_mode(mode);
     let server = match tls {
         RuntimeIdentity::Fixed(tls) => Server::new(listener, tls, proxy, config.trust_domain),
         RuntimeIdentity::Workload(workload) => {

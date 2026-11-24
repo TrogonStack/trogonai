@@ -15,7 +15,9 @@ use trogon_workload_identity::{IdentityDriver, IdentityStore, MaterialLease};
 
 use crate::connection::Proxy;
 use crate::constants::ACCEPT_ERROR_BACKOFF;
+use crate::credential_source::CredentialSource;
 use crate::live_policy::KvPolicyDriver;
+use crate::peer_certificate::claimed_uri;
 use crate::peer_identity::PeerIdentity;
 use crate::trust_domain::TrustDomain;
 use crate::workload_registration_driver::RegistrationDriver;
@@ -238,31 +240,40 @@ async fn serve_connection(
     let tls = match handshake {
         Ok(Ok(tls)) => tls,
         Ok(Err(error)) => {
-            tracing::warn!(%peer, error = %error, "TLS handshake refused");
+            crate::telemetry::refusal::handshake_refused(peer, &error);
             return;
         }
         Err(_) => {
-            tracing::warn!(%peer, "TLS handshake timed out");
+            crate::telemetry::refusal::handshake_timed_out(peer);
             return;
         }
     };
     let certificates = tls.get_ref().1.peer_certificates().unwrap_or_default();
+    let credential_source = if lease.is_some() {
+        CredentialSource::WorkloadApi
+    } else {
+        CredentialSource::StaticFile
+    };
     let identity = match lease {
         Some(lease) => match PeerIdentity::from_workload_certificates(certificates, lease) {
             Ok(identity) => identity,
             Err(error) => {
-                tracing::warn!(%peer, error = %error, "workload peer refused");
+                let claimed = certificates.first().and_then(|leaf| claimed_uri(leaf.as_ref()));
+                crate::telemetry::refusal::workload_peer_refused(peer, claimed.as_deref(), &error);
                 return;
             }
         },
         None => match PeerIdentity::from_verified_certificates(certificates, &trust_domain) {
             Ok(identity) => identity,
             Err(error) => {
-                tracing::warn!(%peer, error = %error, "client certificate names no agent");
+                let claimed = certificates.first().and_then(|leaf| claimed_uri(leaf.as_ref()));
+                crate::telemetry::refusal::certificate_names_no_agent(peer, claimed.as_deref(), &error);
                 return;
             }
         },
     };
+    crate::telemetry::connection::accepted(peer, identity.spiffe_id(), credential_source);
+    proxy.metrics().record_accepted(credential_source);
     proxy.serve(tls, &identity).await;
 }
 

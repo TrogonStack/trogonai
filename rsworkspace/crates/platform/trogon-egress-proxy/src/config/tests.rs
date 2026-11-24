@@ -218,3 +218,29 @@ fn live_policy_derives_its_scope_from_validated_runtime_configuration() {
     assert_eq!(policy.key(), "t61636d65.p7061796d656e7473");
     assert_eq!(policy.bucket(), "egress_policy");
 }
+
+#[test]
+fn enforcement_is_the_default_mode() {
+    let config = resolve(parse(&[]).expect("args")).expect("config");
+    assert_eq!(config.enforcement_mode, EnforcementMode::Enforce);
+}
+
+#[test]
+fn dry_run_is_selected_only_by_naming_it() {
+    let config = resolve(parse(&["--enforcement-mode", "dry_run"]).expect("args")).expect("config");
+    assert_eq!(config.enforcement_mode, EnforcementMode::DryRun);
+    let config = resolve(parse(&["--enforcement-mode", "enforce"]).expect("args")).expect("config");
+    assert_eq!(config.enforcement_mode, EnforcementMode::Enforce);
+}
+
+#[test]
+fn an_unknown_mode_refuses_startup_instead_of_falling_back() {
+    for value in ["", "off", "Dry_Run", "dry-run", "permissive"] {
+        let args = parse(&["--enforcement-mode", value]).expect("args");
+        assert_eq!(
+            resolve(args).unwrap_err(),
+            ConfigError::EnforcementMode(EnforcementModeError),
+            "{value:?}"
+        );
+    }
+}
