@@ -16,6 +16,7 @@ fn as_str_returns_expected_values() {
     assert_eq!(ServiceName::TrogonSourceSlack.as_str(), "trogon-source-slack");
     assert_eq!(ServiceName::TrogonSourceTelegram.as_str(), "trogon-source-telegram");
     assert_eq!(ServiceName::ChannelBridgeTelegram.as_str(), "channel-bridge-telegram");
+    assert_eq!(ServiceName::TrogonEgressProxy.as_str(), "trogon-egress-proxy");
 }
 
 #[test]

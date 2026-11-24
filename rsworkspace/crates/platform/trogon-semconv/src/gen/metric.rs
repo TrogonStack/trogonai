@@ -292,6 +292,24 @@ pub fn build_decider_wasm_traps(meter: &opentelemetry::metrics::Meter) -> opente
         .build()
 }
 
+/// mTLS connections accepted, by where the credentials came from
+///
+/// Instrument: `counter`. Unit: `{connection}`.
+pub const EGRESS_PROXY_CONNECTIONS_ACCEPTED: &str = "egress_proxy.connections.accepted";
+
+/// mTLS connections accepted, by where the credentials came from
+///
+/// Instrument: `counter`. Unit: `{connection}`.
+pub fn build_egress_proxy_connections_accepted(
+    meter: &opentelemetry::metrics::Meter,
+) -> opentelemetry::metrics::Counter<u64> {
+    meter
+        .u64_counter(EGRESS_PROXY_CONNECTIONS_ACCEPTED)
+        .with_description("mTLS connections accepted, by where the credentials came from.")
+        .with_unit("{connection}")
+        .build()
+}
+
 /// Credential resolutions served from the runtime cache
 ///
 /// Instrument: `counter`. Unit: `{resolution}`.

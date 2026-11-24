@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use tracing::field::{Field, Visit};
 use tracing::subscriber::{DefaultGuard, NoSubscriber};
-use tracing::{Dispatch, Event, Subscriber};
+use tracing::{Dispatch, Event, Level, Subscriber};
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
@@ -26,6 +26,7 @@ pub use facade::{CapturedLog, CapturedLogs, LogLevel};
 /// text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturedEvent {
+    level: Level,
     fields: BTreeMap<String, String>,
 }
 
@@ -43,6 +44,11 @@ impl CapturedEvent {
     /// The event's message.
     pub fn message(&self) -> Option<&str> {
         self.field(Self::MESSAGE_FIELD)
+    }
+
+    /// The level the event was emitted at.
+    pub fn level(&self) -> Level {
+        self.level
     }
 }
 
@@ -74,6 +80,11 @@ impl CapturedEvents {
     pub fn events(&self) -> Vec<CapturedEvent> {
         self.0.lock().expect("captured events are not poisoned").clone()
     }
+
+    /// The events recorded so far at exactly `level`, in order.
+    pub fn at(&self, level: Level) -> Vec<CapturedEvent> {
+        self.events().into_iter().filter(|event| event.level == level).collect()
+    }
 }
 
 /// While a single dispatcher is registered, `tracing` caches a callsite's
@@ -97,7 +108,10 @@ impl<S: Subscriber> Layer<S> for CapturedEvents {
         self.0
             .lock()
             .expect("captured events are not poisoned")
-            .push(CapturedEvent { fields: fields.0 });
+            .push(CapturedEvent {
+                level: *event.metadata().level(),
+                fields: fields.0,
+            });
     }
 }
 

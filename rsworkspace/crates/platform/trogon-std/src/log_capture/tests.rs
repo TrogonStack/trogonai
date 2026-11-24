@@ -104,3 +104,22 @@ fn records_an_event_whose_callsite_was_first_reached_on_a_thread_without_a_subsc
     };
     assert_eq!(event.field("attempt"), Some("1"));
 }
+
+#[test]
+fn keeps_each_event_level_and_selects_events_at_exactly_one_level() {
+    let events = CapturedEvents::new();
+    let guard = events.install(LevelFilter::INFO);
+
+    tracing::info!(step = 1, "started");
+    tracing::warn!(reason = "slow", "lagging");
+    tracing::error!(reason = "gone", "failed");
+    drop(guard);
+
+    let levels: Vec<Level> = events.events().iter().map(CapturedEvent::level).collect();
+    assert_eq!(levels, [Level::INFO, Level::WARN, Level::ERROR]);
+    let warnings = events.at(Level::WARN);
+    let [warning] = warnings.as_slice() else {
+        panic!("expected exactly one warning, got {warnings:?}");
+    };
+    assert_eq!(warning.field("reason"), Some("slow"));
+}
