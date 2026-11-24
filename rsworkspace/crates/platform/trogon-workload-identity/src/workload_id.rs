@@ -4,7 +4,9 @@ use crate::RegistrationError;
 use crate::constants::MAX_SPIFFE_ID_BYTES;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WorkloadId(SpiffeId);
+/// A canonical SPIFFE ID that names a workload: lowercase trust domain and a
+/// non-empty, normalized path.
+pub struct WorkloadId(SpiffeId);
 
 impl WorkloadId {
     pub fn new(value: &str) -> Result<Self, RegistrationError> {
@@ -22,3 +24,6 @@ impl WorkloadId {
         &self.0
     }
 }
+
+#[cfg(test)]
+mod tests;

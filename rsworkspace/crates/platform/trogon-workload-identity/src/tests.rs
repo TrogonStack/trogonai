@@ -21,11 +21,16 @@ pub(crate) const PEER_ID: &str = "spiffe://example.org/runtime/workload-1";
 mod boundary_tests;
 mod bundle_snapshot_tests;
 mod crl_tests;
+mod jwt_bundle_source_tests;
+pub(crate) mod jwt_svid_tests;
 mod lifecycle_tests;
 mod spiffe_id_bounds_tests;
+mod telemetry_tests;
+mod tls_identity_tests;
 mod trust_revocation_tests;
 mod validation_tests;
 mod wire_identity_tests;
+mod workload_api_surface_tests;
 
 #[derive(Default)]
 pub(crate) struct Recorder(Mutex<Vec<ActivationFact>>);

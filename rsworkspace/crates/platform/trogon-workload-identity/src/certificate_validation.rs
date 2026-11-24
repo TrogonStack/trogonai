@@ -16,18 +16,11 @@ pub(crate) fn timestamp(value: i64) -> Result<SystemTime, MaterialError> {
         .ok_or(MaterialError::Profile)
 }
 
-pub(crate) fn leaf_profile(
-    certificate: &CertificateDer<'_>,
-    now: SystemTime,
-) -> Result<(SpiffeId, SystemTime, SystemTime), MaterialError> {
-    let (rest, leaf) = X509Certificate::from_der(certificate).map_err(|_| MaterialError::Profile)?;
-    if !rest.is_empty() {
-        return Err(MaterialError::Profile);
-    }
-    let id = spiffe::cert::spiffe_id_from_der(certificate).map_err(|_| MaterialError::Identity)?;
-    if id.path().is_empty() {
-        return Err(MaterialError::Identity);
-    }
+/// The X.509-SVID key constraints a leaf must satisfy: `cA` false, `digitalSignature`
+/// set, neither `keyCertSign` nor `cRLSign`, and, when an extended key usage is
+/// present, both `serverAuth` and `clientAuth`. It is the only definition of that
+/// profile: [`leaf_profile`] and [`verify_leaf_key_profile`] both call it.
+fn key_profile(leaf: &X509Certificate<'_>) -> Result<(), MaterialError> {
     let basic = leaf
         .basic_constraints()
         .map_err(|_| MaterialError::Profile)?
@@ -46,12 +39,60 @@ pub(crate) fn leaf_profile(
     {
         return Err(MaterialError::Profile);
     }
+    Ok(())
+}
+
+/// Checks a DER leaf against the X.509-SVID key constraints only. Validity
+/// window, lifetime cap and identity are the caller's concern.
+pub fn verify_leaf_key_profile(certificate: &[u8]) -> Result<(), MaterialError> {
+    let (rest, leaf) = X509Certificate::from_der(certificate).map_err(|_| MaterialError::Profile)?;
+    if !rest.is_empty() {
+        return Err(MaterialError::Profile);
+    }
+    key_profile(&leaf)
+}
+
+/// The not-before and not-after instants of a leaf and the positive span
+/// between them. A zero or negative span is refused.
+fn validity_period(leaf: &X509Certificate<'_>) -> Result<(SystemTime, SystemTime, Duration), MaterialError> {
     let not_before = timestamp(leaf.validity().not_before.timestamp())?;
     let expires_at = timestamp(leaf.validity().not_after.timestamp())?;
     let lifetime = expires_at
         .duration_since(not_before)
         .map_err(|_| MaterialError::Profile)?;
-    if not_before > now || expires_at <= now || lifetime.is_zero() || lifetime > MAX_SVID_LIFETIME {
+    if lifetime.is_zero() {
+        return Err(MaterialError::Profile);
+    }
+    Ok((not_before, expires_at, lifetime))
+}
+
+/// The validity span (not-after minus not-before) of a DER leaf. It is the
+/// quantity [`MAX_SVID_LIFETIME`](crate::constants::MAX_SVID_LIFETIME) bounds.
+/// Comparing it with that ceiling and checking the current time are the
+/// caller's concern.
+pub fn leaf_lifetime(certificate: &[u8]) -> Result<Duration, MaterialError> {
+    let (rest, leaf) = X509Certificate::from_der(certificate).map_err(|_| MaterialError::Profile)?;
+    if !rest.is_empty() {
+        return Err(MaterialError::Profile);
+    }
+    validity_period(&leaf).map(|(_, _, lifetime)| lifetime)
+}
+
+pub(crate) fn leaf_profile(
+    certificate: &CertificateDer<'_>,
+    now: SystemTime,
+) -> Result<(SpiffeId, SystemTime, SystemTime), MaterialError> {
+    let (rest, leaf) = X509Certificate::from_der(certificate).map_err(|_| MaterialError::Profile)?;
+    if !rest.is_empty() {
+        return Err(MaterialError::Profile);
+    }
+    let id = spiffe::cert::spiffe_id_from_der(certificate).map_err(|_| MaterialError::Identity)?;
+    if id.path().is_empty() {
+        return Err(MaterialError::Identity);
+    }
+    key_profile(&leaf)?;
+    let (not_before, expires_at, lifetime) = validity_period(&leaf)?;
+    if not_before > now || expires_at <= now || lifetime > MAX_SVID_LIFETIME {
         return Err(MaterialError::Profile);
     }
     Ok((id, not_before, expires_at))

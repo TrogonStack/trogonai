@@ -14,9 +14,14 @@ test-support = ["dep:rcgen", "dep:tempfile", "dep:tokio-stream", "dep:time"]
 
 [dependencies]
 async-trait = { workspace = true }
+aws-lc-rs = "=1.18.1"
+base64 = { workspace = true }
 futures = { workspace = true }
+jsonwebtoken = { workspace = true }
 rustls = { workspace = true }
 rustls-webpki = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 sha2 = { workspace = true }
 spiffe = { workspace = true, features = ["workload-api-x509"] }
 thiserror = { workspace = true }
@@ -34,11 +39,16 @@ tokio-stream = { version = "=0.1.18", features = ["net"], optional = true }
 time = { workspace = true, optional = true }
 
 [dev-dependencies]
+p256 = { version = "=0.13.2", features = ["ecdsa", "pkcs8"] }
+rand_core = { version = "=0.6.4", features = ["getrandom"] }
+rsa = { version = "=0.9.10", features = ["std"] }
 rustls = { workspace = true, features = ["tls12"] }
 rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "test-util", "io-util"] }
 tokio-rustls = { workspace = true }
+tracing-subscriber = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }
 tonic = { workspace = true }
 tonic-prost = "=0.14.5"
 prost = "=0.14.3"
