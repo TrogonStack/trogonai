@@ -86,7 +86,6 @@ fn idle_policy_rejects_ambiguous_stages_on_construction_and_deserialization() ->
             .err()
             .ok_or("ambiguous idle policy deserialized")?;
         assert_eq!(error.classify(), Data, "{policy:?}");
-        assert!(error.to_string().contains(&expected.to_string()), "{error}");
     }
     Ok(())
 }

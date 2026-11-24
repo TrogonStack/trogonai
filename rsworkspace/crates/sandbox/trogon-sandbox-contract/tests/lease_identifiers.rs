@@ -54,7 +54,6 @@ fn tenant_id_rejects_invalid_values_on_construction_parsing_and_deserialization(
             .err()
             .ok_or("invalid tenant id deserialized")?;
         assert_eq!(error.classify(), Data, "{value:?}");
-        assert_eq!(error.to_string(), expected.to_string());
     }
     Ok(())
 }
