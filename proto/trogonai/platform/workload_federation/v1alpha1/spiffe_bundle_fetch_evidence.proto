@@ -1,0 +1,193 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+import "trogonai/platform/workload_federation/v1alpha1/trust_registration.proto";
+
+// Every attempt is audited, including refusals and failures, because the
+// SPIFFE federation specification recommends logging bundle endpoint fetches
+// for forensics (ADR#0098). Unspecified and unknown values are invalid.
+enum SpiffeBundleFetchOutcome {
+  SPIFFE_BUNDLE_FETCH_OUTCOME_UNSPECIFIED = 0;
+  // A bundle was accepted and differs from the previously accepted one.
+  SPIFFE_BUNDLE_FETCH_OUTCOME_CHANGED = 1;
+  // A bundle was accepted and carries the same authorities as before.
+  SPIFFE_BUNDLE_FETCH_OUTCOME_UNCHANGED = 2;
+  // The response was received and local policy refused it.
+  SPIFFE_BUNDLE_FETCH_OUTCOME_REFUSED = 3;
+  // No usable response was obtained.
+  SPIFFE_BUNDLE_FETCH_OUTCOME_FAILED = 4;
+}
+
+// A bounded closed set. Only refused and failed attempts carry one. Free-form
+// error text, response bodies and certificate contents are never retained.
+enum SpiffeBundleFetchReason {
+  SPIFFE_BUNDLE_FETCH_REASON_UNSPECIFIED = 0;
+  // Refused: the endpoint did not present the configured TLS identity.
+  SPIFFE_BUNDLE_FETCH_REASON_TLS_IDENTITY_MISMATCH = 1;
+  // Refused: the deployment never follows redirects.
+  SPIFFE_BUNDLE_FETCH_REASON_REDIRECT_REFUSED = 2;
+  // Refused: DNS, address or exact endpoint policy rejected the endpoint.
+  SPIFFE_BUNDLE_FETCH_REASON_ENDPOINT_POLICY_REFUSED = 3;
+  // Refused: the document is not a valid SPIFFE bundle.
+  SPIFFE_BUNDLE_FETCH_REASON_MALFORMED_BUNDLE = 4;
+  // Refused: the bundle names a different trust domain than the registration.
+  SPIFFE_BUNDLE_FETCH_REASON_TRUST_DOMAIN_MISMATCH = 5;
+  // Refused: spiffe_sequence is lower than the last accepted sequence.
+  SPIFFE_BUNDLE_FETCH_REASON_SEQUENCE_REGRESSION = 6;
+  // Refused: the response exceeded the bundle size ceiling.
+  SPIFFE_BUNDLE_FETCH_REASON_OVERSIZE = 7;
+  // Failed: the request deadline elapsed.
+  SPIFFE_BUNDLE_FETCH_REASON_TIMEOUT = 8;
+  // Failed: connection error or non-success HTTP status.
+  SPIFFE_BUNDLE_FETCH_REASON_UNAVAILABLE = 9;
+}
+
+// Public authority identifiers only. Each value is the SHA-256 of the DER
+// X.509 authority certificate or of the JWT authority's public key, never the
+// material itself and never a private key.
+message SpiffeBundleAuthorityChanges {
+  option (buf.validate.message).cel = {
+    id: "spiffe_bundle_authority_changes.nonempty"
+    message: "an accepted bundle change must add or remove at least one authority"
+    expression: "this.x509_authorities_added_sha256.size() + this.x509_authorities_removed_sha256.size() + this.jwt_authorities_added_sha256.size() + this.jwt_authorities_removed_sha256.size() > 0"
+  };
+  repeated bytes x509_authorities_added_sha256 = 1 [(buf.validate.field).repeated = {
+    max_items: 128
+    unique: true
+    items: {
+      bytes: {len: 32}
+    }
+  }];
+  repeated bytes x509_authorities_removed_sha256 = 2 [(buf.validate.field).repeated = {
+    max_items: 128
+    unique: true
+    items: {
+      bytes: {len: 32}
+    }
+  }];
+  repeated bytes jwt_authorities_added_sha256 = 3 [(buf.validate.field).repeated = {
+    max_items: 128
+    unique: true
+    items: {
+      bytes: {len: 32}
+    }
+  }];
+  repeated bytes jwt_authorities_removed_sha256 = 4 [(buf.validate.field).repeated = {
+    max_items: 128
+    unique: true
+    items: {
+      bytes: {len: 32}
+    }
+  }];
+}
+
+message SpiffeBundleFetchHttpsWeb {
+  TrustEndpoint endpoint = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The authenticated identity is what the endpoint proved, not the configured
+// expectation. An attempt that failed before authentication carries none.
+message SpiffeBundleFetchHttpsSpiffe {
+  TrustEndpoint endpoint = 1 [features.field_presence = LEGACY_REQUIRED];
+  string authenticated_spiffe_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 2048
+    pattern: "^spiffe://[a-z0-9._-]{1,255}(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|[.][A-Za-z0-9_-][A-Za-z0-9._-]*|[.][.][A-Za-z0-9._-]+))+$"
+  }];
+}
+
+// Evidence for one fetch attempt against one exact trust registration revision.
+// Actor and occurrence time remain in the audit event envelope, as for
+// lifecycle events, so no timestamp is repeated here. Changes to the
+// relationship itself are the existing TrustRegistrationEvent records.
+//
+// No bundle bytes, certificates, keys or response bodies are retained. Only a
+// SPIFFE endpoint profile is represented: OIDC refresh has its own evidence.
+// Sequence and refresh hint are recorded as received, so a refusal can still
+// show what the endpoint sent. The digest is only for an accepted bundle.
+message SpiffeBundleFetchEvidence {
+  option (buf.validate.message).cel = {
+    id: "spiffe_bundle_fetch.success"
+    message: "an accepted fetch carries a bundle digest and sequence and no reason"
+    expression: "this.outcome > 2 || (this.reason == 0 && has(this.bundle_sha256) && has(this.spiffe_sequence))"
+  };
+  option (buf.validate.message).cel = {
+    id: "spiffe_bundle_fetch.rejection"
+    message: "a refused or failed fetch carries a reason and no bundle digest"
+    expression: "this.outcome < 3 || (this.reason != 0 && !has(this.bundle_sha256) && !has(this.changes))"
+  };
+  option (buf.validate.message).cel = {
+    id: "spiffe_bundle_fetch.reason_class"
+    message: "a refusal carries a policy reason and a failure carries a transport reason"
+    expression: "this.outcome == 3 ? (this.reason >= 1 && this.reason <= 7) : (this.outcome != 4 || this.reason >= 8)"
+  };
+  option (buf.validate.message).cel = {
+    id: "spiffe_bundle_fetch.changes"
+    message: "only a changed bundle carries authority changes"
+    expression: "(this.outcome == 1) == has(this.changes)"
+  };
+  option (buf.validate.message).cel = {
+    id: "spiffe_bundle_fetch.endpoint_identity"
+    message: "an accepted fetch over https_spiffe carries the authenticated endpoint identity"
+    expression: "this.outcome > 2 || !has(this.https_spiffe) || has(this.https_spiffe.authenticated_spiffe_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "spiffe_bundle_fetch.sequence_regression"
+    message: "a sequence regression names a received sequence below the accepted one"
+    expression: "this.reason != 6 || (has(this.spiffe_sequence) && has(this.accepted_spiffe_sequence) && this.spiffe_sequence < this.accepted_spiffe_sequence)"
+  };
+  option (buf.validate.message).cel = {
+    id: "spiffe_bundle_fetch.sequence_monotonic"
+    message: "an accepted bundle sequence cannot be below the accepted one"
+    expression: "this.outcome > 2 || !has(this.accepted_spiffe_sequence) || this.spiffe_sequence >= this.accepted_spiffe_sequence"
+  };
+  option (buf.validate.message).cel = {
+    id: "spiffe_bundle_fetch.refresh_hint"
+    message: "the applied refresh interval cannot exceed the bundle refresh hint"
+    expression: "!has(this.spiffe_refresh_hint) || this.effective_refresh_interval <= this.spiffe_refresh_hint"
+  };
+  TrustRegistrationRef trust_registration_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  SpiffeTrustDomain trust_domain = 2 [features.field_presence = LEGACY_REQUIRED];
+  oneof endpoint_profile {
+    option (buf.validate.oneof).required = true;
+    SpiffeBundleFetchHttpsWeb https_web = 3;
+    SpiffeBundleFetchHttpsSpiffe https_spiffe = 4;
+  }
+  SpiffeBundleFetchOutcome outcome = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  SpiffeBundleFetchReason reason = 6 [(buf.validate.field).enum.defined_only = true];
+  // The bundle's spiffe_sequence as received. An accepted fetch must carry
+  // one although the SPIFFE bundle format makes it optional: the sequence
+  // regression refusal orders fetches by it, so a bundle with no sequence
+  // cannot be shown to be newer than the last accepted one and is refused.
+  uint64 spiffe_sequence = 7;
+  // The bundle's spiffe_refresh_hint as received; absent when it carried none.
+  google.protobuf.Duration spiffe_refresh_hint = 8 [(buf.validate.field).duration = {
+    gt: {}
+    lte: {seconds: 31536000}
+  }];
+  // The interval the next fetch is scheduled after: the configured interval,
+  // lowered to the bundle hint when that is faster, never above five minutes.
+  google.protobuf.Duration effective_refresh_interval = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 300}
+    }
+  ];
+  // SHA-256 of the exact received bundle bytes. Two fetches with equal digests
+  // carried the same document.
+  bytes bundle_sha256 = 10 [(buf.validate.field).bytes.len = 32];
+  // Highest sequence accepted before this attempt, when one was accepted.
+  uint64 accepted_spiffe_sequence = 11;
+  SpiffeBundleAuthorityChanges changes = 12;
+}

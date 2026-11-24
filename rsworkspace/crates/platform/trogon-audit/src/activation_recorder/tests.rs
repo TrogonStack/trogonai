@@ -251,8 +251,44 @@ fn activation_records_preserve_registered_application_identity_independently_of_
         panic!("activation detail");
     };
     assert_eq!(actual.binding.application_id.as_deref(), Some("did:key:zExample"));
-    message.binding.as_option_mut().unwrap().spiffe_id = "spiffe://example.test".into();
     assert!(CredentialActivationFacts::try_from(message).is_ok());
+}
+
+#[test]
+fn activation_binding_spiffe_ids_must_be_canonical_and_name_a_path() {
+    let long_path = format!("spiffe://example.test/{}", "a".repeat(2048));
+    for refused in [
+        "spiffe://example.test",
+        "spiffe://example.test/",
+        "SPIFFE://example.test/proxy",
+        "spiffe://EXAMPLE.test/proxy",
+        "spiffe://example.test/proxy/",
+        "spiffe://example.test//proxy",
+        "spiffe://example.test/proxy/..",
+        "spiffe://example.test/proxy?x=1",
+        "spiffe://example.test/proxy#fragment",
+        "spiffe://user@example.test/proxy",
+        "spiffe://example.test:8080/proxy",
+        "",
+        long_path.as_str(),
+    ] {
+        let mut message = activation();
+        message.binding.as_option_mut().unwrap().spiffe_id = refused.into();
+        assert_eq!(
+            CredentialActivationFacts::try_from(message),
+            Err(ActivationFactsError::Binding),
+            "{refused:?}"
+        );
+    }
+    for accepted in [
+        "spiffe://example.test/proxy",
+        "spiffe://example.test/opaque/deployment/7",
+        "spiffe://a-b_c.example.test/A/b-c_d.e",
+    ] {
+        let mut message = activation();
+        message.binding.as_option_mut().unwrap().spiffe_id = accepted.into();
+        assert!(CredentialActivationFacts::try_from(message).is_ok(), "{accepted:?}");
+    }
 }
 
 #[tokio::test]

@@ -45,6 +45,10 @@
               {
                 "type": "unit",
                 "value": "supervisor.service"
+              },
+              {
+                "type": "unix",
+                "value": "uid:1001"
               }
             ],
             "nodeAttestorRef": {
@@ -145,6 +149,10 @@
                 {
                   "type": "unit",
                   "value": "supervisor.service"
+                },
+                {
+                  "type": "unix",
+                  "value": "uid:1001"
                 }
               ],
               "nodeAttestorRef": {
@@ -456,6 +464,10 @@
                       {
                         "type": "unit",
                         "value": "supervisor.service"
+                      },
+                      {
+                        "type": "unix",
+                        "value": "uid:1001"
                       }
                     ],
                     "nodeAttestorRef": {
@@ -660,6 +672,10 @@
                   {
                     "type": "unit",
                     "value": "supervisor.service"
+                  },
+                  {
+                    "type": "unix",
+                    "value": "uid:1001"
                   }
                 ],
                 "nodeAttestorRef": {
@@ -1056,6 +1072,10 @@
                     {
                       "type": "unit",
                       "value": "supervisor.service"
+                    },
+                    {
+                      "type": "unix",
+                      "value": "uid:1001"
                     }
                   ],
                   "nodeAttestorRef": {
@@ -1262,6 +1282,10 @@
                     {
                       "type": "unit",
                       "value": "supervisor.service"
+                    },
+                    {
+                      "type": "unix",
+                      "value": "uid:1001"
                     }
                   ],
                   "nodeAttestorRef": {
@@ -1449,6 +1473,10 @@
                     {
                       "type": "unit",
                       "value": "supervisor.service"
+                    },
+                    {
+                      "type": "unix",
+                      "value": "uid:1001"
                     }
                   ],
                   "nodeAttestorRef": {
@@ -1637,6 +1665,10 @@
                       {
                         "type": "unit",
                         "value": "supervisor.service"
+                      },
+                      {
+                        "type": "unix",
+                        "value": "uid:1001"
                       }
                     ],
                     "nodeAttestorRef": {
@@ -1886,6 +1918,10 @@
                       {
                         "type": "unit",
                         "value": "supervisor.service"
+                      },
+                      {
+                        "type": "unix",
+                        "value": "uid:1001"
                       }
                     ],
                     "nodeAttestorRef": {
@@ -2131,6 +2167,10 @@
                       {
                         "type": "unit",
                         "value": "supervisor.service"
+                      },
+                      {
+                        "type": "unix",
+                        "value": "uid:1001"
                       }
                     ],
                     "nodeAttestorRef": {
@@ -2321,6 +2361,10 @@
                       {
                         "type": "unit",
                         "value": "supervisor.service"
+                      },
+                      {
+                        "type": "unix",
+                        "value": "uid:1001"
                       }
                     ],
                     "nodeAttestorRef": {
@@ -2597,6 +2641,10 @@
                       {
                         "type": "unit",
                         "value": "supervisor.service"
+                      },
+                      {
+                        "type": "unix",
+                        "value": "uid:1001"
                       }
                     ],
                     "nodeAttestorRef": {
@@ -2787,6 +2835,10 @@
                       {
                         "type": "unit",
                         "value": "supervisor.service"
+                      },
+                      {
+                        "type": "unix",
+                        "value": "uid:1001"
                       }
                     ],
                     "nodeAttestorRef": {
@@ -3039,6 +3091,10 @@
                               {
                                 "type": "unit",
                                 "value": "supervisor.service"
+                              },
+                              {
+                                "type": "unix",
+                                "value": "uid:1001"
                               }
                             ],
                             "nodeAttestorRef": {
@@ -3276,7 +3332,7 @@
         }
       ],
       "violations": [
-        "must contain at least 1 item"
+        "must contain at least 2 item"
       ]
     },
     {
@@ -3998,6 +4054,257 @@
       ],
       "violations": [
         "must be a valid UUID"
+      ]
+    },
+    {
+      "name": "workload attestation parent ID refuses bare trust domain",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/parentSpiffeId",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "workload attestation parent ID refuses trailing slash",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/parentSpiffeId",
+          "value": "spiffe://example.test/a/"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "workload attestation parent ID refuses a port",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/parentSpiffeId",
+          "value": "spiffe://example.test:8443/a"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "workload attestation parent ID refuses userinfo",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/parentSpiffeId",
+          "value": "spiffe://user@example.test/a"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "workload attestation parent ID refuses a query",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/parentSpiffeId",
+          "value": "spiffe://example.test/a?x=1"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "workload attestation parent ID refuses a fragment",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/parentSpiffeId",
+          "value": "spiffe://example.test/a#b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "workload attestation parent ID refuses dot-dot segment",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/parentSpiffeId",
+          "value": "spiffe://example.test/a/../b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "workload attestation parent ID refuses ID over 2048 bytes",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/parentSpiffeId",
+          "value": "spiffe://example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "violations": [
+        "must be at most 2048"
+      ]
+    },
+    {
+      "name": "workload attestation parent ID accepts a node path",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/parentSpiffeId",
+          "value": "spiffe://example.test/spire/agent/k8s_psat/cluster/node"
+        }
+      ]
+    },
+    {
+      "name": "workload attestation refuses a single selector",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/workloadSelectors",
+          "value": [
+            {
+              "type": "unix",
+              "value": "uid:1001"
+            }
+          ]
+        }
+      ],
+      "violations": [
+        "must contain at least 2 item"
+      ]
+    },
+    {
+      "name": "workload attestation refuses selectors without a service account or UID",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/workloadSelectors",
+          "value": [
+            {
+              "type": "k8s",
+              "value": "ns:payments"
+            },
+            {
+              "type": "k8s",
+              "value": "container-image:registry.example/app"
+            }
+          ]
+        }
+      ],
+      "violations": [
+        "must include a Kubernetes service account"
+      ]
+    },
+    {
+      "name": "workload attestation refuses a pod UID as the stable selector",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/workloadSelectors",
+          "value": [
+            {
+              "type": "k8s",
+              "value": "ns:payments"
+            },
+            {
+              "type": "k8s",
+              "value": "pod-uid:0f9c"
+            }
+          ]
+        }
+      ],
+      "violations": [
+        "must include a Kubernetes service account"
+      ]
+    },
+    {
+      "name": "workload attestation refuses a UID type with another value",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/workloadSelectors",
+          "value": [
+            {
+              "type": "unix",
+              "value": "gid:1001"
+            },
+            {
+              "type": "unix",
+              "value": "path:/usr/bin/app"
+            }
+          ]
+        }
+      ],
+      "violations": [
+        "must include a Kubernetes service account"
+      ]
+    },
+    {
+      "name": "workload attestation accepts Kubernetes namespace and service account",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/workloadSelectors",
+          "value": [
+            {
+              "type": "k8s",
+              "value": "ns:payments"
+            },
+            {
+              "type": "k8s",
+              "value": "sa:ledger"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "workload attestation accepts Unix UID and path",
+      "template": "profile-definition",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/attested/attestation/workloadSelectors",
+          "value": [
+            {
+              "type": "unix",
+              "value": "uid:1001"
+            },
+            {
+              "type": "unix",
+              "value": "path:/usr/bin/app"
+            }
+          ]
+        }
       ]
     }
   ]

@@ -797,6 +797,270 @@
       "violations": [
         "must be at least 1 characters"
       ]
+    },
+    {
+      "name": "AWS certificate recipient ID refuses bare trust domain",
+      "template": "roles-anywhere",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsRolesAnywhere/certificateSpiffeId",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "AWS certificate recipient ID refuses dot-dot segment",
+      "template": "roles-anywhere",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsRolesAnywhere/certificateSpiffeId",
+          "value": "spiffe://example.test/a/../b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "Google X.509 certificate recipient ID refuses bare trust domain",
+      "template": "gcp-x509",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudX509/certificateSpiffeId",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "Google X.509 certificate recipient ID refuses dot-dot segment",
+      "template": "gcp-x509",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudX509/certificateSpiffeId",
+          "value": "spiffe://example.test/a/../b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "Google certificate-bound recipient ID refuses bare trust domain",
+      "template": "gcp-preview",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudCertificateBoundOidc/certificateSpiffeId",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "Google certificate-bound recipient ID refuses dot-dot segment",
+      "template": "gcp-preview",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudCertificateBoundOidc/certificateSpiffeId",
+          "value": "spiffe://example.test/a/../b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "AWS certificate recipient ID refuses a port",
+      "template": "roles-anywhere",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsRolesAnywhere/certificateSpiffeId",
+          "value": "spiffe://example.test:8443/worker"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "AWS certificate recipient ID refuses userinfo",
+      "template": "roles-anywhere",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsRolesAnywhere/certificateSpiffeId",
+          "value": "spiffe://user@example.test/worker"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "Google X.509 certificate recipient ID refuses a port",
+      "template": "gcp-x509",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudX509/certificateSpiffeId",
+          "value": "spiffe://example.test:8443/worker"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "Google X.509 certificate recipient ID refuses userinfo",
+      "template": "gcp-x509",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudX509/certificateSpiffeId",
+          "value": "spiffe://user@example.test/worker"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "Google certificate-bound certificate recipient ID refuses a port",
+      "template": "gcp-preview",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudCertificateBoundOidc/certificateSpiffeId",
+          "value": "spiffe://example.test:8443/worker"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "Google certificate-bound certificate recipient ID refuses userinfo",
+      "template": "gcp-preview",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudCertificateBoundOidc/certificateSpiffeId",
+          "value": "spiffe://user@example.test/worker"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "AWS web identity audience cannot be a bare trust domain",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsWebIdentity/assertionAudience",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "assertion_audience must name one recipient, not a bare SPIFFE trust domain"
+      ]
+    },
+    {
+      "name": "AWS web identity audience cannot be a bare trust domain with a trailing slash",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsWebIdentity/assertionAudience",
+          "value": "spiffe://example.test/"
+        }
+      ],
+      "violations": [
+        "assertion_audience must name one recipient, not a bare SPIFFE trust domain"
+      ]
+    },
+    {
+      "name": "Google Cloud OIDC audience cannot be a bare trust domain",
+      "template": "gcp-oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudOidc/assertionAudience",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "assertion_audience must name one recipient, not a bare SPIFFE trust domain"
+      ]
+    },
+    {
+      "name": "Google Cloud OIDC audience cannot be a bare trust domain with a trailing slash",
+      "template": "gcp-oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/googleCloudOidc/assertionAudience",
+          "value": "spiffe://example.test/"
+        }
+      ],
+      "violations": [
+        "assertion_audience must name one recipient, not a bare SPIFFE trust domain"
+      ]
+    },
+    {
+      "name": "Entra audience cannot be a bare trust domain",
+      "template": "entra",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/entra/assertionAudience",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "assertion_audience must name one recipient, not a bare SPIFFE trust domain"
+      ]
+    },
+    {
+      "name": "Entra audience cannot be a bare trust domain with a trailing slash",
+      "template": "entra",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/entra/assertionAudience",
+          "value": "spiffe://example.test/"
+        }
+      ],
+      "violations": [
+        "assertion_audience must name one recipient, not a bare SPIFFE trust domain"
+      ]
+    },
+    {
+      "name": "AWS web identity audience may be a SPIFFE ID with a path",
+      "template": "recipient",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/recipient/awsWebIdentity/assertionAudience",
+          "value": "spiffe://example.test/reports"
+        }
+      ],
+      "violations": []
     }
   ]
 }
