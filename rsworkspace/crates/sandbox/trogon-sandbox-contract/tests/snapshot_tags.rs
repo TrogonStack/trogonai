@@ -1,9 +1,10 @@
+use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 use trogon_sandbox_contract::{
-    ArtifactType, Digest, EvictedArtifactAction, RetentionPolicy, ServiceAccountId, SnapshotTag, SnapshotTagAuditEvent,
-    SnapshotTagError, SnapshotTagRecord, TenantId,
+    ArtifactType, Digest, EvictedArtifactAction, RetentionPolicy, RetentionTagLimit, ServiceAccountId, SnapshotTag,
+    SnapshotTagAuditEvent, SnapshotTagName, SnapshotTagNameError, SnapshotTagRecord, TenantId,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -16,54 +17,70 @@ fn instant() -> SystemTime {
     UNIX_EPOCH + Duration::new(1_700_000_000, 5)
 }
 
+fn snapshot_tag(name: &str) -> Result<SnapshotTag, Box<dyn std::error::Error>> {
+    Ok(SnapshotTag {
+        tenant: TenantId::new("acme")?,
+        name: SnapshotTagName::new(name)?,
+    })
+}
+
 #[test]
-fn snapshot_tag_accepts_valid_names() -> TestResult {
-    let longest = "a".repeat(SnapshotTag::MAX_NAME_LEN);
-    for name in ["prod", "v1.2", "A_b-c.9", longest.as_str()] {
-        let tag = SnapshotTag::new(TenantId::new("acme")?, name)?;
-        assert_eq!(tag.name, name);
-        assert_eq!(tag.tenant.as_str(), "acme");
-        assert_eq!(tag.validate(), Ok(()));
+fn snapshot_tag_name_accepts_valid_names() -> TestResult {
+    let longest = "a".repeat(SnapshotTagName::MAX_LEN);
+    for value in ["prod", "v1.2", "A_b-c.9", longest.as_str()] {
+        let name = SnapshotTagName::new(value)?;
+        assert_eq!(name.as_str(), value);
+        assert_eq!(name.to_string(), value);
+        assert_eq!(SnapshotTagName::from_str(value)?, name);
+        assert_eq!(SnapshotTagName::try_from(value.to_owned())?, name);
+        assert_eq!(serde_json::to_value(&name)?, json!(value));
+        assert_eq!(serde_json::from_value::<SnapshotTagName>(json!(value))?, name);
+        assert_eq!(String::from(name), value);
     }
     Ok(())
 }
 
 #[test]
-fn snapshot_tag_rejects_invalid_names() -> TestResult {
-    let too_long = "a".repeat(SnapshotTag::MAX_NAME_LEN + 1);
-    for (name, expected) in [
-        ("", SnapshotTagError::InvalidLength),
-        (too_long.as_str(), SnapshotTagError::InvalidLength),
-        ("bad/name", SnapshotTagError::InvalidCharacters),
-        ("has space", SnapshotTagError::InvalidCharacters),
-        ("caf\u{e9}", SnapshotTagError::InvalidCharacters),
+fn snapshot_tag_name_rejects_invalid_names_at_construction_and_deserialization() {
+    let too_long = "a".repeat(SnapshotTagName::MAX_LEN + 1);
+    for (value, expected) in [
+        ("", SnapshotTagNameError::InvalidLength),
+        (too_long.as_str(), SnapshotTagNameError::InvalidLength),
+        ("bad/name", SnapshotTagNameError::InvalidCharacters),
+        ("has space", SnapshotTagNameError::InvalidCharacters),
+        ("caf\u{e9}", SnapshotTagNameError::InvalidCharacters),
     ] {
+        assert_eq!(SnapshotTagName::new(value), Err(expected), "{value:?}");
+        let error = serde_json::from_value::<SnapshotTagName>(json!(value)).err();
         assert_eq!(
-            SnapshotTag::new(TenantId::new("acme")?, name).err(),
-            Some(expected),
-            "{name:?}"
+            error.map(|error| error.to_string()),
+            Some(expected.to_string()),
+            "{value:?}"
         );
     }
     assert_eq!(
-        SnapshotTagError::InvalidLength.to_string(),
+        SnapshotTagNameError::InvalidLength.to_string(),
         "tag name must be 1-64 characters"
     );
     assert_eq!(
-        SnapshotTagError::InvalidCharacters.to_string(),
+        SnapshotTagNameError::InvalidCharacters.to_string(),
         "tag name must match [a-zA-Z0-9._-]"
     );
-    Ok(())
 }
 
 #[test]
-fn snapshot_tag_deserializes_without_validating() -> TestResult {
-    let tag = SnapshotTag::new(TenantId::new("acme")?, "prod")?;
+fn snapshot_tag_roundtrips_and_rejects_an_invalid_name() -> TestResult {
+    let tag = snapshot_tag("prod")?;
+    assert_eq!(tag.tenant.as_str(), "acme");
     let wire = serde_json::to_value(&tag)?;
     assert_eq!(wire, json!({ "tenant": "acme", "name": "prod" }));
     assert_eq!(serde_json::from_value::<SnapshotTag>(wire)?, tag);
 
-    let stored: SnapshotTag = serde_json::from_value(json!({ "tenant": "acme", "name": "bad/name" }))?;
-    assert_eq!(stored.validate(), Err(SnapshotTagError::InvalidCharacters));
+    let error = serde_json::from_value::<SnapshotTag>(json!({ "tenant": "acme", "name": "bad/name" })).err();
+    assert_eq!(
+        error.map(|error| error.to_string()),
+        Some(SnapshotTagNameError::InvalidCharacters.to_string())
+    );
     Ok(())
 }
 
@@ -75,7 +92,11 @@ fn snapshot_tag_record_roundtrips_with_and_without_retention() -> TestResult {
         artifact_type: ArtifactType::FirecrackerSnapshotV1,
         set_by: ServiceAccountId::new("svc-ci"),
         set_at: instant(),
-        retention: Some(RetentionPolicy::new(3, 30, EvictedArtifactAction::Delete)?),
+        retention: Some(RetentionPolicy {
+            max_tags: RetentionTagLimit::new(3)?,
+            max_age_days: 30,
+            delete_evicted: EvictedArtifactAction::Delete,
+        }),
     };
     let wire = serde_json::to_value(&record)?;
     assert_eq!(
@@ -102,7 +123,7 @@ fn snapshot_tag_record_roundtrips_with_and_without_retention() -> TestResult {
 
 #[test]
 fn snapshot_tag_audit_events_are_tagged_by_event() -> TestResult {
-    let tag = SnapshotTag::new(TenantId::new("acme")?, "prod")?;
+    let tag = snapshot_tag("prod")?;
     let first = digest('a')?;
     let second = digest('b')?;
 

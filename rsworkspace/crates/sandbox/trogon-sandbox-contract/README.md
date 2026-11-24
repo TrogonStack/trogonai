@@ -82,9 +82,9 @@ actions.
 
 `SnapshotPolicy` names the `ArtifactType` and target repository for a lease's
 snapshots, plus an optional `RetentionPolicy`, `PrewarmSpec`, and tag name that
-are omitted from JSON when absent. `RetentionPolicy::new` and `validate` keep
-`max_tags` between 1 and 10; deserialization does not validate, so stored
-policies keep parsing. `delete_evicted` is an `EvictedArtifactAction`, `Delete`
+are omitted from JSON when absent. A `RetentionPolicy` keeps `max_tags` as a
+`RetentionTagLimit` between 1 and 10; construction and deserialization both
+enforce the bounds. `delete_evicted` is an `EvictedArtifactAction`, `Delete`
 or `Keep`, serialized as a JSON boolean; an omitted value reads as `Keep`, which
 leaves the evicted artifact in the registry. These policies describe intent;
 they do not schedule idle handling, take snapshots, or prune a registry.
@@ -102,25 +102,26 @@ matches only the same digest. `OciArtifactRef`
 pins an `ArtifactType` by digest in a registry.
 
 `NativeSnapshotRef` names a snapshot a provider keeps itself, scoped to its
-`ProviderKind`, with an optional `expires_at` in Unix seconds. `validate` requires
-an id of 1 to 128 bytes of ASCII letters, digits, `-`, `_`, or `.`.
+`ProviderKind`, with an optional `expires_at` in Unix seconds. Its
+`NativeSnapshotId` holds 1 to 128 bytes of ASCII letters, digits, `-`, `_`, or
+`.`; construction, parsing, and deserialization all enforce it.
 `NativeSnapshotReceipt` carries the reference and an optional size.
 `PullSecretId` and `ServiceAccountId` serialize as JSON strings and accept any
 string; a `PullSecretId` names a secret, it never carries one.
 
-`SnapshotTag` scopes a name to a `TenantId`. `SnapshotTag::new` and `validate`
-require 1 to 64 bytes of ASCII letters, digits, `.`, `_`, or `-`; deserialization
-does not validate, so stored tags keep parsing. `SnapshotTagRecord` and
+`SnapshotTag` scopes a `SnapshotTagName` to a `TenantId`. A `SnapshotTagName`
+holds 1 to 64 bytes of ASCII letters, digits, `.`, `_`, or `-`; construction,
+parsing, and deserialization all enforce it. `SnapshotTagRecord` and
 `SnapshotTagAuditEvent` (tagged by `event` as `set` or `cleared`) record who moved
 a tag and when, using serde's `SystemTime` encoding of `secs_since_epoch` and
 `nanos_since_epoch`.
 
-`DriveId` scopes a drive name to a `TenantId`; `DriveId::new` and `validate`
-require 1 to 64 bytes without `/`, `\`, or `..`. `DriveMount` mounts a drive in a
-`DriveMountMode`, `read_write` by default or `read_only`, and `validate` requires
-an absolute path that does not resolve to `/`, such as `/.` or `//`, with no `..`
-component. `DriveStorage` is untagged:
-an S3 bucket or a `ProviderVolumeRef`, whose `ProviderVolumeId` rejects an empty
+`DriveId` scopes a `DriveName` to a `TenantId`; a `DriveName` holds 1 to 64
+bytes without `/`, `\`, or `..`. `DriveMount` mounts a drive at a `MountPath` in a
+`DriveMountMode`, `read_write` by default or `read_only`. A `MountPath` is
+absolute, does not resolve to `/`, such as `/.` or `//`, and has no `..`
+component. Construction, parsing, and deserialization enforce both rules.
+`DriveStorage` is untagged: an S3 bucket or a `ProviderVolumeRef`, whose `ProviderVolumeId` rejects an empty
 value, more than 256 bytes, whitespace, or control characters. `DriveRecord`
 flattens its storage into the record, and `DriveRecord::DEFAULT_SIZE_GIB` (100)
 and `DriveRecord::MAX_SIZE_GIB` (1024) bound a requested size. `DriveError` is

@@ -3,20 +3,24 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use serde_json::json;
 use trogon_sandbox_contract::{
-    DriveError, DriveId, DriveIdError, DriveMount, DriveMountMode, DriveRecord, DriveStorage, LeaseId,
-    NativeVolumeBinding, ProviderKind, ProviderVolumeId, ProviderVolumeIdError, ProviderVolumeRef, TenantId,
+    DriveError, DriveId, DriveMount, DriveMountMode, DriveName, DriveNameError, DriveRecord, DriveStorage, LeaseId,
+    MountPath, MountPathError, NativeVolumeBinding, ProviderKind, ProviderVolumeId, ProviderVolumeIdError,
+    ProviderVolumeRef, TenantId,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 fn drive_id(name: &str) -> Result<DriveId, Box<dyn std::error::Error>> {
-    Ok(DriveId::new(TenantId::new("acme")?, name)?)
+    Ok(DriveId {
+        tenant: TenantId::new("acme")?,
+        name: DriveName::new(name)?,
+    })
 }
 
 fn drive_mount(mount_path: &str) -> Result<DriveMount, Box<dyn std::error::Error>> {
     Ok(DriveMount {
         drive_id: drive_id("d0")?,
-        mount_path: mount_path.to_owned(),
+        mount_path: MountPath::new(mount_path)?,
         mode: DriveMountMode::default(),
     })
 }
@@ -29,86 +33,119 @@ fn provider_volume() -> Result<ProviderVolumeRef, Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn drive_id_accepts_valid_names() -> TestResult {
-    let longest = "d".repeat(DriveId::MAX_NAME_LEN);
-    for name in ["d0", "my drive.v2", "a.b", longest.as_str()] {
-        let id = drive_id(name)?;
-        assert_eq!(id.name, name);
-        assert_eq!(id.validate(), Ok(()));
+fn drive_name_accepts_valid_names() -> TestResult {
+    let longest = "d".repeat(DriveName::MAX_LEN);
+    for value in ["d0", "my drive.v2", "a.b", longest.as_str()] {
+        let name = DriveName::new(value)?;
+        assert_eq!(name.as_str(), value);
+        assert_eq!(name.to_string(), value);
+        assert_eq!(DriveName::from_str(value)?, name);
+        assert_eq!(DriveName::try_from(value.to_owned())?, name);
+        assert_eq!(serde_json::to_value(&name)?, json!(value));
+        assert_eq!(serde_json::from_value::<DriveName>(json!(value))?, name);
+        assert_eq!(String::from(name), value);
     }
     Ok(())
 }
 
 #[test]
-fn drive_id_rejects_invalid_names() -> TestResult {
-    let too_long = "d".repeat(DriveId::MAX_NAME_LEN + 1);
-    for (name, expected) in [
-        ("", DriveIdError::InvalidLength),
-        (too_long.as_str(), DriveIdError::InvalidLength),
-        ("a/b", DriveIdError::InvalidCharacters),
-        ("a\\b", DriveIdError::InvalidCharacters),
-        ("..", DriveIdError::InvalidCharacters),
-        ("a..b", DriveIdError::InvalidCharacters),
+fn drive_name_rejects_invalid_names_at_construction_and_deserialization() {
+    let too_long = "d".repeat(DriveName::MAX_LEN + 1);
+    for (value, expected) in [
+        ("", DriveNameError::InvalidLength),
+        (too_long.as_str(), DriveNameError::InvalidLength),
+        ("a/b", DriveNameError::InvalidCharacters),
+        ("a\\b", DriveNameError::InvalidCharacters),
+        ("..", DriveNameError::InvalidCharacters),
+        ("a..b", DriveNameError::InvalidCharacters),
     ] {
+        assert_eq!(DriveName::new(value), Err(expected), "{value:?}");
+        let error = serde_json::from_value::<DriveName>(json!(value)).err();
         assert_eq!(
-            DriveId::new(TenantId::new("acme")?, name).err(),
-            Some(expected),
-            "{name:?}"
+            error.map(|error| error.to_string()),
+            Some(expected.to_string()),
+            "{value:?}"
         );
     }
     assert_eq!(
-        DriveIdError::InvalidLength.to_string(),
+        DriveNameError::InvalidLength.to_string(),
         "drive name must be 1-64 characters"
     );
     assert_eq!(
-        DriveIdError::InvalidCharacters.to_string(),
+        DriveNameError::InvalidCharacters.to_string(),
         "drive name must not contain '/', '\\\\', or '..'"
     );
-    Ok(())
 }
 
 #[test]
-fn drive_id_deserializes_without_validating() -> TestResult {
+fn drive_id_roundtrips_and_rejects_an_invalid_name() -> TestResult {
     let id = drive_id("d0")?;
     let wire = serde_json::to_value(&id)?;
     assert_eq!(wire, json!({ "tenant": "acme", "name": "d0" }));
     assert_eq!(serde_json::from_value::<DriveId>(wire)?, id);
 
-    let stored: DriveId = serde_json::from_value(json!({ "tenant": "acme", "name": "a/b" }))?;
-    assert_eq!(stored.validate(), Err(DriveIdError::InvalidCharacters));
+    let error = serde_json::from_value::<DriveId>(json!({ "tenant": "acme", "name": "a/b" })).err();
+    assert_eq!(
+        error.map(|error| error.to_string()),
+        Some(DriveNameError::InvalidCharacters.to_string())
+    );
     Ok(())
 }
 
 #[test]
-fn drive_mount_validate_accepts_an_absolute_path() -> TestResult {
-    for path in ["/mnt/d0", "/mnt/..d0", "/mnt/d0/", "/mnt/./d0", "/.d0"] {
-        assert_eq!(drive_mount(path)?.validate(), Ok(()), "{path}");
+fn mount_path_accepts_absolute_paths() -> TestResult {
+    for value in ["/mnt/d0", "/mnt/..d0", "/mnt/d0/", "/mnt/./d0", "/.d0"] {
+        let path = MountPath::new(value)?;
+        assert_eq!(path.as_str(), value);
+        assert_eq!(path.to_string(), value);
+        assert_eq!(MountPath::from_str(value)?, path);
+        assert_eq!(MountPath::try_from(value.to_owned())?, path);
+        assert_eq!(serde_json::to_value(&path)?, json!(value));
+        assert_eq!(serde_json::from_value::<MountPath>(json!(value))?, path);
+        assert_eq!(String::from(path), value);
     }
     Ok(())
 }
 
 #[test]
-fn drive_mount_validate_rejects_unsafe_paths() -> TestResult {
-    for (path, reason) in [
-        ("relative/path", "must be absolute"),
-        ("", "must be absolute"),
-        ("/", "must not be '/'"),
-        ("/.", "must not be '/'"),
-        ("/./", "must not be '/'"),
-        ("///", "must not be '/'"),
-        ("/mnt/../etc", "must not contain '..' components"),
-        ("/..", "must not contain '..' components"),
+fn mount_path_rejects_unsafe_paths_at_construction_and_deserialization() {
+    for (value, expected) in [
+        ("relative/path", MountPathError::NotAbsolute),
+        ("", MountPathError::NotAbsolute),
+        ("/", MountPathError::Root),
+        ("/.", MountPathError::Root),
+        ("/./", MountPathError::Root),
+        ("///", MountPathError::Root),
+        ("/mnt/../etc", MountPathError::ParentComponent),
+        ("/..", MountPathError::ParentComponent),
     ] {
+        assert_eq!(MountPath::new(value), Err(expected), "{value:?}");
+        let error = serde_json::from_value::<MountPath>(json!(value)).err();
         assert_eq!(
-            drive_mount(path)?.validate(),
-            Err(DriveError::InvalidDriveMountPath {
-                mount_path: path.to_owned(),
-                reason: reason.to_owned(),
-            }),
-            "{path}"
+            error.map(|error| error.to_string()),
+            Some(expected.to_string()),
+            "{value:?}"
         );
     }
-    Ok(())
+    assert_eq!(MountPathError::NotAbsolute.to_string(), "mount path must be absolute");
+    assert_eq!(MountPathError::Root.to_string(), "mount path must not resolve to '/'");
+    assert_eq!(
+        MountPathError::ParentComponent.to_string(),
+        "mount path must not contain '..' components"
+    );
+}
+
+#[test]
+fn drive_mount_rejects_an_unsafe_mount_path() {
+    let error = serde_json::from_value::<DriveMount>(json!({
+        "drive_id": { "tenant": "acme", "name": "d0" },
+        "mount_path": "/",
+    }))
+    .err();
+    assert_eq!(
+        error.map(|error| error.to_string()),
+        Some(MountPathError::Root.to_string())
+    );
 }
 
 #[test]

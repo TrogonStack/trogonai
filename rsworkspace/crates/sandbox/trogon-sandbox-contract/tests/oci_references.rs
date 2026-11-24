@@ -1,7 +1,9 @@
+use std::str::FromStr;
+
 use serde_json::json;
 use trogon_sandbox_contract::{
-    ArtifactType, Digest, NativeSnapshotIdError, NativeSnapshotReceipt, NativeSnapshotRef, OciArtifactRef, OciImageRef,
-    ProviderKind, PullSecretId, ServiceAccountId,
+    ArtifactType, Digest, NativeSnapshotId, NativeSnapshotIdError, NativeSnapshotReceipt, NativeSnapshotRef,
+    OciArtifactRef, OciImageRef, ProviderKind, PullSecretId, ServiceAccountId,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -122,7 +124,7 @@ fn oci_artifact_ref_roundtrips_and_formats_its_allowlist_string() -> TestResult 
 fn native_snapshot_ref_roundtrips_with_and_without_expiry() -> TestResult {
     let reference = NativeSnapshotRef {
         provider: ProviderKind::Daytona,
-        id: "trogon-snap-1".to_owned(),
+        id: NativeSnapshotId::new("trogon-snap-1")?,
         expires_at: Some(1_900_000_000),
     };
     let wire = serde_json::to_value(&reference)?;
@@ -142,43 +144,62 @@ fn native_snapshot_ref_roundtrips_with_and_without_expiry() -> TestResult {
 }
 
 #[test]
-fn native_snapshot_ref_validates_id_and_expiry() {
+fn native_snapshot_ref_reports_expiry() -> TestResult {
     let mut reference = NativeSnapshotRef {
         provider: ProviderKind::Daytona,
-        id: "ok-id_1.2".to_owned(),
+        id: NativeSnapshotId::new("ok-id_1.2")?,
         expires_at: Some(100),
     };
-    assert_eq!(reference.validate(), Ok(()));
     assert!(reference.is_expired_at(100));
     assert!(reference.is_expired_at(101));
     assert!(!reference.is_expired_at(99));
     reference.expires_at = None;
     assert!(!reference.is_expired_at(u64::MAX));
+    Ok(())
+}
 
-    reference.id = "x".repeat(NativeSnapshotRef::MAX_ID_LEN);
-    assert_eq!(reference.validate(), Ok(()));
+#[test]
+fn native_snapshot_id_accepts_valid_ids() -> TestResult {
+    let longest = "x".repeat(NativeSnapshotId::MAX_LEN);
+    for value in ["ok-id_1.2", "s", longest.as_str()] {
+        let id = NativeSnapshotId::new(value)?;
+        assert_eq!(id.as_str(), value);
+        assert_eq!(id.to_string(), value);
+        assert_eq!(NativeSnapshotId::from_str(value)?, id);
+        assert_eq!(NativeSnapshotId::try_from(value.to_owned())?, id);
+        assert_eq!(serde_json::to_value(&id)?, json!(value));
+        assert_eq!(serde_json::from_value::<NativeSnapshotId>(json!(value))?, id);
+        assert_eq!(String::from(id), value);
+    }
+    Ok(())
+}
 
-    let too_long = "x".repeat(NativeSnapshotRef::MAX_ID_LEN + 1);
-    for (id, expected) in [
-        (
-            "",
-            NativeSnapshotIdError::InvalidLength {
-                max: NativeSnapshotRef::MAX_ID_LEN,
-            },
-        ),
-        (
-            too_long.as_str(),
-            NativeSnapshotIdError::InvalidLength {
-                max: NativeSnapshotRef::MAX_ID_LEN,
-            },
-        ),
+#[test]
+fn native_snapshot_id_rejects_invalid_ids_at_construction_and_deserialization() {
+    let too_long = "x".repeat(NativeSnapshotId::MAX_LEN + 1);
+    let invalid_length = NativeSnapshotIdError::InvalidLength {
+        max: NativeSnapshotId::MAX_LEN,
+    };
+    for (value, expected) in [
+        ("", invalid_length),
+        (too_long.as_str(), invalid_length),
         ("has space", NativeSnapshotIdError::InvalidCharacters),
         ("a/b", NativeSnapshotIdError::InvalidCharacters),
         ("caf\u{e9}", NativeSnapshotIdError::InvalidCharacters),
     ] {
-        reference.id = id.to_owned();
-        assert_eq!(reference.validate(), Err(expected), "{id:?}");
+        assert_eq!(NativeSnapshotId::new(value), Err(expected), "{value:?}");
+        let error = serde_json::from_value::<NativeSnapshotId>(json!(value)).err();
+        assert_eq!(
+            error.map(|error| error.to_string()),
+            Some(expected.to_string()),
+            "{value:?}"
+        );
     }
+    let error = serde_json::from_value::<NativeSnapshotRef>(json!({ "provider": "daytona", "id": "a/b" })).err();
+    assert_eq!(
+        error.map(|error| error.to_string()),
+        Some(NativeSnapshotIdError::InvalidCharacters.to_string())
+    );
 }
 
 #[test]
@@ -197,7 +218,7 @@ fn native_snapshot_id_errors_keep_their_messages() {
 fn native_snapshot_receipt_omits_an_unreported_size() -> TestResult {
     let reference = NativeSnapshotRef {
         provider: ProviderKind::Modal,
-        id: "s".to_owned(),
+        id: NativeSnapshotId::new("s")?,
         expires_at: None,
     };
     let unsized_receipt = NativeSnapshotReceipt {
