@@ -63,10 +63,9 @@ resolves a `SuspendRequestLevel` only to a suspend level the provider offers,
 and `EnvDigest` reuses the `Digest` grammar. These profiles report capabilities;
 they do not select, place, or authorize a provider.
 
-`LeaseId`, `TenantId`, and `CorrelationId` serialize as JSON strings and accept
-any string on deserialization, so identifiers minted before a rule existed keep
-parsing. `TenantId::new` validates a tenant being introduced: it rejects an empty
-value, one longer than 128 bytes, or one containing a control character.
+`LeaseId` and `CorrelationId` serialize as JSON strings and accept any string.
+`TenantId` also serializes as a JSON string, but holds 1 to 128 bytes with no
+control characters; construction, parsing, and deserialization all enforce it.
 `EmptyObject` serializes as `{}` for enum variants that carry no fields, and
 deserializes only from an empty JSON object.
 
@@ -75,10 +74,11 @@ five tags on construction and deserialization. `contains_all` matches a tag
 filter, and an empty filter matches every lease.
 
 `IdlePolicy` lists `IdleStage` values, each applying an `IdleAction` (`pause`,
-`suspend`, or `release`) once a lease has been quiet for more than
-`after_seconds`. `IdlePolicy::validate` requires at least one stage, stage times
-within the operator's limit and strictly increasing, and strictly more severe
-actions.
+`suspend`, or `release`) once a lease has been quiet for more than a nonzero
+`after_seconds`. A policy holds at least one stage, strictly increasing stage
+times, and strictly more severe actions; construction and deserialization both
+enforce it. `fits_within` reports whether every stage fires within an
+operator's ceiling on idle time.
 
 `SnapshotPolicy` names the `ArtifactType` and target repository for a lease's
 snapshots, plus an optional `RetentionPolicy`, `PrewarmSpec`, and tag name that
