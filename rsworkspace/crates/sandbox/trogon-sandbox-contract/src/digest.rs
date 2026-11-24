@@ -20,6 +20,11 @@ impl Digest {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The 64-character hex hash, without the `sha256:` prefix.
+    pub fn hex(&self) -> &str {
+        self.0.strip_prefix(DIGEST_PREFIX).unwrap_or(&self.0)
+    }
 }
 
 impl FromStr for Digest {

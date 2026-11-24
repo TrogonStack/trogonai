@@ -178,6 +178,34 @@ key-value entry or a literal. `Debug` and `Display` never show a literal value,
 but serialization carries it to the worker. These types describe where a
 workspace comes from; they do not clone, mount, or fetch secrets.
 
+`CommandReadinessRequest` asks a worker whether a lease's sandbox can run
+commands through the sealed supervisor. It binds the probe to a tenant, a lease,
+a `ProviderKind`, a `CommandReadinessTarget`, and a `SandboxId` of 1 to 512
+bytes with no control characters. The target's `LeaseEpoch` is required and is
+never zero, and the lease id must be 1 to 1024 bytes of dot-separated tokens
+with no whitespace, control characters, `*`, or `>`. Construction and
+deserialization both enforce these rules and reject unknown fields.
+`CommandReadinessResponse` is tagged by `outcome`: `ready` with a
+`CommandReadinessRuntime`, whose `sha256` is the bare hex hash of the
+supervisor, `unsupported` or `unavailable` with the binding and a reason, or
+`denied` with a reason. These types describe the probe; they do not run it.
+
+`DispatchTarget` names the worker and attempt a lease is dispatched to, with an
+optional `LeaseEpoch` for workers that support epochs.
+
+The credential broker contracts cover issuing, revoking, and rotating
+credentials. `CredentialIssueRequest` asks for a token with a
+`CredentialScope`, tagged by `kind`, and a nonzero `ttl_seconds`. It may carry a
+`PolicyFence` naming the committed policy revision it was built from.
+`CredentialIssueOutcome` and `CredentialAckOutcome` are tagged by `outcome` as
+`ok` or `err`, and every `CredentialError` is tagged by `kind`. A
+`CredentialAck` always serializes with `ok: true`, and deserialization rejects
+`ok: false`. `ShortLivedToken` and `OidcToken` never show their value in
+`Debug` and have no `Display`, but serialization carries it.
+`CredentialAuditEvent` is tagged by `event` as `issued`, `revoked`, or
+`rotated`, and `CredentialProvider` parses its wire names. These types describe
+the broker's messages; they do not store, mint, or verify credentials.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
