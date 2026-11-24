@@ -63,6 +63,14 @@ resolves a `SuspendRequestLevel` only to a suspend level the provider offers,
 and `EnvDigest` reuses the `Digest` grammar. These profiles report capabilities;
 they do not select, place, or authorize a provider.
 
+`CapabilityRequirements` is what a lease asks of a worker: `needs_*` flags, minimum
+tiers and levels, and optional limits such as region and lifetime. Each flag is a
+`CapabilityNeed`, `Required` or `NotRequired`, serialized as a JSON boolean; an
+omitted flag reads as `NotRequired`. The contract carries the request only. Matching
+it against a profile is not part of the contract. `LeaseError` and `DriveError` are
+tagged by `kind`, and `LeaseError::NoWorkerSatisfiesCapabilities` carries the
+requirements that found no worker.
+
 `LeaseId` and `CorrelationId` serialize as JSON strings and accept any string.
 `TenantId` also serializes as a JSON string, but holds 1 to 128 bytes with no
 control characters; construction, parsing, and deserialization all enforce it.

@@ -3,7 +3,9 @@
 
 mod account_limits;
 mod artifact_type;
+mod capability_need;
 mod capability_profile;
+mod capability_requirements;
 mod capability_support;
 mod clone_auth;
 mod command_readiness_denied_reason;
@@ -71,6 +73,7 @@ mod isolation_capability;
 mod lease_counters;
 mod lease_epoch;
 mod lease_epoch_error;
+mod lease_error;
 mod lease_failed;
 mod lease_failed_reason;
 mod lease_id;
@@ -163,7 +166,9 @@ mod workspace_source;
 
 pub use account_limits::AccountLimits;
 pub use artifact_type::ArtifactType;
+pub use capability_need::CapabilityNeed;
 pub use capability_profile::CapabilityProfile;
+pub use capability_requirements::CapabilityRequirements;
 pub use capability_support::CapabilitySupport;
 pub use clone_auth::CloneAuth;
 pub use command_readiness_denied_reason::CommandReadinessDeniedReason;
@@ -224,6 +229,7 @@ pub use isolation_capability::IsolationCapability;
 pub use lease_counters::LeaseCounters;
 pub use lease_epoch::LeaseEpoch;
 pub use lease_epoch_error::LeaseEpochError;
+pub use lease_error::LeaseError;
 pub use lease_failed::LeaseFailed;
 pub use lease_failed_reason::LeaseFailedReason;
 pub use lease_id::LeaseId;
