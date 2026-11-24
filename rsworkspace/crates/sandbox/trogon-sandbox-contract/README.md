@@ -130,6 +130,28 @@ tagged by `kind`. `SandboxUserName` and `SandboxGroupName` accept only
 deserialization. These contracts describe drives and accounts; they do not
 provision storage, mount volumes, or create users.
 
+`WorkerHeartbeat` is the periodic report a worker publishes: its `WorkerId`,
+`ProviderKind`, full `ProviderCapabilityProfile`, `WorkerCapacity`, cached and
+warm-pool image digests, and the `NativeVolumeBinding` values it holds.
+`WorkerDispatchProtocol` names the dispatch format the worker accepts, `legacy` by
+default or `targeted_v1`, and `supports_lease_epoch` is a `CapabilitySupport`
+flag. Fields added after the first heartbeat default when an older worker omits
+them, and empty volume bindings and warm-pool counts are left out of the JSON. A
+heartbeat reports state; it does not register a worker or route a lease.
+
+`LeaseStatus` uses the JSON strings `pending`, `running`, `paused`, `suspending`,
+`suspended`, `waking`, `cancelling`, `released`, and `failed`. `LeaseUsage`
+reports one lease's command and file counters, its running, paused, and suspended
+seconds, and optional `ResourceGauges`; `TenantUsage` sums the same counters
+across a tenant's leases. `LeaseCounters` holds the totals a lease accrues
+while it runs; `add` saturates at `u64::MAX` and leaves the pause and suspend
+bookkeeping untouched. `AccountLimits` pairs a
+tenant's usage with its caps, and `TagLimits` adds an optional cap on active
+leases per tag value. `ResourceUsageRequest`, `GetLeaseUsageRequest`,
+`GetTenantUsageRequest`, and `GetAccountLimitsRequest` carry the identifiers for
+those reads. These types report usage; they do not meter, bill, or enforce a
+quota.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
