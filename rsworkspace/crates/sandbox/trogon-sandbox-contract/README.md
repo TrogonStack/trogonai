@@ -152,6 +152,32 @@ leases per tag value. `ResourceUsageRequest`, `GetLeaseUsageRequest`,
 those reads. These types report usage; they do not meter, bill, or enforce a
 quota.
 
+`SnapshotPublished` and `SnapshotDeleted` announce a snapshot entering or leaving
+the registry, and `LiveSnapshotEntry` is one the tenant is charged for. Each may
+carry a `SnapshotGeneration`, a canonical ULID of 26 uppercase Crockford base32
+characters starting with `0` through `7`; construction, parsing, and
+deserialization all enforce it. `SnapshotPublishedTag` names the
+`SnapshotTagName` a builder moves to the snapshot and the `set_at` time tag moves
+are ordered by. `SnapshotAccountingResponse` is tagged by `outcome`: `committed`
+with a `SnapshotAccountingDisposition` of `live`, `superseded`, or `deleted`, or
+`refused` with a `SnapshotAccountingRefusal`. `SnapshotCaptureStatus` is tagged
+by `kind` as `created` or `failed`, and `SnapshotRestoreResult` carries the
+digest a worker restored. `LeaseFailed` reports a `LeaseFailedReason`, tagged by
+`kind`; its `digest_mismatch` holds a `DigestMismatch` whose `expected` and
+`actual` digests differ, which construction and deserialization both enforce.
+These events describe snapshots; they do not push, delete, or charge for
+artifacts.
+
+`WorkspaceSource` is keyed by its variant name: `clone` checks out a Git `sha`
+with `CloneAuth`, `host_mount` mounts a host directory, `s3_volume` mounts an S3
+prefix in a `VolumeMode` with an optional seed snapshot, and `empty` starts from
+nothing. A host mount's `HostMountAccess` serializes as the JSON boolean
+`readonly`, and an omitted value reads as `ReadWrite`. `CloneAuth` is `none`,
+`bearer_token`, or `basic`, and each secret is a `SecretRef`, either a NATS
+key-value entry or a literal. `Debug` and `Display` never show a literal value,
+but serialization carries it to the worker. These types describe where a
+workspace comes from; they do not clone, mount, or fetch secrets.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
