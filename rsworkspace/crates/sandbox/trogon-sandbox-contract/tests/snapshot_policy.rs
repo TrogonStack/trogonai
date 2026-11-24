@@ -1,8 +1,8 @@
 use serde_json::error::Category::Data;
 use serde_json::json;
 use trogon_sandbox_contract::{
-    ArtifactType, EvictedArtifactAction, PrewarmSpec, ProviderKind, RetentionPolicy, RetentionPolicyError,
-    SnapshotPolicy,
+    ArtifactType, EvictedArtifactAction, PrewarmSpec, ProviderKind, RetentionPolicy, RetentionTagLimit,
+    RetentionTagLimitError, SnapshotPolicy,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -12,7 +12,11 @@ fn snapshot_policy_roundtrips_with_every_field() -> TestResult {
     let original = SnapshotPolicy {
         artifact_type: ArtifactType::SandboxRootfsV1,
         target_repository: "snapshots/acme".to_owned(),
-        retention: Some(RetentionPolicy::new(3, 30, EvictedArtifactAction::Delete)?),
+        retention: Some(RetentionPolicy {
+            max_tags: RetentionTagLimit::new(3)?,
+            max_age_days: 30,
+            delete_evicted: EvictedArtifactAction::Delete,
+        }),
         prewarm: Some(PrewarmSpec {
             pool_size: 3,
             providers: vec![ProviderKind::LocalDocker, ProviderKind::K8sMicroVm],
@@ -46,40 +50,45 @@ fn snapshot_policy_omits_and_defaults_absent_fields() -> TestResult {
 }
 
 #[test]
-fn retention_policy_accepts_max_tags_within_bounds() -> TestResult {
-    for max_tags in [RetentionPolicy::MIN_MAX_TAGS, 5, RetentionPolicy::MAX_MAX_TAGS] {
-        let policy = RetentionPolicy::new(max_tags, 30, EvictedArtifactAction::Keep)?;
-        assert_eq!(policy.max_tags, max_tags);
-        assert_eq!(policy.max_age_days, 30);
-        assert_eq!(policy.delete_evicted, EvictedArtifactAction::Keep);
+fn retention_tag_limit_accepts_values_within_bounds() -> TestResult {
+    for value in [RetentionTagLimit::MIN, 5, RetentionTagLimit::MAX] {
+        let limit = RetentionTagLimit::new(value)?;
+        assert_eq!(limit.get(), value);
+        assert_eq!(RetentionTagLimit::try_from(value)?, limit);
+        assert_eq!(serde_json::to_value(limit)?, json!(value));
+        assert_eq!(serde_json::from_value::<RetentionTagLimit>(json!(value))?, limit);
+        assert_eq!(u32::from(limit), value);
     }
     Ok(())
 }
 
 #[test]
-fn retention_policy_rejects_max_tags_out_of_bounds() {
-    let expected = RetentionPolicyError::MaxTagsOutOfRange { min: 1, max: 10 };
-    for max_tags in [0, 11] {
+fn retention_tag_limit_rejects_values_out_of_bounds_at_construction_and_deserialization() {
+    let expected = RetentionTagLimitError::OutOfRange { min: 1, max: 10 };
+    for value in [0, 11, u32::MAX] {
+        assert_eq!(RetentionTagLimit::new(value), Err(expected), "{value}");
+        let error = serde_json::from_value::<RetentionTagLimit>(json!(value)).err();
         assert_eq!(
-            RetentionPolicy::new(max_tags, 30, EvictedArtifactAction::Keep).err(),
-            Some(expected)
+            error.map(|error| error.to_string()),
+            Some(expected.to_string()),
+            "{value}"
         );
     }
-    let unchecked = RetentionPolicy {
-        max_tags: 20,
-        max_age_days: 30,
-        delete_evicted: EvictedArtifactAction::Keep,
-    };
-    assert_eq!(unchecked.validate().err(), Some(expected));
     assert_eq!(expected.to_string(), "max_tags must be between 1 and 10");
 }
 
 #[test]
-fn retention_policy_deserialization_stays_unchecked_and_defaults_to_keep() -> TestResult {
-    let policy: RetentionPolicy = serde_json::from_value(json!({ "max_tags": 20, "max_age_days": 30 }))?;
-    assert_eq!(policy.max_tags, 20);
+fn retention_policy_rejects_out_of_bounds_max_tags_and_defaults_to_keep() -> TestResult {
+    let policy: RetentionPolicy = serde_json::from_value(json!({ "max_tags": 3, "max_age_days": 30 }))?;
+    assert_eq!(policy.max_tags.get(), 3);
+    assert_eq!(policy.max_age_days, 30);
     assert_eq!(policy.delete_evicted, EvictedArtifactAction::Keep);
-    assert!(policy.validate().is_err());
+
+    let error = serde_json::from_value::<RetentionPolicy>(json!({ "max_tags": 20, "max_age_days": 30 })).err();
+    assert_eq!(
+        error.map(|error| error.to_string()),
+        Some("max_tags must be between 1 and 10".to_owned())
+    );
     Ok(())
 }
 

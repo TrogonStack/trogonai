@@ -1,8 +1,9 @@
 # Sandbox contract
 
 `trogon-sandbox-contract` provides validated worker, dispatch-attempt, and operation
-identifiers, lease identifiers and policies, artifact metadata, operation kinds, and
-the operation state transition rules.
+identifiers, lease identifiers and policies, artifact metadata, image and snapshot
+references, drive contracts, operation kinds, and the operation state transition
+rules.
 
 `WorkerId`, `DispatchAttemptId`, and `OperationId` serialize as JSON strings. Each
 accepts 1 to 128 bytes containing only ASCII letters, digits, `_`, or `-`.
@@ -81,12 +82,53 @@ actions.
 
 `SnapshotPolicy` names the `ArtifactType` and target repository for a lease's
 snapshots, plus an optional `RetentionPolicy`, `PrewarmSpec`, and tag name that
-are omitted from JSON when absent. `RetentionPolicy::new` and `validate` keep
-`max_tags` between 1 and 10; deserialization does not validate, so stored
-policies keep parsing. `delete_evicted` is an `EvictedArtifactAction`, `Delete`
+are omitted from JSON when absent. A `RetentionPolicy` keeps `max_tags` as a
+`RetentionTagLimit` between 1 and 10; construction and deserialization both
+enforce the bounds. `delete_evicted` is an `EvictedArtifactAction`, `Delete`
 or `Keep`, serialized as a JSON boolean; an omitted value reads as `Keep`, which
 leaves the evicted artifact in the registry. These policies describe intent;
 they do not schedule idle handling, take snapshots, or prune a registry.
+
+`OciImageRef` splits an image into `registry`, `repository`, and an optional
+`tag` and `digest`, which are omitted from JSON when absent.
+`OciImageRef::parse_unqualified` treats the first path component as the registry
+only when it contains `.` or `:`, or is `localhost`, and splits off an `@` suffix
+as the digest only when it is a valid `Digest`; an invalid suffix stays in the
+reference. `pattern_matches_legacy` matches an
+allowlist pattern exactly or by a single trailing `*`; an empty pattern matches
+nothing. `pattern_matches_oci_image_ref` also compares a pattern part by part, so an
+empty registry, an absent tag, or a `*` tag matches any value, and a pinned digest
+matches only the same digest. `OciArtifactRef`
+pins an `ArtifactType` by digest in a registry.
+
+`NativeSnapshotRef` names a snapshot a provider keeps itself, scoped to its
+`ProviderKind`, with an optional `expires_at` in Unix seconds. Its
+`NativeSnapshotId` holds 1 to 128 bytes of ASCII letters, digits, `-`, `_`, or
+`.`; construction, parsing, and deserialization all enforce it.
+`NativeSnapshotReceipt` carries the reference and an optional size.
+`PullSecretId` and `ServiceAccountId` serialize as JSON strings and accept any
+string; a `PullSecretId` names a secret, it never carries one.
+
+`SnapshotTag` scopes a `SnapshotTagName` to a `TenantId`. A `SnapshotTagName`
+holds 1 to 64 bytes of ASCII letters, digits, `.`, `_`, or `-`; construction,
+parsing, and deserialization all enforce it. `SnapshotTagRecord` and
+`SnapshotTagAuditEvent` (tagged by `event` as `set` or `cleared`) record who moved
+a tag and when, using serde's `SystemTime` encoding of `secs_since_epoch` and
+`nanos_since_epoch`.
+
+`DriveId` scopes a `DriveName` to a `TenantId`; a `DriveName` holds 1 to 64
+bytes without `/`, `\`, or `..`. `DriveMount` mounts a drive at a `MountPath` in a
+`DriveMountMode`, `read_write` by default or `read_only`. A `MountPath` is
+absolute, does not resolve to `/`, such as `/.` or `//`, and has no `..`
+component. Construction, parsing, and deserialization enforce both rules.
+`DriveStorage` is untagged: an S3 bucket or a `ProviderVolumeRef`, whose `ProviderVolumeId` rejects an empty
+value, more than 256 bytes, whitespace, or control characters. `DriveRecord`
+flattens its storage into the record, and `DriveRecord::DEFAULT_SIZE_GIB` (100)
+and `DriveRecord::MAX_SIZE_GIB` (1024) bound a requested size. `DriveError` is
+tagged by `kind`. `SandboxUserName` and `SandboxGroupName` accept only
+`^[a-z_][a-z0-9_-]*$` within 32 bytes, on construction, parsing, and
+deserialization. These contracts describe drives and accounts; they do not
+provision storage, mount volumes, or create users.
 
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
