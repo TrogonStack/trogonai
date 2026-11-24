@@ -1,13 +1,16 @@
 use std::str::FromStr;
 
 use crate::Digest;
-use crate::constants::DIGEST_PREFIX;
 
+/// Splits a trailing `@digest` off an image reference, only when it parses as a [`Digest`].
+///
+/// An invalid suffix stays part of the reference, so a malformed digest pattern never widens to the
+/// bare repository.
 pub(crate) fn split_digest(value: &str) -> (&str, Option<Digest>) {
-    match value.rsplit_once('@') {
-        Some((before, digest)) if digest.starts_with(DIGEST_PREFIX) => (before, Digest::from_str(digest).ok()),
-        _ => (value, None),
-    }
+    value
+        .rsplit_once('@')
+        .and_then(|(before, digest)| Digest::from_str(digest).ok().map(|digest| (before, Some(digest))))
+        .unwrap_or((value, None))
 }
 
 pub(crate) fn split_tag(value: &str) -> (&str, Option<&str>) {

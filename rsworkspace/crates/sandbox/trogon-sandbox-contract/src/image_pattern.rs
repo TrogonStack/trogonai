@@ -5,7 +5,8 @@ use crate::OciImageRef;
 /// The pattern first matches the image's [`OciImageRef::allowlist_string`] the way
 /// [`pattern_matches_legacy`] does. Otherwise it is parsed as an image reference and compared by
 /// part: an empty registry matches any registry, a trailing `*` on the repository matches a
-/// prefix, an absent tag matches any tag, and a `*` tag matches any tag or none.
+/// prefix, an absent tag matches any tag, and a `*` tag matches any tag or none. A pattern that
+/// pins a digest matches only an image with that same digest.
 pub fn pattern_matches_oci_image_ref(pattern: &str, image: &OciImageRef) -> bool {
     if pattern_matches_legacy(pattern, &image.allowlist_string()) {
         return true;
@@ -29,6 +30,9 @@ fn oci_image_ref_matches(pattern: &OciImageRef, candidate: &OciImageRef) -> bool
         return false;
     }
     if !prefix_or_exact_matches(&pattern.repository, &candidate.repository) {
+        return false;
+    }
+    if pattern.digest.is_some() && pattern.digest != candidate.digest {
         return false;
     }
     match (&pattern.tag, &candidate.tag) {

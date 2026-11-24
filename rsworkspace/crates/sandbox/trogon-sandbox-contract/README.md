@@ -92,11 +92,13 @@ they do not schedule idle handling, take snapshots, or prune a registry.
 `OciImageRef` splits an image into `registry`, `repository`, and an optional
 `tag` and `digest`, which are omitted from JSON when absent.
 `OciImageRef::parse_unqualified` treats the first path component as the registry
-only when it contains `.` or `:`, or is `localhost`, and keeps a `@sha256:` suffix
-as the digest only when it is a valid `Digest`. `pattern_matches_legacy` matches an
+only when it contains `.` or `:`, or is `localhost`, and splits off an `@` suffix
+as the digest only when it is a valid `Digest`; an invalid suffix stays in the
+reference. `pattern_matches_legacy` matches an
 allowlist pattern exactly or by a single trailing `*`; an empty pattern matches
 nothing. `pattern_matches_oci_image_ref` also compares a pattern part by part, so an
-empty registry, an absent tag, or a `*` tag matches any value. `OciArtifactRef`
+empty registry, an absent tag, or a `*` tag matches any value, and a pinned digest
+matches only the same digest. `OciArtifactRef`
 pins an `ArtifactType` by digest in a registry.
 
 `NativeSnapshotRef` names a snapshot a provider keeps itself, scoped to its
@@ -116,7 +118,8 @@ a tag and when, using serde's `SystemTime` encoding of `secs_since_epoch` and
 `DriveId` scopes a drive name to a `TenantId`; `DriveId::new` and `validate`
 require 1 to 64 bytes without `/`, `\`, or `..`. `DriveMount` mounts a drive in a
 `DriveMountMode`, `read_write` by default or `read_only`, and `validate` requires
-an absolute path other than `/` with no `..` component. `DriveStorage` is untagged:
+an absolute path that does not resolve to `/`, such as `/.` or `//`, with no `..`
+component. `DriveStorage` is untagged:
 an S3 bucket or a `ProviderVolumeRef`, whose `ProviderVolumeId` rejects an empty
 value, more than 256 bytes, whitespace, or control characters. `DriveRecord`
 flattens its storage into the record, and `DriveRecord::DEFAULT_SIZE_GIB` (100)

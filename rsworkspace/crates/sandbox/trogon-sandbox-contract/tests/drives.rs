@@ -81,7 +81,7 @@ fn drive_id_deserializes_without_validating() -> TestResult {
 
 #[test]
 fn drive_mount_validate_accepts_an_absolute_path() -> TestResult {
-    for path in ["/mnt/d0", "/mnt/..d0", "/mnt/d0/"] {
+    for path in ["/mnt/d0", "/mnt/..d0", "/mnt/d0/", "/mnt/./d0", "/.d0"] {
         assert_eq!(drive_mount(path)?.validate(), Ok(()), "{path}");
     }
     Ok(())
@@ -93,6 +93,9 @@ fn drive_mount_validate_rejects_unsafe_paths() -> TestResult {
         ("relative/path", "must be absolute"),
         ("", "must be absolute"),
         ("/", "must not be '/'"),
+        ("/.", "must not be '/'"),
+        ("/./", "must not be '/'"),
+        ("///", "must not be '/'"),
         ("/mnt/../etc", "must not contain '..' components"),
         ("/..", "must not contain '..' components"),
     ] {

@@ -27,7 +27,7 @@ fn oci_image_ref_splits_registry_repository_tag_and_digest() -> TestResult {
         ),
         ("app:", "", "app:", None, None),
         ("app@latest", "", "app@latest", None, None),
-        ("app@sha256:BAD", "", "app", None, None),
+        ("app@sha256:BAD", "", "app@sha256", Some("BAD"), None),
     ];
     for (input, registry, repository, tag, expected_digest) in cases {
         let image = OciImageRef::parse_unqualified(input);

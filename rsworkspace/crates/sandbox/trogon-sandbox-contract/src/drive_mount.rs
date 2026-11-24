@@ -14,11 +14,16 @@ pub struct DriveMount {
 }
 
 impl DriveMount {
-    /// Requires an absolute mount path other than `/` with no `..` component.
+    /// Requires an absolute mount path that does not resolve to `/` (such as `/.` or `//`) and has no
+    /// `..` component.
     pub fn validate(&self) -> Result<(), DriveError> {
         let reason = if !self.mount_path.starts_with('/') {
             "must be absolute"
-        } else if self.mount_path == "/" {
+        } else if self
+            .mount_path
+            .split('/')
+            .all(|component| component.is_empty() || component == ".")
+        {
             "must not be '/'"
         } else if self.mount_path.split('/').any(|component| component == "..") {
             "must not contain '..' components"

@@ -1,5 +1,9 @@
 use trogon_sandbox_contract::{OciImageRef, pattern_matches_legacy, pattern_matches_oci_image_ref};
 
+fn pinned(hex: char) -> String {
+    format!("ghcr.io/team-a/foo@sha256:{}", hex.to_string().repeat(64))
+}
+
 #[test]
 fn legacy_pattern_matches_exact_or_single_trailing_wildcard() {
     assert!(!pattern_matches_legacy("", ""));
@@ -50,4 +54,38 @@ fn image_pattern_matches_by_part_when_the_allowlist_string_differs() {
     assert!(!pattern_matches_oci_image_ref("ghcr.io/team-a/foo:2.0", &tagged));
     assert!(!pattern_matches_oci_image_ref("ghcr.io/team-a/foo:1.0", &untagged));
     assert!(!pattern_matches_oci_image_ref("ghcr.io/te*m-a/*:*", &tagged));
+}
+
+#[test]
+fn image_pattern_with_a_digest_requires_the_same_digest() {
+    let pattern = pinned('a');
+    assert!(pattern_matches_oci_image_ref(
+        &pattern,
+        &OciImageRef::parse_unqualified(&pattern)
+    ));
+    assert!(!pattern_matches_oci_image_ref(
+        &pattern,
+        &OciImageRef::parse_unqualified(&pinned('b'))
+    ));
+    assert!(!pattern_matches_oci_image_ref(
+        &pattern,
+        &OciImageRef::parse_unqualified("ghcr.io/team-a/foo")
+    ));
+    assert!(!pattern_matches_oci_image_ref(
+        &pattern,
+        &OciImageRef::parse_unqualified("ghcr.io/team-a/foo:1.0")
+    ));
+}
+
+#[test]
+fn image_pattern_with_a_malformed_digest_does_not_widen_to_the_repository() {
+    let pattern = "ghcr.io/team-a/foo@sha256:BAD";
+    assert!(!pattern_matches_oci_image_ref(
+        pattern,
+        &OciImageRef::parse_unqualified("ghcr.io/team-a/foo")
+    ));
+    assert!(!pattern_matches_oci_image_ref(
+        pattern,
+        &OciImageRef::parse_unqualified(&pinned('a'))
+    ));
 }
