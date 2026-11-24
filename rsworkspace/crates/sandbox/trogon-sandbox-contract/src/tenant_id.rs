@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -6,19 +7,16 @@ use crate::TenantIdError;
 
 /// The tenant that owns a lease.
 ///
-/// It serializes as a JSON string. Deserialization stays unchecked so tenants that predate the
-/// [`TenantId::new`] rules, including ones containing `:` or `/`, keep working.
+/// It holds 1 to [`TenantId::MAX_LEN`] bytes with no control characters and serializes as a JSON
+/// string. Construction, parsing, and deserialization all enforce it.
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct TenantId(String);
 
 impl TenantId {
-    /// Longest tenant identifier [`TenantId::new`] accepts, in bytes.
+    /// Longest tenant identifier the wire accepts, in bytes.
     pub const MAX_LEN: usize = 128;
 
-    /// Validates a tenant identifier that is being introduced, such as when an API key is minted.
-    ///
-    /// It rejects an empty value, one longer than [`TenantId::MAX_LEN`] bytes, or one containing a
-    /// control character.
     pub fn new(value: impl Into<String>) -> Result<Self, TenantIdError> {
         let value = value.into();
         if value.is_empty() {
@@ -35,6 +33,22 @@ impl TenantId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl TryFrom<String> for TenantId {
+    type Error = TenantIdError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl FromStr for TenantId {
+    type Err = TenantIdError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
     }
 }
 

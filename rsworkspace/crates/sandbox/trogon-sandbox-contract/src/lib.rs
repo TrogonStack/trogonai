@@ -26,6 +26,7 @@ mod evicted_artifact_action;
 mod idle_action;
 mod idle_policy;
 mod idle_policy_error;
+mod idle_policy_wire;
 mod idle_stage;
 mod image_pattern;
 mod image_reference_parts;

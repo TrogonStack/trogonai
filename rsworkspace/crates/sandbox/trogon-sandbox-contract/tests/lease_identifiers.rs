@@ -39,7 +39,7 @@ fn ids_reject_values_that_are_not_strings() {
 }
 
 #[test]
-fn tenant_id_rejects_invalid_new_values() {
+fn tenant_id_rejects_invalid_values_on_construction_parsing_and_deserialization() -> TestResult {
     let too_long = "a".repeat(TenantId::MAX_LEN + 1);
     for (value, expected) in [
         ("", TenantIdError::Empty),
@@ -48,11 +48,18 @@ fn tenant_id_rejects_invalid_new_values() {
         ("acme\u{7f}", TenantIdError::ControlCharacter),
     ] {
         assert_eq!(TenantId::new(value).err(), Some(expected), "{value:?}");
+        assert_eq!(value.parse::<TenantId>().err(), Some(expected), "{value:?}");
+        assert_eq!(TenantId::try_from(value.to_owned()).err(), Some(expected), "{value:?}");
+        let error = serde_json::from_value::<TenantId>(json!(value))
+            .err()
+            .ok_or("invalid tenant id deserialized")?;
+        assert_eq!(error.classify(), Data, "{value:?}");
     }
+    Ok(())
 }
 
 #[test]
-fn tenant_id_accepts_valid_new_values() -> TestResult {
+fn tenant_id_accepts_valid_values() -> TestResult {
     let longest = "a".repeat(TenantId::MAX_LEN);
     for value in [
         "acme",
@@ -65,17 +72,11 @@ fn tenant_id_accepts_valid_new_values() -> TestResult {
         let tenant = TenantId::new(value)?;
         assert_eq!(tenant.as_str(), value);
         assert_eq!(tenant.to_string(), value);
+        assert_eq!(value.parse::<TenantId>()?, tenant);
+        assert_eq!(TenantId::try_from(value.to_owned())?, tenant);
         assert_eq!(serde_json::to_value(&tenant)?, json!(value));
+        assert_eq!(serde_json::from_value::<TenantId>(json!(value))?, tenant);
         assert_eq!(String::from(tenant), value);
-    }
-    Ok(())
-}
-
-#[test]
-fn tenant_id_deserialization_stays_unchecked() -> TestResult {
-    for value in ["", "acme\nteam", "org:acme/team"] {
-        let tenant: TenantId = serde_json::from_value(json!(value))?;
-        assert_eq!(tenant.as_str(), value);
     }
     Ok(())
 }

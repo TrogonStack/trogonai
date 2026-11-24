@@ -1,4 +1,4 @@
-/// A new tenant identifier does not satisfy the rules `TenantId::new` enforces.
+/// A tenant identifier does not satisfy the rules [`TenantId`](crate::TenantId) enforces.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, thiserror::Error)]
 pub enum TenantIdError {
     #[error("tenant id must not be empty")]
