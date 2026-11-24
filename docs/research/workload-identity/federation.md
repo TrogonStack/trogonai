@@ -89,7 +89,9 @@ not wait for a grant review.
 Configure each direction explicitly. If Trogon authenticates a customer workload, Trogon
 needs that customer's bundle relationship. If the customer authenticates Trogon, the
 customer needs a corresponding relationship. One direction does not imply the other, and
-neither implies trust in a third domain that the peer happens to trust.
+neither implies trust in a third domain that the peer happens to trust. Avoid long chains
+of federated domains: each added hop widens what a compromised bundle endpoint can affect,
+so a relationship that depends on an intermediate domain needs its own explicit entry.
 
 Each relationship retains at least:
 
@@ -97,7 +99,8 @@ Each relationship retains at least:
 - The approved bundle endpoint URL and explicit endpoint profile.
 - For `https_spiffe`, the expected endpoint SPIFFE ID and independently authenticated
   bootstrap bundle.
-- The owner, lifecycle/admission policy, accepted configuration revision, restore fence and
+- A named owner, the scope administrator responsible for the relationship, and its
+  lifecycle/admission policy, accepted configuration revision, restore fence and
   validity/staleness policy required by our deployment contract.
 - The authorized foreign subjects or admitted subject classes and their explicit platform
   mappings.
@@ -123,7 +126,20 @@ tenant membership, a destination permit or a Connection grant.
 
 Define bundle refresh, overlap, failure, explicit removal and compromise behavior. A
 stale-cache policy needs a Trogon contract and measurements; it cannot be inferred from HTTP
-cache hints. Explicit withdrawal must invalidate the local binding and captured sessions
+cache hints.
+
+Polling follows the `spiffe_refresh_hint` the bundle itself carries, defined by the
+[SPIFFE Trust Domain and Bundle specification](https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md),
+and falls back to five minutes when the bundle has no hint. The configured
+`refresh_interval` is an upper bound on that effective interval, never a floor, and the
+SPIFFE trust profile caps it at 300 seconds. A new signing key must be published in the bundle at least
+three refresh intervals before its first signing use, so every relying party has fetched it;
+`rotation_overlap` is therefore at least three and at most five times `refresh_interval`. Each bundle endpoint
+fetch is audited (see ADR#0098) as `SpiffeBundleFetchEvidence`, whether it changed the bundle,
+left it unchanged, was refused or failed. Creation, revision, activation, withdrawal and
+retirement of the relationship are the existing `TrustRegistrationEvent` records, which
+alerting on federation relationship changes can consume.
+ Explicit withdrawal must invalidate the local binding and captured sessions
 according to the selected profile. Rotation and independently fenced restore must not
 reintroduce an earlier revoked bundle or relationship.
 
@@ -237,6 +253,14 @@ Qualification must prove:
   is not equivalent to exposing the privileged Workload API or signing endpoint.
 - Upstream key rotation/publication and recipient JWKS caching cannot strand valid tokens or
   preserve retired authority beyond the approved window.
+- The OIDC Discovery Provider is configured with a restricted `domains` list naming only the
+  exact issuer host. The spike found that this list does not restrict the `/keys` path, so
+  the fronting proxy must also check the host for the JWKS request.
+- `allow_insecure_scheme` is never enabled. The provider listens over HTTPS itself or sits
+  behind a trusted proxy that terminates TLS, and the plaintext hop is never reachable from
+  another host.
+- The selected algorithm is RS, ES or PS family. The JWT-SVID specification does not permit
+  EdDSA, so a native SPIRE issuer cannot select it.
 
 JWT-SVID is a bearer format unless a separate binding is specified and enforced. It is not
 an OIDC interactive user login, and it does not imply a `cnf` claim or proof of the holder's

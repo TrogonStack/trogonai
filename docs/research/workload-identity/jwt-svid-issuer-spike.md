@@ -59,6 +59,13 @@ reserved `.test` suffix. No external resolution or real certificate was involved
 
 ### Configuration used (sanitized)
 
+> **Lab only.** Every block below is a throwaway local configuration. `join_token`
+> attestation, `insecure_bootstrap`, a world-accessible Workload API socket, a SQLite
+> datastore, the `disk` key manager and `insecure_addr` listeners are all prohibited in a
+> production profile by [ADR#0098](../../adr/0098-attested-workload-identity.md) and the
+> [workload identity reference](../../reference/workload-identity.md). Do not copy them
+> into a deployment.
+
 Server (the RSA run; the ES256 run changed only `jwt_key_type`, the trust domain and
 `ca_ttl`):
 
@@ -89,7 +96,8 @@ Registration entries (parent is the attested agent alias): `ns/a/sa/alpha` selec
 `unix:uid:1001` with `jwtSVIDTTL 120`, `ns/a/sa/beta` selected by `unix:uid:1002` with the
 server default TTL, and `oidc-helper` selected by `unix:uid:1005`.
 
-Discovery provider variants:
+Discovery provider variants (lab only: variants A and C serve plaintext HTTP with
+`insecure_addr`, which a production profile never enables):
 
 ```hcl
 # Variant A: admin socket, HTTP behind a notional proxy
@@ -211,6 +219,11 @@ key lingered in JWKS beyond the observation window; pruning cadence was not meas
 token with a valid signature from a lingering expired key is still refused on `exp`, but
 expiry of the key does not by itself withdraw it from the published set. Early removal
 needs the explicit `taint` then `revoke` sequence.
+
+The production contract is stricter than this observation: a new key is published at least
+three refresh intervals before its first signing use, so `ca_ttl`, the signing activation
+point and the recipients' refresh interval must be chosen together rather than taken from
+the one-third default seen here.
 
 The JWT key lifetime equals `ca_ttl`, and `jwt_key_type` is independent of the X.509 CA
 key type (the repository profile selects `ec-p256` for the CA). Choosing RS256 for

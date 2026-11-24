@@ -1,12 +1,15 @@
+import hashlib
 import json
 import subprocess
 import argparse
 import os
+import re
 from pathlib import Path
 
+from alerts import alert_rules
 from iam import policies
 from manifests import manifests, supervisor_patches
-from profile import validate, server_config, agent_config, registrations
+from profile import validate, server_config, agent_config, migration_config, registrations
 
 VERSION = "1.16.0"
 COMMIT = "872c1d55b4d5ac7fc1bf05f0760f2ca740ab37aa"
@@ -43,7 +46,33 @@ def verify_image(image):
     return signatures
 
 
-def render(config, verify=verify_image):
+def run_git(argv):
+    """Run one git command; returns (exit status, stdout)."""
+    done = subprocess.run(argv, capture_output=True, text=True, timeout=30, check=False)
+    return done.returncode, done.stdout
+
+
+def input_commit(path, runner=run_git):
+    """The commit that versions a deployment input, or a refusal when the file is untracked or has uncommitted changes.
+
+    Asked in the file's own repository: it must be tracked, identical to the index and to HEAD.
+    """
+    directory, name = str(path.resolve().parent), path.name
+    try:
+        tracked, _ = runner(["git", "-C", directory, "ls-files", "--error-unmatch", "--", name])
+        status, changes = runner(["git", "-C", directory, "status", "--porcelain", "--untracked-files=no", "--", name])
+        head, commit = runner(["git", "-C", directory, "rev-parse", "HEAD"])
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError("deployment input version could not be determined") from error
+    if tracked or status or head or not re.fullmatch(r"[0-9a-f]{40,64}", commit.strip()):
+        raise ValueError("deployment input is not tracked by git")
+    if changes.strip():
+        raise ValueError("deployment input has uncommitted changes")
+    return commit.strip()
+
+
+def render(config, verify=verify_image, source=None):
+    """`source` is {"sha256", "commit"} of the deployment input, stamped into the review artifact with the digest of registrations.json."""
     try:
         verified = {name: verify(image) for name, image in IMAGES.items()}
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
@@ -52,10 +81,14 @@ def render(config, verify=verify_image):
     def encode(value):
         return json.dumps(value, indent=2, sort_keys=True) + "\n"
     files = {name: encode(value) for name, value in policies(config).items()}
+    registered = encode(registrations(config))
     files.update({
-        "server.conf": encode(server_config(config)), "agent.conf": encode(agent_config(config)),
-        "registrations.json": encode(registrations(config)),
-        "registration-plan.json": encode({"purpose": "review-only; not runtime authority", "recovery_epoch": config["recovery_epoch"], "registrations": config["registrations"]}),
+        "server.conf": encode(server_config(config)), "migrate.conf": encode(migration_config(config)), "agent.conf": encode(agent_config(config)),
+        "registrations.json": registered, "alert-rules.json": encode(alert_rules()),
+        "registration-plan.json": encode({
+            "purpose": "review-only; not runtime authority", "recovery_epoch": config["recovery_epoch"], "registrations": config["registrations"],
+            "input": source, "registrations_sha256": hashlib.sha256(registered.encode()).hexdigest(),
+        }),
         "supervisor-patches.json": encode(supervisor_patches(config)),
         "release-verification.json": encode({"version": VERSION, "commit": COMMIT, "images": IMAGES, "signatures": verified}),
     })
@@ -72,25 +105,28 @@ def unique_fields(pairs):
     return value
 
 
-def main():
+def main(argv=None, runner=run_git, verify=verify_image):
     parser = argparse.ArgumentParser(description="Render the gated SPIRE deployment.")
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    parser.add_argument("--allow-unversioned-input", action="store_true",
+                        help="render an input that is not committed in git (fixtures, the example, tests); the plan then records no commit")
+    args = parser.parse_args(argv)
     try:
         with args.config.open("rb") as handle:
             source = handle.read(512 * 1024 + 1)
         if len(source) > 512 * 1024:
             raise ValueError("deployment configuration exceeds the profile bound")
         config = json.loads(source, object_pairs_hook=unique_fields)
-        files = render(config)
+        commit = None if args.allow_unversioned_input else input_commit(args.config, runner)
+        files = render(config, verify, {"sha256": hashlib.sha256(source).hexdigest(), "commit": commit})
         args.output.mkdir(mode=0o700)
         for name, content in files.items():
             descriptor = os.open(args.output / name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             with os.fdopen(descriptor, "w") as handle:
                 handle.write(content)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        parser.exit(1, "deployment refused: configuration, release trust or output is not usable\n")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        parser.exit(1, "deployment refused: " + (str(error) if "deployment input" in str(error) else "configuration, release trust or output is not usable") + "\n")
 
 
 if __name__ == "__main__":

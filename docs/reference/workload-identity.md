@@ -211,6 +211,34 @@ Artifact provenance, attestor correctness, signer custody, retained historical
 audit, cluster isolation, failover and restore acceptance still require the
 deployment evidence below.
 
+## Enforcement mode and connection events
+
+The egress proxy enforces by default. `--enforcement-mode` or
+`TROGON_EGRESS_ENFORCEMENT_MODE` selects `enforce` or `dry_run`, and any other
+value refuses startup. Dry run changes one answer: an authenticated caller whose
+identity holds no permit for the requested destination is forwarded instead of
+refused. The proxy then emits a warning event named `egress_would_deny` and the
+audit record carries the dry run enforcement mode with outcome `would_deny`.
+Authentication, the X.509-SVID checks, the private address guards and refusals
+because policy is unavailable are the same in both modes. Dry run is for
+observing a rollout, never a standing configuration.
+
+Every accepted mTLS connection logs one `peer_connection_accepted` event with the
+full peer SPIFFE ID, the peer address and the credential source, `workload_api` or
+`static_file`. A refused certificate logs the SPIFFE ID it claimed, if it claimed
+one, with the refusal reason. These events are the service dependency record: they
+show which identity actually calls the proxy, to compare with the expected one.
+The same acceptance increments the OpenTelemetry counter
+`egress_proxy.connections.accepted` with the attribute
+`egress_proxy.credential_source`.
+
+The static-file listener checks its client trust anchors when it loads them. An
+anchor that carries a URI subject alternative name must name exactly the
+configured trust domain, and an anchor naming another trust domain or carrying
+more than one URI subject alternative name refuses startup. An anchor with no URI
+subject alternative name, such as an upstream root, is accepted, so the file
+must still hold only this trust domain's anchors.
+
 ## Live egress authority
 
 Select `--policy-bucket` and a nonzero `--policy-incarnation` instead of
@@ -267,6 +295,45 @@ A publisher must not renew stale grants as fresh policy. Tests of this reader
 and its authenticated runtime path do not establish HA, production attestation
 or ADR0049's end-to-end p99 target.
 
+## SPIFFE ID convention
+
+The [SPIFFE ID specification](https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE-ID.md)
+is the normative source for what an ID may contain. This convention narrows it for
+workloads that Trogon registers. Settle it before the first registration entry, because
+renaming an ID later means a new entry, a new authorization policy and a rotation of every
+peer that pins the old one.
+
+- **Trust domain per environment.** Each environment has its own trust domain and roots.
+  The environment is part of the trust domain, such as `production.identity.example.org`,
+  and never appears in the path.
+- **Local workload path.** `/<owning-group>/<service>`, optionally followed by further
+  stable qualifiers, for a total of two to four segments. A segment matches
+  `[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?`, so it is lowercase only. An example is
+  `spiffe://production.identity.example.org/platform/egress`.
+- **Case.** Nothing is case-folded. The scheme and trust domain must already be lowercase,
+  and the path is case-sensitive. The runtime types and the trust manifest check refuse a
+  non-canonical ID instead of normalizing it, and policy compares the exact canonical
+  string. The lowercase-only segment rule removes any case ambiguity for local IDs.
+- **Stable values only.** A path never contains a pod name, node name, UID, image digest,
+  address or timestamp. Those change with every deployment and belong in selectors.
+- **No authority in the path.** The path never selects a tenant, project, role or `AgentId`;
+  [registration](#attestation-and-registration) supplies those from governed state.
+- **Enforcement.** The deployment compiler refuses an ID that breaks this convention. See
+  [Prepare a workload identity deployment](../how-to/deploy-workload-identity.md).
+- **Wire contract.** Every SPIFFE ID field that names a workload requires a lowercase trust
+  domain of at most 255 bytes and a non-empty path with no empty, `.` or `..` segment, no
+  trailing slash, query or fragment, within 2048 bytes. The wire rule also accepts the
+  upper-case path characters that the specification allows, because foreign IDs are not
+  ours to constrain.
+- **Static egress alias.** The egress proxy's `/agent/<agent-id>` alias (ADR#0085) is a
+  separate legacy profile that does not follow this convention. It is the static
+  compatibility slice, not the workload identity profile. It still is a SPIFFE ID: the
+  proxy refuses to render or accept an alias whose agent segment holds anything outside
+  letters, digits, `.`, `-` and `_`, so a `did:key:` agent id has no static alias and
+  appears in policy documents and registrations only.
+- **Foreign domains.** A foreign trust domain keeps its own conventions, and Trogon matches
+  its IDs exactly rather than normalizing them.
+
 ## Attestation and registration
 
 Implementation:
@@ -308,6 +375,18 @@ Implementation:
 - [ ] Independently advance the protected recovery fence across restore and
   collect native SPIRE issuance events. Ordinary issuer logs do not implement
   the platform activation gate or prove pre-signing acknowledgement.
+- [x] Harden the SPIRE server configuration:
+  - Keep `admin_ids` short, owned and reviewed; every entry is a standing
+    administrator.
+  - Leave `allow_nonconforming_agent_ids` false.
+  - Set `plugin_checksum` for every external plugin.
+  - Disable the Delegated Identity API, or limit its delegates to named trusted node
+    components and handle recycled process IDs.
+  - For a regulated or high-assurance profile, chain an `UpstreamAuthority` to a
+    hardware-protected enterprise CA. The compiler renders the `aws_pca` plugin from
+    `upstream_authority` and requires it when `assurance_level` is `regulated`; a
+    `disk` upstream authority is refused. A `standard` profile may stay self-rooted
+    with KMS-held keys.
 
 Verification:
 
@@ -344,7 +423,8 @@ Verification:
   unknown critical extensions, invalid leaf purpose, expired chains, multiple
   URI identities and unexpected trust domains.
 - [ ] Verify rotation with old and new connections, missed update/reconnect,
-  wrong-domain bundles, compromised-root removal and failed renewal.
+  wrong-domain bundles, compromised-root removal and failed renewal, including
+  rotation under load at the connection limit.
 - [x] Exercise real TLS 1.2 and TLS 1.3 handshakes with shared client session
   state. Subsequent egress connections require full handshakes; an explicit
   resumption control demonstrates that the fixture can resume both protocols.
@@ -423,6 +503,78 @@ Verification:
 - [ ] Missing, revoked or narrowed user consent cannot be recovered from an
   earlier workload-authentication success or cached policy decision.
 
+## JWT-SVID verification
+
+X.509-SVID with mutual TLS stays the default workload credential. A JWT-SVID is for a
+hop where a layer-7 intermediary terminates TLS. It is a bearer token, so it is never
+forwarded to another service; each hop gets a token for its own audience.
+
+`trogon-workload-identity` provides the only accepted path for a JWT-SVID:
+`JwtSvidVerifier::verify(token, hop)` returns a `VerifiedJwtSvid` (workload ID,
+audience, expiry, hop kind) or a typed `JwtSvidError`. The verifier is built with one
+expected `JwtAudience` and a `JwtBundleSource`.
+
+JWT bundles are delivered and rotated through the Workload API, like X.509 bundles. A
+`JwtBundleDriver` reads the `FetchJWTBundles` stream with the same reconnect, backoff,
+bounds and redaction rules as the X.509 stream, and the verifier reads the current set on
+every call, never a snapshot. Each update replaces the whole set, so an authority absent
+from an update stops being trusted at once. Bundles are one `JwtBundle` per trust domain
+and are never merged. An update with any invalid entry (no keys, a bad key, an unparsable
+trust domain, a duplicate, an excess of bundles or bytes) is refused whole, the last good
+set is kept, and the stream is reconnected.
+
+The verifier fails closed, before it reads the token, when the source cannot vouch for
+its set:
+
+- `bundles_not_delivered`: no set has arrived yet.
+- `bundles_stale`: the stream has been lost for longer than 30 seconds
+  (`JWT_BUNDLE_MAX_STALENESS`). A live stream is never stale. The bound equals the default
+  token leeway and covers a reconnect or an agent restart, so a removed authority can
+  outlive a broken stream by at most that long. The X.509 side withdraws material as soon
+  as its stream ends; the JWT side keeps a short grace because each verification is
+  independent and a brief reconnect should not refuse every request.
+
+A fixed set exists only for tests (`JwtBundleSource::static_for_tests`, behind the
+`test-support` feature).
+
+The opt-in test `devops/kubernetes/spire/test_jwt_bundle_live.py` proves the bundle
+source and the verifier against a real SPIRE 1.16.0 agent: the bundle arrives through
+`FetchJWTBundles`, a JWT-SVID minted by the agent verifies for its audience and is
+refused for another, and the source goes stale 30 seconds after the agent stops.
+
+The hop rule is enforced by the type, not by guidance. `verify` takes a
+`ConfidentialHop`, and the only constructors are `ConfidentialHop::mutual_tls`, from the
+`PeerEvidence` of an authenticated mutual-TLS peer, and `ConfidentialHop::unix_socket`,
+from a connected local Unix domain socket (the one accepted exception; peer credentials
+come from the kernel). A token cannot be verified without one of them. A mutual-TLS hop
+is refused as `hop_expired` once its peer evidence expires. `VerifiedJwtSvid::hop()`
+returns the `HopKind` (`mutual_tls` or `unix_socket`) for logging.
+
+`JwtAudience` is an absolute URI naming one specific service, such as
+`spiffe://prod.example.com/reports`. It cannot be built from an empty value, a value with
+whitespace or control characters, a bare trust domain (`example.org`, `spiffe://example.org`,
+`spiffe://example.org/`), a bare word such as `production`, or a URI without an
+authority. Rules, applied in this order after the hop check:
+
+- JWS compact serialization only: three base64url segments, bounded size.
+- `alg` is RS256/384/512, ES256/384/512 or PS256/384/512, checked before any key lookup.
+  `none`, HMAC and EdDSA are refused. All nine algorithms verify, and an EC key verifies
+  only the algorithm of its curve: ES256 with P-256, ES384 with P-384, ES512 with P-521.
+- Header parameters are `alg`, `typ` and `kid` only; `typ`, if present, is `JWT` or `JOSE`.
+- `sub` is a canonical workload SPIFFE ID with a path. Its trust domain selects the
+  bundle; an unknown trust domain is refused and no other bundle's key is tried.
+- The signature verifies under the key named by `kid`, or, without `kid`, under a key of
+  that bundle whose type fits `alg`. Bundle keys come from JWKS entries with
+  `use: jwt-svid` and a `kid`; RSA keys are at least 2048 bits, EC keys P-256, P-384 or P-521.
+- `aud` is present and names exactly one audience, the expected one. A token scoped to
+  several audiences is refused even when one of them matches.
+- `exp` is present, not past (30 seconds of leeway by default, at most 60) and at most
+  300 seconds ahead by default (configurable up to 3600). `nbf`, if present, has passed.
+  The ceiling is local policy; the specification sets no upper limit.
+
+Each refusal logs a `warn` event with a stable `reason` code and never the token or key
+material.
+
 ## Provider exchange and token protection
 
 Implementation:
@@ -480,6 +632,47 @@ assertions and tokens. A missing required capability blocks this profile;
 compatibility mode cannot satisfy the gate by changing its label.
 Verify artifact signatures and provenance against configured release trust;
 a digest obtained without authenticated provenance is not sufficient evidence.
+
+### Lifetime ceilings
+
+These ceilings bound different things and are not interchangeable:
+
+| Ceiling | Bounds | Source |
+| --- | --- | --- |
+| 330 seconds | Governed registration lease, egress session and policy backstop | [ADR#0049](../adr/0049-revocation-latency-target.md) |
+| 3600 seconds | X.509-SVID lifetime | [ADR#0098](../adr/0098-attested-workload-identity.md) |
+| 300 seconds | JWT-SVID assertion lifetime (`max_assertion_lifetime`) | [Wire bounds](./workload-identity-configuration.md#proposed-wire-bounds) |
+
+The egress proxy's legacy static-file mode applies the same 3600-second ceiling. It
+refuses a client certificate whose validity (not-after minus not-before) exceeds it during
+the TLS handshake and logs `reason = client_certificate_lifetime_exceeded`. It also checks
+its own certificate when the configuration loads, and startup fails with a typed error
+rather than serving it. The ceiling is a constant, not a setting. A legacy long-lived
+static certificate, on either side, must be reissued with a validity of one hour or less
+before this proxy accepts it.
+
+Static-file mode also holds both certificates to the X.509-SVID key profile: not a CA,
+`digitalSignature` set, neither `keyCertSign` nor `cRLSign`, and, when an extended key
+usage is present, both `serverAuth` and `clientAuth`. A client certificate that breaks it
+fails the TLS handshake. The proxy's own certificate is checked when the configuration
+loads, so a certificate issued with only `serverAuth` stops startup with a typed error.
+Reissue such a certificate with both usages, or with no extended key usage, before
+upgrading.
+
+### Measurements
+
+Track these to show the rollout is making progress. They are measures, not gates; the
+gates are the checklists above. The
+[deployment procedure](../how-to/deploy-workload-identity.md#measure-progress) names
+the source of each number.
+
+- Share of service-to-service calls authenticated by SVID.
+- Static service credentials retired, counted against the inventory taken at the start.
+- Registration entries with a single broad selector. The target is zero.
+- Median SVID lifetime, and rotation failures per week.
+- Time to revoke, from entry deletion to the expiry of the last valid SVID. The
+  X.509-SVID ceiling of 3600 seconds bounds it, and platform use ends sooner, within the
+  330-second registration bound.
 
 The [connector conformance gate](./connector-conformance.md) remains necessary
 for provider integrations. No certificate fixture, local library test or draft

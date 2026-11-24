@@ -38,6 +38,15 @@ func loadFixture(t *testing.T) policyDocument {
 func asMap(value any) map[string]any { return value.(map[string]any) }
 func asList(value any) []any         { return value.([]any) }
 
+func nodeTerms(pod map[string]any) []map[string]any {
+	required := asMap(asMap(asMap(asMap(pod["spec"])["affinity"])["nodeAffinity"])["requiredDuringSchedulingIgnoredDuringExecution"])
+	var terms []map[string]any
+	for _, term := range asList(required["nodeSelectorTerms"]) {
+		terms = append(terms, asMap(term))
+	}
+	return terms
+}
+
 func clone(value map[string]any) map[string]any {
 	data, _ := json.Marshal(value)
 	var result map[string]any
@@ -176,7 +185,7 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 			if strings.HasSuffix(asMap(item["metadata"])["name"].(string), "-identity-sockets") {
 				policy = item
 			}
-		case "StatefulSet", "DaemonSet":
+		case "StatefulSet", "DaemonSet", "Job":
 			template := clone(asMap(asMap(item["spec"])["template"]))
 			asMap(template["metadata"])["namespace"] = asMap(item["metadata"])["namespace"]
 			issuerPods = append(issuerPods, template)
@@ -213,6 +222,23 @@ func TestSocketAdmissionBoundary(t *testing.T) {
 			},
 			"control_plane_node": func(p map[string]any) {
 				asMap(p["spec"])["nodeName"] = "identity-control-a"
+			},
+			"unapproved_node_in_affinity": func(p map[string]any) {
+				asMap(asList(nodeTerms(p)[0]["matchFields"])[0])["values"] = []any{"identity-control-a"}
+			},
+			"multi_value_term": func(p map[string]any) {
+				asMap(asList(nodeTerms(p)[0]["matchFields"])[0])["values"] = []any{"identity-node-a", "identity-node-b"}
+			},
+			"extra_unapproved_term": func(p map[string]any) {
+				spec := asMap(asMap(asMap(p["spec"])["affinity"])["nodeAffinity"])["requiredDuringSchedulingIgnoredDuringExecution"].(map[string]any)
+				spec["nodeSelectorTerms"] = append(asList(spec["nodeSelectorTerms"]), map[string]any{"matchFields": []any{map[string]any{"key": "metadata.name", "operator": "In", "values": []any{"identity-control-a"}}}})
+			},
+			"term_without_node_names": func(p map[string]any) {
+				spec := asMap(asMap(asMap(p["spec"])["affinity"])["nodeAffinity"])["requiredDuringSchedulingIgnoredDuringExecution"].(map[string]any)
+				spec["nodeSelectorTerms"] = append(asList(spec["nodeSelectorTerms"]), map[string]any{"matchExpressions": []any{map[string]any{"key": "pool", "operator": "Exists"}}})
+			},
+			"host_port_exposure": func(p map[string]any) {
+				asMap(asList(asMap(asList(asMap(p["spec"])["containers"])[0])["ports"])[0])["hostPort"] = float64(9989)
 			},
 			"unapproved_exec_hook": func(p map[string]any) {
 				asMap(asList(asMap(p["spec"])["containers"])[0])["lifecycle"] = map[string]any{"postStart": map[string]any{"exec": map[string]any{"command": []any{"/unexpected-entrypoint"}}}}

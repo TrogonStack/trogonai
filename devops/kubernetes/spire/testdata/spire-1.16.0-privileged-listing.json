@@ -1,0 +1,196 @@
+{
+  "entries": [
+    {
+      "admin": false,
+      "created_at": "1795511583",
+      "dns_names": [
+        "a.example.org"
+      ],
+      "downstream": true,
+      "expires_at": "0",
+      "federates_with": [],
+      "hint": "h",
+      "id": "a80522fd-0ccf-43e8-9477-673f11bfded2",
+      "jwt_svid_ttl": 60,
+      "parent_id": {
+        "path": "/spire/server",
+        "trust_domain": "test.example.org"
+      },
+      "revision_number": "0",
+      "selectors": [
+        {
+          "type": "unix",
+          "value": "uid:1"
+        }
+      ],
+      "spiffe_id": {
+        "path": "/downstream",
+        "trust_domain": "test.example.org"
+      },
+      "store_svid": false,
+      "wit_svid_ttl": 0,
+      "x509_svid_ttl": 120
+    },
+    {
+      "admin": true,
+      "created_at": "1795511583",
+      "dns_names": [],
+      "downstream": false,
+      "expires_at": "0",
+      "federates_with": [],
+      "hint": "",
+      "id": "6bafa542-98a3-4280-b1db-7d36efed6f13",
+      "jwt_svid_ttl": 0,
+      "parent_id": {
+        "path": "/spire/server",
+        "trust_domain": "test.example.org"
+      },
+      "revision_number": "0",
+      "selectors": [
+        {
+          "type": "unix",
+          "value": "uid:0"
+        }
+      ],
+      "spiffe_id": {
+        "path": "/operators/break-glass",
+        "trust_domain": "test.example.org"
+      },
+      "store_svid": false,
+      "wit_svid_ttl": 0,
+      "x509_svid_ttl": 0
+    },
+    {
+      "admin": false,
+      "created_at": "1795511583",
+      "dns_names": [],
+      "downstream": false,
+      "expires_at": "0",
+      "federates_with": [],
+      "hint": "",
+      "id": "534c99bf-9b13-40c6-bcaf-3a53662a9533",
+      "jwt_svid_ttl": 0,
+      "parent_id": {
+        "path": "/spire/server",
+        "trust_domain": "test.example.org"
+      },
+      "revision_number": "0",
+      "selectors": [
+        {
+          "type": "k8s_psat",
+          "value": "agent_node_label:workload-identity.platform.example.node-restriction.kubernetes.io/pool:test-cluster"
+        },
+        {
+          "type": "k8s_psat",
+          "value": "agent_ns:identity-agents"
+        },
+        {
+          "type": "k8s_psat",
+          "value": "agent_sa:spire-agent"
+        },
+        {
+          "type": "k8s_psat",
+          "value": "cluster:test-cluster"
+        }
+      ],
+      "spiffe_id": {
+        "path": "/platform/agent-group/test-cluster/epoch-1",
+        "trust_domain": "test.example.org"
+      },
+      "store_svid": false,
+      "wit_svid_ttl": 0,
+      "x509_svid_ttl": 3590
+    },
+    {
+      "admin": false,
+      "created_at": "1795511583",
+      "dns_names": [],
+      "downstream": false,
+      "expires_at": "0",
+      "federates_with": [],
+      "hint": "",
+      "id": "67704c13-4095-4a45-8854-65e8289343d5",
+      "jwt_svid_ttl": 0,
+      "parent_id": {
+        "path": "/platform/agent-group/test-cluster/epoch-1",
+        "trust_domain": "test.example.org"
+      },
+      "revision_number": "0",
+      "selectors": [
+        {
+          "type": "k8s",
+          "value": "container-image:registry.example.org/platform/egress@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "type": "k8s",
+          "value": "container-name:supervisor"
+        },
+        {
+          "type": "k8s",
+          "value": "ns:trusted-supervisors"
+        },
+        {
+          "type": "k8s",
+          "value": "sa:egress-supervisor"
+        },
+        {
+          "type": "unix",
+          "value": "uid:10001"
+        }
+      ],
+      "spiffe_id": {
+        "path": "/platform/egress",
+        "trust_domain": "test.example.org"
+      },
+      "store_svid": false,
+      "wit_svid_ttl": 0,
+      "x509_svid_ttl": 3590
+    },
+    {
+      "admin": false,
+      "created_at": "1795511583",
+      "dns_names": [],
+      "downstream": false,
+      "expires_at": "0",
+      "federates_with": [],
+      "hint": "",
+      "id": "cf5bb8ca-08c5-45e3-aa88-f8e78f81d138",
+      "jwt_svid_ttl": 0,
+      "parent_id": {
+        "path": "/platform/agent-group/test-cluster/epoch-1",
+        "trust_domain": "test.example.org"
+      },
+      "revision_number": "0",
+      "selectors": [
+        {
+          "type": "k8s",
+          "value": "container-image:registry.example.org/platform/egress@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "type": "k8s",
+          "value": "container-name:supervisor"
+        },
+        {
+          "type": "k8s",
+          "value": "ns:trusted-supervisors"
+        },
+        {
+          "type": "k8s",
+          "value": "sa:ingress-supervisor"
+        },
+        {
+          "type": "unix",
+          "value": "uid:10002"
+        }
+      ],
+      "spiffe_id": {
+        "path": "/platform/ingress",
+        "trust_domain": "test.example.org"
+      },
+      "store_svid": false,
+      "wit_svid_ttl": 0,
+      "x509_svid_ttl": 3590
+    }
+  ],
+  "next_page_token": ""
+}

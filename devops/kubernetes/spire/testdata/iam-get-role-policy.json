@@ -1,0 +1,72 @@
+{
+  "PolicyDocument": {
+    "Statement": [
+      {
+        "Action": "kms:CreateKey",
+        "Condition": {
+          "StringEquals": {
+            "aws:RequestTag/Environment": "production",
+            "aws:RequestTag/spire-server-td": "production.identity.example.org",
+            "kms:KeySpec": "ECC_NIST_P256",
+            "kms:KeyUsage": "SIGN_VERIFY"
+          }
+        },
+        "Effect": "Allow",
+        "Resource": "*",
+        "Sid": "CreateTaggedSigningKeys"
+      },
+      {
+        "Action": [
+          "kms:DescribeKey",
+          "kms:GetPublicKey",
+          "kms:Sign",
+          "kms:ScheduleKeyDeletion",
+          "kms:TagResource",
+          "kms:PutKeyPolicy",
+          "kms:CreateAlias",
+          "kms:UpdateAlias"
+        ],
+        "Condition": {
+          "StringEquals": {
+            "aws:ResourceTag/spire-server-td": "production.identity.example.org"
+          }
+        },
+        "Effect": "Allow",
+        "Resource": "arn:aws:kms:eu-west-1:111122223333:key/*",
+        "Sid": "ManageTrustDomainKeys"
+      },
+      {
+        "Action": [
+          "kms:CreateAlias",
+          "kms:UpdateAlias",
+          "kms:DeleteAlias"
+        ],
+        "Effect": "Allow",
+        "Resource": "arn:aws:kms:eu-west-1:111122223333:alias/SPIRE_SERVER/production.identity.example.org/*",
+        "Sid": "ManageTrustDomainAliases"
+      },
+      {
+        "Action": [
+          "kms:ListAliases",
+          "tag:GetResources"
+        ],
+        "Effect": "Allow",
+        "Resource": "*",
+        "Sid": "DiscoverManagedKeys"
+      },
+      {
+        "Action": [
+          "acm-pca:DescribeCertificateAuthority",
+          "acm-pca:IssueCertificate",
+          "acm-pca:GetCertificate"
+        ],
+        "Effect": "Allow",
+        "Resource": "arn:aws:acm-pca:eu-west-1:111122223333:certificate-authority/12ac02bc-d425-49f7-ab78-570a44972772",
+        "Sid": "SignIntermediateWithUpstreamAuthority"
+      }
+    ],
+    "Version": "2012-10-17"
+  },
+  "PolicyName": "identity-server-signing",
+  "RoleName": "identity-server"
+}

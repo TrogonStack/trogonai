@@ -19,6 +19,13 @@ def policies(config):
          "Action": ["kms:CreateAlias", "kms:UpdateAlias", "kms:DeleteAlias"], "Resource": alias_arn},
         {"Sid": "DiscoverManagedKeys", "Effect": "Allow", "Action": ["kms:ListAliases", "tag:GetResources"], "Resource": "*"},
     ]}
+    if config["upstream_authority"] is not None:
+        # Policy documented for the aws_pca plugin, scoped to the one configured private CA.
+        server_policy["Statement"].append({
+            "Sid": "SignIntermediateWithUpstreamAuthority", "Effect": "Allow",
+            "Action": ["acm-pca:DescribeCertificateAuthority", "acm-pca:IssueCertificate", "acm-pca:GetCertificate"],
+            "Resource": config["upstream_authority"]["certificate_authority_arn"],
+        })
     key_policy = {"Version": "2012-10-17", "Statement": [
         {"Sid": "ManageThisSigningKey", "Effect": "Allow", "Principal": {"AWS": config["server_role_arn"]},
          "Action": key_actions, "Resource": "*"},

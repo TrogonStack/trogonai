@@ -1,6 +1,7 @@
+import hashlib
 import json
 
-from profile import POOL_LABEL, SOCKET_DIRECTORY, SOCKET_PATH, SERVER_SOCKET
+from profile import POOL_LABEL, SOCKET_DIRECTORY, SOCKET_PATH, SERVER_SOCKET, SERVER_METRICS_PORT, AGENT_METRICS_PORT
 
 
 def resource(api, kind, name, namespace=None, **values):
@@ -32,10 +33,11 @@ def config_volume(name, configmap):
 
 
 def node_affinity(names, pool):
+    """One term per node, because the API server accepts a single value in a `metadata.name` field selector; terms are ORed."""
     return {"nodeAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": {"nodeSelectorTerms": [{
-        "matchFields": [{"key": "metadata.name", "operator": "In", "values": names}],
+        "matchFields": [{"key": "metadata.name", "operator": "In", "values": [name]}],
         "matchExpressions": [{"key": POOL_LABEL, "operator": "In", "values": [pool]}],
-    }]}}}
+    } for name in names]}}}
 
 
 def probe(binary, socket, shallow=False):
@@ -81,7 +83,7 @@ def server(config, images):
         "containers": [{
             "name": "server", "image": images["server"], "imagePullPolicy": "IfNotPresent",
             "command": [binary], "args": ["run", "-config", "/run/spire/config/server.conf", "-expandEnv"],
-            "ports": [{"name": "grpc", "containerPort": 8081}],
+            "ports": [{"name": "grpc", "containerPort": 8081}, {"name": "metrics", "containerPort": SERVER_METRICS_PORT}],
             "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}},
             "resources": {"requests": {"cpu": "500m", "memory": "512Mi"}, "limits": {"cpu": "2", "memory": "2Gi"}},
             "env": [
@@ -121,6 +123,54 @@ def server(config, images):
     ]
 
 
+def migration_job_name(spec, migrate_conf):
+    """A Job's pod template is immutable, so the name changes with anything the Job
+    runs: the whole spec and the migration config."""
+    canonical = json.dumps({"spec": spec, "migrate.conf": migrate_conf}, sort_keys=True, separators=(",", ":"))
+    return "spire-server-migrate-" + hashlib.sha256(canonical.encode()).hexdigest()[:10]
+
+
+def migration(config, images, files):
+    """One-shot schema migration: the pinned server runs as a native sidecar until the check container sees it healthy, then the Job completes."""
+    namespace = config["namespace"]
+    labels = {"app.kubernetes.io/name": "spire-server-migrate"}
+    binary = "/opt/spire/bin/spire-server"
+    security = {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}}
+    pod = {
+        "restartPolicy": "OnFailure", "serviceAccountName": "spire-server-migrate", "automountServiceAccountToken": False,
+        "securityContext": {"runAsUser": 1000, "runAsGroup": 1000, "runAsNonRoot": True, "fsGroup": 1000,
+                            "fsGroupChangePolicy": "OnRootMismatch", "seccompProfile": {"type": "RuntimeDefault"}},
+        "affinity": node_affinity(config["server_node_names"], config["cluster"] + "-control"),
+        "initContainers": [{
+            "name": "server", "image": images["server"], "imagePullPolicy": "IfNotPresent", "restartPolicy": "Always",
+            "command": [binary], "args": ["run", "-config", "/run/spire/config/migrate.conf"], "securityContext": security,
+            "resources": {"requests": {"cpu": "100m", "memory": "128Mi"}, "limits": {"cpu": "1", "memory": "512Mi"}},
+            "volumeMounts": [mount("config", "/run/spire/config"), mount("admin", "/run/spire/admin", False), mount("tmp", "/tmp", False),
+                mount("database-client", "/run/spire/database"), mount("database-ca", "/run/spire/database-ca")],
+            "startupProbe": {**probe(binary, SERVER_SOCKET), "failureThreshold": 30},
+        }],
+        "containers": [{
+            "name": "check", "image": images["server"], "imagePullPolicy": "IfNotPresent",
+            "command": [binary], "args": ["healthcheck", "-socketPath", SERVER_SOCKET], "securityContext": security,
+            "resources": {"requests": {"cpu": "10m", "memory": "32Mi"}, "limits": {"cpu": "100m", "memory": "64Mi"}},
+            "volumeMounts": [mount("admin", "/run/spire/admin", False)],
+        }],
+        "volumes": [config_volume("config", "spire-server-migrate"), {"name": "admin", "emptyDir": {"medium": "Memory", "sizeLimit": "16Mi"}},
+            {"name": "tmp", "emptyDir": {"sizeLimit": "64Mi"}},
+            {"name": "database-client", "secret": {"secretName": config["database"]["client_secret"], "defaultMode": 0o440}},
+            config_volume("database-ca", config["database"]["root_ca_configmap"])],
+    }
+    spec = {
+        "backoffLimit": 3, "activeDeadlineSeconds": 900, "completions": 1, "parallelism": 1,
+        "template": {"metadata": {"labels": labels}, "spec": pod},
+    }
+    return [
+        resource("v1", "ServiceAccount", "spire-server-migrate", namespace, automountServiceAccountToken=False),
+        resource("v1", "ConfigMap", "spire-server-migrate", namespace, data={"migrate.conf": files["migrate.conf"]}),
+        resource("batch/v1", "Job", migration_job_name(spec, files["migrate.conf"]), namespace, spec=spec),
+    ]
+
+
 def agent(config, images):
     namespace = config["agent_namespace"]
     labels = {"app.kubernetes.io/name": "spire-agent"}
@@ -133,6 +183,7 @@ def agent(config, images):
             "affinity": node_affinity(config["node_names"], config["cluster"]),
             "containers": [{"name": "agent", "image": images["agent"], "imagePullPolicy": "IfNotPresent",
                 "command": [binary], "args": ["run", "-config", "/run/spire/config/agent.conf"],
+                "ports": [{"name": "metrics", "containerPort": AGENT_METRICS_PORT}],
                 "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True,
                     "capabilities": {"drop": ["ALL"], "add": ["SYS_PTRACE"]}},
                 "resources": {"requests": {"cpu": "250m", "memory": "256Mi"}, "limits": {"cpu": "1", "memory": "1Gi"}},
@@ -167,14 +218,22 @@ def network_policies(config):
                    "podSelector": {"matchLabels": {"app.kubernetes.io/name": "spire-server"}}}
     agent_peer = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": config["agent_namespace"]}},
                   "podSelector": {"matchLabels": {"app.kubernetes.io/name": "spire-agent"}}}
+    scraper = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": config["monitoring"]["namespace"]}},
+               "podSelector": {"matchLabels": {"app.kubernetes.io/name": config["monitoring"]["scraper"]}}}
     resources.append(resource("networking.k8s.io/v1", "NetworkPolicy", "spire-server", config["namespace"], spec={
         "podSelector": {"matchLabels": {"app.kubernetes.io/name": "spire-server"}}, "policyTypes": ["Ingress", "Egress"],
-        "ingress": [{"from": [agent_peer], "ports": [{"protocol": "TCP", "port": 8081}]}],
-        "egress": [dns, destinations(config["api_server_cidrs"], 443), destinations(config["aws_endpoint_cidrs"], 443),
+        "ingress": [{"from": [agent_peer], "ports": [{"protocol": "TCP", "port": 8081}]},
+                    {"from": [scraper], "ports": [{"protocol": "TCP", "port": SERVER_METRICS_PORT}]}],
+        "egress": [dns, destinations(config["api_server_cidrs"], config["api_server_port"]), destinations(config["aws_endpoint_cidrs"], 443),
                    destinations(config["database"]["cidrs"], 5432)],
+    }))
+    resources.append(resource("networking.k8s.io/v1", "NetworkPolicy", "spire-server-migrate", config["namespace"], spec={
+        "podSelector": {"matchLabels": {"app.kubernetes.io/name": "spire-server-migrate"}}, "policyTypes": ["Ingress", "Egress"],
+        "ingress": [], "egress": [dns, destinations(config["database"]["cidrs"], 5432)],
     }))
     resources.append(resource("networking.k8s.io/v1", "NetworkPolicy", "spire-agent", config["agent_namespace"], spec={
         "podSelector": {"matchLabels": {"app.kubernetes.io/name": "spire-agent"}}, "policyTypes": ["Ingress", "Egress"],
+        "ingress": [{"from": [scraper], "ports": [{"protocol": "TCP", "port": AGENT_METRICS_PORT}]}],
         "egress": [dns, {"to": [server_peer], "ports": [{"protocol": "TCP", "port": 8081}]}, destinations(config["node_cidrs"], 10250)],
     }))
     return resources
@@ -238,11 +297,11 @@ def socket_policy(config, images):
         "has(object.spec.automountServiceAccountToken) && !object.spec.automountServiceAccountToken",
     ])
     process = matching_fields(container, {key: expected_container[key] for key in
-        ["command", "args", "env", "livenessProbe", "readinessProbe", "startupProbe"]})
+        ["command", "args", "ports", "env", "livenessProbe", "readinessProbe", "startupProbe"]})
     process += " && " + " && ".join([
         f"!has({container}.lifecycle)",
+        f"(!has({container}.ports) || {container}.ports.all(p, (!has(p.hostPort) || p.hostPort == 0) && !has(p.hostIP)))",
         f"(!has({container}.envFrom) || {container}.envFrom.size() == 0)",
-        f"(!has({container}.ports) || {container}.ports.size() == 0)",
         f"(!has({container}.volumeDevices) || {container}.volumeDevices.size() == 0)",
         "(!has(object.spec.initContainers) || object.spec.initContainers.size() == 0)",
         "(!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0)",
@@ -254,7 +313,7 @@ def socket_policy(config, images):
         "object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.size() > 0",
         "object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.all(t, "
         "has(t.matchFields) && t.matchFields.exists(f, f.key == 'metadata.name' && f.operator == 'In' && "
-        "f.values.size() > 0 && f.values.all(n, variables.agentNodes.exists(approved, approved == n))))",
+        "f.values.size() == 1 && f.values.all(n, variables.agentNodes.exists(approved, approved == n))))",
     ])
     variables = [
         {"name": "agentNodes", "expression": quote(config["node_names"])},
@@ -362,13 +421,41 @@ def socket_policy(config, images):
     })
     node_binding = resource("admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicyBinding", node_name,
         spec={"policyName": node_name, "validationActions": ["Deny"]})
-    return [policy, binding, node_policy, node_binding]
+    return [policy, binding, node_policy, node_binding, *access_policy(config)]
+
+
+ACCESS_RULES = [
+    {"operations": ["CONNECT"], "resources": ["pods/exec", "pods/attach", "pods/portforward"]},
+    {"operations": ["UPDATE"], "resources": ["pods/ephemeralcontainers"]},
+]
+
+
+def access_policy(config):
+    """Refuse interactive access to the SPIRE pods unless the requester is in a declared operator group.
+
+    Exec into the server reaches the admin socket and the in-memory CA keys' process; attach and port-forward
+    reach the same process, and an ephemeral container shares its namespaces. `reconcile.py` runs
+    `kubectl exec`, so the operator running it must be in one of these groups.
+    """
+    name = config["namespace"] + "-identity-operator-access"
+    namespaces = sorted({config["namespace"], config["agent_namespace"]})
+    policy = resource("admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicy", name, spec={
+        "failurePolicy": "Fail", "matchConstraints": {
+            "namespaceSelector": {"matchExpressions": [{"key": "kubernetes.io/metadata.name", "operator": "In", "values": namespaces}]},
+            "resourceRules": [{"apiGroups": [""], "apiVersions": ["v1"], **rule} for rule in ACCESS_RULES]},
+        "variables": [{"name": "operatorGroups", "expression": json.dumps(config["server_operator_groups"])}],
+        "validations": [{"expression": "has(request.userInfo.groups) && request.userInfo.groups.exists(g, variables.operatorGroups.exists(o, o == g))",
+                         "message": f"Interactive access to the SPIRE pods in {', '.join(namespaces)} requires membership in a declared server operator group."}],
+    })
+    binding = resource("admissionregistration.k8s.io/v1", "ValidatingAdmissionPolicyBinding", name,
+        spec={"policyName": name, "validationActions": ["Deny"]})
+    return [policy, binding]
 
 
 def supervisor_patches(config):
     return [{"namespace": r["namespace"], "service_account": r["service_account"], "pod_spec_patch": {
         "serviceAccountName": r["service_account"], "automountServiceAccountToken": False,
-        "affinity": node_affinity(config["node_names"], config["cluster"]),
+        "affinity": node_affinity(r["node_names"], config["cluster"]),
         "containers": [{"name": r["container"], "image": r["container_image"],
             "securityContext": {"runAsUser": r["uid"], "runAsNonRoot": True, "allowPrivilegeEscalation": False,
                 "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}, "seccompProfile": {"type": "RuntimeDefault"}},
@@ -398,8 +485,9 @@ def manifests(config, images, files):
     accounts = [resource("v1", "ServiceAccount", name, namespace, automountServiceAccountToken=False)
                 for namespace, name in sorted({(r["namespace"], r["service_account"]) for r in config["registrations"]})]
     configurations = [
+        resource("v1", "ConfigMap", "spire-alert-rules", config["monitoring"]["namespace"], data={"alert-rules.json": files["alert-rules.json"]}),
         resource("v1", "ConfigMap", "spire-server", config["namespace"], data={"server.conf": files["server.conf"], "kms-key-policy.json": files["kms-key-policy.json"]}),
         resource("v1", "ConfigMap", "spire-agent", config["agent_namespace"], data={"agent.conf": files["agent.conf"]}),
     ]
     return {"apiVersion": "v1", "kind": "List", "items": namespaces + accounts + rbac(config) + configurations +
-        network_policies(config) + socket_policy(config, images) + server(config, images) + [agent(config, images)]}
+        network_policies(config) + socket_policy(config, images) + migration(config, images, files) + server(config, images) + [agent(config, images)]}

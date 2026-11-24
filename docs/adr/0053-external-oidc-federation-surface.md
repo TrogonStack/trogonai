@@ -127,7 +127,10 @@ audit. Enumerable bindings are the property worth paying object count for.
 ### 4. One audience per assertion, minted at the moment of exchange
 
 An assertion minted for an external IdP carries exactly one audience, the one
-that IdP requires. Tokens minted for any internal purpose are never presented
+that IdP requires. That audience names one specific recipient, never the bare
+trust domain, an environment name or any other value shared by several
+recipients, since such a value lets one recipient replay the assertion to
+another. Tokens minted for any internal purpose are never presented
 as external assertions and vice versa: a multi-audience bearer token is
 replayable to every recipient it names.
 
