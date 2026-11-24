@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::CredentialAckError;
 use crate::credential_ack_wire::CredentialAckWire;
+use crate::{CredentialAckError, CredentialAckStatus};
 
 /// The credential broker's acknowledgement of a request that returns no token.
 ///
@@ -17,17 +17,17 @@ impl TryFrom<CredentialAckWire> for CredentialAck {
     type Error = CredentialAckError;
 
     fn try_from(wire: CredentialAckWire) -> Result<Self, Self::Error> {
-        if !wire.ok {
-            return Err(CredentialAckError::NotOk);
+        match wire.ok {
+            CredentialAckStatus::Accepted => Ok(Self { message: wire.message }),
+            CredentialAckStatus::Refused => Err(CredentialAckError::NotOk),
         }
-        Ok(Self { message: wire.message })
     }
 }
 
 impl From<CredentialAck> for CredentialAckWire {
     fn from(ack: CredentialAck) -> Self {
         Self {
-            ok: true,
+            ok: CredentialAckStatus::Accepted,
             message: ack.message,
         }
     }

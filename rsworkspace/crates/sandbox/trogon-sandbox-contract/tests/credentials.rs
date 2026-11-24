@@ -5,10 +5,11 @@ use std::time::{Duration, SystemTime};
 use serde_json::error::Category::Data;
 use serde_json::json;
 use trogon_sandbox_contract::{
-    CredentialAck, CredentialAckError, CredentialAckOutcome, CredentialAuditEvent, CredentialError, CredentialId,
-    CredentialIssueOutcome, CredentialIssueRequest, CredentialIssueResponse, CredentialProvider,
-    CredentialProviderError, CredentialRevokeRequest, CredentialRotateRequest, CredentialScope, LeaseId, OidcClaims,
-    OidcToken, PolicyFence, PullSecretId, ServiceAccountId, ShortLivedToken, TenantId, TokenId,
+    CredentialAck, CredentialAckError, CredentialAckOutcome, CredentialAckStatus, CredentialAuditEvent,
+    CredentialError, CredentialId, CredentialIssueOutcome, CredentialIssueRequest, CredentialIssueResponse,
+    CredentialProvider, CredentialProviderError, CredentialRevokeRequest, CredentialRotateRequest, CredentialScope,
+    LeaseId, OidcClaims, OidcToken, PolicyFence, PullSecretId, SandboxId, ServiceAccountId, ShortLivedToken, TenantId,
+    TokenId,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -69,7 +70,7 @@ fn tokens_never_show_their_value_in_debug() -> TestResult {
 fn oidc_claims_name_the_forward_target_and_the_lease() -> TestResult {
     let claims = OidcClaims {
         iss: "https://egress.example".to_owned(),
-        sub: "sandbox-1".to_owned(),
+        sub: SandboxId::new("sandbox-1")?,
         aud: "https://forward.example/hooks".to_owned(),
         tenant_id: TenantId::new("tenant-a")?,
         lease_id: LeaseId::new("lease-1"),
@@ -286,6 +287,14 @@ fn acks_always_carry_ok_true() -> TestResult {
     assert_eq!(serde_json::from_value::<CredentialAckOutcome>(encoded)?, outcome);
     let failed = json!({ "outcome": "ok", "ok": false });
     assert!(serde_json::from_value::<CredentialAckOutcome>(failed).is_err());
+
+    for (status, ok) in [
+        (CredentialAckStatus::Accepted, true),
+        (CredentialAckStatus::Refused, false),
+    ] {
+        assert_eq!(serde_json::to_value(status)?, json!(ok));
+        assert_eq!(serde_json::from_value::<CredentialAckStatus>(json!(ok))?, status);
+    }
     Ok(())
 }
 
@@ -297,33 +306,46 @@ fn credential_errors_are_tagged_by_kind() -> TestResult {
                 message: "no such credential".to_owned(),
             },
             json!({ "kind": "not_found", "message": "no such credential" }),
+            "credential not found: no such credential",
         ),
         (
             CredentialError::TokenExpired {
                 token_id: TokenId::new("token-1"),
             },
             json!({ "kind": "token_expired", "token_id": "token-1" }),
+            "token token-1 expired",
         ),
         (
             CredentialError::TokenRevoked {
                 token_id: TokenId::new("token-1"),
             },
             json!({ "kind": "token_revoked", "token_id": "token-1" }),
+            "token token-1 was revoked",
+        ),
+        (
+            CredentialError::ScopeDenied {
+                message: "bucket not allowed".to_owned(),
+            },
+            json!({ "kind": "scope_denied", "message": "bucket not allowed" }),
+            "credential scope denied: bucket not allowed",
         ),
         (
             CredentialError::PolicyFenceRefused {
                 message: "stale revision".to_owned(),
             },
             json!({ "kind": "policy_fence_refused", "message": "stale revision" }),
+            "policy fence refused: stale revision",
         ),
         (
             CredentialError::Backend {
                 message: "store unavailable".to_owned(),
             },
             json!({ "kind": "backend", "message": "store unavailable" }),
+            "credential backend failed: store unavailable",
         ),
     ];
-    for (error, encoded) in cases {
+    for (error, encoded, display) in cases {
+        assert_eq!(error.to_string(), display);
         let outcome = CredentialAckOutcome::Err(error.clone());
         assert_eq!(serde_json::to_value(&error)?, encoded);
         assert_eq!(serde_json::from_value::<CredentialError>(encoded)?, error);

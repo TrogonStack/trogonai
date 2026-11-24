@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{LeaseId, TenantId};
+use crate::{LeaseId, SandboxId, TenantId};
 
 /// The claims an [`OidcToken`](crate::OidcToken) carries for a forwarded request.
 ///
@@ -10,7 +10,7 @@ use crate::{LeaseId, TenantId};
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct OidcClaims {
     pub iss: String,
-    pub sub: String,
+    pub sub: SandboxId,
     pub aud: String,
     pub tenant_id: TenantId,
     pub lease_id: LeaseId,
