@@ -327,6 +327,8 @@ pub enum JwtError {
     Decode(String),
     #[error("system time error: {0}")]
     SystemTime(#[source] std::time::SystemTimeError),
+    #[error("broker user JWT lifetime is invalid")]
+    Lifetime(#[source] crate::CredentialExpiryError),
     #[error("caller_id invalid for NATS subject token")]
     InvalidCallerId,
     #[error("external subject must be non-empty")]

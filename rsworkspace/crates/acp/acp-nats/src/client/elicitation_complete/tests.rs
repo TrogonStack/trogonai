@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::schema::{
     CreateElicitationRequest, CreateElicitationResponse, ElicitationAcceptAction, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse,
 };
@@ -36,7 +36,7 @@ impl MockClient {
 impl ClientHandler for MockClient {
     async fn session_notification(
         &self,
-        _: agent_client_protocol::schema::v1::SessionNotification,
+        _: agent_client_protocol::v1::schema::SessionNotification,
     ) -> agent_client_protocol::Result<()> {
         Ok(())
     }
@@ -116,9 +116,9 @@ async fn has_reply_logs_warning_but_still_forwards() {
 async fn mock_client_trait_coverage() {
     let client = MockClient::new();
     let action = ElicitationAcceptAction::new();
-    let mode = agent_client_protocol::schema::v1::ElicitationFormMode::new(
-        agent_client_protocol::schema::v1::ElicitationSessionScope::new("sess-1"),
-        agent_client_protocol::schema::v1::ElicitationSchema::new(),
+    let mode = agent_client_protocol::v1::schema::ElicitationFormMode::new(
+        agent_client_protocol::v1::schema::ElicitationSessionScope::new("sess-1"),
+        agent_client_protocol::v1::schema::ElicitationSchema::new(),
     );
     let req = CreateElicitationRequest::new(mode, "please respond");
     let resp = client.elicitation_create(req).await;

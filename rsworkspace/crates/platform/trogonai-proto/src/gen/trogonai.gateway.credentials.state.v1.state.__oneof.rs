@@ -132,40 +132,40 @@ pub mod credential_state_snapshot {
             Self::Some(State::from(v))
         }
     }
-    impl serde::Serialize for State {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for State {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Missing(v) => {
-                    map.serialize_entry("missing", v)?;
+                    map.serialize_entry("missing", &**v)?;
                 }
                 Self::PendingWrite(v) => {
-                    map.serialize_entry("pendingWrite", v)?;
+                    map.serialize_entry("pendingWrite", &**v)?;
                 }
                 Self::Active(v) => {
-                    map.serialize_entry("active", v)?;
+                    map.serialize_entry("active", &**v)?;
                 }
                 Self::WriteFailed(v) => {
-                    map.serialize_entry("writeFailed", v)?;
+                    map.serialize_entry("writeFailed", &**v)?;
                 }
                 Self::RotationPending(v) => {
-                    map.serialize_entry("rotationPending", v)?;
+                    map.serialize_entry("rotationPending", &**v)?;
                 }
                 Self::Revoked(v) => {
-                    map.serialize_entry("revoked", v)?;
+                    map.serialize_entry("revoked", &**v)?;
                 }
                 Self::DestroyRequested(v) => {
-                    map.serialize_entry("destroyRequested", v)?;
+                    map.serialize_entry("destroyRequested", &**v)?;
                 }
                 Self::Destroyed(v) => {
-                    map.serialize_entry("destroyed", v)?;
+                    map.serialize_entry("destroyed", &**v)?;
                 }
                 Self::CleanupFailed(v) => {
-                    map.serialize_entry("cleanupFailed", v)?;
+                    map.serialize_entry("cleanupFailed", &**v)?;
                 }
             }
             map.end()

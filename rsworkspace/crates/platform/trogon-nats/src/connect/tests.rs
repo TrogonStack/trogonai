@@ -1,4 +1,7 @@
 use async_nats::connection::State;
+
+mod inbox_prefix_tests;
+mod reconnect_quarantine_tests;
 use async_nats::{ClientError, ConnectErrorKind, ServerError};
 
 use super::*;
@@ -930,4 +933,36 @@ async fn connect_once_logs_the_auth_it_failed_with_but_never_the_token() {
         Some("token")
     );
     assert!(!format!("{events:?}").contains(OTHER_TOKEN), "{events:?}");
+}
+
+#[test]
+fn a_server_address_shows_without_the_credentials_it_carries() {
+    for (server, shown) in [
+        (
+            "nats://fake-user:fake-password@nats.internal:4222",
+            "nats://<redacted>@nats.internal:4222",
+        ),
+        ("fake-token@nats.internal:4222", "<redacted>@nats.internal:4222"),
+        ("tls://nats.internal:4222", "tls://nats.internal:4222"),
+        ("nats.internal:4222", "nats.internal:4222"),
+        (
+            "nats://fake-user:fake/password@nats.internal:4222",
+            "nats://<redacted>@nats.internal:4222",
+        ),
+        (
+            "nats://fake-user:fake?password@nats.internal:4222",
+            "nats://<redacted>@nats.internal:4222",
+        ),
+        (
+            "nats://fake-user:fake#password@nats.internal:4222",
+            "nats://<redacted>@nats.internal:4222",
+        ),
+        (
+            "nats://fake/token@nats.internal:4222",
+            "nats://<redacted>@nats.internal:4222",
+        ),
+        ("ws://nats.internal:443/path@mirror", "ws://<redacted>@mirror"),
+    ] {
+        assert_eq!(redact_server_userinfo(server), shown, "{server}");
+    }
 }

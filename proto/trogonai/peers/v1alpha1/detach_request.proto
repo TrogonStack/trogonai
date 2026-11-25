@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/attachment_ref.proto";
+
+message DetachRequest {
+  reserved attachment;
+
+  AttachmentRef attachment_ref = 1;
+}

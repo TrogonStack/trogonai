@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/peers/v1alpha1/peer_attachment.proto";
+import "trogonai/peers/v1alpha1/peer_availability.proto";
+import "trogonai/peers/v1alpha1/peer_condition.proto";
+
+message PeerHeartbeatRecorded {
+  PeerAttachment attachment = 1;
+  PeerAvailability availability = 2;
+  PeerCondition condition = 3;
+  google.protobuf.Timestamp active_at = 4;
+}

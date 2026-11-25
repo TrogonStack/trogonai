@@ -47,22 +47,22 @@ pub mod agent_budget_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::AgentBudgetInitialized(v) => {
-                    map.serialize_entry("agentBudgetInitialized", v)?;
+                    map.serialize_entry("agentBudgetInitialized", &**v)?;
                 }
                 Self::AgentBudgetSet(v) => {
-                    map.serialize_entry("agentBudgetSet", v)?;
+                    map.serialize_entry("agentBudgetSet", &**v)?;
                 }
                 Self::AgentBudgetCleared(v) => {
-                    map.serialize_entry("agentBudgetCleared", v)?;
+                    map.serialize_entry("agentBudgetCleared", &**v)?;
                 }
             }
             map.end()

@@ -1,0 +1,188 @@
+{
+  "captured_from": {
+    "typescript": "sdk.mjs 0.3.323",
+    "python": "claude_agent_sdk 0.2.181"
+  },
+  "scenarios": {
+    "post_turn_no_needs": {
+      "stdin_closed_after": "result",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "post_turn_needs": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "post_stream_no_needs": {
+      "stdin_closed_after": "nothing",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "post_stream_needs": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "python_post_no_needs": {
+      "stdin_closed_after": "nothing",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "python_post_needs": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "BB",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "none_turn_no_needs": {
+      "stdin_closed_after": "never",
+      "cli_sent": [
+        "A"
+      ],
+      "yielded": [
+        "A"
+      ],
+      "ended": false
+    },
+    "none_turn_needs": {
+      "stdin_closed_after": "never",
+      "cli_sent": [
+        "A"
+      ],
+      "yielded": [
+        "A"
+      ],
+      "ended": false
+    },
+    "none_stream_no_needs": {
+      "stdin_closed_after": "nothing",
+      "cli_sent": [
+        "A"
+      ],
+      "yielded": [
+        "A"
+      ],
+      "ended": true
+    },
+    "none_stream_needs": {
+      "stdin_closed_after": "never",
+      "cli_sent": [
+        "A"
+      ],
+      "yielded": [
+        "A"
+      ],
+      "ended": false
+    },
+    "python_none_no_needs": {
+      "stdin_closed_after": "nothing",
+      "cli_sent": [
+        "A"
+      ],
+      "yielded": [
+        "A"
+      ],
+      "ended": true
+    },
+    "python_none_needs": {
+      "stdin_closed_after": "never",
+      "cli_sent": [
+        "A"
+      ],
+      "yielded": [
+        "A"
+      ],
+      "ended": false
+    }
+  }
+}

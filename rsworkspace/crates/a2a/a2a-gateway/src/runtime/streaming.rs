@@ -142,6 +142,7 @@ pub fn maybe_spawn_streaming_ingress_pump(
     let spawn = StreamingIngressSpawn { kind, reply, caller };
     MaybeStreamingSpawn::Spawned(spawn_streaming_ingress_pump(
         client.clone(),
+        async_nats::jetstream::new(client.clone()),
         prefix.clone(),
         streaming_ingress_config,
         gate.clone(),

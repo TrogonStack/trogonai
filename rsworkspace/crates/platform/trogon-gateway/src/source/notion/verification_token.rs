@@ -3,7 +3,7 @@ use async_nats::jetstream::context::GetStreamError;
 use async_nats::jetstream::stream::{LastRawMessageError, LastRawMessageErrorKind};
 use futures_util::StreamExt;
 use trogon_nats::jetstream::{JetStreamGetStream, JetStreamLastRawMessageBySubject};
-use trogon_nats::{NatsToken, SubscribeClient};
+use trogon_nats::{DottedNatsToken, SubscribeClient};
 
 use super::NotionVerificationToken;
 use super::config::NotionConfig;
@@ -63,7 +63,7 @@ where
     }
 }
 
-pub fn verification_subject(subject_prefix: &NatsToken) -> String {
+pub fn verification_subject(subject_prefix: &DottedNatsToken) -> String {
     format!("{subject_prefix}.subscription.verification")
 }
 

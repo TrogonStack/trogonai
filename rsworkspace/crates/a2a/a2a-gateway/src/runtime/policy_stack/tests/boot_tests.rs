@@ -78,6 +78,7 @@ fn configured_cel_rules_control_ingress_and_broken_reloads_deny() {
     std::fs::create_dir(root.path().join("tier2")).unwrap();
     let rule = root.path().join("tier2/access.cel");
     std::fs::write(&rule, "true").unwrap();
+    let original_mtime = std::fs::metadata(&rule).unwrap().modified().unwrap();
     let env = tier2_env(root.path());
     let context = Tier2EvaluationContext::new(
         a2a_nats::A2aMethod::MessageSend,
@@ -92,6 +93,8 @@ fn configured_cel_rules_control_ingress_and_broken_reloads_deny() {
     let evaluate = || substrate.tier2.evaluator().unwrap().evaluate(&context);
     assert_eq!(evaluate(), Tier2Decision::Allow);
     std::fs::write(&rule, "false").unwrap();
+    let deny_mtime = original_mtime + std::time::Duration::from_secs(5);
+    filetime::set_file_mtime(&rule, filetime::FileTime::from_system_time(deny_mtime)).unwrap();
     assert_eq!(
         evaluate(),
         Tier2Decision::Deny {
@@ -99,6 +102,8 @@ fn configured_cel_rules_control_ingress_and_broken_reloads_deny() {
         }
     );
     std::fs::write(&rule, "(broken").unwrap();
+    let broken_mtime = original_mtime + std::time::Duration::from_secs(10);
+    filetime::set_file_mtime(&rule, filetime::FileTime::from_system_time(broken_mtime)).unwrap();
     assert_eq!(
         evaluate(),
         Tier2Decision::Deny {

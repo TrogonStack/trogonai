@@ -73,7 +73,6 @@ first problem: it recovers every other credential, keeps the checkpoint
 pinned, and logs a warning for each cause with the underlying error.
 `credential recovery found an invalid credential event` carries the
 `stream_sequence` of the bad event. `credential recovery replay failed`,
-`credential recovery planning failed`,
 `credential write activation recovery failed` and
 `credential rotation activation recovery failed` carry the `credential_id`.
 `error = ...` on those lines is the actual cause and everything above is just
@@ -104,9 +103,9 @@ invalid event means a genuinely corrupt payload. The pass still recovers every
 other credential, but it does not move the checkpoint past the bad event and
 records a failure with the usual backoff, so `status` becomes `stuck` after
 30 minutes. Unlike an outage, this does not clear on its own: every retry
-reads the event again. A credential whose own stream fails to read, decode or
-replay is handled the same way, counted in `failed_recoveries` and logged as
-`credential recovery replay failed` with its `credential_id`.
+reads the event again. A credential whose own stream fails to read, decode,
+replay or plan is handled the same way, counted in `failed_recoveries` and
+logged as `credential recovery replay failed` with its `credential_id`.
 
 ## When the worker is healthy but the credential is stuck
 
@@ -115,7 +114,8 @@ starting from the checkpoint. A credential whose event predates the
 checkpoint is never reconsidered.
 
 Confirm the actual state from the event stream for that credential id, then
-check OpenBao directly:
+check OpenBao directly. The path's last segment is the credential id itself,
+as the write request records it:
 
 ```bash
 bao kv metadata get -mount=secret \

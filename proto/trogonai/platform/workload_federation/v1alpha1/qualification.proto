@@ -1,0 +1,85 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/platform/workload_federation/v1alpha1/environment.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+
+message QualificationEvidenceRef {
+  string qualification_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+  bytes evidence_sha256 = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+}
+
+// Public references to independently verified issuer/deployment evidence.
+// Admission resolves the record, proves artifact identity, supported interfaces,
+// attestation/isolation and current validity. A production tier also requires
+// the approved production seal policy and a qualified SPIFFE_CA signing profile
+// with the required protection. No enum or receipt proves hardware custody.
+// Alternative issuers need equivalent evidence under ADR#0098.
+message IssuerQualification {
+  option (buf.validate.message).cel = {
+    id: "issuer_qualification.interval"
+    message: "qualification validity must end after qualification"
+    expression: "this.valid_until > this.qualified_at"
+  };
+  QualificationEvidenceRef qualification_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  IssuerImplementation implementation = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  string implementation_version = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+    }
+  ];
+  WorkloadEnvironment environment = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  DeploymentTier deployment_tier = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  SigningProfileRef ca_signing_profile_ref = 6 [features.field_presence = LEGACY_REQUIRED];
+  bytes deployment_artifact_sha256 = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.len = 32
+  ];
+
+  google.protobuf.Timestamp qualified_at = 9 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  google.protobuf.Timestamp valid_until = 10 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}
+
+enum IssuerImplementation {
+  ISSUER_IMPLEMENTATION_UNSPECIFIED = 0;
+  ISSUER_IMPLEMENTATION_SPIRE = 1;
+  ISSUER_IMPLEMENTATION_QUALIFIED_ALTERNATIVE = 2;
+}

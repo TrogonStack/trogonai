@@ -6,24 +6,23 @@ use super::config::GithubConfig;
 use super::constants::{
     HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE, HTTP_BODY_SIZE_MAX, NATS_HEADER_DELIVERY, NATS_HEADER_EVENT,
 };
-use super::signature;
+use crate::source::hub_signature;
 use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use std::future::Future;
 use std::pin::Pin;
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
+use trogon_credential_domain::{CredentialKind, SourceIntegrationId, SourceKind};
+use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 use trogon_semconv::span::GITHUB_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
-use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
-use crate::source_integration_id::SourceIntegrationId;
 
 fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode {
     if outcome.is_ok() {
@@ -39,7 +38,7 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     webhook_secret: GitHubWebhookSecret,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -48,7 +47,7 @@ struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
     publisher: ClaimCheckPublisher<P, S>,
     credential_resolver: RuntimeCredentialResolver<G>,
     runtime_key: RuntimeIntegrationKey,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -152,7 +151,7 @@ async fn handle_webhook_inner<P: JetStreamPublisher, S: ObjectStorePut>(
 
     match sig {
         Some(sig) => {
-            if let Err(e) = signature::verify(state.webhook_secret.as_str(), &body, sig) {
+            if let Err(e) = hub_signature::verify(state.webhook_secret.as_str(), &body, sig) {
                 warn!(reason = %e, "GitHub webhook signature validation failed");
                 return StatusCode::UNAUTHORIZED;
             }
@@ -240,7 +239,7 @@ where
         }
     };
 
-    if let Err(e) = signature::verify(webhook_secret.as_str(), &body, sig) {
+    if let Err(e) = hub_signature::verify(webhook_secret.as_str(), &body, sig) {
         warn!(reason = %e, "GitHub webhook signature validation failed");
         return StatusCode::UNAUTHORIZED;
     }

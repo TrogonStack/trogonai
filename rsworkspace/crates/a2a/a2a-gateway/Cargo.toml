@@ -37,6 +37,7 @@ bytes = { workspace = true }
 cel-interpreter = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 futures = { workspace = true }
+opentelemetry = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -50,10 +51,13 @@ tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
 trogon-audit = { workspace = true }
 trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-semconv = { workspace = true }
+trogon-telemetry = { workspace = true }
 trogon-std = { workspace = true, features = ["signal", "uuid"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
 buffa = { workspace = true }
 nkeys = { workspace = true }
 serde_json = { workspace = true }

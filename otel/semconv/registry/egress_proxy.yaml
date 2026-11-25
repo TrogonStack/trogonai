@@ -1,0 +1,35 @@
+groups:
+  # trogon-egress-proxy: the mTLS CONNECT forward proxy (meter "trogon-egress-proxy").
+  - id: registry.trogonai.egress_proxy
+    type: attribute_group
+    display_name: Egress Proxy Attributes
+    brief: Attributes emitted by the egress proxy.
+    attributes:
+      - id: egress_proxy.credential_source
+        type:
+          members:
+            - id: workload_api
+              value: "workload_api"
+              brief: The listener identity and client trust anchors came from the SPIFFE Workload API.
+              stability: development
+            - id: static_file
+              value: "static_file"
+              brief: The listener identity and client trust anchors were read from static files.
+              stability: development
+        stability: development
+        brief: Where the listener's own identity and the client trust anchors came from.
+        examples: ["workload_api", "static_file"]
+
+  - id: metric.egress_proxy.connections.accepted
+    type: metric
+    metric_name: egress_proxy.connections.accepted
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: mTLS connections accepted, by where the credentials came from.
+    instrument: counter
+    unit: "{connection}"
+    stability: development
+    attributes:
+      - ref: egress_proxy.credential_source
+        requirement_level: required

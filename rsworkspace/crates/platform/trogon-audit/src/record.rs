@@ -9,7 +9,7 @@ use buffa_types::google::protobuf::{Duration as ProtoDuration, Timestamp};
 use trogonai_proto::agents::agents::v1alpha1::AgentId;
 use trogonai_proto::hierarchy::v1alpha1::NodeId;
 use trogonai_proto::platform::audit::v1::audit_actor::{
-    AgentActor, ApiKeyActor, BreakGlassActor, HumanSessionActor, Unattributed,
+    AgentActor, ApiKeyActor, BreakGlassActor, HumanSessionActor, ServiceActor, Unattributed,
 };
 use trogonai_proto::platform::audit::v1::audit_record::Detail;
 use trogonai_proto::platform::audit::v1::{
@@ -24,6 +24,7 @@ use crate::actor::Actor;
 use crate::audit_subject::AuditSubject;
 use crate::change_facts::ChangeFacts;
 use crate::change_terminal::ChangeTerminal;
+use crate::credential_activation_facts::{ActivationScopeError, CredentialActivationFacts};
 use crate::credential_facts::CredentialFacts;
 use crate::credential_terminal::CredentialTerminal;
 use crate::decision_facts::DecisionFacts;
@@ -32,12 +33,14 @@ use crate::enforcement::Enforcement;
 use crate::integrity_terminal::IntegrityTerminal;
 use crate::layer_facts::LayerFacts;
 use crate::obligation::Obligation;
+use crate::read_only::ReadOnly;
 use crate::record_id::RecordId;
 use crate::record_kind::RecordKind;
 use crate::record_scope::RecordScope;
 use crate::stamp::Stamp;
 use crate::surface::Surface;
 use crate::tls_mode::TlsMode;
+use crate::workload_peer_facts::{WorkloadPeerEvidenceFacts, WorkloadPeerScopeError};
 use crate::writer_identity::WriterIdentity;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,7 +52,58 @@ pub struct Record {
 }
 
 impl Record {
+    pub fn authenticated_workload_decision(
+        scope: RecordScope,
+        facts: DecisionFacts,
+        peer: WorkloadPeerEvidenceFacts,
+        stamp: Stamp,
+    ) -> Result<Self, WorkloadPeerScopeError> {
+        if facts.surface != Surface::Egress
+            || facts.read_only != ReadOnly::Undeclared
+            || facts.outcome.enforcement() != Enforcement::Enforce
+        {
+            return Err(WorkloadPeerScopeError);
+        }
+        let Actor::Agent { agent_id } = &scope.actor else {
+            return Err(WorkloadPeerScopeError);
+        };
+        if !peer.matches_binding(scope.tenant.as_str(), scope.project.as_str(), agent_id.as_str())
+            || (!facts.outcome.is_refusal() && !peer.valid_at(&Timestamp::from(stamp.occurred_at)))
+        {
+            return Err(WorkloadPeerScopeError);
+        }
+        Ok(Self::decision_with_peer(scope, facts, Some(peer), stamp))
+    }
+
+    pub fn credential_activation(
+        scope: RecordScope,
+        facts: CredentialActivationFacts,
+        stamp: Stamp,
+    ) -> Result<Self, ActivationScopeError> {
+        if !facts.matches_scope(scope.tenant.as_str(), scope.project.as_str()) {
+            return Err(ActivationScopeError);
+        }
+        let subject = AuditSubject::change(scope.project.clone(), ChangeTerminal::Credential);
+        Ok(Self::assemble(
+            scope,
+            stamp,
+            RecordKind::CredentialActivation,
+            subject,
+            credential_attribution(),
+            Detail::from(facts.into_message()),
+        ))
+    }
+
     pub fn decision(scope: RecordScope, facts: DecisionFacts, stamp: Stamp) -> Self {
+        Self::decision_with_peer(scope, facts, None, stamp)
+    }
+
+    fn decision_with_peer(
+        scope: RecordScope,
+        facts: DecisionFacts,
+        peer: Option<WorkloadPeerEvidenceFacts>,
+        stamp: Stamp,
+    ) -> Self {
         let kind = RecordKind::Decision {
             outcome: facts.outcome,
             read_only: facts.read_only,
@@ -57,7 +111,7 @@ impl Record {
         };
         let subject = AuditSubject::decision(scope.project.clone(), facts.outcome.terminal());
         let attribution = attribution(&facts);
-        let detail = Detail::from(gateway_decision(&facts));
+        let detail = Detail::from(gateway_decision(&facts, peer));
         Self::assemble(scope, stamp, kind, subject, attribution, detail)
     }
 
@@ -90,6 +144,21 @@ impl Record {
             subject,
             MessageField::none(),
             detail,
+        )
+    }
+
+    pub(crate) fn readiness_probe(identity: &WriterIdentity, stamp: Stamp) -> Self {
+        let subject = AuditSubject::integrity(identity.component().clone(), IntegrityTerminal::ReadinessProbe);
+        Self::assemble(
+            identity.scope(),
+            stamp,
+            RecordKind::Integrity,
+            subject,
+            MessageField::none(),
+            Detail::from(WriterLifecycle {
+                kind: EnumValue::from(WriterLifecycleKind::ReadinessProbe),
+                reset_reason: None,
+            }),
         )
     }
 
@@ -188,6 +257,10 @@ fn audit_actor(actor: &Actor) -> AuditActor {
             agent_id: MessageField::some(agent_id(id.as_str())),
         }
         .into(),
+        Actor::Service { service_id } => ServiceActor {
+            service_id: service_id.to_string(),
+        }
+        .into(),
     };
     AuditActor { kind }
 }
@@ -234,6 +307,7 @@ fn gateway_surface(surface: Surface) -> GatewaySurface {
     match surface {
         Surface::A2aIngress => GatewaySurface::GATEWAY_SURFACE_A2A_INGRESS,
         Surface::Egress => GatewaySurface::GATEWAY_SURFACE_EGRESS,
+        Surface::SecretsRelease => GatewaySurface::GATEWAY_SURFACE_SECRETS_RELEASE,
     }
 }
 
@@ -256,8 +330,9 @@ fn layer_verdict(layer: &LayerFacts) -> LayerVerdict {
     }
 }
 
-fn gateway_decision(facts: &DecisionFacts) -> GatewayDecision {
+fn gateway_decision(facts: &DecisionFacts, peer: Option<WorkloadPeerEvidenceFacts>) -> GatewayDecision {
     GatewayDecision {
+        workload_peer: peer.map_or_else(MessageField::none, |peer| MessageField::some(peer.into_message())),
         surface: EnumValue::from(gateway_surface(facts.surface)),
         target: facts.target.to_string(),
         request_bytes: facts.request_bytes,
@@ -285,6 +360,7 @@ fn credential_use(facts: &CredentialFacts) -> CredentialUse {
         binding_id: facts.binding_id.to_string(),
         destination: facts.destination.as_ref().map(ToString::to_string),
         decision_record_id: facts.decision_record_id.map(|id| id.to_string()),
+        location: facts.location.as_ref().map(ToString::to_string),
     }
 }
 

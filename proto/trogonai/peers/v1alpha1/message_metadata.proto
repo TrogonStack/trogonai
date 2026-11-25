@@ -1,0 +1,24 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/peers/v1alpha1/claim_check.proto";
+import "trogonai/peers/v1alpha1/content_semantic_fingerprint.proto";
+
+// Persisted message metadata contains no message body or caller-chosen subject.
+message MessageMetadata {
+  reserved 5, 7;
+  reserved content_digest;
+
+  string message_id = 1;
+  string sender_peer_id = 2;
+  string recipient_peer_id = 3;
+  string collaboration_ref = 4;
+  uint32 content_size_bytes = 6;
+  google.protobuf.Timestamp accepted_at = 8;
+  google.protobuf.Timestamp expires_at = 9;
+  string reply_to_message_id = 10;
+  ClaimCheck content_ref = 11;
+  ContentSemanticFingerprint semantic_fingerprint = 12;
+}

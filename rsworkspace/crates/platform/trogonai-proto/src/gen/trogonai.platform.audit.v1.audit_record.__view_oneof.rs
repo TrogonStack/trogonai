@@ -26,5 +26,12 @@ pub mod audit_record {
                 super::super::super::super::__buffa::view::WriterLifecycleView<'a>,
             >,
         ),
+        CredentialActivation(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::super::super::workload_identity::v1alpha1::__buffa::view::CredentialActivationView<
+                    'a,
+                >,
+            >,
+        ),
     }
 }

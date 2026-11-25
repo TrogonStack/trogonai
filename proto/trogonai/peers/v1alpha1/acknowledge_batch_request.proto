@@ -1,0 +1,12 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/attachment_ref.proto";
+
+message AcknowledgeBatchRequest {
+  reserved attachment;
+
+  AttachmentRef attachment_ref = 1;
+  string batch_id = 2;
+}

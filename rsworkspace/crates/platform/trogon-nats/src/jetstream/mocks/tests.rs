@@ -114,6 +114,31 @@ async fn reconciling_a_stream_that_already_matches_writes_nothing() {
 }
 
 #[tokio::test]
+async fn owned_reconciliation_refuses_foreign_subjects_without_writing() {
+    let ctx = MockJetStreamContext::new();
+    let foreign = stream::Config {
+        name: "ACP_COMMANDS".to_owned(),
+        subjects: vec!["other.v1.session.*.agent.prompt".to_owned()],
+        ..Default::default()
+    };
+    ctx.get_or_create_stream(foreign).await.unwrap();
+    let desired = stream::Config {
+        name: "ACP_COMMANDS".to_owned(),
+        subjects: vec!["acp.v1.session.*.agent.prompt".to_owned()],
+        ..Default::default()
+    };
+
+    let owned = ctx
+        .create_or_reconcile_stream_if_owned(&desired, &[ProvisionedStreamField::Subjects], "acp.v1.")
+        .await
+        .unwrap();
+
+    assert!(!owned);
+    assert_eq!(ctx.stream_writes(), 1);
+    assert_eq!(ctx.created_streams()[0].subjects, ["other.v1.session.*.agent.prompt"]);
+}
+
+#[tokio::test]
 async fn mock_publisher_records_publishes() {
     let pub_mock = MockJetStreamPublisher::new();
     let ack = pub_mock
@@ -472,6 +497,51 @@ async fn mock_publish_message_missing_reads_return_not_found() {
 
     assert_eq!(latest.kind(), LastRawMessageErrorKind::NoMessageFound);
     assert_eq!(raw.kind(), LastRawMessageErrorKind::NoMessageFound);
+}
+
+#[tokio::test]
+async fn mock_publish_message_reads_the_first_message_of_a_subject_from_a_sequence() {
+    let publisher = MockJetStreamPublishMessage::new();
+    for (id, subject) in [
+        ("event-1", "events.alpha"),
+        ("event-2", "events.beta"),
+        ("event-3", "events.alpha"),
+    ] {
+        publisher
+            .publish_message(
+                async_nats::jetstream::message::PublishMessage::build()
+                    .message_id(id)
+                    .payload(Bytes::from(id))
+                    .outbound_message(subject),
+            )
+            .await
+            .unwrap()
+            .await
+            .unwrap();
+    }
+
+    let first = publisher
+        .get_first_raw_message_by_subject("events.alpha", 1)
+        .await
+        .unwrap();
+    let next = publisher
+        .get_first_raw_message_by_subject("events.alpha", 2)
+        .await
+        .unwrap();
+    let past_the_end = publisher
+        .get_first_raw_message_by_subject("events.alpha", 4)
+        .await
+        .unwrap_err();
+    let other_subject = publisher
+        .get_first_raw_message_by_subject("events.missing", 1)
+        .await
+        .unwrap_err();
+
+    assert_eq!(first.sequence, 1);
+    assert_eq!(next.sequence, 3);
+    assert_eq!(next.payload, Bytes::from_static(b"event-3"));
+    assert_eq!(past_the_end.kind(), LastRawMessageErrorKind::NoMessageFound);
+    assert_eq!(other_subject.kind(), LastRawMessageErrorKind::NoMessageFound);
 }
 
 #[tokio::test]

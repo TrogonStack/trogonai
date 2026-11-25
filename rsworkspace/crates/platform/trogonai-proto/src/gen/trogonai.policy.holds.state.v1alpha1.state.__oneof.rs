@@ -25,19 +25,19 @@ pub mod state {
             Self::Some(State::from(v))
         }
     }
-    impl serde::Serialize for State {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for State {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Missing(v) => {
-                    map.serialize_entry("missing", v)?;
+                    map.serialize_entry("missing", &**v)?;
                 }
                 Self::Holds(v) => {
-                    map.serialize_entry("holds", v)?;
+                    map.serialize_entry("holds", &**v)?;
                 }
             }
             map.end()

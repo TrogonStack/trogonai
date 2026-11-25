@@ -91,31 +91,31 @@ pub mod configuration_change {
             Self::Some(Change::from(v))
         }
     }
-    impl serde::Serialize for Change {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Change {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Runtime(v) => {
-                    map.serialize_entry("runtime", v)?;
+                    map.serialize_entry("runtime", &**v)?;
                 }
                 Self::RuntimeSettings(v) => {
-                    map.serialize_entry("runtimeSettings", v)?;
+                    map.serialize_entry("runtimeSettings", &**v)?;
                 }
                 Self::VariablesSchema(v) => {
-                    map.serialize_entry("variablesSchema", v)?;
+                    map.serialize_entry("variablesSchema", &**v)?;
                 }
                 Self::Dependencies(v) => {
-                    map.serialize_entry("dependencies", v)?;
+                    map.serialize_entry("dependencies", &**v)?;
                 }
                 Self::SelectableLabels(v) => {
-                    map.serialize_entry("selectableLabels", v)?;
+                    map.serialize_entry("selectableLabels", &**v)?;
                 }
                 Self::Description(v) => {
-                    map.serialize_entry("description", v)?;
+                    map.serialize_entry("description", &**v)?;
                 }
             }
             map.end()
@@ -154,19 +154,19 @@ pub mod runtime_settings_difference {
             Self::ConservativeCharter(::buffa::alloc::boxed::Box::new(v))
         }
     }
-    impl serde::Serialize for Classification {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Classification {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Classified(v) => {
-                    map.serialize_entry("classified", v)?;
+                    map.serialize_entry("classified", &**v)?;
                 }
                 Self::ConservativeCharter(v) => {
-                    map.serialize_entry("conservativeCharter", v)?;
+                    map.serialize_entry("conservativeCharter", &**v)?;
                 }
             }
             map.end()

@@ -224,7 +224,7 @@ async fn bootstrap_nats_transport(
     let wire = AsyncNatsAuthMintWire::new(client_arc.clone(), mint_wire_timeout);
 
     let mint_subject: Arc<str> = env
-        .var("AUTH_CALLOUT_MINT_SUBJECT")
+        .var(a2a_auth_callout::constants::BRIDGE_MINT_SUBJECT_VAR)
         .ok()
         .map(|v| v.trim().to_owned())
         .filter(|s| !s.is_empty())

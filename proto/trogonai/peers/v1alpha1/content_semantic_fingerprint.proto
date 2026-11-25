@@ -1,0 +1,8 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+// Semantic identity is independent of the locator and stored-byte integrity.
+message ContentSemanticFingerprint {
+  bytes value = 1;
+}

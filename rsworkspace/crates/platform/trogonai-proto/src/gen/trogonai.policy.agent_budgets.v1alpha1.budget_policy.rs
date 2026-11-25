@@ -3,6 +3,7 @@
 
 /// The period is attributed when spending is authorized, not when its eventual
 /// settlement arrives. Unknown and unspecified periods reject admission.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum AgentBudgetPeriod {

@@ -6,7 +6,7 @@ use axum::{
     http::StatusCode, http::header::AsHeaderName, routing::post,
 };
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
+use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
@@ -106,7 +106,7 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 
 async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: &ClaimCheckPublisher<P, S>,
-    subject_prefix: &NatsToken,
+    subject_prefix: &DottedNatsToken,
     event_id: Option<&str>,
     reason: RejectReason,
     body: Bytes,
@@ -136,7 +136,7 @@ struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     webhook_token: DatadogWebhookToken,
     webhook_token_header: HeaderName,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     timestamp_tolerance: Option<NonZeroDuration>,
     nats_ack_timeout: NonZeroDuration,
 }

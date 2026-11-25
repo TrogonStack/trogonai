@@ -14,6 +14,11 @@ pub mod audit_record {
         WriterLifecycle(
             ::buffa::alloc::boxed::Box<super::super::super::WriterLifecycle>,
         ),
+        CredentialActivation(
+            ::buffa::alloc::boxed::Box<
+                super::super::super::super::super::workload_identity::v1alpha1::CredentialActivation,
+            >,
+        ),
     }
     impl ::buffa::Oneof for Detail {}
     impl From<super::super::super::GatewayDecision> for Detail {
@@ -56,25 +61,46 @@ pub mod audit_record {
             Self::Some(Detail::from(v))
         }
     }
-    impl serde::Serialize for Detail {
-        fn serialize<S: serde::Serializer>(
+    impl From<
+        super::super::super::super::super::workload_identity::v1alpha1::CredentialActivation,
+    > for Detail {
+        fn from(
+            v: super::super::super::super::super::workload_identity::v1alpha1::CredentialActivation,
+        ) -> Self {
+            Self::CredentialActivation(::buffa::alloc::boxed::Box::new(v))
+        }
+    }
+    impl From<
+        super::super::super::super::super::workload_identity::v1alpha1::CredentialActivation,
+    > for ::core::option::Option<Detail> {
+        fn from(
+            v: super::super::super::super::super::workload_identity::v1alpha1::CredentialActivation,
+        ) -> Self {
+            Self::Some(Detail::from(v))
+        }
+    }
+    impl ::serde::Serialize for Detail {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::GatewayDecision(v) => {
-                    map.serialize_entry("gatewayDecision", v)?;
+                    map.serialize_entry("gatewayDecision", &**v)?;
                 }
                 Self::CredentialUse(v) => {
-                    map.serialize_entry("credentialUse", v)?;
+                    map.serialize_entry("credentialUse", &**v)?;
                 }
                 Self::Change(v) => {
-                    map.serialize_entry("change", v)?;
+                    map.serialize_entry("change", &**v)?;
                 }
                 Self::WriterLifecycle(v) => {
-                    map.serialize_entry("writerLifecycle", v)?;
+                    map.serialize_entry("writerLifecycle", &**v)?;
+                }
+                Self::CredentialActivation(v) => {
+                    map.serialize_entry("credentialActivation", &**v)?;
                 }
             }
             map.end()

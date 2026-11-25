@@ -12,17 +12,33 @@
     feature = "gateway",
     feature = "schedules",
     feature = "decider",
+    feature = "peers",
     feature = "grpc-nats-micro",
     feature = "policy",
     feature = "model-access",
-    feature = "audit"
+    feature = "audit",
+    feature = "secrets-exchange"
 ))]
 mod r#gen;
 
-#[cfg(any(feature = "gateway", feature = "schedules"))]
+#[cfg(any(feature = "gateway", feature = "schedules", feature = "peers"))]
 mod codec;
 
 pub mod constants;
+
+#[cfg(feature = "session-contracts")]
+#[allow(clippy::all)]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    allow(
+        acyclic_modules,
+        reason = "Buffa emits message and view modules that reference each other"
+    )
+)]
+mod session_gen;
+
+#[cfg(feature = "session-contracts")]
+pub mod session_contracts;
 
 #[cfg(feature = "chrono")]
 pub mod convert;
@@ -35,6 +51,9 @@ pub mod scheduler;
 
 #[cfg(feature = "decider")]
 pub mod decider;
+
+#[cfg(feature = "peers")]
+pub mod peers;
 
 #[cfg(feature = "schedules")]
 pub use crate::r#gen::trogon::content;
@@ -61,6 +80,9 @@ pub use crate::r#gen::trogonai::platform;
 
 #[cfg(feature = "audit")]
 pub use crate::r#gen::trogonai::session;
+
+#[cfg(feature = "secrets-exchange")]
+pub use crate::r#gen::trogonai::secrets;
 
 #[cfg(feature = "policy")]
 pub use crate::r#gen::trogonai::connections;
@@ -135,7 +157,8 @@ mod tests;
         feature = "grpc-nats-micro",
         feature = "policy",
         feature = "model-access",
-        feature = "audit"
+        feature = "audit",
+        feature = "secrets-exchange"
     )
 ))]
 mod codec_conformance_tests;

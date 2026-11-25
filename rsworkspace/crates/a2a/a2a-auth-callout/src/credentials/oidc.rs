@@ -1,6 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
 use crate::constants::OIDC_ALLOWED_ALGORITHMS;
 use crate::error::{AuthCalloutError, CredentialError};
 use crate::jwt::{
@@ -8,29 +10,20 @@ use crate::jwt::{
     spicedb_principal_from_oidc_claims,
 };
 use crate::permissions::IssuedPermissions;
+use crate::{CredentialExpiry, CredentialExpiryError, VerifiedCredential};
 use jsonwebtoken::jwk::{AlgorithmParameters, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OidcIssuerUrl(String);
+mod oidc_discovery_error;
+mod oidc_issuer_url;
 
-impl OidcIssuerUrl {
-    pub fn parse(url: impl Into<String>) -> Result<Self, AuthCalloutError> {
-        let mut s = url.into();
-        while s.ends_with('/') {
-            s.pop();
-        }
-        if s.is_empty() {
-            return Err(AuthCalloutError::CredentialVerification(
-                CredentialError::InvalidCredentials("OIDC issuer URL is empty".into()),
-            ));
-        }
-        Ok(Self(s))
-    }
+pub use oidc_discovery_error::OidcDiscoveryError;
+pub use oidc_issuer_url::{OidcIssuerUrl, OidcIssuerUrlError};
 
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
+#[derive(serde::Deserialize)]
+struct DiscoveryDocumentWire {
+    issuer: String,
+    jwks_uri: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,93 +102,42 @@ impl JwksOidcVerifier {
             .connect_timeout(std::time::Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|e| CredentialError::InvalidCredentials(e.to_string()))?;
-        let uri = format!("{}/.well-known/openid-configuration", issuer.as_str());
-        let resp = http
-            .get(uri)
-            .send()
-            .await
-            .map_err(|e| CredentialError::InvalidCredentials(e.to_string()))?;
-        let doc: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| CredentialError::InvalidCredentials(e.to_string()))?;
-        // Refuse a discovery doc whose `issuer` claim doesn't match the one
-        // we asked for — the doc is fetched off the network and a MITM /
-        // misconfigured DNS could redirect us at an attacker's IdP.
-        let doc_issuer = doc
-            .get("issuer")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CredentialError::InvalidCredentials("missing issuer in OIDC discovery".into()))?;
-        if doc_issuer.trim_end_matches('/') != issuer.as_str().trim_end_matches('/') {
-            return Err(CredentialError::InvalidCredentials(format!(
-                "OIDC discovery issuer mismatch: configured={:?} discovered={:?}",
-                issuer.as_str(),
-                doc_issuer
-            ))
-            .into());
+            .map_err(OidcDiscoveryError::Http)?;
+        let uri = format!(
+            "{}/.well-known/openid-configuration",
+            issuer.as_str().trim_end_matches('/')
+        );
+        let doc: DiscoveryDocumentWire = oidc_discovery_error::fetch_document(&http, &uri).await?;
+        if doc.issuer != issuer.as_str() {
+            return Err(OidcDiscoveryError::IssuerMismatch.into());
         }
-        let jwks_uri = doc
-            .get("jwks_uri")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CredentialError::InvalidCredentials("missing jwks_uri in OIDC discovery".into()))?;
-        // Constrain jwks_uri to the issuer's origin so a tampered discovery
-        // doc can't point us at attacker-controlled JWKS while tokens still
-        // claim the expected `iss`.
-        if !same_origin(jwks_uri, issuer.as_str()) {
-            return Err(CredentialError::InvalidCredentials(format!(
-                "OIDC jwks_uri {jwks_uri:?} is outside issuer origin {:?}",
-                issuer.as_str()
-            ))
-            .into());
+        if !same_origin(&doc.jwks_uri, issuer.as_str()) {
+            return Err(OidcDiscoveryError::JwksLocation.into());
         }
         Ok(Self {
             issuer,
             expected_id_token_audiences,
             jwks: JwksSource::Remote {
-                jwks_uri: jwks_uri.to_owned(),
+                jwks_uri: doc.jwks_uri,
                 http,
             },
         })
     }
 }
 
-/// True if `candidate_url` and `expected_url` share scheme + host + port.
-/// Used to keep OIDC `jwks_uri` co-located with the configured issuer so a
-/// tampered discovery doc can't redirect JWKS fetches to an attacker origin.
 fn same_origin(candidate_url: &str, expected_url: &str) -> bool {
-    let cand = match url_origin(candidate_url) {
-        Some(o) => o,
-        None => return false,
+    let Ok(candidate) = reqwest::Url::parse(candidate_url) else {
+        return false;
     };
-    match url_origin(expected_url) {
-        Some(exp) => cand == exp,
-        None => false,
-    }
-}
-
-fn url_origin(s: &str) -> Option<(String, String, Option<String>)> {
-    // Lightweight scheme://host[:port] parser — we deliberately don't pull in
-    // a full URL crate just for this check.
-    let (scheme, rest) = s.split_once("://")?;
-    let host_port = rest.split('/').next().unwrap_or("");
-    let (host, port) = match host_port.rsplit_once(':') {
-        Some((h, p)) if !h.contains('[') || h.ends_with(']') => (h.to_owned(), Some(p.to_owned())),
-        _ => (host_port.to_owned(), None),
+    let Ok(expected) = reqwest::Url::parse(expected_url) else {
+        return false;
     };
-    if host.is_empty() {
-        return None;
-    }
-    let scheme = scheme.to_ascii_lowercase();
-    // Normalize the default ports against the scheme so `https://host` and
-    // `https://host:443` collapse to the same origin — otherwise discovery
-    // rejects a legitimate jwks_uri whenever the configured issuer omits
-    // the default port.
-    let port = match (scheme.as_str(), port.as_deref()) {
-        ("https", Some("443")) | ("http", Some("80")) => None,
-        _ => port,
-    };
-    Some((scheme, host.to_ascii_lowercase(), port))
+    candidate.host_str().is_some()
+        && candidate.username().is_empty()
+        && candidate.password().is_none()
+        && candidate.query().is_none()
+        && candidate.fragment().is_none()
+        && candidate.origin() == expected.origin()
 }
 
 /// A JWK may verify an OIDC ID token under `alg` only when the key's own
@@ -241,16 +183,9 @@ fn jwk_permits_verification_with(jwk: &jsonwebtoken::jwk::Jwk, alg: jsonwebtoken
 impl JwksOidcVerifier {
     pub(crate) async fn fetch_jwks(&self) -> Result<JwkSet, AuthCalloutError> {
         match &self.jwks {
-            JwksSource::Remote { jwks_uri, http } => {
-                let resp = http
-                    .get(jwks_uri)
-                    .send()
-                    .await
-                    .map_err(|e| CredentialError::InvalidCredentials(e.to_string()))?;
-                resp.json::<JwkSet>()
-                    .await
-                    .map_err(|e| AuthCalloutError::from(CredentialError::InvalidCredentials(e.to_string())))
-            }
+            JwksSource::Remote { jwks_uri, http } => oidc_discovery_error::fetch_document(http, jwks_uri)
+                .await
+                .map_err(AuthCalloutError::from),
             JwksSource::Static(j) => Ok((**j).clone()),
         }
     }
@@ -272,7 +207,7 @@ impl JwksOidcVerifier {
         &self,
         token: &BearerToken,
         account: &AudienceAccount,
-    ) -> Result<UserJwtClaims, AuthCalloutError> {
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         if self.expected_id_token_audiences.is_empty() {
             return Err(AuthCalloutError::CredentialVerification(
                 CredentialError::InvalidCredentials("no expected OIDC token audiences configured".into()),
@@ -302,11 +237,35 @@ impl JwksOidcVerifier {
         // Built from the header only after the allowlist above has vetted it,
         // so the token cannot nominate its own algorithm.
         let mut validation = Validation::new(header.alg);
+        validation.leeway = 0;
+        validation.validate_nbf = true;
         validation.set_issuer(&[self.issuer.as_str()]);
         validation.set_audience(&auds);
         let decoding_key = Self::decoding_key_for_jwk(jwk)?;
         let token_data = decode::<serde_json::Value>(token.as_str(), &decoding_key, &validation)
             .map_err(|e| CredentialError::InvalidCredentials(format!("OIDC token validation failed: {e}")))?;
+        // Header::crit maps explicit null to None, so preserve signed member presence.
+        let protected_header = URL_SAFE_NO_PAD
+            .decode(token.as_str().split('.').next().unwrap_or_default())
+            .map_err(CredentialError::ProtectedHeaderEncoding)?;
+        let protected_header: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_slice(&protected_header).map_err(CredentialError::ProtectedHeaderJson)?;
+        if protected_header.get("crit").is_some() {
+            return Err(CredentialError::UnsupportedCriticalHeader.into());
+        }
+        if token_data
+            .claims
+            .get("nbf")
+            .is_some_and(|value| value.as_i64().is_none())
+        {
+            return Err(CredentialError::InvalidNotBefore.into());
+        }
+        let expires_at = token_data
+            .claims
+            .get("exp")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or(CredentialError::Validity(CredentialExpiryError::InvalidTimestamp))?;
+        let expires_at = CredentialExpiry::from_unix_seconds(expires_at).map_err(CredentialError::Validity)?;
         let sub_str = token_data
             .claims
             .get("sub")
@@ -318,26 +277,37 @@ impl JwksOidcVerifier {
         let namespace = CallerNamespace::Oidc { issuer: &self.issuer };
         let caller_id = derive_caller_id(namespace, sub_str, account)
             .map_err(|e| CredentialError::InvalidCredentials(format!("caller_id derivation failed: {e}")))?;
-        Ok(UserJwtClaims {
-            kid: crate::signing_key_source::unminted_placeholder(),
-            sub,
-            aud: account.clone(),
-            data,
-            caller_id,
-            principal_kind: namespace.principal_kind(),
-            nats_permissions: IssuedPermissions::none(),
-        })
+        Ok(VerifiedCredential::new(
+            UserJwtClaims {
+                kid: crate::signing_key_source::unminted_placeholder(),
+                sub,
+                aud: account.clone(),
+                data,
+                caller_id,
+                principal_kind: namespace.principal_kind(),
+                nats_permissions: IssuedPermissions::none(),
+            },
+            expires_at,
+        ))
     }
 }
 
 #[async_trait::async_trait]
 pub trait OidcVerifier: Send + Sync + 'static {
-    async fn verify(&self, token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError>;
+    async fn verify(
+        &self,
+        token: &BearerToken,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError>;
 }
 
 #[async_trait::async_trait]
 impl OidcVerifier for JwksOidcVerifier {
-    async fn verify(&self, token: &BearerToken, account: &AudienceAccount) -> Result<UserJwtClaims, AuthCalloutError> {
+    async fn verify(
+        &self,
+        token: &BearerToken,
+        account: &AudienceAccount,
+    ) -> Result<VerifiedCredential, AuthCalloutError> {
         self.verify_internal(token, account).await
     }
 }

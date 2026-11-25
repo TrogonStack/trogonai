@@ -25,6 +25,43 @@ async fn mock_client_tracks_subscribe() {
 }
 
 #[tokio::test]
+async fn mock_client_queue_subscribe_without_an_injected_stream_fails() {
+    let mock = MockNatsClient::new();
+
+    let error = mock
+        .queue_subscribe("test.sub", "workers".to_owned())
+        .await
+        .err()
+        .unwrap();
+
+    assert_eq!(error.kind(), SubscribeErrorKind::Other);
+}
+
+#[tokio::test]
+async fn mock_client_tracks_queue_subscribe_apart_from_plain_subscribe() {
+    let mock = MockNatsClient::new();
+
+    let _ = mock.queue_subscribe("test.sub", "workers".to_owned()).await;
+
+    assert_eq!(
+        mock.queue_subscribed_to(),
+        vec![("test.sub".to_owned(), "workers".to_owned())]
+    );
+    assert!(mock.subscribed_to().is_empty());
+}
+
+#[tokio::test]
+async fn mock_client_queue_subscription_yields_injected_messages() {
+    let mock = MockNatsClient::new();
+    let sender = mock.inject_messages();
+    let mut subscription = mock.queue_subscribe("test.sub", "workers".to_owned()).await.unwrap();
+
+    sender.unbounded_send(message_on("test.sub")).unwrap();
+
+    assert_eq!(subscription.next().await.unwrap().subject.as_str(), "test.sub");
+}
+
+#[tokio::test]
 async fn mock_client_request_returns_err() {
     let mock = MockNatsClient::new();
     let result = mock
@@ -117,6 +154,21 @@ async fn advanced_mock_subscribe_delegates_to_base() {
 }
 
 #[tokio::test]
+async fn advanced_mock_queue_subscribe_delegates_to_base() {
+    let mock = AdvancedMockNatsClient::new();
+    let sender = mock.inject_messages();
+    let mut subscription = mock.queue_subscribe("test.sub", "workers".to_owned()).await.unwrap();
+
+    sender.unbounded_send(message_on("test.sub")).unwrap();
+
+    assert_eq!(
+        mock.queue_subscribed_to(),
+        vec![("test.sub".to_owned(), "workers".to_owned())]
+    );
+    assert_eq!(subscription.next().await.unwrap().subject.as_str(), "test.sub");
+}
+
+#[tokio::test]
 async fn advanced_mock_request_no_response_configured() {
     let mock = AdvancedMockNatsClient::new();
     let result = mock
@@ -139,4 +191,16 @@ fn mock_error_display() {
     let err = MockError("test".into());
     assert_eq!(err.to_string(), "test");
     assert!(std::error::Error::source(&err).is_none());
+}
+
+fn message_on(subject: &str) -> async_nats::Message {
+    async_nats::Message {
+        subject: subject.into(),
+        reply: None,
+        payload: bytes::Bytes::new(),
+        headers: None,
+        status: None,
+        description: None,
+        length: 0,
+    }
 }

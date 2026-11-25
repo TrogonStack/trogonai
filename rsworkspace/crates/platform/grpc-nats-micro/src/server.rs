@@ -3,6 +3,10 @@
 //! `service` feature. Only the error reply path (§3) bypasses micro's own
 //! `respond`, because micro's error-respond helper cannot carry a body (see
 //! [`reply_error`]).
+//!
+//! [`answer`] is the same negotiation and reply encoding for a service that
+//! takes its requests from a subscription of its own instead of a micro
+//! registration.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -20,7 +24,7 @@ use crate::constants::HEADER_CONTENT_TYPE;
 use crate::content_type::{ContentType, EncodeError};
 use crate::content_type_input::ContentTypeInput;
 use crate::service_fault::ServiceFault;
-use crate::status_codec::{self, Outcome};
+use crate::status_codec::{self, EncodedReply, Outcome};
 
 /// Decodes a request payload and produces a reply payload for one endpoint.
 ///
@@ -140,6 +144,36 @@ async fn dispatch<P: PublishClient>(
             let _ = published.inspect_err(warn_unencodable);
         }
     }
+}
+
+/// Answer one request the way an endpoint [`serve`] registers would: negotiate
+/// its encoding against `content_type_policy` (ADR 0016 §4), run `handler`,
+/// and encode the outcome as the reply ADR 0016 §3 defines, `Content-Type`
+/// included.
+///
+/// This is for a service whose subject micro cannot register, such as one
+/// with wildcards at the positions that name its caller, so it subscribes on
+/// its own and publishes the returned reply to the request's reply subject.
+/// Micro's discovery and endpoint statistics do not cover such a service.
+///
+/// # Errors
+///
+/// Returns [`EncodeError`] when the outcome is an error whose `Status` will not
+/// encode, which leaves no reply to send.
+pub async fn answer(
+    headers: Option<&HeaderMap>,
+    payload: &[u8],
+    content_type_policy: &ServiceOptions,
+    handler: &dyn EndpointHandler,
+) -> Result<EncodedReply, EncodeError> {
+    let (content_type, outcome) = resolve(headers, payload, content_type_policy, handler).await;
+    let outcome = match outcome {
+        Ok(body) => Outcome::Success(bytes::Bytes::from(body)),
+        Err(fault) => Outcome::Error(fault),
+    };
+    let mut reply = status_codec::encode_reply(outcome, content_type)?;
+    reply.headers.insert(HEADER_CONTENT_TYPE, content_type.header_value());
+    Ok(reply)
 }
 
 /// Negotiate the request's encoding (ADR 0016 §4), run the handler, and report

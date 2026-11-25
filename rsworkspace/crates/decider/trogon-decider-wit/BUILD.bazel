@@ -1,0 +1,23 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+# The WIT contract, for crates whose `export_decider!` expansion reads it.
+filegroup(
+    name = "wit",
+    srcs = glob(["wit/**"]),
+    visibility = ["//visibility:public"],
+)
+
+workspace_crate(
+    compile_data = [":wit"],
+    data = [":wit"],
+    integration_tests = {
+        # Runs nested cargo builds of this crate per feature and target, which Bazel
+        # cannot provide.
+        "feature_build": {"tags": ["manual"]},
+    },
+    # WIT_DIR bakes CARGO_MANIFEST_DIR into a constant that `export_decider!` reads
+    # while other crates compile. Inside a sandbox that path is private to this
+    # action, so compiling outside it keeps the path valid for every reader.
+    library_tags = ["no-sandbox"],
+    unit_test_tags = ["no-sandbox"],
+)

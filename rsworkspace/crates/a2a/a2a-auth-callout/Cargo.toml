@@ -38,7 +38,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "=0.3.23", features = ["fmt", "env-filter"] }
 trogon-identity-types = { workspace = true }
@@ -58,6 +58,9 @@ rcgen = "=0.14.8"
 rsa = { version = "=0.9.10", features = ["pem"] }
 testcontainers = "=0.27.3"
 wiremock = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.186"
 
 [features]
 test-support = []

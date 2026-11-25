@@ -6,14 +6,37 @@ use trogon_decider_runtime::{
 
 use super::*;
 
-fn write_requested() -> v1::CredentialWriteRequested {
-    v1::CredentialWriteRequested {
-        credential_id: "github:primary:webhook_secret".to_string(),
+const CREDENTIAL_ID: &str = "6f9619ff-8b86-4011-b42d-00c04fc964ff";
+
+fn identity() -> v1::CredentialIdentity {
+    v1::CredentialIdentity {
+        credential_id: CREDENTIAL_ID.to_string(),
         owner_id: "tenant-1".to_string(),
         source: Some(v1::CredentialSource::Github.into()),
-        kind: Some(v1::CredentialKind::WebhookSecret.into()),
         scope_key: "github".to_string(),
+        kind: Some(v1::CredentialKind::WebhookSecret.into()),
+        identity_version: Some(v1::CredentialIdentityVersion::V1.into()),
     }
+}
+
+fn key() -> v1::CredentialKey {
+    v1::CredentialKey {
+        credential_id: CREDENTIAL_ID.to_string(),
+        owner_id: "tenant-1".to_string(),
+    }
+}
+
+fn write_requested() -> v1::CredentialWriteRequested {
+    v1::CredentialWriteRequested {
+        identity: MessageField::some(identity()),
+    }
+}
+
+fn decode(event_type: &str, payload: &[u8]) -> v1::CredentialEvent {
+    <v1::CredentialEvent as EventDecode>::decode(EventData::new(event_type, payload))
+        .unwrap()
+        .into_decoded()
+        .unwrap()
 }
 
 #[test]
@@ -44,109 +67,81 @@ fn event_encode_rejects_missing_event_case() {
 #[test]
 fn event_decode_dispatches_by_generated_full_name() {
     let inner = write_requested();
-    let encoded = inner.encode_to_vec();
 
-    let decoded = <v1::CredentialEvent as EventDecode>::decode(EventData::new(
+    let decoded = decode(
         <v1::CredentialWriteRequested as buffa::MessageName>::FULL_NAME,
-        &encoded,
-    ))
-    .unwrap();
+        &inner.encode_to_vec(),
+    );
 
-    let decoded = decoded.into_decoded().unwrap();
-    assert!(matches!(decoded.event, Some(CredentialEventCase::WriteRequested(_))));
+    assert_eq!(decoded.event, Some(CredentialEventCase::from(inner)));
 }
 
 #[test]
 fn event_decode_dispatches_all_lifecycle_event_types() {
     let activated = v1::CredentialActivated {
-        metadata: MessageField::some(v1::CredentialMetadata {
-            reference: MessageField::some(v1::CredentialRef {
-                id: "github:primary:webhook_secret".to_string(),
-                version: Some(1),
-                owner_id: "tenant-1".to_string(),
-                source: Some(v1::CredentialSource::Github.into()),
-                scope_key: "github".to_string(),
-                kind: Some(v1::CredentialKind::WebhookSecret.into()),
-            }),
-            status: Some(v1::CredentialStatus::Active.into()),
-            fingerprint: "fingerprint".to_string(),
-        }),
+        key: key().into(),
+        version: Some(1),
+        fingerprint: "fingerprint".to_string(),
     };
     let revoked = v1::CredentialRevoked {
-        credential_ref: MessageField::some(v1::CredentialRef {
-            id: "github:primary:webhook_secret".to_string(),
-            version: Some(1),
-            owner_id: "tenant-1".to_string(),
-            source: Some(v1::CredentialSource::Github.into()),
-            scope_key: "github".to_string(),
-            kind: Some(v1::CredentialKind::WebhookSecret.into()),
-        }),
-    };
-
-    let decoded = <v1::CredentialEvent as EventDecode>::decode(EventData::new(
-        <v1::CredentialActivated as buffa::MessageName>::FULL_NAME,
-        &activated.encode_to_vec(),
-    ))
-    .unwrap()
-    .into_decoded()
-    .unwrap();
-    assert!(matches!(decoded.event, Some(CredentialEventCase::Activated(_))));
-
-    let decoded = <v1::CredentialEvent as EventDecode>::decode(EventData::new(
-        <v1::CredentialRevoked as buffa::MessageName>::FULL_NAME,
-        &revoked.encode_to_vec(),
-    ))
-    .unwrap()
-    .into_decoded()
-    .unwrap();
-    assert!(matches!(decoded.event, Some(CredentialEventCase::Revoked(_))));
-
-    let credential_ref = MessageField::some(v1::CredentialRef {
-        id: "github:primary:webhook_secret".to_string(),
+        key: key().into(),
         version: Some(1),
-        owner_id: "tenant-1".to_string(),
-        source: Some(v1::CredentialSource::Github.into()),
-        scope_key: "github".to_string(),
-        kind: Some(v1::CredentialKind::WebhookSecret.into()),
-    });
+    };
     let destroy_requested = v1::CredentialDestroyRequested {
-        credential_ref: credential_ref.clone(),
+        key: key().into(),
+        version: Some(1),
         reason: "logical cleanup complete".to_string(),
     };
     let destroyed = v1::CredentialDestroyed {
-        credential_ref: credential_ref.clone(),
+        key: key().into(),
+        version: Some(1),
     };
     let destroy_failed = v1::CredentialDestroyFailed {
-        credential_ref,
+        key: key().into(),
+        version: Some(1),
         reason: "secret store unavailable".to_string(),
     };
 
-    let decoded = <v1::CredentialEvent as EventDecode>::decode(EventData::new(
-        <v1::CredentialDestroyRequested as buffa::MessageName>::FULL_NAME,
-        &destroy_requested.encode_to_vec(),
-    ))
-    .unwrap()
-    .into_decoded()
-    .unwrap();
-    assert!(matches!(decoded.event, Some(CredentialEventCase::DestroyRequested(_))));
-
-    let decoded = <v1::CredentialEvent as EventDecode>::decode(EventData::new(
-        <v1::CredentialDestroyed as buffa::MessageName>::FULL_NAME,
-        &destroyed.encode_to_vec(),
-    ))
-    .unwrap()
-    .into_decoded()
-    .unwrap();
-    assert!(matches!(decoded.event, Some(CredentialEventCase::Destroyed(_))));
-
-    let decoded = <v1::CredentialEvent as EventDecode>::decode(EventData::new(
-        <v1::CredentialDestroyFailed as buffa::MessageName>::FULL_NAME,
-        &destroy_failed.encode_to_vec(),
-    ))
-    .unwrap()
-    .into_decoded()
-    .unwrap();
-    assert!(matches!(decoded.event, Some(CredentialEventCase::DestroyFailed(_))));
+    assert_eq!(
+        decode(
+            <v1::CredentialActivated as buffa::MessageName>::FULL_NAME,
+            &activated.encode_to_vec()
+        )
+        .event,
+        Some(CredentialEventCase::from(activated))
+    );
+    assert_eq!(
+        decode(
+            <v1::CredentialRevoked as buffa::MessageName>::FULL_NAME,
+            &revoked.encode_to_vec()
+        )
+        .event,
+        Some(CredentialEventCase::from(revoked))
+    );
+    assert_eq!(
+        decode(
+            <v1::CredentialDestroyRequested as buffa::MessageName>::FULL_NAME,
+            &destroy_requested.encode_to_vec()
+        )
+        .event,
+        Some(CredentialEventCase::from(destroy_requested))
+    );
+    assert_eq!(
+        decode(
+            <v1::CredentialDestroyed as buffa::MessageName>::FULL_NAME,
+            &destroyed.encode_to_vec()
+        )
+        .event,
+        Some(CredentialEventCase::from(destroyed))
+    );
+    assert_eq!(
+        decode(
+            <v1::CredentialDestroyFailed as buffa::MessageName>::FULL_NAME,
+            &destroy_failed.encode_to_vec()
+        )
+        .event,
+        Some(CredentialEventCase::from(destroy_failed))
+    );
 }
 
 #[test]
@@ -173,7 +168,8 @@ fn event_type_returns_inner_event_full_name() {
     let event = v1::CredentialEvent {
         event: Some(
             v1::CredentialRevoked {
-                credential_ref: MessageField::none(),
+                key: MessageField::none(),
+                version: None,
             }
             .into(),
         ),

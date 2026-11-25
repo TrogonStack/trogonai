@@ -1,0 +1,27 @@
+{
+  "Role": {
+    "Arn": "arn:aws:iam::111122223333:role/identity-server",
+    "AssumeRolePolicyDocument": {
+      "Statement": [
+        {
+          "Action": "sts:AssumeRoleWithWebIdentity",
+          "Condition": {
+            "StringEquals": {
+              "oidc.eks.eu-west-1.amazonaws.com/id/EXAMPLE:aud": "sts.amazonaws.com",
+              "oidc.eks.eu-west-1.amazonaws.com/id/EXAMPLE:sub": "system:serviceaccount:identity-control:spire-server"
+            }
+          },
+          "Effect": "Allow",
+          "Principal": {
+            "Federated": "arn:aws:iam::111122223333:oidc-provider/oidc.eks.eu-west-1.amazonaws.com/id/EXAMPLE"
+          }
+        }
+      ],
+      "Version": "2012-10-17"
+    },
+    "CreateDate": "2025-01-01T00:00:00+00:00",
+    "Path": "/",
+    "RoleId": "AROAEXAMPLEROLEID",
+    "RoleName": "identity-server"
+  }
+}

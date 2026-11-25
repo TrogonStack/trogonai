@@ -1,0 +1,91 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "trogonai/platform/workload_federation/v1alpha1/attestation.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/environment.proto";
+import "trogonai/platform/workload_federation/v1alpha1/qualification.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+import "trogonai/platform/workload_federation/v1alpha1/source_identity.proto";
+
+message AttestedExecutionEnvironment {
+  IssuerQualification issuer = 1 [features.field_presence = LEGACY_REQUIRED];
+  AttestationProfile attestation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// External OIDC/SPIFFE admission does not enroll a local SVID or establish local
+// process isolation. Resolve the qualification and each subject binding against
+// this exact trust registration before admitting an execution.
+message ExternalWorkloadEnvironment {
+  TrustRegistrationRef trust_registration_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  QualificationEvidenceRef qualification_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Version 1 of the immutable owner payload encoded by ConfigurationArtifact.
+// Scope, issuer/attestation, allowed identities and recipients are explicit.
+// Admission proves supported qualification and current owner state; an imported
+// profile does not grant use. Each finite renewal needs current independent
+// authorization and cannot extend the original operation grant (ADR#0098).
+message ExecutionProfileDefinition {
+  option (buf.validate.message).cel = {
+    id: "execution_profile.unique_bindings"
+    message: "execution source identities and recipient registrations must be unique"
+    expression: "this.allowed_sources.map(s, has(s.local_workload) ? s.local_workload.spiffe_id : s.subject_binding_ref.version.id).unique() && this.allowed_recipient_refs.map(r, r.version.id).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "execution_profile.scope"
+    message: "execution identities, recipients and qualification must remain in the profile scope"
+    expression: "this.allowed_sources.all(s, has(s.local_workload) ? (s.local_workload.tenant == this.scope.tenant && s.local_workload.project == this.scope.project) : s.subject_binding_ref.scope == this.scope) && this.allowed_recipient_refs.all(r, r.scope == this.scope) && (!has(this.attested) || this.attested.issuer.ca_signing_profile_ref.scope == this.scope) && (!has(this.external) || this.external.trust_registration_ref.scope == this.scope)"
+  };
+  option (buf.validate.message).cel = {
+    id: "execution_profile.source_profile"
+    message: "attested execution requires local identities and external execution requires governed subject bindings"
+    expression: "has(this.attested) ? this.allowed_sources.all(s, has(s.local_workload)) : this.allowed_sources.all(s, has(s.subject_binding_ref))"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  oneof environment {
+    option (buf.validate.oneof).required = true;
+    AttestedExecutionEnvironment attested = 2;
+    ExternalWorkloadEnvironment external = 3;
+  }
+  repeated SourceIdentityRequirement allowed_sources = 4 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 64
+  }];
+  repeated RecipientBindingRef allowed_recipient_refs = 5 [(buf.validate.field).repeated.max_items = 64];
+  google.protobuf.Duration max_admission_lease = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 330}
+    }
+  ];
+  WorkloadIsolation isolation = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  uint32 contract_version = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32.const = 1
+  ];
+}
+
+// Hash exact artifact.definition_bytes, which encode ExecutionProfileDefinition
+// without this wrapper. Ingress and replay decode, validate and compare the
+// projection below to those bytes; re-encoding is not the hash input.
+message ExecutionProfile {
+  option (buf.validate.message).cel = {
+    id: "execution_profile_record.scope"
+    message: "profile reference and definition scopes must match"
+    expression: "this.execution_profile_ref.scope == this.definition.scope"
+  };
+  ExecutionProfileRef execution_profile_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConfigurationArtifact artifact = 2 [features.field_presence = LEGACY_REQUIRED];
+  ExecutionProfileDefinition definition = 3 [features.field_presence = LEGACY_REQUIRED];
+}

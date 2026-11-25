@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+#MISE description="Run under Cargo every rsworkspace test that Bazel tags manual or skips"
+"""Run the rsworkspace tests that `bazel test //...` never runs.
+
+Each crate's BUILD.bazel tags `manual` the integration tests Bazel cannot run
+(trybuild, nested cargo builds, files outside the package) and passes `--skip`
+for unit tests it cannot run. Reading that list from the BUILD files instead of
+keeping a copy here means a test that Bazel stops running is picked up here the
+day its tag lands. A `manual` this parser does not understand fails the task, so
+a new form cannot drop a test silently.
+"""
+
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+WORKSPACE = ROOT / "rsworkspace"
+
+# `"name": {"tags": ["manual"]}` inside integration_tests.
+MANUAL_TEST = re.compile(r'"([\w-]+)":\s*\{[^{}]*"tags":\s*\[[^\]]*"manual"[^\]]*\][^{}]*\}')
+UNIT_TEST_ARGS = re.compile(r"unit_test_args\s*=\s*\[(.*?)\]", re.S)
+STRING = re.compile(r'"([^"]*)"')
+PASSED = re.compile(r"test result: ok\. (\d+) passed")
+
+
+def build_files():
+    listed = subprocess.check_output(["git", "ls-files", "-z", "--", ":(glob)rsworkspace/**/BUILD.bazel"], cwd=ROOT, text=True)
+    return [ROOT / name for name in listed.split("\0") if name]
+
+
+def crate_name(package):
+    with open(package / "Cargo.toml", "rb") as manifest:
+        return tomllib.load(manifest)["package"]["name"]
+
+
+def skipped_unit_tests(text):
+    names = []
+    for block in UNIT_TEST_ARGS.findall(text):
+        arguments = STRING.findall(block)
+        for flag, value in zip(arguments, arguments[1:]):
+            if flag == "--skip":
+                names.append(value)
+        if arguments.count("--skip") != len([a for a in arguments if a != "--skip"]):
+            sys.exit(f"unit_test_args holds arguments other than --skip pairs: {arguments}")
+    return names
+
+
+def cargo_test(*arguments, expect=None):
+    command = ["cargo", "test", *arguments]
+    print("+ " + " ".join(command), flush=True)
+    completed = subprocess.run(command, cwd=WORKSPACE, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    sys.stdout.write(completed.stdout)
+    if completed.returncode != 0:
+        sys.exit(f"{' '.join(command)} exited {completed.returncode}")
+    passed = sum(int(count) for count in PASSED.findall(completed.stdout))
+    if passed == 0 or (expect is not None and passed != expect):
+        sys.exit(f"{' '.join(command)} passed {passed} tests, expected {expect or 'at least one'}")
+
+
+def main():
+    runs = []
+    for build in build_files():
+        text = build.read_text()
+        manual = MANUAL_TEST.findall(text)
+        if text.count('"manual"') != len(manual):
+            sys.exit(f"{build.relative_to(ROOT)}: a manual tag outside integration_tests that this task cannot run")
+        skipped = skipped_unit_tests(text)
+        if not manual and not skipped:
+            continue
+        crate = crate_name(build.parent)
+        runs += [("--test", crate, test, None) for test in manual]
+        if skipped:
+            runs.append(("--lib", crate, skipped, len(skipped)))
+    if not runs:
+        sys.exit("no Bazel manual or skipped tests found; the parser no longer matches the BUILD files")
+    for kind, crate, target, expect in runs:
+        if kind == "--test":
+            cargo_test("-p", crate, "--all-features", "--test", target)
+        else:
+            cargo_test("-p", crate, "--all-features", "--lib", "--", "--exact", *target, expect=expect)
+
+
+if __name__ == "__main__":
+    main()

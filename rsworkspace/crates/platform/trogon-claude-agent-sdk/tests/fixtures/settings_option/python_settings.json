@@ -1,0 +1,66 @@
+{
+  "python": "3.12.16",
+  "depth": [
+    {"caller": "module", "loads": 9997, "error": "maximum recursion depth exceeded while decoding a JSON object from a unicode string", "value_sha256": "1a033d7ada1c1fcf58f246f1adaeb0c0a787c41b146fbe2efac89ef7afd6fa01", "value_length": 70013},
+    {"caller": "client_connect", "loads": 9993, "error": "maximum recursion depth exceeded while decoding a JSON object from a unicode string", "value_sha256": "1d7caa4fca151d46cb83e69f342f1cd328d440863ad67d4d3a52af8718893370", "value_length": 69985},
+    {"caller": "query", "loads": 9987, "error": "maximum recursion depth exceeded while decoding a JSON object from a unicode string", "value_sha256": "ac31c55ef8e3273033652bed328731ff13773a44fb5d25b482ed36eeb0eba33f", "value_length": 69943}
+  ],
+  "surrogates": [
+    ["{\"x\": \"\\udc00\"}", "{\"x\": \"\\udc00\", \"sandbox\": {\"enabled\": true}}"],
+    ["{\"\\ud800k\": \"a\\ud83d\"}", "{\"\\ud800k\": \"a\\ud83d\", \"sandbox\": {\"enabled\": true}}"],
+    ["{\"x\": \"\\udc00\\ud800\", \"y\": [\"\\udfff\"]}", "{\"x\": \"\\udc00\\ud800\", \"y\": [\"\\udfff\"], \"sandbox\": {\"enabled\": true}}"],
+    ["{\"x\": \"\\ud83d\\ude00\"}", "{\"x\": \"\\ud83d\\ude00\", \"sandbox\": {\"enabled\": true}}"]
+  ],
+  "files": [
+    ["", 0, "", ["error", "Failed to load settings: Expecting value: line 1 column 1 (char 0)"]],
+    ["ef", 0, "", ["error", "Failed to load settings: Expecting value: line 1 column 1 (char 0)"]],
+    ["efbb", 0, "", ["error", "Failed to load settings: Expecting value: line 1 column 1 (char 0)"]],
+    ["efbbbf", 0, "", ["error", "Failed to load settings: Expecting value: line 1 column 1 (char 0)"]],
+    ["efbbbfefbbbf7b7d", 0, "", ["error", "Failed to load settings: Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)"]],
+    ["efbbbf7b2278223a22efbbbf227d", 0, "", ["value", "{\"x\": \"\\ufeff\", \"sandbox\": {\"enabled\": true}}"]],
+    ["20efbbbf7b7d", 0, "", ["error", "Failed to load settings: Expecting value: line 1 column 2 (char 1)"]],
+    ["ef80", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode bytes in position 0-1: unexpected end of data"]],
+    ["efbb80", 0, "", ["error", "Failed to load settings: Expecting value: line 1 column 1 (char 0)"]],
+    ["efbbbfef", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xef in position 0: unexpected end of data"]],
+    ["7b2278223a22eda080227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xed in position 6: invalid continuation byte"]],
+    ["7b2278223a22edbfbf227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xed in position 6: invalid continuation byte"]],
+    ["7b2278223a2280227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0x80 in position 6: invalid start byte"]],
+    ["7b2278223a22c0af227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xc0 in position 6: invalid start byte"]],
+    ["7b2278223a22ff227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xff in position 6: invalid start byte"]],
+    ["7b2278223a22f5227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xf5 in position 6: invalid start byte"]],
+    ["7b2278223a22f490227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xf4 in position 6: invalid continuation byte"]],
+    ["7b2278223a22e080227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xe0 in position 6: invalid continuation byte"]],
+    ["7b2278223a22c3227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xc3 in position 6: invalid continuation byte"]],
+    ["7b2278223a22e282227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode bytes in position 6-7: invalid continuation byte"]],
+    ["7b2278223a22f09f98227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode bytes in position 6-8: invalid continuation byte"]],
+    ["7b2278223a22e282", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode bytes in position 6-7: unexpected end of data"]],
+    ["7b2278223a317dff", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0xff in position 7: invalid start byte"]],
+    ["efbbbf7b2278223a2280227d", 0, "", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0x80 in position 6: invalid start byte"]],
+    ["7b2278223a22efbfbe227d", 0, "", ["value", "{\"x\": \"\\ufffe\", \"sandbox\": {\"enabled\": true}}"]],
+    ["7b2278223a22", 10000, "80227d", ["error", "Failed to load settings: 'utf-8' codec can't decode byte 0x80 in position 10006: invalid start byte"]],
+    ["7b0d0a2278223a312c7d", 0, "", ["error", "Failed to load settings: Expecting property name enclosed in double quotes: line 2 column 7 (char 8)"]],
+    ["7b0d2278223a312c7d", 0, "", ["error", "Failed to load settings: Expecting property name enclosed in double quotes: line 2 column 7 (char 8)"]],
+    ["0d0a0d0a7b2278223a5d", 0, "", ["error", "Failed to load settings: Expecting value: line 3 column 6 (char 7)"]],
+    ["7b2278223a22610d62227d", 0, "", ["error", "Failed to load settings: Invalid control character at: line 1 column 8 (char 7)"]],
+    ["7b2278223a22610a62227d", 0, "", ["error", "Failed to load settings: Invalid control character at: line 1 column 8 (char 7)"]]
+  ],
+  "raised": [
+    ["7b2278223a22ff227d", [["module", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode byte 0xff in position 6: invalid start byte", "UnicodeDecodeError", "utf-8", "7b2278223a22ff227d", 6, 7, "invalid start byte"], ["client_connect", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode byte 0xff in position 6: invalid start byte", "UnicodeDecodeError", "utf-8", "7b2278223a22ff227d", 6, 7, "invalid start byte"], ["query", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode byte 0xff in position 6: invalid start byte", "UnicodeDecodeError", "utf-8", "7b2278223a22ff227d", 6, 7, "invalid start byte"]]],
+    ["efbbbf7b2278223a2280227d", [["module", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode byte 0x80 in position 6: invalid start byte", "UnicodeDecodeError", "utf-8", "7b2278223a2280227d", 6, 7, "invalid start byte"], ["client_connect", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode byte 0x80 in position 6: invalid start byte", "UnicodeDecodeError", "utf-8", "7b2278223a2280227d", 6, 7, "invalid start byte"], ["query", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode byte 0x80 in position 6: invalid start byte", "UnicodeDecodeError", "utf-8", "7b2278223a2280227d", 6, 7, "invalid start byte"]]],
+    ["7b2278223a22e282", [["module", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode bytes in position 6-7: unexpected end of data", "UnicodeDecodeError", "utf-8", "7b2278223a22e282", 6, 8, "unexpected end of data"], ["client_connect", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode bytes in position 6-7: unexpected end of data", "UnicodeDecodeError", "utf-8", "7b2278223a22e282", 6, 8, "unexpected end of data"], ["query", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode bytes in position 6-7: unexpected end of data", "UnicodeDecodeError", "utf-8", "7b2278223a22e282", 6, 8, "unexpected end of data"]]],
+    ["7b2278223a22eda080227d", [["module", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode byte 0xed in position 6: invalid continuation byte", "UnicodeDecodeError", "utf-8", "7b2278223a22eda080227d", 6, 7, "invalid continuation byte"], ["client_connect", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode byte 0xed in position 6: invalid continuation byte", "UnicodeDecodeError", "utf-8", "7b2278223a22eda080227d", 6, 7, "invalid continuation byte"], ["query", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode byte 0xed in position 6: invalid continuation byte", "UnicodeDecodeError", "utf-8", "7b2278223a22eda080227d", 6, 7, "invalid continuation byte"]]],
+    ["7b2278223a22f09f98227d", [["module", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode bytes in position 6-8: invalid continuation byte", "UnicodeDecodeError", "utf-8", "7b2278223a22f09f98227d", 6, 9, "invalid continuation byte"], ["client_connect", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode bytes in position 6-8: invalid continuation byte", "UnicodeDecodeError", "utf-8", "7b2278223a22f09f98227d", 6, 9, "invalid continuation byte"], ["query", "CLIConnectionError", true, "Failed to load settings: 'utf-8' codec can't decode bytes in position 6-8: invalid continuation byte", "UnicodeDecodeError", "utf-8", "7b2278223a22f09f98227d", 6, 9, "invalid continuation byte"]]]
+  ],
+  "missing_paths": [
+    ["73ff78", "Failed to load settings: [Errno 2] No such file or directory: 's\\udcffx/none.json'"],
+    ["69742773ff", "Failed to load settings: [Errno 2] No such file or directory: \"it's\\udcff/none.json\""],
+    ["712227fe", "Failed to load settings: [Errno 2] No such file or directory: 'q\"\\'\\udcfe/none.json'"],
+    ["636166c3a9", "Failed to load settings: [Errno 2] No such file or directory: 'caf\u00e9/none.json'"],
+    ["ee8080", "Failed to load settings: [Errno 2] No such file or directory: '\\ue000/none.json'"],
+    ["7409627f5c", "Failed to load settings: [Errno 2] No such file or directory: 't\\tb\\x7f\\\\/none.json'"],
+    ["c3", "Failed to load settings: [Errno 2] No such file or directory: '\\udcc3/none.json'"],
+    ["610a620d85c285e280a8", "Failed to load settings: [Errno 2] No such file or directory: 'a\\nb\\r\\udc85\\x85\\u2028/none.json'"],
+    ["eda080", "Failed to load settings: [Errno 2] No such file or directory: '\\udced\\udca0\\udc80/none.json'"],
+    ["e282", "Failed to load settings: [Errno 2] No such file or directory: '\\udce2\\udc82/none.json'"]
+  ]
+}

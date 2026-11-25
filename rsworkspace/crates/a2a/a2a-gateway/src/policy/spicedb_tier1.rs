@@ -44,7 +44,7 @@ pub type SpiceDbTier1SessionCache = SpiceDbSessionCache;
 
 impl From<tonic::Status> for OwnerEmitError {
     fn from(status: tonic::Status) -> Self {
-        Self::new(status.to_string())
+        Self::new(status)
     }
 }
 

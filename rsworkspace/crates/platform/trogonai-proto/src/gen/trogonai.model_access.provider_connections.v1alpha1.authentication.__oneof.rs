@@ -37,25 +37,25 @@ pub mod gateway_authentication {
             Self::Some(Mode::from(v))
         }
     }
-    impl serde::Serialize for Mode {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Mode {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::ConfiguredKey(v) => {
-                    map.serialize_entry("configuredKey", v)?;
+                    map.serialize_entry("configuredKey", &**v)?;
                 }
                 Self::OverrideKey(v) => {
-                    map.serialize_entry("overrideKey", v)?;
+                    map.serialize_entry("overrideKey", &**v)?;
                 }
                 Self::Passthrough(v) => {
-                    map.serialize_entry("passthrough", v)?;
+                    map.serialize_entry("passthrough", &**v)?;
                 }
                 Self::NoAuthentication(v) => {
-                    map.serialize_entry("noAuthentication", v)?;
+                    map.serialize_entry("noAuthentication", &**v)?;
                 }
             }
             map.end()
@@ -103,22 +103,22 @@ pub mod credential_binding_configuration {
             Self::Some(Authentication::from(v))
         }
     }
-    impl serde::Serialize for Authentication {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Authentication {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::StoredApiKey(v) => {
-                    map.serialize_entry("storedApiKey", v)?;
+                    map.serialize_entry("storedApiKey", &**v)?;
                 }
                 Self::DeploymentNoCredential(v) => {
-                    map.serialize_entry("deploymentNoCredential", v)?;
+                    map.serialize_entry("deploymentNoCredential", &**v)?;
                 }
                 Self::Gateway(v) => {
-                    map.serialize_entry("gateway", v)?;
+                    map.serialize_entry("gateway", &**v)?;
                 }
             }
             map.end()

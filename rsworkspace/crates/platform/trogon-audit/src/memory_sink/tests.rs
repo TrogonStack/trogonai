@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use super::*;
-use crate::fixtures::{allow, deny, sealed_at, stamper};
+use crate::fixtures::{allow, deny, draft_of, head_at, sealed_at, signed_with, stamper};
 
 #[tokio::test]
 async fn stores_in_order_numbers_from_one_and_counts_attempts() {
@@ -140,4 +140,38 @@ async fn a_held_publish_counts_as_an_attempt_and_stores_once_released() {
 
     assert_eq!(publishing.await.unwrap(), Ok(StoredAck::new(STREAM_AUDIT, 1, false)));
     assert_eq!(sink.stored(), vec![record]);
+}
+
+#[tokio::test]
+async fn stores_checkpoints_apart_from_records_and_numbers_them_from_one() {
+    let stamper = stamper();
+    let sink = MemorySink::new();
+    let first = signed_with(1, &draft_of(head_at(1)));
+    let second = signed_with(1, &draft_of(head_at(2)));
+    sink.publish(&sealed_at(allow(&stamper), 1)).await.unwrap();
+
+    assert_eq!(
+        sink.publish_checkpoint(&first).await,
+        Ok(StoredAck::new(STREAM_AUDIT_CHECKPOINT, 1, false))
+    );
+    assert_eq!(
+        sink.publish_checkpoint(&second).await,
+        Ok(StoredAck::new(STREAM_AUDIT_CHECKPOINT, 2, false))
+    );
+    assert_eq!(sink.checkpoints(), vec![first, second]);
+    assert_eq!(sink.stored().len(), 1);
+    assert_eq!(sink.attempts(), 3);
+}
+
+#[tokio::test]
+async fn a_checkpoint_meets_the_same_injected_failures() {
+    let sink = MemorySink::new();
+    let checkpoint = signed_with(1, &draft_of(head_at(1)));
+    sink.fail_next(1, SinkError::StreamFull);
+
+    assert_eq!(sink.publish_checkpoint(&checkpoint).await, Err(SinkError::StreamFull));
+    sink.fail_all(SinkError::Unreachable);
+    assert_eq!(sink.publish_checkpoint(&checkpoint).await, Err(SinkError::Unreachable));
+    assert!(sink.checkpoints().is_empty());
+    assert_eq!(sink.attempts(), 2);
 }

@@ -106,34 +106,34 @@ pub mod provider_connection_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Registered(v) => {
-                    map.serialize_entry("registered", v)?;
+                    map.serialize_entry("registered", &**v)?;
                 }
                 Self::Activated(v) => {
-                    map.serialize_entry("activated", v)?;
+                    map.serialize_entry("activated", &**v)?;
                 }
                 Self::BindingReplaced(v) => {
-                    map.serialize_entry("bindingReplaced", v)?;
+                    map.serialize_entry("bindingReplaced", &**v)?;
                 }
                 Self::BindingRevoked(v) => {
-                    map.serialize_entry("bindingRevoked", v)?;
+                    map.serialize_entry("bindingRevoked", &**v)?;
                 }
                 Self::Revoked(v) => {
-                    map.serialize_entry("revoked", v)?;
+                    map.serialize_entry("revoked", &**v)?;
                 }
                 Self::ProfileSet(v) => {
-                    map.serialize_entry("profileSet", v)?;
+                    map.serialize_entry("profileSet", &**v)?;
                 }
                 Self::RoutingPolicySet(v) => {
-                    map.serialize_entry("routingPolicySet", v)?;
+                    map.serialize_entry("routingPolicySet", &**v)?;
                 }
             }
             map.end()

@@ -1,5 +1,58 @@
 use super::*;
 use crate::bridge_mint::BridgeCredentialError;
+use crate::credentials::oidc::{OidcIssuerUrl, OidcIssuerUrlError};
+use crate::tenant_admission::TenantAdmissionError;
+use std::error::Error;
+
+#[test]
+fn rejected_issuer_configuration_keeps_typed_sources_and_an_opaque_wire_category() {
+    for issuer in [
+        "not an issuer URL",
+        "http://issuer.example",
+        "https://issuer.example/#administration",
+    ] {
+        let rejected = OidcIssuerUrl::parse(issuer).unwrap_err();
+        let error = AuthCalloutError::from(rejected);
+        let credential_source = error.source().unwrap().downcast_ref::<CredentialError>().unwrap();
+        let issuer_source = credential_source
+            .source()
+            .unwrap()
+            .downcast_ref::<OidcIssuerUrlError>()
+            .unwrap();
+        match issuer {
+            "not an issuer URL" => {
+                assert!(matches!(issuer_source, OidcIssuerUrlError::InvalidUrl(_)));
+                assert!(issuer_source.source().is_some());
+            }
+            "http://issuer.example" => assert!(matches!(issuer_source, OidcIssuerUrlError::HttpsRequired)),
+            _ => assert!(matches!(issuer_source, OidcIssuerUrlError::UnsupportedComponents)),
+        }
+        let category = DenialCategory::from_auth_callout_error(&error);
+        let reason = crate::DenialReason::new(category).unwrap();
+        assert_eq!(reason.as_str(), "invalid_credentials");
+        assert!(!reason.as_str().contains(issuer));
+    }
+}
+
+#[test]
+fn tenant_membership_denial_is_opaque_and_authority_failure_is_unavailable() {
+    for error in [TenantAdmissionError::NotMember, TenantAdmissionError::AudienceMismatch] {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&error.into()),
+            DenialCategory::InvalidCredentials
+        );
+    }
+    for error in [
+        TenantAdmissionError::Busy,
+        TenantAdmissionError::Timeout,
+        TenantAdmissionError::TooLarge,
+    ] {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&error.into()),
+            DenialCategory::ServiceUnavailable
+        );
+    }
+}
 
 #[test]
 fn each_auth_callout_error_variant_maps_to_category() {
@@ -70,6 +123,15 @@ fn credential_invalid_credentials_keeps_category_opaque() {
     assert_eq!(category, DenialCategory::InvalidCredentials);
     assert!(!category.as_str().contains("signature"));
     assert!(!category.as_str().contains("kid"));
+}
+
+#[test]
+fn certificate_path_failure_keeps_category_opaque() {
+    let err = AuthCalloutError::CredentialVerification(CredentialError::MtlsCertificate(
+        crate::credentials::mtls::CertificateVerificationError::Path(webpki::Error::UnknownIssuer),
+    ));
+    let category = DenialCategory::from_auth_callout_error(&err);
+    assert_eq!(category.as_str(), "invalid_credentials");
 }
 
 #[test]

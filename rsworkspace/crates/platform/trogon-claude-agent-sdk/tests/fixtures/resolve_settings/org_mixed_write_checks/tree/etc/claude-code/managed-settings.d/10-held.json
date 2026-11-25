@@ -1,0 +1,8 @@
+{
+  "env": {
+    "HELD": "1"
+  },
+  "availableModels": [
+    "opus"
+  ]
+}

@@ -1,17 +1,19 @@
 use super::*;
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
-use crate::source_integration_id::SourceIntegrationId;
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
 const TEST_CLIENT_STATE: &str = "secret-client-state";
 const RUNTIME_CLIENT_STATE: &str = "runtime-client-state";
@@ -27,7 +29,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 fn test_config() -> MicrosoftGraphConfig {
     MicrosoftGraphConfig {
         client_state: MicrosoftGraphClientState::new(TEST_CLIENT_STATE).unwrap(),
-        subject_prefix: NatsToken::new("microsoft-graph").unwrap(),
+        subject_prefix: DottedNatsToken::new("microsoft-graph").unwrap(),
         stream_name: NatsToken::new("MICROSOFT_GRAPH").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
@@ -48,12 +50,14 @@ async fn runtime_app(publisher: MockJetStreamPublisher, client_state: &str) -> R
     let integration_id = SourceIntegrationId::new("primary").unwrap();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::MicrosoftGraph,
-                integration_id.clone(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::MicrosoftGraph,
+                    integration_id.clone(),
+                ),
+                CredentialKind::ClientState,
             ),
-            CredentialKind::ClientState,
             trogon_std::SecretString::new(client_state).unwrap(),
         )
         .await
@@ -61,7 +65,7 @@ async fn runtime_app(publisher: MockJetStreamPublisher, client_state: &str) -> R
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
 
     runtime_router(

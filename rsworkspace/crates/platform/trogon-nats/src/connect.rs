@@ -253,12 +253,16 @@ fn servers_for_logging(servers: &[String]) -> Vec<String> {
     servers.iter().map(|server| redact_server_userinfo(server)).collect()
 }
 
-fn redact_server_userinfo(server: &str) -> String {
+/// `server` with the user name, password, or token it carries replaced by
+/// `<redacted>`, so the address can be logged or shown without the credential
+/// a NATS URL may hold.
+///
+/// A password may carry an unescaped `/`, `?`, or `#`, which makes an `@` in a
+/// path indistinguishable from the end of userinfo, so everything up to the
+/// last `@` is redacted rather than risk showing a secret.
+pub fn redact_server_userinfo(server: &str) -> String {
     let authority_start = server.find("://").map_or(0, |scheme_end| scheme_end + 3);
-    let authority = &server[authority_start..];
-    let authority_end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
-    let authority = &authority[..authority_end];
-    let Some(userinfo_end) = authority.rfind('@') else {
+    let Some(userinfo_end) = server[authority_start..].rfind('@') else {
         return server.to_owned();
     };
     let userinfo_end = authority_start + userinfo_end;
@@ -299,6 +303,63 @@ pub async fn connect(config: &NatsConfig, connection_timeout: Duration) -> Resul
         .connect(&config.servers)
         .await;
     connected(config, result)
+}
+
+pub async fn connect_with_inbox_prefix(
+    config: &NatsConfig,
+    connection_timeout: Duration,
+    inbox_prefix: &crate::DottedNatsToken,
+) -> Result<Client, ConnectError> {
+    let opts = prepare(config).await?.custom_inbox_prefix(inbox_prefix.as_str());
+    let result = apply_reconnect_options(opts, connection_timeout)
+        .connect(&config.servers)
+        .await;
+    connected(config, result)
+}
+
+pub async fn connect_once_with_inbox_prefix(
+    config: &NatsConfig,
+    auth: NatsAuth,
+    connection_timeout: Duration,
+    inbox_prefix: &crate::DottedNatsToken,
+) -> Result<Client, ConnectError> {
+    let config = NatsConfig { auth, ..config.clone() };
+    let opts = prepare(&config).await?.custom_inbox_prefix(inbox_prefix.as_str());
+    let result = opts
+        .connection_timeout(connection_timeout)
+        .max_reconnects(config.servers.len())
+        .connect(&config.servers)
+        .await;
+    connected(&config, result)
+}
+
+/// Delays every replacement transport after an established session. The caller
+/// owns the quarantine duration; queued requests are not retracted by this API.
+pub async fn connect_once_with_reconnect_quarantine(
+    config: &NatsConfig,
+    auth: NatsAuth,
+    connection_timeout: Duration,
+    inbox_prefix: &crate::DottedNatsToken,
+    reconnect_quarantine: Duration,
+) -> Result<Client, ConnectError> {
+    let config = NatsConfig { auth, ..config.clone() };
+    let opts = prepare(&config).await?.custom_inbox_prefix(inbox_prefix.as_str());
+    let result = opts
+        .connection_timeout(connection_timeout)
+        .max_reconnects(config.servers.len())
+        .reconnect_to_server_callback(move |servers, last_info| async move {
+            if last_info.server_id.is_empty() {
+                None
+            } else {
+                servers.into_iter().next().map(|server| async_nats::ReconnectToServer {
+                    addr: server.addr,
+                    delay: Some(reconnect_quarantine),
+                })
+            }
+        })
+        .connect(&config.servers)
+        .await;
+    connected(&config, result)
 }
 
 /// Makes a single pass over the servers with `auth` in place of the configured

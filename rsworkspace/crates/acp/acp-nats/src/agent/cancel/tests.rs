@@ -3,7 +3,7 @@ use crate::AgentHandler;
 use crate::agent::test_support::{has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics};
 use crate::config::Config;
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::CancelNotification;
+use agent_client_protocol::v1::schema::CancelNotification;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_std::time::MockClock;
 
@@ -39,17 +39,13 @@ async fn cancel_publishes_to_correct_subject() {
 }
 
 #[tokio::test]
-async fn cancel_also_publishes_session_cancelled_broadcast() {
+async fn cancel_publishes_only_the_backend_cancellation_intent() {
     let (mock, _js, bridge) = mock_bridge();
 
     let _ = bridge.cancel(CancelNotification::new("s1")).await;
 
     let published = mock.published_messages();
-    assert!(
-        published.contains(&"acp.v1.session.s1.agent.cancelled".to_string()),
-        "expected publish to acp.v1.session.s1.agent.cancelled (prompt broadcast), got: {:?}",
-        published
-    );
+    assert_eq!(published, ["acp.v1.session.s1.agent.cancel"]);
 }
 
 #[tokio::test]
@@ -60,7 +56,7 @@ async fn cancel_validates_session_id() {
         .await
         .unwrap_err();
     assert!(err.message.contains("Invalid session ID"));
-    assert_eq!(err.code, ErrorCode::InvalidParams);
+    assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]

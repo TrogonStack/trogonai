@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import copy
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -165,7 +167,7 @@ def main():
     parser.add_argument("--buf", help="Override the Buf executable selected by mise")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    pinned_buf = tomllib.loads((root / ".mise.toml").read_text())["tools"]["buf"]
+    pinned_buf = tomllib.loads((root / ".config" / "mise" / "config.toml").read_text())["tools"]["buf"]
     buf = args.buf
     if not buf:
         selected = run(["mise", "which", "buf", "--tool", f"buf@{pinned_buf}"])
@@ -217,12 +219,12 @@ def main():
         if build.returncode:
             fail(build.stderr)
         messages = descriptor_messages(json.loads(image.read_text()))
-        for fixture in fixtures:
+
+        def check(fixture):
             label = f"{fixture['suite']}/{fixture['name']}"
             unknown = unknown_fields(fixture["payload"], fixture["type"], messages)
             if unknown:
-                failures.append(f"{label}: unknown fixture fields: {', '.join(unknown)}")
-                continue
+                return None, [f"{label}: unknown fixture fields: {', '.join(unknown)}"]
             command = [
                 buf,
                 "convert",
@@ -233,30 +235,38 @@ def main():
                 "--to=-#format=json",
             ]
             payload = json.dumps(fixture["payload"])
-            parsed = run(command, payload)
-            if parsed.returncode:
-                failures.append(f"{label}: fixture cannot parse: {parsed.stderr}")
-                continue
             validated = run([*command, "--validate"], payload)
+            # Successful validation also proves parsing; retain the parse-only
+            # diagnostic when validation fails for a malformed fixture.
+            if validated.returncode:
+                parsed = run(command, payload)
+                if parsed.returncode:
+                    return None, [f"{label}: fixture cannot parse: {parsed.stderr}"]
             if not fixture["invalid"]:
-                valid += 1
                 if validated.returncode:
-                    failures.append(f"{label}: valid payload rejected: {validated.stderr}")
-                continue
-            invalid += 1
+                    return "valid", [f"{label}: valid payload rejected: {validated.stderr}"]
+                return "valid", []
             if not validated.returncode:
-                failures.append(f"{label}: invalid payload accepted")
-            elif not any(
+                return "invalid", [f"{label}: invalid payload accepted"]
+            if not any(
                 category in validated.stderr
                 for category in ("validation error:", "validation errors:")
             ):
-                failures.append(f"{label}: validation did not run: {validated.stderr}")
-            else:
-                for violation in fixture.get("violations", []):
-                    if violation not in validated.stderr:
-                        failures.append(
-                            f"{label}: expected {violation!r}: {validated.stderr}"
-                        )
+                return "invalid", [f"{label}: validation did not run: {validated.stderr}"]
+            return "invalid", [
+                f"{label}: expected {violation!r}: {validated.stderr}"
+                for violation in fixture.get("violations", [])
+                if violation not in validated.stderr
+            ]
+
+        # Buf runs in separate processes; map keeps the report in fixture order.
+        with ThreadPoolExecutor(max_workers=os.cpu_count() or 1) as pool:
+            for kind, problems in pool.map(check, fixtures):
+                if kind == "valid":
+                    valid += 1
+                elif kind == "invalid":
+                    invalid += 1
+                failures.extend(problems)
     for failure in failures:
         print(failure, file=sys.stderr)
     print(

@@ -1,0 +1,8 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    integration_tests = {
+        # Runs the binary against a NATS server started in a container.
+        "runtime_process": {"tags": ["requires-network"]},
+    },
+)

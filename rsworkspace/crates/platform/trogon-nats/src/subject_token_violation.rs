@@ -1,5 +1,5 @@
 /// Describes what went wrong when validating a NATS subject token: empty, invalid character, or too long.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SubjectTokenViolationError {
     #[error("subject token is empty")]
     Empty,

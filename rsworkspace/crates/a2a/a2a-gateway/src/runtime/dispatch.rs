@@ -68,9 +68,10 @@ use crate::constants::{
 };
 
 /// Run a single ingress envelope through the full gateway dispatch
-/// chain. Returns once the reply (or detached audit publish) has
-/// been initiated; the caller is responsible for spawning this
-/// future on the request-handling task pool.
+/// chain. Imported replies reserve a process-wide relay slot and complete off
+/// the ingress loop. Their legacy delivery audit is emitted after the relay
+/// succeeds or fails, independently of the write-ahead policy decision below.
+/// Capacity refusal replies immediately without delivering to the agent.
 ///
 /// `tier1_owner` is `None` on deployments that don't write
 /// owner-relationship tuples back to SpiceDB; passing it as
@@ -635,17 +636,6 @@ async fn dispatch_routed<E: ReadEnv>(
         None
     };
 
-    let disposition = forward_to_agent(
-        client,
-        env,
-        agent_subject.as_str(),
-        method_dots.as_str(),
-        reply.clone(),
-        headers_owned.clone(),
-        payload.clone(),
-    )
-    .await;
-
     let (rewrites, stream_consumer) = merge_forward_audit_rewrites(
         &tier3_rewrites,
         ingress_subject,
@@ -654,8 +644,99 @@ async fn dispatch_routed<E: ReadEnv>(
         method_dots.as_str(),
     );
 
+    let stream_shutdown = shutdown.child_token();
+    let disposition = if reply.as_str().starts_with("_R_.") {
+        let completion_stream_shutdown = stream_shutdown.clone();
+        let request = async_nats::Request::new()
+            .headers(headers_owned.clone())
+            .payload(payload.clone());
+        let completion_client = client.clone();
+        let completion_reply = reply.clone();
+        let completion_headers = headers_owned.clone();
+        let completion_payload = payload.clone();
+        let completion_prefix = config.a2a_prefix.clone();
+        let completion_agent = agent_id.clone();
+        let mut completion_audit = AuditEnvelope::new(
+            &agent_id,
+            method_slashes.clone(),
+            json_rpc_audit_req_id(payload.as_ref()),
+            started_wall_ms,
+            0,
+            AuditOutcome::Ok,
+            Some(payload.as_ref()),
+            enrich_audit_caller(
+                AuditEnvelopeFields {
+                    trace_id: Some(trace_id.clone()),
+                    rules_fired: Some(rules_fired.clone()),
+                    rewrites: rewrites.clone(),
+                    stream_consumer: stream_consumer.clone(),
+                    zed_token_snapshot: tier1_zed_token.clone(),
+                    tier1_decision: tier1.is_enabled().then_some(Tier1Decision::Allow),
+                    tier3_decision: gateway_tier3_redaction_enabled(env).then_some(Tier3Decision::Allow),
+                    ..Default::default()
+                },
+                &caller,
+            ),
+        );
+        match crate::runtime::imported_reply_relay::IMPORTED_REPLY_RELAY.forward(
+            client.clone(),
+            &caller,
+            agent_subject.clone().into(),
+            reply.clone(),
+            request,
+            unary_deadline_for_method(env, method_dots.as_str()).unwrap_or(config.non_unary_relay_timeout.duration()),
+            shutdown.clone(),
+            move |outcome| async move {
+                completion_audit.latency_ms = elapsed_ms(started_mono);
+                let failure_reply = match outcome {
+                    Ok(()) => None,
+                    Err(error) => {
+                        completion_stream_shutdown.cancel();
+                        warn!(error = %error, "gateway imported reply relay failed");
+                        completion_audit.outcome = AuditOutcome::Err {
+                            code: error.code(),
+                            message: error.message().into(),
+                        };
+                        Some(a2a_nats::gateway_ingress::ingress_error_response_wire(
+                            &completion_headers,
+                            &completion_payload,
+                            error.code(),
+                            error.message(),
+                            None,
+                        ))
+                    }
+                };
+                spawn_gateway_audit_publish(
+                    audit_enabled,
+                    completion_client.clone(),
+                    completion_prefix,
+                    completion_agent,
+                    completion_audit,
+                );
+                if let Some(encoded) = failure_reply {
+                    reply_error(&completion_client, completion_reply, encoded.headers, encoded.body).await;
+                }
+            },
+        ) {
+            Ok(()) => ForwardDisposition::Pending,
+            Err(error) => ForwardDisposition::Failed(ForwardError::Capacity(error)),
+        }
+    } else {
+        forward_to_agent(
+            client,
+            env,
+            &agent_subject,
+            method_dots.as_str(),
+            reply.clone(),
+            headers_owned.clone(),
+            payload.clone(),
+        )
+        .await
+    };
+
     match disposition {
-        ForwardDisposition::Ok => {
+        ForwardDisposition::Ok | ForwardDisposition::Pending => {
+            let pending = matches!(disposition, ForwardDisposition::Pending);
             tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_FORWARDED);
             if streaming_ingress_enabled {
                 let _ = maybe_spawn_streaming_ingress_pump(
@@ -663,7 +744,7 @@ async fn dispatch_routed<E: ReadEnv>(
                     &config.a2a_prefix,
                     streaming_ingress_config,
                     streaming_ingress_gate,
-                    shutdown.clone(),
+                    stream_shutdown,
                     method_dots.as_str(),
                     &headers_owned,
                     payload.as_ref(),
@@ -671,6 +752,9 @@ async fn dispatch_routed<E: ReadEnv>(
                     caller.clone(),
                     events_last_seq,
                 );
+            }
+            if pending {
+                return;
             }
             spawn_gateway_audit_publish(
                 audit_enabled,
@@ -701,7 +785,19 @@ async fn dispatch_routed<E: ReadEnv>(
                 ),
             );
         }
-        ForwardDisposition::Publish(error) => {
+        ForwardDisposition::Failed(error) => {
+            let message = match &error {
+                ForwardError::Capacity(_) => "gateway imported reply capacity exhausted",
+                ForwardError::Publish(_) => "gateway failed to publish to agent",
+            };
+            let encoded = a2a_nats::gateway_ingress::ingress_error_response_wire(
+                &headers_owned,
+                &payload,
+                -32_803,
+                message,
+                None,
+            );
+            reply_error(client, reply, encoded.headers, encoded.body).await;
             tracing::Span::current().record(ATTR_ROUTING_OUTCOME, ROUTING_FORWARD_FAILED);
             warn!(
                 ingress.subject = %ingress_subject,
@@ -709,7 +805,7 @@ async fn dispatch_routed<E: ReadEnv>(
                 ingress.reply_present = true,
                 routing_outcome = "forward_failed",
                 error = %error,
-                "gateway failed to publish forward to agent subject",
+                "gateway forward refused or failed",
             );
             spawn_gateway_audit_publish(
                 audit_enabled,
@@ -724,7 +820,7 @@ async fn dispatch_routed<E: ReadEnv>(
                     elapsed_ms(started_mono),
                     AuditOutcome::Err {
                         code: -32_803,
-                        message: format!("gateway failed to publish: {error}"),
+                        message: message.into(),
                     },
                     Some(payload.as_ref()),
                     enrich_audit_caller(
@@ -964,8 +1060,17 @@ fn owner_tuple_for_message_send(
 
 enum ForwardDisposition {
     Ok,
+    Pending,
     Deadline,
-    Publish(async_nats::client::PublishError),
+    Failed(ForwardError),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ForwardError {
+    #[error(transparent)]
+    Publish(#[from] async_nats::client::PublishError),
+    #[error(transparent)]
+    Capacity(#[from] crate::runtime::imported_reply_relay::RelayAdmissionError),
 }
 
 async fn forward_to_agent<E: ReadEnv>(
@@ -986,7 +1091,7 @@ async fn forward_to_agent<E: ReadEnv>(
         .await
         {
             Ok(Ok(())) => ForwardDisposition::Ok,
-            Ok(Err(err)) => ForwardDisposition::Publish(err),
+            Ok(Err(err)) => ForwardDisposition::Failed(err.into()),
             Err(_elapsed) => ForwardDisposition::Deadline,
         },
         None => match client
@@ -994,7 +1099,7 @@ async fn forward_to_agent<E: ReadEnv>(
             .await
         {
             Ok(()) => ForwardDisposition::Ok,
-            Err(err) => ForwardDisposition::Publish(err),
+            Err(err) => ForwardDisposition::Failed(err.into()),
         },
     }
 }

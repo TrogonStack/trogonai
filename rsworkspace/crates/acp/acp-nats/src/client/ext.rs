@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_notification_params, decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{ExtNotification, ExtRequest, ExtResponse};
+use agent_client_protocol::v1::schema::{ExtNotification, ExtRequest, ExtResponse};
 use async_nats::header::HeaderMap;
 use serde_json::value::RawValue;
 use std::sync::Arc;
@@ -18,10 +18,14 @@ pub enum ExtError {
     ClientError(#[source] agent_client_protocol::Error),
 }
 
-pub fn error_code_and_message(e: &ExtError) -> (ErrorCode, String) {
-    match e {
-        ExtError::MalformedJson(inner) => (ErrorCode::ParseError, format!("Malformed ext request JSON: {}", inner)),
-        ExtError::ClientError(inner) => (inner.code, inner.message.clone()),
+impl From<&ExtError> for agent_client_protocol::Error {
+    fn from(error: &ExtError) -> Self {
+        match error {
+            ExtError::MalformedJson(inner) => {
+                Self::new(ErrorCode::PARSE_ERROR, format!("Malformed ext request JSON: {}", inner))
+            }
+            ExtError::ClientError(inner) => inner.clone(),
+        }
     }
 }
 
@@ -63,9 +67,9 @@ async fn handle_request<N: PublishClient + FlushClient, C: ClientHandler + Sync>
             rpc_reply::publish_success_reply(nats, reply_to, response_id, &response, "ext_method reply").await;
         }
         Err(e) => {
-            let (code, message) = error_code_and_message(&e);
+            let error = agent_client_protocol::Error::from(&e);
             warn!(error = %e, "Failed to handle ext method");
-            rpc_reply::publish_error_reply(nats, reply_to, response_id, code, &message, "ext_method error reply").await;
+            rpc_reply::publish_agent_error_reply(nats, reply_to, response_id, &error, "ext_method error reply").await;
         }
     }
 }

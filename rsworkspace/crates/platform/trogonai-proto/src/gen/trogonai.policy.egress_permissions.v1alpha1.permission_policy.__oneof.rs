@@ -19,16 +19,16 @@ pub mod egress_destination {
             Self::Some(Destination::from(v))
         }
     }
-    impl serde::Serialize for Destination {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Destination {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Host(v) => {
-                    map.serialize_entry("host", v)?;
+                    map.serialize_entry("host", &**v)?;
                 }
             }
             map.end()

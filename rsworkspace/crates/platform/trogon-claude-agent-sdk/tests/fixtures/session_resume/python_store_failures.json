@@ -1,0 +1,31 @@
+{
+  "source": "claude_agent_sdk 0.2.181 materialize_resume_session against a SessionStore subclass whose calls raise an exception with the backend message; the store leaves list_sessions to the Protocol default in list_sessions_unsupported",
+  "session": "123e4567-e89b-42d3-a456-426614174000",
+  "cases": [
+    {
+      "name": "load",
+      "resume": "session",
+      "python": "SessionStore.load() for session 123e4567-e89b-42d3-a456-426614174000 failed during resume materialization: backend refused the load"
+    },
+    {
+      "name": "list_sessions_unsupported",
+      "resume": "latest",
+      "python": "SessionStore.list_sessions() failed during resume materialization: "
+    },
+    {
+      "name": "list_sessions",
+      "resume": "latest",
+      "python": "SessionStore.list_sessions() failed during resume materialization: listing refused"
+    },
+    {
+      "name": "list_subkeys",
+      "resume": "session",
+      "python": "SessionStore.list_subkeys() for session 123e4567-e89b-42d3-a456-426614174000 failed during resume materialization: subkey listing refused"
+    },
+    {
+      "name": "subkey_load",
+      "resume": "session",
+      "python": "SessionStore.load() for session 123e4567-e89b-42d3-a456-426614174000 subpath agent-a failed during resume materialization: subagent load refused"
+    }
+  ]
+}

@@ -1,0 +1,155 @@
+{
+  "source": "sdk.mjs 0.3.323 Query.backgroundTasks against a scripted CLI answering each background_tasks request with the reply shown; reply.omit leaves the response key out",
+  "cases": [
+    {
+      "name": "true",
+      "reply": {
+        "response": {
+          "backgrounded": true
+        }
+      },
+      "typescript": {
+        "value": true
+      }
+    },
+    {
+      "name": "false",
+      "reply": {
+        "response": {
+          "backgrounded": false
+        }
+      },
+      "typescript": {
+        "value": false
+      }
+    },
+    {
+      "name": "null",
+      "reply": {
+        "response": {
+          "backgrounded": null
+        }
+      },
+      "typescript": {
+        "value": true
+      }
+    },
+    {
+      "name": "absent",
+      "reply": {
+        "response": {
+          "other": 1
+        }
+      },
+      "typescript": {
+        "value": true
+      }
+    },
+    {
+      "name": "string",
+      "reply": {
+        "response": {
+          "backgrounded": "yes"
+        }
+      },
+      "typescript": {
+        "value": "yes"
+      }
+    },
+    {
+      "name": "number",
+      "reply": {
+        "response": {
+          "backgrounded": 0
+        }
+      },
+      "typescript": {
+        "value": 0
+      }
+    },
+    {
+      "name": "object",
+      "reply": {
+        "response": {
+          "backgrounded": {
+            "tasks": [
+              1
+            ]
+          }
+        }
+      },
+      "typescript": {
+        "value": {
+          "tasks": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "array",
+      "reply": {
+        "response": {
+          "backgrounded": []
+        }
+      },
+      "typescript": {
+        "value": []
+      }
+    },
+    {
+      "name": "response_string",
+      "reply": {
+        "response": "text"
+      },
+      "typescript": {
+        "value": true
+      }
+    },
+    {
+      "name": "response_number",
+      "reply": {
+        "response": 3
+      },
+      "typescript": {
+        "value": true
+      }
+    },
+    {
+      "name": "response_false",
+      "reply": {
+        "response": false
+      },
+      "typescript": {
+        "value": true
+      }
+    },
+    {
+      "name": "response_array",
+      "reply": {
+        "response": []
+      },
+      "typescript": {
+        "value": true
+      }
+    },
+    {
+      "name": "response_null",
+      "reply": {
+        "response": null
+      },
+      "typescript": {
+        "throws": "TypeError: Cannot read properties of null (reading 'backgrounded')"
+      }
+    },
+    {
+      "name": "response_omitted",
+      "reply": {
+        "omit": true
+      },
+      "typescript": {
+        "throws": "TypeError: Cannot read properties of undefined (reading 'backgrounded')"
+      }
+    }
+  ]
+}

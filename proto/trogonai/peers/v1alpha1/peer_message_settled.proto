@@ -1,0 +1,10 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "trogonai/peers/v1alpha1/recipient_receipt.proto";
+
+// A duplicate receipt never releases sender pending capacity twice.
+message PeerMessageSettled {
+  RecipientReceipt receipt = 1;
+}

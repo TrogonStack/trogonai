@@ -1,0 +1,183 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(":coverage.bzl", "node_coverage_tools", "rust_coverage_tools")
+
+node_coverage_tools(
+    name = "node_coverage_tools",
+    testonly = True,
+)
+
+py_test(
+    name = "js_coverage_test",
+    srcs = ["js_coverage_test.py"],
+    args = [
+        "--bootstrap=$(rootpath @aspect_rules_js//js/private/node-bootstrap:coverage.cjs)",
+        "--reporter=$(rootpath @aspect_rules_js//js/private/coverage:coverage.js)",
+        "--parent=$(rootpath :coverage_test_parent.cjs)",
+        "--child=$(rootpath :coverage_test_child.cjs)",
+        "--tools=$(rootpath :node_coverage_tools)",
+    ],
+    data = [
+        "coverage_test_child.cjs",
+        "coverage_test_parent.cjs",
+        ":node_coverage_tools",
+        "@aspect_rules_js//js/private/coverage:coverage.js",
+        "@aspect_rules_js//js/private/node-bootstrap:coverage.cjs",
+        "@aspect_rules_js//js/private/node-bootstrap:util.cjs",
+    ],
+)
+
+rust_binary(
+    name = "coverage_test_runner",
+    testonly = True,
+    srcs = ["coverage_test_runner.rs"],
+    edition = "2024",
+    rustc_flags = ["-Cinstrument-coverage"],
+)
+
+rust_binary(
+    name = "coverage_test_child",
+    testonly = True,
+    srcs = ["coverage_test_child.rs"],
+    edition = "2024",
+    rustc_flags = ["-Cinstrument-coverage"],
+)
+
+rust_coverage_tools(
+    name = "coverage_tools",
+    testonly = True,
+)
+
+py_test(
+    name = "rust_coverage_test",
+    srcs = ["rust_coverage_test.py"],
+    args = [
+        "--collector=$(rootpath @rules_rust//rust/coverage:collect_rust_coverage)",
+        "--runner=$(rootpath :coverage_test_runner)",
+        "--child=$(rootpath :coverage_test_child)",
+        "--tools=$(rootpath :coverage_tools)",
+    ],
+    data = [
+        ":coverage_test_child",
+        ":coverage_test_runner",
+        ":coverage_tools",
+        "@rules_rust//rust/coverage:collect_rust_coverage",
+    ],
+)
+
+exports_files([
+    "patches/rules_rust-native-coverage-filter.patch",
+    "compiler_failures.py",
+    "compiler_failures_test.py",
+])
+
+py_binary(
+    name = "compiler_failures",
+    srcs = ["compiler_failures.py"],
+    visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "compiler_failures_lib",
+    srcs = ["compiler_failures.py"],
+    imports = ["."],
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "buf",
+    actual = "@mise//tools/buf",
+    visibility = ["//visibility:public"],
+)
+
+# The target the decider components under rsworkspace/wasm-components build for.
+platform(
+    name = "wasm32-unknown-unknown",
+    constraint_values = [
+        "@platforms//cpu:wasm32",
+        "@platforms//os:none",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "wasm-tools",
+    actual = "@mise//tools/wasm-tools",
+    visibility = ["//visibility:public"],
+)
+
+exports_files([
+    "rustfmt_check.sh",
+    "decider_component_test.sh",
+    "decider_coverage_test.sh",
+    "decider_suite_test.sh",
+    "decider_descriptor_test.sh",
+    "wasm-components.Cargo.lock",
+])
+
+# The wasm build resolves its external crates from this lockfile instead of
+# rsworkspace/Cargo.lock, which also pins host-only crates that do not build
+# for wasm32; this keeps the two on the same versions.
+sh_test(
+    name = "wasm_components_lockfile_test",
+    srcs = ["wasm_components_lockfile_test.sh"],
+    args = [
+        "$(rootpath wasm-components.Cargo.lock)",
+        "$(rootpath //rsworkspace:Cargo.lock)",
+    ],
+    data = [
+        "wasm-components.Cargo.lock",
+        "//rsworkspace:Cargo.lock",
+    ],
+)
+
+sh_test(
+    name = "rust_license_test",
+    srcs = ["rust_license_test.sh"],
+    data = [
+        "//rsworkspace:Cargo.toml",
+        "@rules_rust//cargo:current_cargo_toolchain",
+        "@rules_rust//rust/toolchain:current_rustc_files",
+    ],
+    env = {
+        "CARGO": "$(rootpath @rules_rust//cargo:current_cargo_toolchain)",
+        "CARGO_MANIFEST": "$(rootpath //rsworkspace:Cargo.toml)",
+        "RUSTC": "$(rootpath @rules_rust//rust/toolchain:current_rustc_files)",
+    },
+    # The member manifests cargo reads are not among the declared inputs, so the
+    # test runs outside the sandbox and is never served from the cache.
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+)
+
+sh_test(
+    name = "rust_tls_policy_test",
+    srcs = ["rust_tls_policy_test.sh"],
+    data = [
+        "//rsworkspace:Cargo.lock",
+        "//rsworkspace:Cargo.toml",
+        "//rsworkspace:deny.toml",
+        "@mise//tools/cargo-deny",
+        "@rules_rust//cargo:current_cargo_toolchain",
+        "@rules_rust//rust/toolchain:current_rustc_files",
+    ],
+    env = {
+        "CARGO": "$(rootpath @rules_rust//cargo:current_cargo_toolchain)",
+        "CARGO_DENY": "$(rootpath @mise//tools/cargo-deny)",
+        "CARGO_MANIFEST": "$(rootpath //rsworkspace:Cargo.toml)",
+        "RUSTC": "$(rootpath @rules_rust//rust/toolchain:current_rustc_files)",
+    },
+    # cargo downloads every dependency's manifest from crates.io, and the
+    # source tree it reads is not among the declared inputs, so the test runs
+    # outside the sandbox and is never served from the cache.
+    tags = [
+        "external",
+        "no-sandbox",
+        "requires-network",
+    ],
+)

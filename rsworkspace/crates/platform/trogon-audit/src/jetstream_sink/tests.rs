@@ -17,7 +17,7 @@ use trogon_std::log_capture::LevelFilter;
 
 use super::*;
 use crate::constants::{HEADER_CHAIN, HEADER_SEQUENCE, HEADER_WRITER};
-use crate::fixtures::{CHAIN, allow, sealed_at, stamper};
+use crate::fixtures::{CHAIN, allow, draft_of, head_at, sealed_at, signed_with, stamper};
 
 fn sealed() -> SealedRecord {
     sealed_at(allow(&stamper()), 4)
@@ -231,6 +231,75 @@ async fn an_unacknowledged_attempt_reaches_the_log_facade_when_no_subscriber_is_
         .find(|entry| entry.message.contains("audit publish was not acknowledged"))
         .expect("the attempt is logged");
     assert!(line.message.contains(&record.id().to_string()));
+    assert!(line.message.contains("timeout"));
+}
+
+#[tokio::test]
+async fn publishes_a_checkpoint_under_its_checkpoint_id() {
+    let publisher = MockJetStreamPublisher::new();
+    let sink = JetStreamSink::with_defaults(publisher.clone());
+    let checkpoint = signed_with(1, &draft_of(head_at(4)));
+
+    assert_eq!(
+        sink.publish_checkpoint(&checkpoint).await,
+        Ok(StoredAck::new("mock-stream", 1, false))
+    );
+    let messages = publisher.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, "platform.v1.audit.checkpoint.egress_proxy.signed");
+    assert_eq!(messages[0].payload, *checkpoint.payload());
+    assert_eq!(
+        messages[0].headers.get(NATS_MESSAGE_ID).unwrap().as_str(),
+        checkpoint.id().to_string()
+    );
+    assert_eq!(messages[0].headers.get(HEADER_SEQUENCE).unwrap().as_str(), "4");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unacknowledged_checkpoint_is_retried_under_its_id_and_logged() {
+    let captured = CapturedEvents::new();
+    let _guard = captured.install(LevelFilter::TRACE);
+    let publisher = ScriptedPublisher::replying([Reply::AckHangs, Reply::NotAccepted]);
+    let sink = JetStreamSink::new(publisher.clone(), DEFAULT_ACK_TIMEOUT, attempts(3));
+    let checkpoint = signed_with(1, &draft_of(head_at(4)));
+
+    assert_eq!(sink.publish_checkpoint(&checkpoint).await, Err(SinkError::Unreachable));
+
+    let ids = publisher.message_ids();
+    assert_eq!(ids, vec![checkpoint.id().to_string(); 2]);
+    let events = captured.events();
+    let reasons: Vec<_> = events.iter().filter_map(|event| event.field("reason")).collect();
+    assert_eq!(reasons, vec!["timeout", "unreachable"]);
+    let id = checkpoint.id().to_string();
+    assert!(
+        events
+            .iter()
+            .all(|event| event.field("checkpoint_id") == Some(id.as_str()))
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event.message() == Some("audit checkpoint publish was not acknowledged"))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unacknowledged_checkpoint_reaches_the_log_facade_when_no_subscriber_is_installed() {
+    let Some(logs) = CapturedLogs::isolated() else {
+        return;
+    };
+    let publisher = ScriptedPublisher::replying([Reply::AckHangs]);
+    let sink = JetStreamSink::new(publisher, DEFAULT_ACK_TIMEOUT, attempts(1));
+    let checkpoint = signed_with(1, &draft_of(head_at(4)));
+
+    assert_eq!(sink.publish_checkpoint(&checkpoint).await, Err(SinkError::Timeout));
+
+    let records = logs.records();
+    let line = records
+        .iter()
+        .find(|entry| entry.message.contains("audit checkpoint publish was not acknowledged"))
+        .expect("the attempt is logged");
+    assert!(line.message.contains(&checkpoint.id().to_string()));
     assert!(line.message.contains("timeout"));
 }
 

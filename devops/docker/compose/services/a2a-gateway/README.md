@@ -1,6 +1,6 @@
 # a2a-gateway Locally
 
-`a2a-gateway` subscribes to the A2A ingress wildcard `a2a.v1.gateway.*.*.*.>`
+`a2a-gateway` subscribes to the A2A ingress wildcard `<DEV account key>.a2a.v1.gateway.*.*.*.>`
 in the `PLATFORM` account, derives the caller from the subject (ADR 0082),
 runs the enabled policy tiers, and forwards a request that passes to its agent.
 A request that fails a tier is refused, and a forwarded `A2a-Caller-Jwt` that
@@ -38,8 +38,14 @@ service sets the shared `NATS_URL`, `NATS_CREDS`, `NATS_CA`, `NATS_CERT` and
 | `A2A_GATEWAY_TIER1_DECLARATIVE_ENABLED` | `true` in `compose.yml` |
 | `A2A_GATEWAY_TIER1_BUNDLE_DIR` | `/etc/a2a-gateway/policy`, this directory's `policy/` mounted read-only |
 | `A2A_GATEWAY_JWT_AUDIENCE` | `gateway.env`, written by `nats-bootstrap`. The `DEV` account public key, which the callout puts in the `aud` of every caller JWT it mints for that tenant. |
-| `A2A_PREFIX`, `A2A_GATEWAY_QUEUE_GROUP` | Optional, unset by default |
+| `A2A_PREFIX` | `gateway.env`, the `DEV` account public key followed by `.a2a`, matching the server-authorized import. |
+| `A2A_GATEWAY_QUEUE_GROUP` | Optional, unset by default |
 | `RUST_LOG` | Defaults to `info` |
+
+Bootstrap exports gateway requests and events with the account token at the
+first subject position. DEV imports its own account-prefixed subjects under
+the bare `a2a` prefix. The gateway serves that tenant prefix in PLATFORM;
+agent responders in PLATFORM must use the same prefix.
 
 The gateway holds only public keys, so it can check a caller JWT but never
 mint one.

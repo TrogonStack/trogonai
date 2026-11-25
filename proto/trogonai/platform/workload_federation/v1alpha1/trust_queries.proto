@@ -1,0 +1,87 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/common.proto";
+import "trogonai/platform/workload_federation/v1alpha1/subject_binding_control.proto";
+import "trogonai/platform/workload_federation/v1alpha1/trust_registration_control.proto";
+
+// Read authorization is checked independently for every request. Page tokens
+// are server-authenticated, finite and bound to caller, exact scope, query kind
+// and snapshot. A token is never bearer permission or an unverified offset.
+message GetTrustRegistrationRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  TrustRegistrationId trust_registration_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetTrustRegistrationResponse {
+  TrustRegistrationState state = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ListTrustRegistrationsRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gt: 0
+      lte: 100
+    }
+  ];
+  bytes page_token = 3 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message ListTrustRegistrationsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_trust_registrations_response.scope"
+    message: "every trust registration result must belong to the response scope"
+    expression: "this.states.all(s, s.configuration.trust_registration_ref.scope == this.scope)"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated TrustRegistrationState states = 2 [(buf.validate.field).repeated.max_items = 100];
+  bytes next_page_token = 3 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message GetSubjectBindingRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  SubjectBindingId subject_binding_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetSubjectBindingResponse {
+  SubjectBindingState state = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ListSubjectBindingsRequest {
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint32 page_size = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint32 = {
+      gt: 0
+      lte: 100
+    }
+  ];
+  bytes page_token = 3 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message ListSubjectBindingsResponse {
+  option (buf.validate.message).cel = {
+    id: "list_subject_bindings_response.scope"
+    message: "every subject binding result must belong to the response scope"
+    expression: "this.states.all(s, s.configuration.subject_binding_ref.scope == this.scope)"
+  };
+  WorkloadScope scope = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated SubjectBindingState states = 2 [(buf.validate.field).repeated.max_items = 100];
+  bytes next_page_token = 3 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 4096
+  }];
+}

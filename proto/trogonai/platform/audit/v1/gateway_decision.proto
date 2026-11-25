@@ -7,6 +7,7 @@ import "google/protobuf/duration.proto";
 import "trogonai/platform/audit/v1/gateway_surface.proto";
 import "trogonai/platform/audit/v1/layer_verdict.proto";
 import "trogonai/platform/audit/v1/tls_mode.proto";
+import "trogonai/platform/workload_identity/v1alpha1/workload_peer_evidence.proto";
 import "trogonai/session/sessions/v1alpha1/session_id.proto";
 
 // GatewayDecision is the detail of a request an enforcing point admitted or
@@ -38,4 +39,5 @@ message GatewayDecision {
   repeated LayerVerdict layer_verdicts = 7;
   // The Session the decision was made for, taken from the certificate on egress.
   trogonai.session.sessions.v1alpha1.SessionId session = 8;
+  trogonai.platform.workload_identity.v1alpha1.WorkloadPeerEvidence workload_peer = 9;
 }

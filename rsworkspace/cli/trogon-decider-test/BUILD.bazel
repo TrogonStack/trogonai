@@ -1,0 +1,19 @@
+load("//.config/bazel:decider.bzl", "decider_suites")
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+exports_files(["schedules.yaml"])
+
+workspace_crate(
+    data = [
+        "schedules.yaml",
+        "//.config/bazel:wasm-tools",
+        "//rsworkspace/wasm-components/trogon-schedules-decider:component",
+    ],
+    # The import check runs wasm-tools, which is not on the sandbox PATH.
+    env = {"WASM_TOOLS": "$(rootpath //.config/bazel:wasm-tools)"},
+    # The tests resolve the component and schedules.yaml through
+    # CARGO_MANIFEST_DIR, relative to the runfiles root at run time.
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
+)
+
+decider_suites(binary = ":decider-test")

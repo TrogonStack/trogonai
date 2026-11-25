@@ -1,0 +1,30 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    compile_data = [
+        "README.md",
+        "src/**/*.json",
+        # The jsonschema metaschema vocabularies keep the package's extensionless names.
+        "src/upstream/metaschemas/**",
+        "src/upstream/python_nameprep.txt",
+        "tests/fixtures/**",
+    ],
+    examples = {
+        "*": {"compile_data": ["examples/support/*.rs"]},
+    },
+    integration_tests = {
+        "*": {"compile_data": ["tests/support/*.rs"]},
+        "native_options_golden": {"compile_data": [
+            "tests/*.rs",
+            "src/process_transport/run_as_tests.rs",
+        ]},
+        # Runs the upstream settings oracle against the fixtures at run time.
+        "resolve_settings_differential": {
+            "data": [
+                ".config/mise/lib/claude-sdk-freshness/resolve_settings_oracle.mjs",
+                "tests/fixtures/resolve_settings/**",
+            ],
+            "rustc_env": {"CLAUDE_SDK_CRATE_DIR": "{package}"},
+        },
+    },
+)

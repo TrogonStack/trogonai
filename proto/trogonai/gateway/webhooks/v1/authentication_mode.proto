@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.gateway.webhooks.v1;
+
+enum AuthenticationMode {
+  AUTHENTICATION_MODE_UNSPECIFIED = 0;
+  AUTHENTICATION_MODE_BEARER = 1;
+  AUTHENTICATION_MODE_HMAC_SHA256 = 2;
+}

@@ -95,8 +95,12 @@ pub(crate) fn mint_nats_user_jwt(
     issued_at: SystemTime,
     ttl: Duration,
 ) -> Result<MintedUserJwt, JwtError> {
+    let ttl_seconds = ttl.as_secs();
+    if ttl_seconds == 0 {
+        return Err(JwtError::Lifetime(crate::CredentialExpiryError::EmptyLifetime));
+    }
     let iat_secs = secs_since_unix(issued_at)?;
-    let ttl_secs_i64 = i64::try_from(ttl.as_secs().max(1)).unwrap_or(i64::MAX);
+    let ttl_secs_i64 = i64::try_from(ttl_seconds).unwrap_or(i64::MAX);
     let exp_secs = iat_secs.saturating_add(ttl_secs_i64);
 
     let mut user = User {
