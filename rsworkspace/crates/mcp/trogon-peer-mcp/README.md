@@ -26,11 +26,6 @@ The result is one MCP text item containing native hook JSON with
 `hookSpecificOutput.additionalContext`. The adapter returns the backend's same
 unacknowledged assignment on retry and records no acknowledgment of its own.
 
-Prompt hooks have one total two-second budget covering lock acquisition,
-enrollment, preparation and rendering. A deadline does not confirm whether a
-remote operation completed. Retry with the same native session and prompt
-identifiers; the reserved identity and any existing preparation remain intact.
-
 Tool failures become MCP application error results with bounded static messages
 and a stable per-variant `structuredContent.code` from `PeerMcpError::code()`,
 so callers can distinguish failures without matching diagnostic text. Typed
