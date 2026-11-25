@@ -12,6 +12,30 @@ pub const A2A_GATEWAY_RELAY_LIMIT: &str = "a2a.gateway.relay.limit";
 /// ACP NATS subject prefix for the service instance. Resource attribute in acp-nats-server / acp-nats-stdio
 pub const ACP_PREFIX: &str = "acp.prefix";
 
+/// Where the listener's own identity and the client trust anchors came from
+pub const EGRESS_PROXY_CREDENTIAL_SOURCE: &str = "egress_proxy.credential_source";
+
+/// Allowed values for the `egress_proxy.credential_source` attribute
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum EgressProxyCredentialSource {
+    /// The listener identity and client trust anchors came from the SPIFFE Workload API
+    WorkloadApi,
+    /// The listener identity and client trust anchors were read from static files
+    StaticFile,
+}
+
+impl EgressProxyCredentialSource {
+    /// Returns the wire value recorded for this attribute member.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::WorkloadApi => "workload_api",
+            Self::StaticFile => "static_file",
+        }
+    }
+}
+
 /// Standard OTel error.type. Emitted on nats.request / nats.publish failures
 pub const ERROR_TYPE: &str = "error.type";
 
