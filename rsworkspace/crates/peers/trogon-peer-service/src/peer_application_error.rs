@@ -3,6 +3,8 @@ use trogon_decider_runtime::{AuthorizationDeniedError, PrincipalIdError};
 use trogon_peer::{DetachError, HeartbeatError, MessageError, PeerObservationError, PeerValueError};
 #[derive(Debug, thiserror::Error)]
 pub enum PeerApplicationError<ReadError, AppendError> {
+    #[error("peer context rendering failed: {0}")]
+    Context(#[from] trogon_peer_context::PeerContextError),
     #[error("peer application operation is not implemented")]
     NotImplemented,
     #[error("invalid or missing peer request field")]
