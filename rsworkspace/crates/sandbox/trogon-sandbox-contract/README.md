@@ -151,6 +151,24 @@ flag. Fields added after the first heartbeat default when an older worker omits
 them, and empty volume bindings and warm-pool counts are left out of the JSON. A
 heartbeat reports state; it does not register a worker or route a lease.
 
+`EnvironmentDefinition` names what makes one execution environment differ from
+another: its `ProviderKind`, architecture, pinned `components` (a sorted map), boot
+arguments, snapshot format, isolation profile, and optional CPU template, stamped
+with `EnvironmentDefinition::SCHEMA_VERSION`. `EnvDigest` carries the manifest
+annotation key as `EnvDigest::ANNOTATION_KEY`. `LegacySnapshotPolicy` is
+`allow_with_warning` by default, or `refuse`, for snapshots that record no digest.
+The contract does not hash a definition into a digest or decide whether a restore
+may run.
+`SnapshotKvRecord` is the catalog entry a snapshot builder writes, with optional
+`parent`, `created_at` in serde's `SystemTime` encoding, and `env_digest` that are
+omitted when absent.
+
+`WorkerAuthorityRequest` asks the broker which of a worker's `LeaseId` values it
+still owns. `WorkerAuthorityResponse` lists the `OwnedLease` values, each with an
+optional `LeaseEpoch` omitted when absent, and the `not_assigned` leases, which
+default to empty. These types carry the question and answer; they do not check
+ownership or freeze a lease.
+
 `LeaseStatus` uses the JSON strings `pending`, `running`, `paused`, `suspending`,
 `suspended`, `waking`, `cancelling`, `released`, and `failed`. `LeaseUsage`
 reports one lease's command and file counters, its running, paused, and suspended
