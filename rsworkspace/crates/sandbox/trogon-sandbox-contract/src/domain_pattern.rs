@@ -33,6 +33,46 @@ impl DomainPattern {
         self.port
     }
 
+    /// The same pattern spanning every port.
+    pub(crate) fn without_port(&self) -> Self {
+        Self {
+            target: self.target.clone(),
+            port: None,
+        }
+    }
+
+    /// The same pattern restricted to `port`.
+    pub(crate) fn with_port(&self, port: Port) -> Self {
+        Self {
+            target: self.target.clone(),
+            port: Some(port),
+        }
+    }
+
+    /// Reports whether every destination this pattern matches is also matched by `other`.
+    ///
+    /// `api.example.com` is covered by `*.example.com`, and so is `*.api.example.com`, but `*.example.com` is not
+    /// covered by an exact host. A pattern without a port spans every port, so only an `other` without a port
+    /// covers it.
+    pub(crate) fn is_covered_by(&self, other: &Self) -> bool {
+        if let Some(expected) = other.port
+            && self.port != Some(expected)
+        {
+            return false;
+        }
+        match (&self.target, &other.target) {
+            (_, PatternTarget::Any) => true,
+            (PatternTarget::Exact(host), PatternTarget::Exact(expected)) => host == expected,
+            (PatternTarget::Exact(host), PatternTarget::Subdomains(suffix)) => {
+                host.as_domain().is_some_and(|name| name.is_strict_subdomain_of(suffix))
+            }
+            (PatternTarget::Any, _) | (PatternTarget::Subdomains(_), PatternTarget::Exact(_)) => false,
+            (PatternTarget::Subdomains(base), PatternTarget::Subdomains(suffix)) => {
+                base == suffix || base.is_strict_subdomain_of(suffix)
+            }
+        }
+    }
+
     /// Parses `input`, accepting a bare `*` only when `allow_any` is set.
     pub(crate) fn parse_with(input: &str, allow_any: bool) -> Result<Self, DomainPatternError> {
         if input.is_empty() {

@@ -322,6 +322,8 @@ regular expression with at least one capture group. Construction and deserializa
 JSON shape omits each defaulted field. Rules that need the sandbox spec, such as environment name collisions and
 inject hosts that the network policy denies, are not checked here.
 
+`SandboxSpec` is the wire description of one sandbox: its image, workspace, environment, CPU and memory limits, network policy, mounts, drives, exposed ports, secret bindings, idle policy, and retention toggles. Construction and deserialization enforce the rules that span fields: environment size and key limits, a single idle setting, no unbounded lease without an idle release, snapshot output only while snapshots are retained, distinct mount paths and exposed ports, at most four drives, and, for each secret binding, no environment collision, a user defined network policy, and inject hosts that an allowed domain covers and no denied domain fully covers. An omitted port on a version 2 binding means port 443. The `Debug` output shows environment names and redacts their values. Rules that need tenant policy or runtime state, such as quotas, image and snapshot existence, drive ownership, and provider capabilities, are not checked here.
+
 This package defines values and allowed transitions. It does not execute
 operations, persist state, authorize transitions, enforce claim ownership, or
 provide worker, provider, transport, or lease-generation behavior.
