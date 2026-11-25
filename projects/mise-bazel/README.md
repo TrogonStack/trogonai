@@ -54,7 +54,7 @@ installation hint.
 
 The version comes from the tool's entry in the configuration. When an entry
 lists several versions, the first one is used. The executable name defaults to
-the last segment of the tool name, so `ubi:open-telemetry/weaver` provides
+the last segment of the tool name, so `github:open-telemetry/weaver` provides
 `weaver`, and an `exe` option overrides it.
 
 The Rust toolchain supports macOS ARM64 and Linux x86-64 hosts. Each target

@@ -7086,6 +7086,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-a2ui"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "trogon-aauth-as"
 version = "0.0.1"
 dependencies = [
