@@ -22,7 +22,7 @@ These concepts answer different questions:
 | --- | --- | --- |
 | Application `AgentId` | Which logical application agent is this? | Application identity and governance under draft [ADR#0036](../adr/0036-agent-self-certifying-identity.md) and [ADR#0037](../adr/0037-agent-identity-governance.md). It is not evidence about the current process. |
 | Runtime attestation | Which node and workload are requesting credentials? | A qualified issuer checks deployment-specific evidence and constrained registration. Node admission and workload admission are separate. |
-| SPIFFE ID | Which workload name does the issuer attest to? | A namespaced URI such as `spiffe://example.org/workload/worker`. Its path cannot choose a tenant, project, role or `AgentId`. |
+| SPIFFE ID | Which workload name does the issuer attest to? | A namespaced URI such as `spiffe://example.org/platform/worker`. Its path cannot choose a tenant, project, role or `AgentId`. |
 | SVID | What credential proves the SPIFFE identity? | An X.509 certificate and matching private key in the implemented consumer profile. JWT-SVID acquisition is separate proposed work. |
 | Governed registration | What platform identity may this attested workload represent? | An exact, versioned mapping with approved roots, finite validity and an independently controlled recovery fence. |
 | Authorization | What operation may it perform now? | Current tenant/project policy, destination permits and, where applicable, Connection grants and purpose constraints. |

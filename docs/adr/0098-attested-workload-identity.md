@@ -41,6 +41,17 @@ attestation or automatic rotation. The NATS callout's existing
 mTLS identity is a certificate DN or fingerprint, not a SPIFFE identity.
 These foundations must not be advertised as the workload identity profile below.
 
+This platform runs SPIRE rather than the native workload identity of one
+cloud for the following reasons, stated once. The identity contract, platform authorization and opaque
+secret and key references stay independent of environment vendors, and
+Kubernetes, AWS, Google Cloud, Azure and GitHub integrate through selected
+profiles rather than defining it. A cloud contributes optional node evidence,
+issuer key custody and resource credentials, and replaces neither the common
+identity contract nor platform authorization. The self-hosted development
+profile also needs none of AWS, GitHub or Kubernetes. The alternative of a new
+platform CA built from agent-signed CSRs is rejected in the Decision below,
+because it leaves the stolen-key enrollment gap open.
+
 ## Decision
 
 ### Attestation and issuance precede production acceptance
@@ -228,6 +239,14 @@ claiming sender constraint or changing the provider's actual token lifetime.
 JWT-SVIDs likewise remain bearer credentials unless a separately specified
 protocol constrains their use. They are not the internal default.
 
+A JWT-SVID is allowed in two places only: a layer-7 hop that terminates TLS and
+cannot take part in mutual TLS, and federation to a system that accepts
+OIDC-style tokens. Use compact serialization only, with the `alg`, `kid` and
+`typ` header parameters and no others. Carry it over confidential transport on
+every network hop; a local Unix socket is the only exception. Its lifetime is
+measured in minutes and never exceeds the 300-second ceiling that the issuer
+profile contract enforces.
+
 ### Cache only the authorized resource token, never the exchange assertion
 
 Mint a federation assertion for one audience when an exchange is about to
@@ -271,8 +290,8 @@ parsing, signatures or a reference state machine do not establish attestation,
 rotation, isolation or production acceptance.
 
 Required platform audit records cover registration, credential activation,
-denial, policy and grant decisions, accepted bundle changes and administrative
-recovery. The activation gate binds received issuance/renewal updates to platform
+denial, policy and grant decisions, bundle endpoint fetches (including failed
+ones, recorded as `SpiffeBundleFetchEvidence`), accepted bundle changes and administrative recovery. The activation gate binds received issuance/renewal updates to platform
 use; native CA signing events are a separate issuer audit stream. Required
 platform audit failure blocks new activation, authority or dispatch. Denial,
 revocation, redaction and expiry remain effective if recording fails. Retain

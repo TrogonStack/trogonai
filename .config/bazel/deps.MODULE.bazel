@@ -80,6 +80,7 @@ kubernetes_json_schema(
         "clusterrolebinding-rbac-v1": "3f83a2198fe9c178bf742849df9a3fb719fe2f3bb8ef425fee855931dad554cf",
         "configmap-v1": "fed751af12c2873a7db2b4cd1294c2959497fda8520f1fc8e5d21adf967ad72e",
         "daemonset-apps-v1": "410871aa51ca678b861fddf530925f1fc6c9f38766975cbae3bb113c339fcecc",
+        "job-batch-v1": "1dbe7c98d227ab2614d85d4e70c2d04872239bb91c4ed30abc2cfadccef40e4b",
         "namespace-v1": "324fae677b98d1a6d54340db0c334d053e8ffbafceb3f73326e41de2610d5843",
         "networkpolicy-networking-v1": "f6324cc464f62228b0418f438d167208e4f86c7e3677ba30f608e79a8b26ba79",
         "poddisruptionbudget-policy-v1": "0f7e20f2683a2c5a1b890a14f8837d41c70dd0237eb44ba1f4204ae9c2138f4d",

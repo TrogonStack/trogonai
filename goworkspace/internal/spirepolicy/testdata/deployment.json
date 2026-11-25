@@ -22,9 +22,27 @@
                       "key": "metadata.name",
                       "operator": "In",
                       "values": [
-                        "identity-node-a",
-                        "identity-node-b",
-                        "identity-node-c"
+                        "identity-node-a"
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "matchExpressions": [
+                    {
+                      "key": "workload-identity.platform.example.node-restriction.kubernetes.io/pool",
+                      "operator": "In",
+                      "values": [
+                        "production-eu1"
+                      ]
+                    }
+                  ],
+                  "matchFields": [
+                    {
+                      "key": "metadata.name",
+                      "operator": "In",
+                      "values": [
+                        "identity-node-b"
                       ]
                     }
                   ]
@@ -255,8 +273,19 @@
       {
         "apiVersion": "v1",
         "data": {
+          "alert-rules.json": "{\n  \"groups\": [\n    {\n      \"name\": \"spire-server-events\",\n      \"rules\": [\n        {\n          \"alert\": \"SpireRegistrationEntryChanged\",\n          \"annotations\": {\n            \"runbook\": \"docs/how-to/deploy-workload-identity.md#alert-on-issuer-events\",\n            \"summary\": \"A registration entry was created, updated or deleted through the SPIRE server API; match it to an approved change\"\n          },\n          \"expr\": \"(sum(increase(spire_server_rpc_entry_v1_entry_batch_create_entry[5m])) or vector(0)) + (sum(spire_server_rpc_entry_v1_entry_batch_create_entry unless spire_server_rpc_entry_v1_entry_batch_create_entry offset 5m) or vector(0)) + (sum(increase(spire_server_rpc_entry_v1_entry_batch_update_entry[5m])) or vector(0)) + (sum(spire_server_rpc_entry_v1_entry_batch_update_entry unless spire_server_rpc_entry_v1_entry_batch_update_entry offset 5m) or vector(0)) + (sum(increase(spire_server_rpc_entry_v1_entry_batch_delete_entry[5m])) or vector(0)) + (sum(spire_server_rpc_entry_v1_entry_batch_delete_entry unless spire_server_rpc_entry_v1_entry_batch_delete_entry offset 5m) or vector(0)) > 0\",\n          \"for\": \"0m\",\n          \"labels\": {\n            \"severity\": \"critical\"\n          }\n        },\n        {\n          \"alert\": \"SpireRegistrationEntryDatastoreWrite\",\n          \"annotations\": {\n            \"runbook\": \"docs/how-to/deploy-workload-identity.md#alert-on-issuer-events\",\n            \"summary\": \"The SPIRE datastore wrote a registration entry; match it to an approved change\"\n          },\n          \"expr\": \"(sum(increase(spire_server_datastore_registration_entry_create[5m])) or vector(0)) + (sum(spire_server_datastore_registration_entry_create unless spire_server_datastore_registration_entry_create offset 5m) or vector(0)) + (sum(increase(spire_server_datastore_registration_entry_update[5m])) or vector(0)) + (sum(spire_server_datastore_registration_entry_update unless spire_server_datastore_registration_entry_update offset 5m) or vector(0)) + (sum(increase(spire_server_datastore_registration_entry_delete[5m])) or vector(0)) + (sum(spire_server_datastore_registration_entry_delete unless spire_server_datastore_registration_entry_delete offset 5m) or vector(0)) > 0\",\n          \"for\": \"0m\",\n          \"labels\": {\n            \"severity\": \"warning\"\n          }\n        },\n        {\n          \"alert\": \"SpireAgentAttestationFailed\",\n          \"annotations\": {\n            \"runbook\": \"docs/how-to/deploy-workload-identity.md#alert-on-issuer-events\",\n            \"summary\": \"A SPIRE agent failed node attestation\"\n          },\n          \"expr\": \"(sum(increase(spire_server_rpc_agent_v1_agent_attest_agent{status!=\\\"OK\\\"}[5m])) or vector(0)) + (sum(spire_server_rpc_agent_v1_agent_attest_agent{status!=\\\"OK\\\"} unless spire_server_rpc_agent_v1_agent_attest_agent{status!=\\\"OK\\\"} offset 5m) or vector(0)) > 0\",\n          \"for\": \"0m\",\n          \"labels\": {\n            \"severity\": \"critical\"\n          }\n        },\n        {\n          \"alert\": \"SpireAgentBanned\",\n          \"annotations\": {\n            \"runbook\": \"docs/how-to/deploy-workload-identity.md#alert-on-issuer-events\",\n            \"summary\": \"A SPIRE agent was banned\"\n          },\n          \"expr\": \"(sum(increase(spire_server_rpc_agent_v1_agent_ban_agent[5m])) or vector(0)) + (sum(spire_server_rpc_agent_v1_agent_ban_agent unless spire_server_rpc_agent_v1_agent_ban_agent offset 5m) or vector(0)) > 0\",\n          \"for\": \"0m\",\n          \"labels\": {\n            \"severity\": \"critical\"\n          }\n        },\n        {\n          \"alert\": \"SpireJoinTokenCreated\",\n          \"annotations\": {\n            \"runbook\": \"docs/how-to/deploy-workload-identity.md#alert-on-issuer-events\",\n            \"summary\": \"A SPIRE join token was minted; this profile attests agents with k8s_psat only and a token lets any holder attest an agent\"\n          },\n          \"expr\": \"(sum(increase(spire_server_rpc_agent_v1_agent_create_join_token[5m])) or vector(0)) + (sum(spire_server_rpc_agent_v1_agent_create_join_token unless spire_server_rpc_agent_v1_agent_create_join_token offset 5m) or vector(0)) > 0\",\n          \"for\": \"0m\",\n          \"labels\": {\n            \"severity\": \"critical\"\n          }\n        },\n        {\n          \"alert\": \"SpireFederationRelationshipChanged\",\n          \"annotations\": {\n            \"runbook\": \"docs/how-to/deploy-workload-identity.md#alert-on-issuer-events\",\n            \"summary\": \"A SPIRE federation relationship was created, updated or deleted; this profile configures none\"\n          },\n          \"expr\": \"(sum(increase(spire_server_rpc_trustdomain_v1_trust_domain_batch_create_federation_relationship[5m])) or vector(0)) + (sum(spire_server_rpc_trustdomain_v1_trust_domain_batch_create_federation_relationship unless spire_server_rpc_trustdomain_v1_trust_domain_batch_create_federation_relationship offset 5m) or vector(0)) + (sum(increase(spire_server_rpc_trustdomain_v1_trust_domain_batch_update_federation_relationship[5m])) or vector(0)) + (sum(spire_server_rpc_trustdomain_v1_trust_domain_batch_update_federation_relationship unless spire_server_rpc_trustdomain_v1_trust_domain_batch_update_federation_relationship offset 5m) or vector(0)) + (sum(increase(spire_server_rpc_trustdomain_v1_trust_domain_batch_delete_federation_relationship[5m])) or vector(0)) + (sum(spire_server_rpc_trustdomain_v1_trust_domain_batch_delete_federation_relationship unless spire_server_rpc_trustdomain_v1_trust_domain_batch_delete_federation_relationship offset 5m) or vector(0)) > 0\",\n          \"for\": \"0m\",\n          \"labels\": {\n            \"severity\": \"critical\"\n          }\n        }\n      ]\n    },\n    {\n      \"name\": \"spire-agent-events\",\n      \"rules\": [\n        {\n          \"alert\": \"SpireWorkloadAttestationFailing\",\n          \"annotations\": {\n            \"runbook\": \"docs/how-to/deploy-workload-identity.md#alert-on-issuer-events\",\n            \"summary\": \"Repeated workload attestation failures: the agent cannot derive selectors for calling processes\"\n          },\n          \"expr\": \"(sum(increase(spire_agent_workload_api_workload_attestation{status!=\\\"OK\\\"}[10m])) or vector(0)) + (sum(spire_agent_workload_api_workload_attestation{status!=\\\"OK\\\"} unless spire_agent_workload_api_workload_attestation{status!=\\\"OK\\\"} offset 10m) or vector(0)) > 5\",\n          \"for\": \"10m\",\n          \"labels\": {\n            \"severity\": \"warning\"\n          }\n        },\n        {\n          \"alert\": \"SpireWorkloadIdentityDenied\",\n          \"annotations\": {\n            \"runbook\": \"docs/how-to/deploy-workload-identity.md#alert-on-issuer-events\",\n            \"summary\": \"A process keeps asking the Workload API for an identity that no registration entry grants it\"\n          },\n          \"expr\": \"(sum(increase(spire_agent_rpc_workload_api_fetch_x509svid{status=\\\"PermissionDenied\\\"}[10m])) or vector(0)) + (sum(spire_agent_rpc_workload_api_fetch_x509svid{status=\\\"PermissionDenied\\\"} unless spire_agent_rpc_workload_api_fetch_x509svid{status=\\\"PermissionDenied\\\"} offset 10m) or vector(0)) + (sum(increase(spire_agent_rpc_workload_api_fetch_jwtsvid{status=\\\"PermissionDenied\\\"}[10m])) or vector(0)) + (sum(spire_agent_rpc_workload_api_fetch_jwtsvid{status=\\\"PermissionDenied\\\"} unless spire_agent_rpc_workload_api_fetch_jwtsvid{status=\\\"PermissionDenied\\\"} offset 10m) or vector(0)) > 5\",\n          \"for\": \"10m\",\n          \"labels\": {\n            \"severity\": \"warning\"\n          }\n        },\n        {\n          \"alert\": \"SpireSvidRotationFailed\",\n          \"annotations\": {\n            \"runbook\": \"docs/how-to/deploy-workload-identity.md#alert-on-issuer-events\",\n            \"summary\": \"An agent or server SVID rotation failed\"\n          },\n          \"expr\": \"(sum(increase(spire_agent_node_attestor_new_svid{status!=\\\"OK\\\"}[5m])) or vector(0)) + (sum(spire_agent_node_attestor_new_svid{status!=\\\"OK\\\"} unless spire_agent_node_attestor_new_svid{status!=\\\"OK\\\"} offset 5m) or vector(0)) + (sum(increase(spire_server_svid_rotate{status!=\\\"OK\\\"}[5m])) or vector(0)) + (sum(spire_server_svid_rotate{status!=\\\"OK\\\"} unless spire_server_svid_rotate{status!=\\\"OK\\\"} offset 5m) or vector(0)) > 0\",\n          \"for\": \"0m\",\n          \"labels\": {\n            \"severity\": \"critical\"\n          }\n        }\n      ]\n    },\n    {\n      \"name\": \"spire-progress\",\n      \"rules\": [\n        {\n          \"expr\": \"(sum(increase(spire_agent_node_attestor_new_svid{status!=\\\"OK\\\"}[1w])) or vector(0)) + (sum(spire_agent_node_attestor_new_svid{status!=\\\"OK\\\"} unless spire_agent_node_attestor_new_svid{status!=\\\"OK\\\"} offset 1w) or vector(0)) + (sum(increase(spire_server_svid_rotate{status!=\\\"OK\\\"}[1w])) or vector(0)) + (sum(spire_server_svid_rotate{status!=\\\"OK\\\"} unless spire_server_svid_rotate{status!=\\\"OK\\\"} offset 1w) or vector(0))\",\n          \"record\": \"spire:svid_rotation_failures:increase1w\"\n        }\n      ]\n    }\n  ]\n}\n"
+        },
+        "kind": "ConfigMap",
+        "metadata": {
+          "name": "spire-alert-rules",
+          "namespace": "monitoring"
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "data": {
           "kms-key-policy.json": "{\n  \"Statement\": [\n    {\n      \"Action\": [\n        \"kms:DescribeKey\",\n        \"kms:GetPublicKey\",\n        \"kms:Sign\",\n        \"kms:ScheduleKeyDeletion\",\n        \"kms:TagResource\",\n        \"kms:PutKeyPolicy\",\n        \"kms:CreateAlias\",\n        \"kms:UpdateAlias\"\n      ],\n      \"Effect\": \"Allow\",\n      \"Principal\": {\n        \"AWS\": \"arn:aws:iam::111122223333:role/identity-server\"\n      },\n      \"Resource\": \"*\",\n      \"Sid\": \"ManageThisSigningKey\"\n    },\n    {\n      \"Action\": [\n        \"kms:DescribeKey\",\n        \"kms:GetKeyPolicy\",\n        \"kms:PutKeyPolicy\",\n        \"kms:DisableKey\",\n        \"kms:EnableKey\",\n        \"kms:ScheduleKeyDeletion\",\n        \"kms:CancelKeyDeletion\",\n        \"kms:ListResourceTags\"\n      ],\n      \"Effect\": \"Allow\",\n      \"Principal\": {\n        \"AWS\": \"arn:aws:iam::111122223333:role/identity-key-administrator\"\n      },\n      \"Resource\": \"*\",\n      \"Sid\": \"IndependentKeyRecovery\"\n    }\n  ],\n  \"Version\": \"2012-10-17\"\n}\n",
-          "server.conf": "{\n  \"plugins\": {\n    \"DataStore\": [\n      {\n        \"sql\": {\n          \"plugin_data\": {\n            \"connection_string\": \"host=identity-db.database.example.org port=5432 dbname=identity user=identity_server sslmode=verify-full sslrootcert=/run/spire/database-ca/ca.crt sslcert=/run/spire/database/tls.crt sslkey=/run/spire/database/tls.key connect_timeout=5\",\n            \"database_type\": \"postgres\",\n            \"disable_migration\": true,\n            \"max_idle_conns\": 10,\n            \"max_open_conns\": 50\n          }\n        }\n      }\n    ],\n    \"KeyManager\": [\n      {\n        \"aws_kms\": {\n          \"plugin_data\": {\n            \"enable_tag_based_key_discovery\": true,\n            \"key_identifier_value\": \"$SPIRE_SERVER_ID\",\n            \"key_policy_file\": \"/run/spire/config/kms-key-policy.json\",\n            \"key_tags\": {\n              \"Environment\": \"production\"\n            },\n            \"region\": \"eu-west-1\"\n          }\n        }\n      }\n    ],\n    \"NodeAttestor\": [\n      {\n        \"k8s_psat\": {\n          \"plugin_data\": {\n            \"clusters\": {\n              \"production-eu1\": {\n                \"allowed_node_label_keys\": [\n                  \"workload-identity.platform.example.node-restriction.kubernetes.io/pool\"\n                ],\n                \"audience\": [\n                  \"spire-server\"\n                ],\n                \"service_account_allow_list\": [\n                  \"identity-agents:spire-agent\"\n                ]\n              }\n            }\n          }\n        }\n      }\n    ]\n  },\n  \"server\": {\n    \"agent_ttl\": \"3590s\",\n    \"audit_log_enabled\": true,\n    \"bind_address\": \"0.0.0.0\",\n    \"bind_port\": 8081,\n    \"ca_key_type\": \"ec-p256\",\n    \"ca_ttl\": \"24h\",\n    \"data_dir\": \"/var/lib/spire\",\n    \"default_x509_svid_ttl\": \"3590s\",\n    \"log_format\": \"json\",\n    \"log_level\": \"INFO\",\n    \"socket_path\": \"/run/spire/admin/api.sock\",\n    \"tls_config\": {\n      \"min_tls_version\": \"VersionTLS13\"\n    },\n    \"trust_domain\": \"production.identity.example.org\"\n  }\n}\n"
+          "server.conf": "{\n  \"plugins\": {\n    \"DataStore\": [\n      {\n        \"sql\": {\n          \"plugin_data\": {\n            \"connection_string\": \"host=identity-db.database.example.org port=5432 dbname=identity user=identity_server sslmode=verify-full sslrootcert=/run/spire/database-ca/ca.crt sslcert=/run/spire/database/tls.crt sslkey=/run/spire/database/tls.key connect_timeout=5\",\n            \"database_type\": \"postgres\",\n            \"disable_migration\": true,\n            \"max_idle_conns\": 10,\n            \"max_open_conns\": 50\n          }\n        }\n      }\n    ],\n    \"KeyManager\": [\n      {\n        \"aws_kms\": {\n          \"plugin_data\": {\n            \"enable_tag_based_key_discovery\": true,\n            \"key_identifier_value\": \"$SPIRE_SERVER_ID\",\n            \"key_policy_file\": \"/run/spire/config/kms-key-policy.json\",\n            \"key_tags\": {\n              \"Environment\": \"production\"\n            },\n            \"region\": \"eu-west-1\"\n          }\n        }\n      }\n    ],\n    \"NodeAttestor\": [\n      {\n        \"k8s_psat\": {\n          \"plugin_data\": {\n            \"clusters\": {\n              \"production-eu1\": {\n                \"allowed_node_label_keys\": [\n                  \"workload-identity.platform.example.node-restriction.kubernetes.io/pool\"\n                ],\n                \"audience\": [\n                  \"spire-server\"\n                ],\n                \"service_account_allow_list\": [\n                  \"identity-agents:spire-agent\"\n                ]\n              }\n            }\n          }\n        }\n      }\n    ],\n    \"UpstreamAuthority\": [\n      {\n        \"aws_pca\": {\n          \"plugin_data\": {\n            \"ca_signing_template_arn\": \"arn:aws:acm-pca:::template/SubordinateCACertificate_PathLen0/V1\",\n            \"certificate_authority_arn\": \"arn:aws:acm-pca:eu-west-1:111122223333:certificate-authority/12ac02bc-d425-49f7-ab78-570a44972772\",\n            \"region\": \"eu-west-1\",\n            \"signing_algorithm\": \"SHA256WITHECDSA\"\n          }\n        }\n      }\n    ]\n  },\n  \"server\": {\n    \"agent_ttl\": \"3590s\",\n    \"audit_log_enabled\": true,\n    \"bind_address\": \"0.0.0.0\",\n    \"bind_port\": 8081,\n    \"ca_key_type\": \"ec-p256\",\n    \"ca_ttl\": \"24h\",\n    \"data_dir\": \"/var/lib/spire\",\n    \"default_jwt_svid_ttl\": \"5m\",\n    \"default_x509_svid_ttl\": \"3590s\",\n    \"log_format\": \"json\",\n    \"log_level\": \"INFO\",\n    \"socket_path\": \"/run/spire/admin/api.sock\",\n    \"tls_config\": {\n      \"min_tls_version\": \"VersionTLS13\"\n    },\n    \"trust_domain\": \"production.identity.example.org\"\n  },\n  \"telemetry\": {\n    \"Prometheus\": {\n      \"host\": \"0.0.0.0\",\n      \"port\": 9988\n    }\n  }\n}\n"
         },
         "kind": "ConfigMap",
         "metadata": {
@@ -267,7 +296,7 @@
       {
         "apiVersion": "v1",
         "data": {
-          "agent.conf": "{\n  \"agent\": {\n    \"data_dir\": \"/var/lib/spire\",\n    \"disable_sds_api\": true,\n    \"log_format\": \"json\",\n    \"log_level\": \"INFO\",\n    \"server_address\": \"spire-server.identity-control.svc\",\n    \"server_port\": 8081,\n    \"socket_path\": \"/run/platform-spire/sockets/api.sock\",\n    \"trust_bundle_path\": \"/run/spire/bootstrap/bundle.pem\",\n    \"trust_domain\": \"production.identity.example.org\"\n  },\n  \"plugins\": {\n    \"KeyManager\": [\n      {\n        \"disk\": {\n          \"plugin_data\": {\n            \"directory\": \"/var/lib/spire/keys\"\n          }\n        }\n      }\n    ],\n    \"NodeAttestor\": [\n      {\n        \"k8s_psat\": {\n          \"plugin_data\": {\n            \"cluster\": \"production-eu1\",\n            \"token_path\": \"/run/spire/psat/token\"\n          }\n        }\n      }\n    ],\n    \"WorkloadAttestor\": [\n      {\n        \"k8s\": {\n          \"plugin_data\": {\n            \"disable_container_selectors\": false,\n            \"kubelet_ca_path\": \"/run/spire/kubelet-ca/ca.crt\",\n            \"kubelet_secure_port\": 10250,\n            \"node_name_env\": \"MY_NODE_NAME\",\n            \"skip_kubelet_verification\": false,\n            \"token_path\": \"/var/run/secrets/kubernetes.io/serviceaccount/token\",\n            \"use_anonymous_authentication\": false\n          }\n        },\n        \"unix\": {\n          \"plugin_data\": {\n            \"discover_workload_path\": false,\n            \"workload_size_limit\": -1\n          }\n        }\n      }\n    ]\n  }\n}\n"
+          "agent.conf": "{\n  \"agent\": {\n    \"data_dir\": \"/var/lib/spire\",\n    \"disable_sds_api\": true,\n    \"log_format\": \"json\",\n    \"log_level\": \"INFO\",\n    \"server_address\": \"spire-server.identity-control.svc\",\n    \"server_port\": 8081,\n    \"socket_path\": \"/run/platform-spire/sockets/api.sock\",\n    \"trust_bundle_path\": \"/run/spire/bootstrap/bundle.pem\",\n    \"trust_domain\": \"production.identity.example.org\"\n  },\n  \"plugins\": {\n    \"KeyManager\": [\n      {\n        \"disk\": {\n          \"plugin_data\": {\n            \"directory\": \"/var/lib/spire/keys\"\n          }\n        }\n      }\n    ],\n    \"NodeAttestor\": [\n      {\n        \"k8s_psat\": {\n          \"plugin_data\": {\n            \"cluster\": \"production-eu1\",\n            \"token_path\": \"/run/spire/psat/token\"\n          }\n        }\n      }\n    ],\n    \"WorkloadAttestor\": [\n      {\n        \"k8s\": {\n          \"plugin_data\": {\n            \"disable_container_selectors\": false,\n            \"kubelet_ca_path\": \"/run/spire/kubelet-ca/ca.crt\",\n            \"kubelet_secure_port\": 10250,\n            \"node_name_env\": \"MY_NODE_NAME\",\n            \"skip_kubelet_verification\": false,\n            \"token_path\": \"/var/run/secrets/kubernetes.io/serviceaccount/token\",\n            \"use_anonymous_authentication\": false\n          }\n        },\n        \"unix\": {\n          \"plugin_data\": {\n            \"discover_workload_path\": false,\n            \"workload_size_limit\": -1\n          }\n        }\n      }\n    ]\n  },\n  \"telemetry\": {\n    \"Prometheus\": {\n      \"host\": \"0.0.0.0\",\n      \"port\": 9989\n    }\n  }\n}\n"
         },
         "kind": "ConfigMap",
         "metadata": {
@@ -423,11 +452,101 @@
                   "protocol": "TCP"
                 }
               ]
+            },
+            {
+              "from": [
+                {
+                  "namespaceSelector": {
+                    "matchLabels": {
+                      "kubernetes.io/metadata.name": "monitoring"
+                    }
+                  },
+                  "podSelector": {
+                    "matchLabels": {
+                      "app.kubernetes.io/name": "prometheus"
+                    }
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "port": 9988,
+                  "protocol": "TCP"
+                }
+              ]
             }
           ],
           "podSelector": {
             "matchLabels": {
               "app.kubernetes.io/name": "spire-server"
+            }
+          },
+          "policyTypes": [
+            "Ingress",
+            "Egress"
+          ]
+        }
+      },
+      {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+          "name": "spire-server-migrate",
+          "namespace": "identity-control"
+        },
+        "spec": {
+          "egress": [
+            {
+              "ports": [
+                {
+                  "port": 53,
+                  "protocol": "UDP"
+                },
+                {
+                  "port": 53,
+                  "protocol": "TCP"
+                }
+              ],
+              "to": [
+                {
+                  "namespaceSelector": {
+                    "matchLabels": {
+                      "kubernetes.io/metadata.name": "kube-system"
+                    }
+                  },
+                  "podSelector": {
+                    "matchLabels": {
+                      "k8s-app": "kube-dns"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "ports": [
+                {
+                  "port": 5432,
+                  "protocol": "TCP"
+                }
+              ],
+              "to": [
+                {
+                  "ipBlock": {
+                    "cidr": "10.42.3.10/32"
+                  }
+                },
+                {
+                  "ipBlock": {
+                    "cidr": "10.42.3.11/32"
+                  }
+                }
+              ]
+            }
+          ],
+          "ingress": [],
+          "podSelector": {
+            "matchLabels": {
+              "app.kubernetes.io/name": "spire-server-migrate"
             }
           },
           "policyTypes": [
@@ -519,6 +638,30 @@
               ]
             }
           ],
+          "ingress": [
+            {
+              "from": [
+                {
+                  "namespaceSelector": {
+                    "matchLabels": {
+                      "kubernetes.io/metadata.name": "monitoring"
+                    }
+                  },
+                  "podSelector": {
+                    "matchLabels": {
+                      "app.kubernetes.io/name": "prometheus"
+                    }
+                  }
+                }
+              ],
+              "ports": [
+                {
+                  "port": 9989,
+                  "protocol": "TCP"
+                }
+              ]
+            }
+          ],
           "podSelector": {
             "matchLabels": {
               "app.kubernetes.io/name": "spire-agent"
@@ -598,11 +741,11 @@
               "name": "agentPrivileges"
             },
             {
-              "expression": "variables.agentIdentity && (has(object.spec.containers[0].command) && ((object.spec.containers[0].command.size() == 1) && (object.spec.containers[0].command[0] == \"/opt/spire/bin/spire-agent\"))) && (has(object.spec.containers[0].args) && ((object.spec.containers[0].args.size() == 3) && (object.spec.containers[0].args[0] == \"run\") && (object.spec.containers[0].args[1] == \"-config\") && (object.spec.containers[0].args[2] == \"/run/spire/config/agent.conf\"))) && (has(object.spec.containers[0].env) && ((object.spec.containers[0].env.size() == 1) && ((has(object.spec.containers[0].env[0].name) && (object.spec.containers[0].env[0].name == \"MY_NODE_NAME\")) && (has(object.spec.containers[0].env[0].valueFrom) && ((has(object.spec.containers[0].env[0].valueFrom.fieldRef) && ((has(object.spec.containers[0].env[0].valueFrom.fieldRef.fieldPath) && (object.spec.containers[0].env[0].valueFrom.fieldRef.fieldPath == \"spec.nodeName\"))))))))) && (has(object.spec.containers[0].livenessProbe) && ((has(object.spec.containers[0].livenessProbe.exec) && ((has(object.spec.containers[0].livenessProbe.exec.command) && ((object.spec.containers[0].livenessProbe.exec.command.size() == 5) && (object.spec.containers[0].livenessProbe.exec.command[0] == \"/opt/spire/bin/spire-agent\") && (object.spec.containers[0].livenessProbe.exec.command[1] == \"healthcheck\") && (object.spec.containers[0].livenessProbe.exec.command[2] == \"-socketPath\") && (object.spec.containers[0].livenessProbe.exec.command[3] == \"/run/platform-spire/sockets/api.sock\") && (object.spec.containers[0].livenessProbe.exec.command[4] == \"-shallow\"))))) && (has(object.spec.containers[0].livenessProbe.timeoutSeconds) && (object.spec.containers[0].livenessProbe.timeoutSeconds == 5)) && (has(object.spec.containers[0].livenessProbe.periodSeconds) && (object.spec.containers[0].livenessProbe.periodSeconds == 10)) && (has(object.spec.containers[0].livenessProbe.failureThreshold) && (object.spec.containers[0].livenessProbe.failureThreshold == 3)))) && (has(object.spec.containers[0].readinessProbe) && ((has(object.spec.containers[0].readinessProbe.exec) && ((has(object.spec.containers[0].readinessProbe.exec.command) && ((object.spec.containers[0].readinessProbe.exec.command.size() == 4) && (object.spec.containers[0].readinessProbe.exec.command[0] == \"/opt/spire/bin/spire-agent\") && (object.spec.containers[0].readinessProbe.exec.command[1] == \"healthcheck\") && (object.spec.containers[0].readinessProbe.exec.command[2] == \"-socketPath\") && (object.spec.containers[0].readinessProbe.exec.command[3] == \"/run/platform-spire/sockets/api.sock\"))))) && (has(object.spec.containers[0].readinessProbe.timeoutSeconds) && (object.spec.containers[0].readinessProbe.timeoutSeconds == 5)) && (has(object.spec.containers[0].readinessProbe.periodSeconds) && (object.spec.containers[0].readinessProbe.periodSeconds == 10)) && (has(object.spec.containers[0].readinessProbe.failureThreshold) && (object.spec.containers[0].readinessProbe.failureThreshold == 3)))) && (has(object.spec.containers[0].startupProbe) && ((has(object.spec.containers[0].startupProbe.exec) && ((has(object.spec.containers[0].startupProbe.exec.command) && ((object.spec.containers[0].startupProbe.exec.command.size() == 4) && (object.spec.containers[0].startupProbe.exec.command[0] == \"/opt/spire/bin/spire-agent\") && (object.spec.containers[0].startupProbe.exec.command[1] == \"healthcheck\") && (object.spec.containers[0].startupProbe.exec.command[2] == \"-socketPath\") && (object.spec.containers[0].startupProbe.exec.command[3] == \"/run/platform-spire/sockets/api.sock\"))))) && (has(object.spec.containers[0].startupProbe.timeoutSeconds) && (object.spec.containers[0].startupProbe.timeoutSeconds == 5)) && (has(object.spec.containers[0].startupProbe.periodSeconds) && (object.spec.containers[0].startupProbe.periodSeconds == 10)) && (has(object.spec.containers[0].startupProbe.failureThreshold) && (object.spec.containers[0].startupProbe.failureThreshold == 30)))) && !has(object.spec.containers[0].lifecycle) && (!has(object.spec.containers[0].envFrom) || object.spec.containers[0].envFrom.size() == 0) && (!has(object.spec.containers[0].ports) || object.spec.containers[0].ports.size() == 0) && (!has(object.spec.containers[0].volumeDevices) || object.spec.containers[0].volumeDevices.size() == 0) && (!has(object.spec.initContainers) || object.spec.initContainers.size() == 0) && (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0)",
+              "expression": "variables.agentIdentity && (has(object.spec.containers[0].command) && ((object.spec.containers[0].command.size() == 1) && (object.spec.containers[0].command[0] == \"/opt/spire/bin/spire-agent\"))) && (has(object.spec.containers[0].args) && ((object.spec.containers[0].args.size() == 3) && (object.spec.containers[0].args[0] == \"run\") && (object.spec.containers[0].args[1] == \"-config\") && (object.spec.containers[0].args[2] == \"/run/spire/config/agent.conf\"))) && (has(object.spec.containers[0].ports) && ((object.spec.containers[0].ports.size() == 1) && ((has(object.spec.containers[0].ports[0].name) && (object.spec.containers[0].ports[0].name == \"metrics\")) && (has(object.spec.containers[0].ports[0].containerPort) && (object.spec.containers[0].ports[0].containerPort == 9989))))) && (has(object.spec.containers[0].env) && ((object.spec.containers[0].env.size() == 1) && ((has(object.spec.containers[0].env[0].name) && (object.spec.containers[0].env[0].name == \"MY_NODE_NAME\")) && (has(object.spec.containers[0].env[0].valueFrom) && ((has(object.spec.containers[0].env[0].valueFrom.fieldRef) && ((has(object.spec.containers[0].env[0].valueFrom.fieldRef.fieldPath) && (object.spec.containers[0].env[0].valueFrom.fieldRef.fieldPath == \"spec.nodeName\"))))))))) && (has(object.spec.containers[0].livenessProbe) && ((has(object.spec.containers[0].livenessProbe.exec) && ((has(object.spec.containers[0].livenessProbe.exec.command) && ((object.spec.containers[0].livenessProbe.exec.command.size() == 5) && (object.spec.containers[0].livenessProbe.exec.command[0] == \"/opt/spire/bin/spire-agent\") && (object.spec.containers[0].livenessProbe.exec.command[1] == \"healthcheck\") && (object.spec.containers[0].livenessProbe.exec.command[2] == \"-socketPath\") && (object.spec.containers[0].livenessProbe.exec.command[3] == \"/run/platform-spire/sockets/api.sock\") && (object.spec.containers[0].livenessProbe.exec.command[4] == \"-shallow\"))))) && (has(object.spec.containers[0].livenessProbe.timeoutSeconds) && (object.spec.containers[0].livenessProbe.timeoutSeconds == 5)) && (has(object.spec.containers[0].livenessProbe.periodSeconds) && (object.spec.containers[0].livenessProbe.periodSeconds == 10)) && (has(object.spec.containers[0].livenessProbe.failureThreshold) && (object.spec.containers[0].livenessProbe.failureThreshold == 3)))) && (has(object.spec.containers[0].readinessProbe) && ((has(object.spec.containers[0].readinessProbe.exec) && ((has(object.spec.containers[0].readinessProbe.exec.command) && ((object.spec.containers[0].readinessProbe.exec.command.size() == 4) && (object.spec.containers[0].readinessProbe.exec.command[0] == \"/opt/spire/bin/spire-agent\") && (object.spec.containers[0].readinessProbe.exec.command[1] == \"healthcheck\") && (object.spec.containers[0].readinessProbe.exec.command[2] == \"-socketPath\") && (object.spec.containers[0].readinessProbe.exec.command[3] == \"/run/platform-spire/sockets/api.sock\"))))) && (has(object.spec.containers[0].readinessProbe.timeoutSeconds) && (object.spec.containers[0].readinessProbe.timeoutSeconds == 5)) && (has(object.spec.containers[0].readinessProbe.periodSeconds) && (object.spec.containers[0].readinessProbe.periodSeconds == 10)) && (has(object.spec.containers[0].readinessProbe.failureThreshold) && (object.spec.containers[0].readinessProbe.failureThreshold == 3)))) && (has(object.spec.containers[0].startupProbe) && ((has(object.spec.containers[0].startupProbe.exec) && ((has(object.spec.containers[0].startupProbe.exec.command) && ((object.spec.containers[0].startupProbe.exec.command.size() == 4) && (object.spec.containers[0].startupProbe.exec.command[0] == \"/opt/spire/bin/spire-agent\") && (object.spec.containers[0].startupProbe.exec.command[1] == \"healthcheck\") && (object.spec.containers[0].startupProbe.exec.command[2] == \"-socketPath\") && (object.spec.containers[0].startupProbe.exec.command[3] == \"/run/platform-spire/sockets/api.sock\"))))) && (has(object.spec.containers[0].startupProbe.timeoutSeconds) && (object.spec.containers[0].startupProbe.timeoutSeconds == 5)) && (has(object.spec.containers[0].startupProbe.periodSeconds) && (object.spec.containers[0].startupProbe.periodSeconds == 10)) && (has(object.spec.containers[0].startupProbe.failureThreshold) && (object.spec.containers[0].startupProbe.failureThreshold == 30)))) && !has(object.spec.containers[0].lifecycle) && (!has(object.spec.containers[0].ports) || object.spec.containers[0].ports.all(p, (!has(p.hostPort) || p.hostPort == 0) && !has(p.hostIP))) && (!has(object.spec.containers[0].envFrom) || object.spec.containers[0].envFrom.size() == 0) && (!has(object.spec.containers[0].volumeDevices) || object.spec.containers[0].volumeDevices.size() == 0) && (!has(object.spec.initContainers) || object.spec.initContainers.size() == 0) && (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0)",
               "name": "agentProcess"
             },
             {
-              "expression": "variables.agentIdentity && (!has(object.spec.nodeName) || object.spec.nodeName == '' || variables.agentNodes.exists(n, n == object.spec.nodeName)) && has(object.spec.affinity) && has(object.spec.affinity.nodeAffinity) && has(object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution) && object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.size() > 0 && object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.all(t, has(t.matchFields) && t.matchFields.exists(f, f.key == 'metadata.name' && f.operator == 'In' && f.values.size() > 0 && f.values.all(n, variables.agentNodes.exists(approved, approved == n))))",
+              "expression": "variables.agentIdentity && (!has(object.spec.nodeName) || object.spec.nodeName == '' || variables.agentNodes.exists(n, n == object.spec.nodeName)) && has(object.spec.affinity) && has(object.spec.affinity.nodeAffinity) && has(object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution) && object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.size() > 0 && object.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.all(t, has(t.matchFields) && t.matchFields.exists(f, f.key == 'metadata.name' && f.operator == 'In' && f.values.size() == 1 && f.values.all(n, variables.agentNodes.exists(approved, approved == n))))",
               "name": "agentPlacement"
             },
             {
@@ -723,6 +866,363 @@
         }
       },
       {
+        "apiVersion": "admissionregistration.k8s.io/v1",
+        "kind": "ValidatingAdmissionPolicy",
+        "metadata": {
+          "name": "identity-control-identity-operator-access"
+        },
+        "spec": {
+          "failurePolicy": "Fail",
+          "matchConstraints": {
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "In",
+                  "values": [
+                    "identity-agents",
+                    "identity-control"
+                  ]
+                }
+              ]
+            },
+            "resourceRules": [
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "CONNECT"
+                ],
+                "resources": [
+                  "pods/exec",
+                  "pods/attach",
+                  "pods/portforward"
+                ]
+              },
+              {
+                "apiGroups": [
+                  ""
+                ],
+                "apiVersions": [
+                  "v1"
+                ],
+                "operations": [
+                  "UPDATE"
+                ],
+                "resources": [
+                  "pods/ephemeralcontainers"
+                ]
+              }
+            ]
+          },
+          "validations": [
+            {
+              "expression": "has(request.userInfo.groups) && request.userInfo.groups.exists(g, variables.operatorGroups.exists(o, o == g))",
+              "message": "Interactive access to the SPIRE pods in identity-agents, identity-control requires membership in a declared server operator group."
+            }
+          ],
+          "variables": [
+            {
+              "expression": "[\"identity-operators\"]",
+              "name": "operatorGroups"
+            }
+          ]
+        }
+      },
+      {
+        "apiVersion": "admissionregistration.k8s.io/v1",
+        "kind": "ValidatingAdmissionPolicyBinding",
+        "metadata": {
+          "name": "identity-control-identity-operator-access"
+        },
+        "spec": {
+          "policyName": "identity-control-identity-operator-access",
+          "validationActions": [
+            "Deny"
+          ]
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "automountServiceAccountToken": false,
+        "kind": "ServiceAccount",
+        "metadata": {
+          "name": "spire-server-migrate",
+          "namespace": "identity-control"
+        }
+      },
+      {
+        "apiVersion": "v1",
+        "data": {
+          "migrate.conf": "{\n  \"plugins\": {\n    \"DataStore\": [\n      {\n        \"sql\": {\n          \"plugin_data\": {\n            \"connection_string\": \"host=identity-db.database.example.org port=5432 dbname=identity user=identity_server sslmode=verify-full sslrootcert=/run/spire/database-ca/ca.crt sslcert=/run/spire/database/tls.crt sslkey=/run/spire/database/tls.key connect_timeout=5\",\n            \"database_type\": \"postgres\",\n            \"disable_migration\": false,\n            \"max_idle_conns\": 10,\n            \"max_open_conns\": 50\n          }\n        }\n      }\n    ],\n    \"KeyManager\": [\n      {\n        \"memory\": {\n          \"plugin_data\": {}\n        }\n      }\n    ],\n    \"NodeAttestor\": [\n      {\n        \"k8s_psat\": {\n          \"plugin_data\": {\n            \"clusters\": {\n              \"production-eu1\": {\n                \"allowed_node_label_keys\": [\n                  \"workload-identity.platform.example.node-restriction.kubernetes.io/pool\"\n                ],\n                \"audience\": [\n                  \"spire-server\"\n                ],\n                \"service_account_allow_list\": [\n                  \"identity-agents:spire-agent\"\n                ]\n              }\n            }\n          }\n        }\n      }\n    ]\n  },\n  \"server\": {\n    \"bind_address\": \"127.0.0.1\",\n    \"bind_port\": 8081,\n    \"data_dir\": \"/tmp/spire\",\n    \"log_format\": \"json\",\n    \"log_level\": \"INFO\",\n    \"socket_path\": \"/run/spire/admin/api.sock\",\n    \"trust_domain\": \"migration.invalid\"\n  }\n}\n"
+        },
+        "kind": "ConfigMap",
+        "metadata": {
+          "name": "spire-server-migrate",
+          "namespace": "identity-control"
+        }
+      },
+      {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+          "name": "spire-server-migrate-07b70daf44",
+          "namespace": "identity-control"
+        },
+        "spec": {
+          "activeDeadlineSeconds": 900,
+          "backoffLimit": 3,
+          "completions": 1,
+          "parallelism": 1,
+          "template": {
+            "metadata": {
+              "labels": {
+                "app.kubernetes.io/name": "spire-server-migrate"
+              }
+            },
+            "spec": {
+              "affinity": {
+                "nodeAffinity": {
+                  "requiredDuringSchedulingIgnoredDuringExecution": {
+                    "nodeSelectorTerms": [
+                      {
+                        "matchExpressions": [
+                          {
+                            "key": "workload-identity.platform.example.node-restriction.kubernetes.io/pool",
+                            "operator": "In",
+                            "values": [
+                              "production-eu1-control"
+                            ]
+                          }
+                        ],
+                        "matchFields": [
+                          {
+                            "key": "metadata.name",
+                            "operator": "In",
+                            "values": [
+                              "identity-control-a"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "matchExpressions": [
+                          {
+                            "key": "workload-identity.platform.example.node-restriction.kubernetes.io/pool",
+                            "operator": "In",
+                            "values": [
+                              "production-eu1-control"
+                            ]
+                          }
+                        ],
+                        "matchFields": [
+                          {
+                            "key": "metadata.name",
+                            "operator": "In",
+                            "values": [
+                              "identity-control-b"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "matchExpressions": [
+                          {
+                            "key": "workload-identity.platform.example.node-restriction.kubernetes.io/pool",
+                            "operator": "In",
+                            "values": [
+                              "production-eu1-control"
+                            ]
+                          }
+                        ],
+                        "matchFields": [
+                          {
+                            "key": "metadata.name",
+                            "operator": "In",
+                            "values": [
+                              "identity-control-c"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              "automountServiceAccountToken": false,
+              "containers": [
+                {
+                  "args": [
+                    "healthcheck",
+                    "-socketPath",
+                    "/run/spire/admin/api.sock"
+                  ],
+                  "command": [
+                    "/opt/spire/bin/spire-server"
+                  ],
+                  "image": "ghcr.io/spiffe/spire-server@sha256:ff546f4c62dafc479a0cd79eae9a7b6df2975754d75efd31706098e0d7548837",
+                  "imagePullPolicy": "IfNotPresent",
+                  "name": "check",
+                  "resources": {
+                    "limits": {
+                      "cpu": "100m",
+                      "memory": "64Mi"
+                    },
+                    "requests": {
+                      "cpu": "10m",
+                      "memory": "32Mi"
+                    }
+                  },
+                  "securityContext": {
+                    "allowPrivilegeEscalation": false,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    },
+                    "readOnlyRootFilesystem": true
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/run/spire/admin",
+                      "name": "admin",
+                      "readOnly": false
+                    }
+                  ]
+                }
+              ],
+              "initContainers": [
+                {
+                  "args": [
+                    "run",
+                    "-config",
+                    "/run/spire/config/migrate.conf"
+                  ],
+                  "command": [
+                    "/opt/spire/bin/spire-server"
+                  ],
+                  "image": "ghcr.io/spiffe/spire-server@sha256:ff546f4c62dafc479a0cd79eae9a7b6df2975754d75efd31706098e0d7548837",
+                  "imagePullPolicy": "IfNotPresent",
+                  "name": "server",
+                  "resources": {
+                    "limits": {
+                      "cpu": "1",
+                      "memory": "512Mi"
+                    },
+                    "requests": {
+                      "cpu": "100m",
+                      "memory": "128Mi"
+                    }
+                  },
+                  "restartPolicy": "Always",
+                  "securityContext": {
+                    "allowPrivilegeEscalation": false,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    },
+                    "readOnlyRootFilesystem": true
+                  },
+                  "startupProbe": {
+                    "exec": {
+                      "command": [
+                        "/opt/spire/bin/spire-server",
+                        "healthcheck",
+                        "-socketPath",
+                        "/run/spire/admin/api.sock"
+                      ]
+                    },
+                    "failureThreshold": 30,
+                    "periodSeconds": 10,
+                    "timeoutSeconds": 5
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/run/spire/config",
+                      "name": "config",
+                      "readOnly": true
+                    },
+                    {
+                      "mountPath": "/run/spire/admin",
+                      "name": "admin",
+                      "readOnly": false
+                    },
+                    {
+                      "mountPath": "/tmp",
+                      "name": "tmp",
+                      "readOnly": false
+                    },
+                    {
+                      "mountPath": "/run/spire/database",
+                      "name": "database-client",
+                      "readOnly": true
+                    },
+                    {
+                      "mountPath": "/run/spire/database-ca",
+                      "name": "database-ca",
+                      "readOnly": true
+                    }
+                  ]
+                }
+              ],
+              "restartPolicy": "OnFailure",
+              "securityContext": {
+                "fsGroup": 1000,
+                "fsGroupChangePolicy": "OnRootMismatch",
+                "runAsGroup": 1000,
+                "runAsNonRoot": true,
+                "runAsUser": 1000,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "serviceAccountName": "spire-server-migrate",
+              "volumes": [
+                {
+                  "configMap": {
+                    "defaultMode": 288,
+                    "name": "spire-server-migrate"
+                  },
+                  "name": "config"
+                },
+                {
+                  "emptyDir": {
+                    "medium": "Memory",
+                    "sizeLimit": "16Mi"
+                  },
+                  "name": "admin"
+                },
+                {
+                  "emptyDir": {
+                    "sizeLimit": "64Mi"
+                  },
+                  "name": "tmp"
+                },
+                {
+                  "name": "database-client",
+                  "secret": {
+                    "defaultMode": 288,
+                    "secretName": "identity-database-client"
+                  }
+                },
+                {
+                  "configMap": {
+                    "defaultMode": 288,
+                    "name": "identity-database-ca"
+                  },
+                  "name": "database-ca"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
         "apiVersion": "v1",
         "kind": "Service",
         "metadata": {
@@ -828,8 +1328,46 @@
                             "key": "metadata.name",
                             "operator": "In",
                             "values": [
-                              "identity-control-a",
-                              "identity-control-b",
+                              "identity-control-a"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "matchExpressions": [
+                          {
+                            "key": "workload-identity.platform.example.node-restriction.kubernetes.io/pool",
+                            "operator": "In",
+                            "values": [
+                              "production-eu1-control"
+                            ]
+                          }
+                        ],
+                        "matchFields": [
+                          {
+                            "key": "metadata.name",
+                            "operator": "In",
+                            "values": [
+                              "identity-control-b"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "matchExpressions": [
+                          {
+                            "key": "workload-identity.platform.example.node-restriction.kubernetes.io/pool",
+                            "operator": "In",
+                            "values": [
+                              "production-eu1-control"
+                            ]
+                          }
+                        ],
+                        "matchFields": [
+                          {
+                            "key": "metadata.name",
+                            "operator": "In",
+                            "values": [
                               "identity-control-c"
                             ]
                           }
@@ -906,6 +1444,10 @@
                     {
                       "containerPort": 8081,
                       "name": "grpc"
+                    },
+                    {
+                      "containerPort": 9988,
+                      "name": "metrics"
                     }
                   ],
                   "readinessProbe": {
@@ -1171,8 +1713,46 @@
                             "key": "metadata.name",
                             "operator": "In",
                             "values": [
-                              "identity-node-a",
-                              "identity-node-b",
+                              "identity-node-a"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "matchExpressions": [
+                          {
+                            "key": "workload-identity.platform.example.node-restriction.kubernetes.io/pool",
+                            "operator": "In",
+                            "values": [
+                              "production-eu1"
+                            ]
+                          }
+                        ],
+                        "matchFields": [
+                          {
+                            "key": "metadata.name",
+                            "operator": "In",
+                            "values": [
+                              "identity-node-b"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "matchExpressions": [
+                          {
+                            "key": "workload-identity.platform.example.node-restriction.kubernetes.io/pool",
+                            "operator": "In",
+                            "values": [
+                              "production-eu1"
+                            ]
+                          }
+                        ],
+                        "matchFields": [
+                          {
+                            "key": "metadata.name",
+                            "operator": "In",
+                            "values": [
                               "identity-node-c"
                             ]
                           }
@@ -1220,6 +1800,12 @@
                     "timeoutSeconds": 5
                   },
                   "name": "agent",
+                  "ports": [
+                    {
+                      "containerPort": 9989,
+                      "name": "metrics"
+                    }
+                  ],
                   "readinessProbe": {
                     "exec": {
                       "command": [

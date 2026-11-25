@@ -18,7 +18,7 @@ ADRs or establish a running configuration service, issuer or provider adapter.
 | --- | --- | --- |
 | Effective local X.509 registration | `platform/workload_identity/v1alpha1` | Exact SPIFFE identity, platform mapping, approved root fingerprints, finite registration lease and recovery fence. |
 | Activation and authenticated peer evidence | `CredentialActivation`, `WorkloadPeerEvidence` | Public attribution and material generations. Activation intent still requires the material owner's final live check. |
-| Managed foreign trust and external subject admission | `platform/workload_federation/v1alpha1` | Domain-to-bundle relationship, configured OIDC verifier, literal claims and exact platform principal binding. |
+| Managed foreign trust and external subject admission | `platform/workload_federation/v1alpha1` | Domain-to-bundle relationship, configured OIDC verifier, literal claims and exact platform principal binding. Relationship changes are `TrustRegistrationEvent` records; each SPIFFE bundle endpoint fetch is `SpiffeBundleFetchEvidence`. |
 | External recipient selection | `RecipientBindingDefinition` and provider recipient profiles | Source identity and operation to one provider account, role, client, audience and resource. |
 | Signing and assertion issuance | `SigningProfileDefinition`, `IssuerProfileDefinition` | Purpose, algorithm, custody qualification and separate public discovery surface. Business key references remain separate. |
 | Execution environment and identity requirements | `ExecutionProfileDefinition` | Qualified issuer/environment artifacts, constrained attestation, allowed source identities, recipients and finite admission lease. |
@@ -95,6 +95,17 @@ or provider protocol limits. A selected profile can choose smaller limits.
 | Literal claim requirements | 32 requirements, each with at most 32 accepted values |
 | Configuration list page and opaque continuation | 100 records and 4096 bytes |
 | Execution identity admission lease | 330 seconds, also bounded by original source and operation authority |
+| SPIFFE ID naming a workload | Lowercase trust domain of at most 255 bytes, then a non-empty path with no empty, `.` or `..` segment, no trailing slash, query or fragment, at most 2048 bytes in total |
+| Issuer `max_assertion_lifetime` | 300 seconds, because a JWT-SVID lives for minutes |
+| SPIFFE trust profile `refresh_interval` | 300 seconds; `rotation_overlap` is at least three and at most five times the interval, and the profile requires an `owner` principal. OIDC trust profiles keep their own refresh policy |
+| SPIFFE bundle fetch evidence | Outcome and reason are closed enums; at most 128 added and 128 removed X.509 or JWT authority SHA-256 digests each; applied refresh interval at most 300 seconds, at most the bundle's `spiffe_refresh_hint`. Bundle bytes, certificates and keys are never carried. |
+| Attestation `workload_selectors` | At least two, one of which is a `k8s` selector valued `sa:<name>` or a `unix` selector valued `uid:<number>` |
+| Native SPIRE issuer algorithm | RS, ES or PS family; EdDSA is refused |
+
+Provider-defined lifetimes (`max_token_lifetime`, `max_session_lifetime` and
+`requested_session_duration`) are deliberately not bounded by the 300-second
+SVID ceiling. They describe provider credentials and sessions, not SVIDs, and
+the provider's own protocol sets their limits.
 
 Request parsing, authentication, key/certificate interpretation and total
 transport/concurrency bounds remain enforcement obligations. Accepting a bounded
