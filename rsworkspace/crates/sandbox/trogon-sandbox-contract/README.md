@@ -312,6 +312,23 @@ credentials. `CredentialIssueRequest` asks for a token with a
 `rotated`, and `CredentialProvider` parses its wire names. These types describe
 the broker's messages; they do not store, mint, or verify credentials.
 
+The network egress contracts carry a lease's outbound policy and what the proxy
+reports. `NetworkPolicy` is `allow_all`, `deny_all`, or `user_defined` with
+`DomainRule` entries, `IpRange` allow and deny lists in CIDR notation, `DeniedDomain` patterns, an
+`OpaqueTunnelPolicy`, and `RequestRule` entries. A `DomainPattern` is a host, a
+`*.` wildcard, or `*`, with an optional `Port`; a `Host` is a lowercase DNS name
+or an IP address in WHATWG form, and an IPv4-mapped IPv6 address reads as IPv4.
+`HttpMethod`, `HeaderName`, `HeaderValue`, and `PathPrefix` bound and normalize
+what a request rule names. `DecideRequest` and `DecideResponse` carry a
+connection verdict, and `RequestDecideRequest` and `RequestDecideResponse` carry
+a per-request one, whose `Debug` shows header names but never values.
+`EgressViolation` and `FsViolation` report a refusal, using a `SecretName` or a
+canonical `LiteralPath`. `GetSandboxDomainRequest`, `NativeHandleRequest`, and
+`SshAccessRequest` and their responses are tagged by `outcome`. Every flag on
+these types is a two-variant enum, such as `BodyTruncation`, serialized as a
+JSON boolean. These types describe messages and policy; they do not match a
+request, enforce a rule, or open a connection.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
