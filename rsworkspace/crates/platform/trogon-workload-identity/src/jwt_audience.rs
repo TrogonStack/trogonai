@@ -8,8 +8,9 @@ use crate::constants::MAX_JWT_AUDIENCE_BYTES;
 ///
 /// A bare trust domain (`example.org`, `spiffe://example.org`,
 /// `spiffe://example.org/`), a bare word such as `production` and anything
-/// without a scheme and a non-empty authority cannot be built, so a verifier can
-/// never be configured with an audience broad enough to be replayed elsewhere.
+/// without a scheme and a non-empty authority cannot be built, nor can a
+/// `spiffe` audience with a query or fragment, so a verifier can never be
+/// configured with an audience broad enough to be replayed elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JwtAudience(String);
 
@@ -33,8 +34,14 @@ impl JwtAudience {
         }
         let authority_and_path = rest.trim_end_matches('/');
         if scheme.eq_ignore_ascii_case("spiffe") {
-            if !authority_and_path.contains('/') {
+            if authority_and_path.contains(['?', '#']) {
+                return Err(JwtVerifierError::AudienceNotSpecific);
+            }
+            let Some((authority, _)) = authority_and_path.split_once('/') else {
                 return Err(JwtVerifierError::AudienceIsTrustDomain);
+            };
+            if authority.is_empty() {
+                return Err(JwtVerifierError::AudienceNotSpecific);
             }
         } else if authority_and_path.is_empty() || authority_and_path.starts_with('/') {
             return Err(JwtVerifierError::AudienceNotSpecific);

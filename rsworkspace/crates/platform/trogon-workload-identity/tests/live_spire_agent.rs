@@ -58,8 +58,8 @@ async fn a_real_agent_delivers_bundles_and_its_jwt_svid_verifies_until_the_strea
     let endpoint = UnixEndpoint::new(&format!("unix://{socket}")).expect("absolute socket path");
     let (source, driver) = JwtBundleSource::new(endpoint);
     let shutdown = CancellationToken::new();
-    let driver = tokio::spawn(driver.run(shutdown.clone()));
     assert_eq!(source.current().err(), Some(JwtBundleSourceError::NeverDelivered));
+    let driver = tokio::spawn(driver.run(shutdown.clone()));
 
     // (a) The trust domain's JWT bundle arrives through FetchJWTBundles.
     let started = Instant::now();

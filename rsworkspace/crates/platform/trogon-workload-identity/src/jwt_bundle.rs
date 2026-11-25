@@ -101,8 +101,11 @@ fn authority(raw: &RawJwk) -> Result<JwtAuthority, JwtBundleError> {
         "RSA" => {
             let modulus = component(&raw.n)?;
             let exponent = component(&raw.e)?;
-            let significant = modulus.iter().skip_while(|byte| **byte == 0).count();
-            if significant * 8 < MIN_RSA_MODULUS_BITS || exponent.is_empty() {
+            let significant = &modulus[modulus.iter().position(|byte| *byte != 0).unwrap_or(modulus.len())..];
+            let bits = significant
+                .first()
+                .map_or(0, |first| significant.len() * 8 - first.leading_zeros() as usize);
+            if bits < MIN_RSA_MODULUS_BITS || exponent.is_empty() {
                 return Err(JwtBundleError::UnsupportedKey);
             }
             (
@@ -164,7 +167,9 @@ impl JwtBundleSet {
 
     /// Builds the whole set of one Workload API update. Every bundle must be
     /// valid: a single bad entry refuses the update, so a partial set is never
-    /// trusted.
+    /// trusted. A trust domain with no JWT-SVID keys does not support JWT-SVID:
+    /// it is left out of the set, so no token of that domain verifies, and it
+    /// does not refuse the other domains of the update.
     pub(crate) fn from_wire(response: JwtBundlesWire) -> Result<Self, JwtBundleError> {
         if response.encoded_len() > MAX_CONTEXT_BYTES {
             return Err(JwtBundleError::TooLarge);
@@ -179,7 +184,11 @@ impl JwtBundleSet {
         for (name, jwks) in &response.bundles {
             let trust_domain = TrustDomain::new(name).map_err(|_| JwtBundleError::InvalidTrustDomain)?;
             let jwks = std::str::from_utf8(jwks).map_err(|_| JwtBundleError::Malformed)?;
-            set = set.with_bundle(JwtBundle::from_jwks(trust_domain, jwks)?)?;
+            match JwtBundle::from_jwks(trust_domain, jwks) {
+                Ok(bundle) => set = set.with_bundle(bundle)?,
+                Err(JwtBundleError::NoAuthorities) => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(set)
     }

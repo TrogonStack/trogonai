@@ -38,6 +38,14 @@ impl JwtBundleState {
         }
     }
 
+    /// The agent denied the stream, so the client is no longer entitled to the
+    /// bundles: the set is dropped and nothing verifies until a new delivery.
+    pub(crate) fn withdraw(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.current = None;
+        }
+    }
+
     /// The stream ended. The first loss starts the staleness clock; further
     /// failed attempts do not restart it.
     pub(crate) fn lost(&self) {

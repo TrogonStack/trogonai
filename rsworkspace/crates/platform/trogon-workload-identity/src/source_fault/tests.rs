@@ -57,6 +57,7 @@ fn transport_reasons_are_stable() {
         SourceFault::FirstResponseTimedOut,
         SourceFault::StreamEnded,
         SourceFault::StreamError,
+        SourceFault::PermissionDenied,
     ]
     .into_iter()
     .map(SourceFault::code)
@@ -68,7 +69,8 @@ fn transport_reasons_are_stable() {
             "connect_timed_out",
             "first_response_timed_out",
             "stream_ended",
-            "stream_error"
+            "stream_error",
+            "permission_denied"
         ]
     );
 }

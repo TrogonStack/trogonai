@@ -1,5 +1,7 @@
 use std::time::SystemTime;
 
+use tokio::time::Instant;
+
 use crate::PeerEvidence;
 
 /// How the token reached the verifier.
@@ -80,6 +82,10 @@ impl ConfidentialHop {
             Hop::UnixSocket { uid, pid } => Some((*uid, *pid)),
             Hop::MutualTls(_) => None,
         }
+    }
+
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        self.peer_evidence().map(PeerEvidence::deadline)
     }
 
     pub(crate) fn expires_at(&self) -> Option<SystemTime> {

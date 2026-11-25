@@ -38,7 +38,7 @@ impl<'a> ParsedToken<'a> {
         let (algorithm, key_id) = header_fields(&header)?;
         // The signature segment is checked after `alg`, so an unsigned
         // `alg: none` token is refused for its algorithm.
-        if signature.is_empty() || !is_base64url(signature) {
+        if signature.is_empty() || !is_base64url(signature) || URL_SAFE_NO_PAD.decode(signature).is_err() {
             return Err(JwtSvidError::MalformedSegment);
         }
         let claims = object(payload, JwtSvidError::MalformedClaims)?;

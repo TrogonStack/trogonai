@@ -7,3 +7,9 @@ pub(crate) enum WorkloadSourceError {
     #[error("Workload API transport is unavailable")]
     Ready(#[from] tonic::transport::Error),
 }
+
+impl WorkloadSourceError {
+    pub(crate) fn is_permission_denied(&self) -> bool {
+        matches!(self, Self::Grpc(status) if status.code() == tonic::Code::PermissionDenied)
+    }
+}

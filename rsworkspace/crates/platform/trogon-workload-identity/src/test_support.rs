@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -187,6 +187,7 @@ struct WorkloadService {
     updates: watch::Receiver<Result<WireResponse, Status>>,
     jwt_updates: watch::Receiver<JwtUpdate>,
     jwt_requests: Arc<AtomicUsize>,
+    jwt_call_denied: Arc<AtomicBool>,
     requests: Arc<AtomicUsize>,
     header_names: Arc<Mutex<BTreeSet<String>>>,
     behavior: StreamBehavior,
@@ -240,6 +241,7 @@ impl tonic::server::ServerStreamingService<WireRequest> for WorkloadService {
 struct JwtBundlesService {
     updates: watch::Receiver<JwtUpdate>,
     requests: Arc<AtomicUsize>,
+    denied: Arc<AtomicBool>,
 }
 
 type JwtBundlesStream = Pin<Box<dyn Stream<Item = Result<WireJwtBundles, Status>> + Send>>;
@@ -252,6 +254,7 @@ impl tonic::server::ServerStreamingService<WireRequest> for JwtBundlesService {
     fn call(&mut self, request: Request<WireRequest>) -> Self::Future {
         let updates = self.updates.clone();
         self.requests.fetch_add(1, Ordering::SeqCst);
+        let denied = self.denied.load(Ordering::SeqCst);
         Box::pin(async move {
             if request
                 .metadata()
@@ -260,6 +263,9 @@ impl tonic::server::ServerStreamingService<WireRequest> for JwtBundlesService {
                 != Some("true")
             {
                 return Err(Status::invalid_argument("required workload header"));
+            }
+            if denied {
+                return Err(Status::permission_denied("bundles withdrawn"));
             }
             let stream = futures::stream::unfold((updates, true), |(mut updates, mut first)| async move {
                 loop {
@@ -307,6 +313,7 @@ where
                     let service = JwtBundlesService {
                         updates: service.jwt_updates,
                         requests: service.jwt_requests,
+                        denied: service.jwt_call_denied,
                     };
                     let mut grpc = tonic::server::Grpc::new(tonic_prost::ProstCodec::default());
                     Ok(grpc.server_streaming(service, request).await)
@@ -327,6 +334,7 @@ pub struct WorkloadApiFixture {
     jwt_updates: watch::Sender<JwtUpdate>,
     requests: Arc<AtomicUsize>,
     jwt_requests: Arc<AtomicUsize>,
+    jwt_call_denied: Arc<AtomicBool>,
     header_names: Arc<Mutex<BTreeSet<String>>>,
     shutdown: CancellationToken,
     task: JoinHandle<()>,
@@ -346,12 +354,14 @@ impl WorkloadApiFixture {
         let requests = Arc::new(AtomicUsize::new(0));
         let (jwt_updates, jwt_receiver) = watch::channel(None);
         let jwt_requests = Arc::new(AtomicUsize::new(0));
+        let jwt_call_denied = Arc::new(AtomicBool::new(false));
         let header_names = Arc::new(Mutex::new(BTreeSet::new()));
         let service = WorkloadService {
             header_names: Arc::clone(&header_names),
             updates: receiver,
             jwt_updates: jwt_receiver,
             jwt_requests: Arc::clone(&jwt_requests),
+            jwt_call_denied: Arc::clone(&jwt_call_denied),
             requests: Arc::clone(&requests),
             behavior,
         };
@@ -370,6 +380,7 @@ impl WorkloadApiFixture {
             jwt_updates,
             requests,
             jwt_requests,
+            jwt_call_denied,
             header_names,
             shutdown,
             task,
@@ -410,6 +421,17 @@ impl WorkloadApiFixture {
         drop(
             self.jwt_updates
                 .send_replace(Some(Err(Status::permission_denied("bundles withdrawn")))),
+        );
+    }
+    /// Makes every later `FetchJWTBundles` call fail with `PermissionDenied`
+    /// before any stream opens.
+    pub fn deny_jwt_bundle_calls(&self) {
+        self.jwt_call_denied.store(true, Ordering::SeqCst);
+    }
+    pub fn jwt_bundles_unavailable(&self) {
+        drop(
+            self.jwt_updates
+                .send_replace(Some(Err(Status::unavailable("agent restarting")))),
         );
     }
     pub fn jwt_bundle_requests(&self) -> usize {

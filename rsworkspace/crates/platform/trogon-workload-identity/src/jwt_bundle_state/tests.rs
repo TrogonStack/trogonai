@@ -58,6 +58,17 @@ async fn failed_reconnect_attempts_do_not_restart_the_staleness_clock() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_withdrawn_set_is_gone_at_once_until_the_next_delivery() {
+    let source = idle_source();
+    source.replace(set());
+    source.withdraw();
+    assert_eq!(source.current().unwrap_err(), JwtBundleSourceError::NeverDelivered);
+    source.lost();
+    source.replace(set());
+    assert!(source.current().is_ok());
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_fresh_delivery_after_a_loss_makes_the_source_current_again() {
     let source = idle_source();
     source.replace(set());

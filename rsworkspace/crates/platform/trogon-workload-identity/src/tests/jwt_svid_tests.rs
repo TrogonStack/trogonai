@@ -18,6 +18,7 @@ use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 use super::*;
 use crate::jwt_algorithm::JwtSvidAlgorithm as Alg;
 use crate::jwt_authority::{AuthorityKey, AuthorityKind, JwtAuthority};
+use crate::jwt_bundles_wire::JwtBundlesWire;
 
 pub(crate) const NOW: u64 = 1_700_000_000;
 pub(crate) const SUB: &str = "spiffe://example.test/service/api";
@@ -134,10 +135,14 @@ pub(crate) fn audience(value: &str) -> JwtAudience {
 }
 
 fn peer_evidence(expires_at: SystemTime) -> PeerEvidence {
+    peer_evidence_until(expires_at, tokio::time::Instant::now() + Duration::from_secs(3600))
+}
+
+fn peer_evidence_until(expires_at: SystemTime, deadline: tokio::time::Instant) -> PeerEvidence {
     PeerEvidence {
         application_id: ApplicationId::new("reports").unwrap(),
         expires_at,
-        deadline: tokio::time::Instant::now() + Duration::from_secs(3600),
+        deadline,
         spiffe_id: spiffe::SpiffeId::new("spiffe://example.test/service/client").unwrap(),
         leaf_sha256: [7; 32],
     }
@@ -1144,4 +1149,182 @@ fn a_key_whose_backend_does_not_match_the_algorithm_never_verifies() {
         ..p521_authority(&p521_key("p521-1"))
     };
     assert!(!p521_for_es256.verifies(Alg::Es256, "header.claims", "AAAA"));
+}
+
+#[test]
+fn a_spiffe_audience_needs_an_authority_and_carries_no_query_or_fragment() {
+    for value in [
+        "spiffe://example.test?scope=/gateway",
+        "spiffe://example.test/gateway?scope=a",
+        "spiffe://example.test/gateway#part",
+        "spiffe://example.test#/gateway",
+        "spiffe:///reports",
+    ] {
+        assert_eq!(
+            JwtAudience::new(value).unwrap_err(),
+            JwtVerifierError::AudienceNotSpecific,
+            "{value}"
+        );
+    }
+}
+
+fn rsa_modulus_jwk(first: u8, length: usize, padding: usize) -> Value {
+    let mut modulus = vec![0; padding];
+    modulus.push(first);
+    modulus.resize(padding + length, 0xff);
+    json!({
+        "kty": "RSA", "use": "jwt-svid", "kid": "r",
+        "n": URL_SAFE_NO_PAD.encode(modulus), "e": "AQAB",
+    })
+}
+
+#[test]
+fn an_rsa_modulus_is_counted_in_bits_not_bytes() {
+    let td = || TrustDomain::new("example.test").unwrap();
+    let from = |jwk: Value| JwtBundle::from_jwks(td(), &json!({"keys": [jwk]}).to_string());
+    for (first, length, padding, accepted) in [
+        (0x80, 256, 0, true),
+        (0x80, 256, 3, true),
+        (0xff, 257, 0, true),
+        (0x7f, 256, 0, false),
+        (0x7f, 256, 2, false),
+        (0x01, 256, 0, false),
+        (0x00, 256, 0, false),
+    ] {
+        let result = from(rsa_modulus_jwk(first, length, padding));
+        if accepted {
+            assert!(result.is_ok(), "{first:#x} {length} {padding}");
+        } else {
+            assert_eq!(
+                result.unwrap_err(),
+                JwtBundleError::UnsupportedKey,
+                "{first:#x} {length}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_trust_domain_without_jwt_keys_does_not_refuse_the_rest_of_the_update_and_never_verifies() {
+    let key = ec_key("ec-1");
+    let update = JwtBundlesWire {
+        bundles: [
+            (
+                "example.test".to_owned(),
+                json!({"keys": [key.jwk.clone()]}).to_string().into_bytes(),
+            ),
+            ("foreign.test".to_owned(), br#"{"keys":[]}"#.to_vec()),
+        ]
+        .into(),
+    };
+    let set = JwtBundleSet::from_wire(update).unwrap();
+    assert_eq!(
+        set.trust_domains().map(ToString::to_string).collect::<Vec<_>>(),
+        ["example.test"]
+    );
+    let verifier = verifier_with(set);
+    assert!(verifier.verify(&ec_token(&key, &claims()), &hop()).is_ok());
+    let foreign = json!({"sub": "spiffe://foreign.test/service/api", "aud": [AUD], "exp": NOW + 120});
+    assert_eq!(
+        refused(&verifier, &ec_token(&key, &foreign)),
+        JwtSvidError::UnknownTrustDomain
+    );
+}
+
+#[test]
+fn an_update_where_no_trust_domain_supports_jwt_svid_clears_the_set() {
+    let update = JwtBundlesWire {
+        bundles: [("foreign.test".to_owned(), br#"{"keys":[]}"#.to_vec())].into(),
+    };
+    assert!(JwtBundleSet::from_wire(update).unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_mutual_tls_hop_is_refused_once_its_monotonic_deadline_passes_whatever_the_wall_clock_says() {
+    let key = ec_key("ec-1");
+    let verifier = verifier_for(&[&key]);
+    let token = ec_token(&key, &claims());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let hop = ConfidentialHop::mutual_tls(&peer_evidence_until(
+        UNIX_EPOCH + Duration::from_secs(NOW + 3600),
+        deadline,
+    ));
+    assert!(verifier.verify(&token, &hop).is_ok());
+    tokio::time::advance(Duration::from_secs(10)).await;
+    assert_eq!(verifier.verify(&token, &hop).unwrap_err(), JwtSvidError::HopExpired);
+}
+
+#[derive(Debug)]
+struct SteppingClock(std::sync::atomic::AtomicUsize);
+
+impl JwtClock for SteppingClock {
+    fn now(&self) -> SystemTime {
+        let reads = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u64;
+        UNIX_EPOCH + Duration::from_secs(NOW + reads * 500)
+    }
+}
+
+#[test]
+fn the_hop_and_the_token_are_judged_at_one_reading_of_the_clock() {
+    let key = ec_key("ec-1");
+    let clock = Arc::new(SteppingClock(std::sync::atomic::AtomicUsize::new(0)));
+    let verifier = verifier_for(&[&key]).with_clock(clock.clone());
+    assert!(verifier.verify(&ec_token(&key, &claims()), &hop()).is_ok());
+    assert_eq!(clock.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+fn verifier_at(key: &TestKey, at: Duration) -> JwtSvidVerifier {
+    verifier_for(&[key]).with_clock(Arc::new(FixedClock(UNIX_EPOCH + at)))
+}
+
+#[test]
+fn a_subsecond_leeway_is_honored_at_expiry() {
+    let key = ec_key("ec-1");
+    let token = ec_token(&key, &json!({"sub": SUB, "aud": [AUD], "exp": NOW}));
+    let leeway = Duration::from_millis(500);
+    let at = |millis| Duration::from_secs(NOW) + Duration::from_millis(millis);
+    let verify = |millis| {
+        verifier_at(&key, at(millis))
+            .with_leeway(leeway)
+            .unwrap()
+            .verify(&token, &hop())
+    };
+    assert!(verify(250).is_ok());
+    assert_eq!(verify(500).unwrap_err(), JwtSvidError::Expired);
+}
+
+#[test]
+fn a_fractional_not_before_is_not_rounded_down() {
+    let key = ec_key("ec-1");
+    let token = ec_token(
+        &key,
+        &json!({"sub": SUB, "aud": [AUD], "exp": NOW + 120, "nbf": NOW as f64 + 0.75}),
+    );
+    let at = |millis| Duration::from_secs(NOW) + Duration::from_millis(millis);
+    let verify = |millis, leeway| {
+        verifier_at(&key, at(millis))
+            .with_leeway(leeway)
+            .unwrap()
+            .verify(&token, &hop())
+    };
+    assert_eq!(verify(250, Duration::ZERO).unwrap_err(), JwtSvidError::NotYetValid);
+    assert!(verify(750, Duration::ZERO).is_ok());
+    assert!(verify(250, Duration::from_millis(500)).is_ok());
+}
+
+#[test]
+fn a_signature_segment_that_is_not_a_base64url_encoding_is_a_malformed_segment() {
+    let key = ec_key("ec-1");
+    let verifier = verifier_for(&[&key]);
+    let token = ec_token(&key, &claims());
+    let (signing_input, _) = token.rsplit_once('.').unwrap();
+    for signature in ["A", "AAAAA", "AB"] {
+        assert_eq!(
+            refused(&verifier, &format!("{signing_input}.{signature}")),
+            JwtSvidError::MalformedSegment,
+            "{signature}"
+        );
+    }
+    let unsigned = format!("{}.{}.A", b64(&json!({"alg": "none"})), b64(&claims()));
+    assert_eq!(refused(&verifier, &unsigned), JwtSvidError::AlgorithmNotAllowed);
 }

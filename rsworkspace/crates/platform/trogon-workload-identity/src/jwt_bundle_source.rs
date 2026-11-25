@@ -11,7 +11,8 @@ use crate::{JwtBundleDriver, JwtBundleSet, JwtBundleSourceError, UnixEndpoint};
 /// no longer trusted. An update that fails validation is refused and the last
 /// good set is kept. The set is trusted while the stream is live, and for
 /// [`JWT_BUNDLE_MAX_STALENESS`] after it is lost; after that, and before the
-/// first delivery, [`current`](Self::current) fails closed.
+/// first delivery, [`current`](Self::current) fails closed. A `PermissionDenied`
+/// answer from the agent drops the set immediately, until a later delivery.
 #[derive(Clone)]
 pub struct JwtBundleSource {
     pub(crate) state: Arc<JwtBundleState>,

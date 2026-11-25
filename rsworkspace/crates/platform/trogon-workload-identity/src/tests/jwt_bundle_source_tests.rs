@@ -97,7 +97,7 @@ async fn an_invalid_update_is_refused_and_the_last_good_set_is_kept() {
     fixture.replace_jwt_bundles(&[("example.test", &jwks(&[&good]))]);
     until(|| verdict(&verifier, &good).is_ok()).await;
     let before = fixture.jwt_bundle_requests();
-    fixture.replace_jwt_bundles(&[("example.test", &jwks(&[])), ("other.test", jwks(&[&other]).as_str())]);
+    fixture.replace_jwt_bundles(&[("example.test", "not json"), ("other.test", jwks(&[&other]).as_str())]);
     until(|| fixture.jwt_bundle_requests() > before).await;
     assert!(
         verdict(&verifier, &good).is_ok(),
@@ -113,7 +113,7 @@ async fn an_invalid_update_is_refused_and_the_last_good_set_is_kept() {
 }
 
 #[tokio::test]
-async fn a_denied_stream_keeps_the_last_set_and_reconnects() {
+async fn a_denied_stream_withdraws_the_set_at_once_and_a_later_delivery_restores_it() {
     let key = ec_key("a");
     let fixture = WorkloadApiFixture::start(Vec::new()).await;
     let (source, shutdown, task) = running_source(&fixture).await;
@@ -122,6 +122,42 @@ async fn a_denied_stream_keeps_the_last_set_and_reconnects() {
     until(|| verdict(&verifier, &key).is_ok()).await;
     let before = fixture.jwt_bundle_requests();
     fixture.jwt_bundles_permission_denied();
+    until(|| verdict(&verifier, &key) == Err(JwtSvidError::BundlesNotDelivered)).await;
+    until(|| fixture.jwt_bundle_requests() > before + 1).await;
+    assert_eq!(verdict(&verifier, &key), Err(JwtSvidError::BundlesNotDelivered));
+    fixture.replace_jwt_bundles(&[("example.test", &jwks(&[&key]))]);
+    until(|| verdict(&verifier, &key).is_ok()).await;
+    shutdown.cancel();
+    task.await.unwrap();
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn a_call_denied_before_any_stream_opens_withdraws_the_set_too() {
+    let key = ec_key("a");
+    let fixture = WorkloadApiFixture::start(Vec::new()).await;
+    let (source, shutdown, task) = running_source(&fixture).await;
+    let verifier = verifier_over(source);
+    fixture.replace_jwt_bundles(&[("example.test", &jwks(&[&key]))]);
+    until(|| verdict(&verifier, &key).is_ok()).await;
+    fixture.deny_jwt_bundle_calls();
+    fixture.jwt_bundles_unavailable();
+    until(|| verdict(&verifier, &key) == Err(JwtSvidError::BundlesNotDelivered)).await;
+    shutdown.cancel();
+    task.await.unwrap();
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn a_stream_that_fails_for_another_reason_keeps_the_last_set_and_reconnects() {
+    let key = ec_key("a");
+    let fixture = WorkloadApiFixture::start(Vec::new()).await;
+    let (source, shutdown, task) = running_source(&fixture).await;
+    let verifier = verifier_over(source);
+    fixture.replace_jwt_bundles(&[("example.test", &jwks(&[&key]))]);
+    until(|| verdict(&verifier, &key).is_ok()).await;
+    let before = fixture.jwt_bundle_requests();
+    fixture.jwt_bundles_unavailable();
     until(|| fixture.jwt_bundle_requests() > before).await;
     assert!(verdict(&verifier, &key).is_ok());
     shutdown.cancel();
@@ -168,8 +204,8 @@ fn an_update_is_refused_whole_when_any_entry_is_invalid() {
     for (update, expected) in [
         (wire(&[]), JwtBundleError::NoBundles),
         (
-            wire(&[("example.test", good.clone()), ("other.test", jwks(&[]))]),
-            JwtBundleError::NoAuthorities,
+            wire(&[("example.test", good.clone()), ("other.test", "not json".to_owned())]),
+            JwtBundleError::Malformed,
         ),
         (
             wire(&[("example.test", good.clone()), ("not a domain", good.clone())]),

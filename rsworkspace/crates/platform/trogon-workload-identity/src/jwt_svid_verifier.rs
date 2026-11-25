@@ -18,7 +18,7 @@
 //! longer than [`JWT_BUNDLE_MAX_STALENESS`](crate::constants::JWT_BUNDLE_MAX_STALENESS).
 //!
 //! 0. The token arrived over a [`ConfidentialHop`]: an authenticated mutual-TLS
-//!    peer whose evidence has not expired, or a local Unix domain socket peer.
+//!    peer whose evidence has not expired, by wall clock and by its monotonic deadline, or a local Unix domain socket peer.
 //!    `verify` cannot be called without one, and the hop kind is recorded in the
 //!    [`VerifiedJwtSvid`].
 //! 1. JWS compact serialization only: exactly three base64url segments, never
@@ -40,6 +40,7 @@
 //!    replay it to the others.
 //! 6. `exp` is present and in the future (within a bounded leeway), and no
 //!    further ahead than the lifetime ceiling; `nbf`, when present, has passed.
+//!    Both are judged against one reading of the clock, fractions included.
 //!
 //! All nine algorithms verify. `jsonwebtoken` has no P-521 support, so ES512
 //! is verified with aws-lc-rs (`ECDSA_P521_SHA512_FIXED`, the 132-byte `R || S`
@@ -52,6 +53,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+use tokio::time::Instant;
 
 use crate::constants::{
     DEFAULT_JWT_SVID_LEEWAY, DEFAULT_JWT_SVID_MAX_LIFETIME, MAX_JWT_SVID_LEEWAY, MAX_JWT_SVID_LIFETIME_CEILING,
@@ -113,9 +115,9 @@ impl JwtSvidVerifier {
     }
 
     fn check(&self, token: &str, hop: &ConfidentialHop) -> Result<VerifiedJwtSvid, JwtSvidError> {
-        if hop
-            .expires_at()
-            .is_some_and(|expires_at| expires_at <= self.clock.now())
+        let now = self.clock.now();
+        if hop.expires_at().is_some_and(|expires_at| expires_at <= now)
+            || hop.deadline().is_some_and(|deadline| deadline <= Instant::now())
         {
             return Err(JwtSvidError::HopExpired);
         }
@@ -143,7 +145,7 @@ impl JwtSvidVerifier {
         }
 
         self.check_audience(parsed.claims.get("aud"))?;
-        let expires_at = self.check_times(&parsed)?;
+        let expires_at = self.check_times(&parsed, now)?;
         Ok(VerifiedJwtSvid::new(
             workload_id,
             self.audience.as_str().to_owned(),
@@ -175,29 +177,25 @@ impl JwtSvidVerifier {
         }
     }
 
-    fn check_times(&self, parsed: &ParsedToken<'_>) -> Result<SystemTime, JwtSvidError> {
-        let now = self
-            .clock
-            .now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |elapsed| elapsed.as_secs());
-        let leeway = self.leeway.as_secs();
+    fn check_times(&self, parsed: &ParsedToken<'_>, now: SystemTime) -> Result<SystemTime, JwtSvidError> {
+        let now = now.duration_since(UNIX_EPOCH).unwrap_or_default();
         let exp = match parsed.claims.get("exp") {
             None | Some(Value::Null) => return Err(JwtSvidError::MissingExpiry),
-            Some(value) => numeric_date(value)?,
+            // Rounded down so a fractional `exp` is never extended.
+            Some(value) => Duration::from_secs(numeric_date(value)?.as_secs()),
         };
-        if exp.saturating_add(leeway) <= now {
+        if exp.saturating_add(self.leeway) <= now {
             return Err(JwtSvidError::Expired);
         }
-        if exp.saturating_sub(now) > self.max_lifetime.as_secs() {
+        if exp.saturating_sub(now) > self.max_lifetime {
             return Err(JwtSvidError::LifetimeTooLong);
         }
         if let Some(value) = parsed.claims.get("nbf")
-            && numeric_date(value)? > now.saturating_add(leeway)
+            && numeric_date(value)? > now.saturating_add(self.leeway)
         {
             return Err(JwtSvidError::NotYetValid);
         }
-        Ok(UNIX_EPOCH + Duration::from_secs(exp))
+        Ok(UNIX_EPOCH + exp)
     }
 }
 
@@ -227,17 +225,18 @@ fn candidates<'a>(bundle: &'a JwtBundle, parsed: &ParsedToken<'_>) -> Result<Vec
     }
 }
 
-/// A NumericDate in whole seconds, rounded down so a fractional `exp` is never
-/// extended.
-fn numeric_date(value: &Value) -> Result<u64, JwtSvidError> {
+/// A NumericDate with its fraction, as time since the epoch.
+fn numeric_date(value: &Value) -> Result<Duration, JwtSvidError> {
     let Value::Number(number) = value else {
         return Err(JwtSvidError::MalformedClaims);
     };
     if let Some(seconds) = number.as_u64() {
-        return Ok(seconds);
+        return Ok(Duration::from_secs(seconds));
     }
     match number.as_f64() {
-        Some(seconds) if seconds.is_finite() && seconds >= 0.0 => Ok(seconds.floor() as u64),
+        Some(seconds) if seconds.is_finite() && seconds >= 0.0 => {
+            Ok(Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX))
+        }
         _ => Err(JwtSvidError::MalformedClaims),
     }
 }
