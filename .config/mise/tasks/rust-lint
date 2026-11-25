@@ -13,6 +13,8 @@ set -o pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 RSWS="$ROOT/rsworkspace"
+# shellcheck source=../lib/rustup-path.sh
+source "$ROOT/.config/mise/lib/rustup-path.sh"
 if ! cd "$RSWS"; then
     echo "Unable to enter workspace: $RSWS" >&2
     exit 1
@@ -108,7 +110,7 @@ step "policy-lint-tests" bash -c 'cd dylints/trogonai_dylint && rustup run "$1" 
 
 # Mirrors CI 'Run repo Rust policy lints': note `--all-targets` so test-target
 # violations (inline test modules, function-local `use`, ...) are caught too.
-step "policy-lints" env -u RUSTUP_TOOLCHAIN RUSTC_WRAPPER="" CARGO_BUILD_RUSTC_WRAPPER="" rustup run "$DYLINT_TOOLCHAIN" \
+step "policy-lints" env -u RUSTUP_TOOLCHAIN PATH="$(rustup_proxy_path)" RUSTC_WRAPPER="" CARGO_BUILD_RUSTC_WRAPPER="" rustup run "$DYLINT_TOOLCHAIN" \
     cargo dylint --all --workspace --no-deps -- --all-features --all-targets
 
 # 5. clippy: mirrors CI 'Run clippy'.

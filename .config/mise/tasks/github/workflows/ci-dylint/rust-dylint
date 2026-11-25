@@ -3,9 +3,13 @@
 set -euo pipefail
 
 ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+# shellcheck source=../../../../lib/rustup-path.sh
+source "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/.config/mise/lib/rustup-path.sh"
 cd "$ROOT/rsworkspace"
 
 unset RUSTUP_TOOLCHAIN
+PATH="$(rustup_proxy_path)"
+export PATH
 
 # A caching rustc wrapper replays the compile without invoking the linker, so
 # `dylint-link` never makes the `lib<name>@<toolchain>.dylib` copy dylint looks for.
