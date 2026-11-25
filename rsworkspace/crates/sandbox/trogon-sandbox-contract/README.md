@@ -271,6 +271,26 @@ these types is a two-variant enum, such as `BodyTruncation`, serialized as a
 JSON boolean. These types describe messages and policy; they do not match a
 request, enforce a rule, or open a connection.
 
+The filesystem policy contracts carry what a sandbox may read and write. An
+`FsPolicy` holds six lists of `FsPathEntry`: `deny_read`, `credential_deny_read`,
+`allow_read_within_deny`, `own_allow_within_deny`, `allow_write`, and
+`deny_write`. Each list holds at most 1024 entries. An entry is tagged by `kind`
+as `literal`, a `LiteralPath` with an optional `DirectoryMarker`, or `glob`, a
+`GlobPattern`. A `GlobPattern` is absolute, has at least one wildcard, and
+refuses a `..` that follows a wildcard segment. It is a JSON string, or an
+object with an `anchor` and a `tail` when the anchor is a plain name. A deny
+glob that ends in a separator is refused, because it could match nothing. These
+types describe the policy; they do not decide whether a path is allowed.
+
+`PlatformOptions` carries the opt-ins only some platforms can enforce, in
+`MacosOptions`, `LinuxOptions`, `FilesystemOptions`, and `ContainerOverrides`,
+plus a list of git safe directories. Every group is left out of the wire when it
+holds its defaults. Each flag is a two-variant enum, such as `PtyAccess`,
+serialized as a JSON boolean. A `MachServiceName` allows only a single trailing
+`*`. `ContainerOverrides` bounds a `PidsLimit` and a `ShmSizeMib`, and an
+`ExtraCapability` is an upper case name that is never on the forbidden list.
+A `MandatoryDenySearchDepth` is from 1 to 10.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
