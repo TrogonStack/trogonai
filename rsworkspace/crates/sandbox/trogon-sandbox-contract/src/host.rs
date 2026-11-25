@@ -14,7 +14,10 @@ use crate::{DomainName, HostError};
 /// address in brackets.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub enum Host {
+pub struct Host(Kind);
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+enum Kind {
     Domain(DomainName),
     Ip(IpAddr),
 }
@@ -29,16 +32,41 @@ impl Host {
             return Err(invalid());
         }
         if input.contains(':') && !input.starts_with('[') {
-            let ip = input.parse::<Ipv6Addr>().map_err(|_| invalid())?;
+            let ip = input.parse::<Ipv6Addr>().map_err(|source| HostError::InvalidIpv6 {
+                input: input.to_string(),
+                source,
+            })?;
             return Ok(Self::from(IpAddr::V6(ip)));
         }
-        match url::Host::parse(input).map_err(|_| invalid())? {
-            url::Host::Ipv4(ip) => Ok(Self::Ip(IpAddr::V4(ip))),
+        let parsed = url::Host::parse(input).map_err(|source| HostError::Unparsable {
+            input: input.to_string(),
+            source,
+        })?;
+        match parsed {
+            url::Host::Ipv4(ip) => Ok(Self(Kind::Ip(IpAddr::V4(ip)))),
             url::Host::Ipv6(ip) => Ok(Self::from(IpAddr::V6(ip))),
             url::Host::Domain(name) => {
                 let name = name.strip_suffix('.').unwrap_or(&name);
-                DomainName::new(name).map(Self::Domain).ok_or_else(invalid)
+                DomainName::new(name)
+                    .map(|name| Self(Kind::Domain(name)))
+                    .ok_or_else(invalid)
             }
+        }
+    }
+
+    /// The domain name, when the host is one.
+    pub fn as_domain(&self) -> Option<&DomainName> {
+        match &self.0 {
+            Kind::Domain(name) => Some(name),
+            Kind::Ip(_) => None,
+        }
+    }
+
+    /// The IP address in canonical form, when the host is one.
+    pub fn as_ip(&self) -> Option<IpAddr> {
+        match &self.0 {
+            Kind::Domain(_) => None,
+            Kind::Ip(ip) => Some(*ip),
         }
     }
 }
@@ -46,8 +74,8 @@ impl Host {
 impl From<IpAddr> for Host {
     fn from(ip: IpAddr) -> Self {
         match ip {
-            IpAddr::V6(v6) => Self::Ip(v6.to_ipv4_mapped().map_or(ip, IpAddr::V4)),
-            v4 => Self::Ip(v4),
+            IpAddr::V6(v6) => Self(Kind::Ip(v6.to_ipv4_mapped().map_or(ip, IpAddr::V4))),
+            v4 => Self(Kind::Ip(v4)),
         }
     }
 }
@@ -76,10 +104,10 @@ impl From<Host> for String {
 
 impl fmt::Display for Host {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Domain(name) => name.fmt(formatter),
-            Self::Ip(IpAddr::V6(ip)) => write!(formatter, "[{ip}]"),
-            Self::Ip(ip) => ip.fmt(formatter),
+        match &self.0 {
+            Kind::Domain(name) => name.fmt(formatter),
+            Kind::Ip(IpAddr::V6(ip)) => write!(formatter, "[{ip}]"),
+            Kind::Ip(ip) => ip.fmt(formatter),
         }
     }
 }

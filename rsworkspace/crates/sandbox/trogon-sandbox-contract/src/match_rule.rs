@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{HeaderMatcher, QueryMatcher, StringMatcher};
+use crate::{HeaderMatcher, HttpMethod, QueryMatcher, StringMatcher};
 
 /// Matcher DSL controlling which requests on a domain get transformed or forwarded versus passed through untouched.
 ///
@@ -12,7 +12,7 @@ pub struct MatchRule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<StringMatcher>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub methods: Vec<String>,
+    pub methods: Vec<HttpMethod>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub query_string: Vec<QueryMatcher>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

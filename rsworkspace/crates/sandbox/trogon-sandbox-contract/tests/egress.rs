@@ -4,10 +4,10 @@ use std::time::{Duration, UNIX_EPOCH};
 use serde_json::error::Category::Data;
 use serde_json::json;
 use trogon_sandbox_contract::{
-    AddressDenialClass, BodyTruncation, DecideMethod, DecideRequest, DecideResponse, EgressDecision, EgressViolation,
-    EgressViolationReason, FsOperation, FsViolation, Host, HttpMethod, LeaseId, LiteralPath, LiteralPathError, Port,
-    ProxyUid, RefusedRequest, RequestDecideBody, RequestDecideRequest, RequestDecideResponse, SecretName,
-    SecretNameError, SocketMark, UnsupportedSigv4Shape, VerdictScope,
+    AddressDenialClass, Base64Data, BodyTruncation, DecideMethod, DecideRequest, DecideResponse, EgressDecision,
+    EgressViolation, EgressViolationReason, FsOperation, FsViolation, Host, HttpMethod, LeaseId, LiteralPath,
+    LiteralPathError, Port, ProxyUid, RefusedRequest, RequestDecideBody, RequestDecideRequest, RequestDecideResponse,
+    SecretName, SecretNameError, SocketMark, UnsupportedSigv4Shape, VerdictScope,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -203,10 +203,49 @@ fn a_refused_request_cuts_the_query_and_fragment() {
     ];
     for (url, target) in cases {
         let refused = RefusedRequest::new("POST", url, "why");
-        assert_eq!(refused.method, "POST");
-        assert_eq!(refused.target, target);
-        assert_eq!(refused.reason, "why");
+        assert_eq!(refused.method(), "POST");
+        assert_eq!(refused.target(), target);
+        assert_eq!(refused.reason(), "why");
     }
+}
+
+#[test]
+fn a_refused_request_is_cut_on_the_wire_too() -> TestResult {
+    let wire = json!({"method": "GET", "target": "https://a.test/p?token=secret#f", "reason": "why"});
+    let read = serde_json::from_value::<RefusedRequest>(wire.clone())?;
+    assert_eq!(read.target(), "https://a.test/p?\u{2026}");
+    assert_eq!(
+        read,
+        RefusedRequest::new("GET", "https://a.test/p?token=secret#f", "why")
+    );
+    assert_eq!(
+        serde_json::to_value(&read)?,
+        json!({"method": "GET", "target": "https://a.test/p?\u{2026}", "reason": "why"})
+    );
+    assert_eq!(serde_json::from_str::<RefusedRequest>(&wire.to_string())?, read);
+    rejects::<RefusedRequest>(json!({"method": "GET"}))
+}
+
+#[test]
+fn a_body_is_standard_base64() -> TestResult {
+    let data = Base64Data::new("eHl6")?;
+    assert_eq!(data.as_str(), "eHl6");
+    assert_eq!(data.to_string(), "eHl6");
+    assert_eq!("eHl6".parse::<Base64Data>()?, data);
+    assert_eq!(Base64Data::try_from("eHl6".to_string())?, data);
+    assert_eq!(String::from(data), "eHl6");
+    assert_eq!(Base64Data::new("")?.as_str(), "");
+    for input in ["a", "eHl6=", "e Hl6", "eHl-", "YQ"] {
+        let error = error_of(Base64Data::new(input))?;
+        assert_eq!(
+            error.to_string(),
+            "value must be standard base64 with padding",
+            "{input:?}"
+        );
+        assert!(std::error::Error::source(&error).is_some(), "{input:?}");
+        rejects::<RequestDecideBody>(json!({"data": input}))?;
+    }
+    Ok(())
 }
 
 #[test]
@@ -462,7 +501,7 @@ fn a_request_decide_request_omits_empty_parts() -> TestResult {
         query: Some("a=1".to_string()),
         headers: BTreeMap::from([("accept".to_string(), vec!["a".to_string(), "b".to_string()])]),
         body: Some(RequestDecideBody {
-            data: "xyz".to_string(),
+            data: Base64Data::new("eHl6")?,
             cut: BodyTruncation::Truncated,
         }),
         ..minimal
@@ -477,7 +516,7 @@ fn a_request_decide_request_omits_empty_parts() -> TestResult {
         "path": "/",
         "query": "a=1",
         "headers": {"accept": ["a", "b"]},
-        "body": {"data": "xyz", "cut": true},
+        "body": {"data": "eHl6", "cut": true},
     });
     assert_eq!(serde_json::to_value(&full)?, wire);
     assert_eq!(serde_json::from_str::<RequestDecideRequest>(&wire.to_string())?, full);
@@ -487,20 +526,20 @@ fn a_request_decide_request_omits_empty_parts() -> TestResult {
 #[test]
 fn a_body_marks_truncation_only_when_cut() -> TestResult {
     let complete = RequestDecideBody {
-        data: "a".to_string(),
+        data: Base64Data::new("YQ==")?,
         cut: BodyTruncation::Complete,
     };
-    assert_eq!(serde_json::to_value(&complete)?, json!({"data": "a"}));
+    assert_eq!(serde_json::to_value(&complete)?, json!({"data": "YQ=="}));
     assert_eq!(
-        serde_json::from_value::<RequestDecideBody>(json!({"data": "a"}))?,
+        serde_json::from_value::<RequestDecideBody>(json!({"data": "YQ=="}))?,
         complete
     );
     assert_eq!(
-        serde_json::from_value::<RequestDecideBody>(json!({"data": "a", "cut": false}))?,
+        serde_json::from_value::<RequestDecideBody>(json!({"data": "YQ==", "cut": false}))?,
         complete
     );
     assert_eq!(
-        serde_json::from_value::<RequestDecideBody>(json!({"data": "a", "cut": true}))?.cut,
+        serde_json::from_value::<RequestDecideBody>(json!({"data": "YQ==", "cut": true}))?.cut,
         BodyTruncation::Truncated
     );
     assert!(BodyTruncation::default().is_complete());
@@ -508,8 +547,8 @@ fn a_body_marks_truncation_only_when_cut() -> TestResult {
     assert_eq!(BodyTruncation::from(true), BodyTruncation::Truncated);
     assert!(bool::from(BodyTruncation::Truncated));
     assert!(!bool::from(BodyTruncation::Complete));
-    rejects::<RequestDecideBody>(json!({"data": "a", "extra": 1}))?;
-    rejects::<RequestDecideBody>(json!({"data": "a", "cut": "yes"}))
+    rejects::<RequestDecideBody>(json!({"data": "YQ==", "extra": 1}))?;
+    rejects::<RequestDecideBody>(json!({"data": "YQ==", "cut": "yes"}))
 }
 
 #[test]

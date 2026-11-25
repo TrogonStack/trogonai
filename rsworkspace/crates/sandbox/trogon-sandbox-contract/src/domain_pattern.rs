@@ -56,9 +56,13 @@ impl DomainPattern {
             if suffix.contains('*') {
                 return Err(invalid());
             }
-            return match Host::new(suffix) {
-                Ok(Host::Domain(name)) if name.as_str().contains('.') => Ok(Self {
-                    target: PatternTarget::Subdomains(name),
+            let host = Host::new(suffix).map_err(|source| DomainPatternError::InvalidWildcardHost {
+                input: input.to_string(),
+                source,
+            })?;
+            return match host.as_domain() {
+                Some(name) if name.as_str().contains('.') => Ok(Self {
+                    target: PatternTarget::Subdomains(name.clone()),
                     port,
                 }),
                 _ => Err(invalid()),
@@ -70,7 +74,7 @@ impl DomainPattern {
         }
 
         let host = Host::new(&host_part)?;
-        if let Host::Domain(name) = &host
+        if let Some(name) = host.as_domain()
             && !name.as_str().contains('.')
             && name.as_str() != "localhost"
         {

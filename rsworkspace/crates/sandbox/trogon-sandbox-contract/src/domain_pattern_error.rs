@@ -13,6 +13,12 @@ pub enum DomainPatternError {
     Port(#[from] PortError),
     #[error("wildcard in '{0}' must be a single leading '*.' with at least two labels after it")]
     InvalidWildcard(String),
+    #[error("wildcard in '{input}' must be a single leading '*.' with at least two labels after it")]
+    InvalidWildcardHost {
+        input: String,
+        #[source]
+        source: HostError,
+    },
     #[error("bare '*' is only allowed in denied domains")]
     BareWildcardNotAllowed,
     #[error("'{0}' must contain a dot or be 'localhost'")]

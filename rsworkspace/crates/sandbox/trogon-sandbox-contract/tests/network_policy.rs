@@ -2,8 +2,9 @@ use serde_json::error::Category::Data;
 use serde_json::json;
 use trogon_sandbox_contract::{
     CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, CredentialTransform, DeniedDomain,
-    DomainPattern, DomainRule, DomainRuleAction, HeaderMatcher, IpRange, MatchRule, NetworkPolicy, OpaqueTunnelPolicy,
-    PullSecretId, QueryMatcher, RequestForward, RequestRule, RequestRuleAction, ServiceAccountId, StringMatcher,
+    DomainPattern, DomainRule, DomainRuleAction, ForwardUrl, ForwardUrlError, HeaderMatcher, HeaderName, HttpMethod,
+    IpRange, MatchRule, NetworkPolicy, OpaqueTunnelPolicy, PullSecretId, QueryMatcher, RequestForward, RequestRule,
+    RequestRuleAction, ServiceAccountId, StringMatcher,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -70,7 +71,7 @@ fn a_full_user_defined_policy_round_trips() -> TestResult {
             DomainRule {
                 domain: DomainPattern::new("api.example.com:443")?,
                 action: DomainRuleAction::Forward(RequestForward {
-                    forward_url: "https://proxy.example.com".to_string(),
+                    forward_url: ForwardUrl::new("https://proxy.example.com")?,
                     match_rules: Vec::new(),
                     ttl_seconds: 30,
                 }),
@@ -186,13 +187,13 @@ fn a_transform_rule_carries_a_credential_and_an_injection() -> TestResult {
     let action = DomainRuleAction::Transform(CredentialTransform {
         match_rules: vec![MatchRule {
             path: Some(StringMatcher::StartsWith("/v1".to_string())),
-            methods: vec!["GET".to_string()],
+            methods: vec![HttpMethod::new("GET")?],
             query_string: vec![QueryMatcher {
                 key: "token".to_string(),
                 value: StringMatcher::Regex("^a+$".to_string()),
             }],
             headers: vec![HeaderMatcher {
-                name: "x-trace".to_string(),
+                name: HeaderName::new("x-trace")?,
                 value: StringMatcher::Exact("on".to_string()),
             }],
         }],
@@ -200,7 +201,7 @@ fn a_transform_rule_carries_a_credential_and_an_injection() -> TestResult {
             requester: Some(ServiceAccountId::new("svc-1")),
             ..credential_request()
         },
-        injection: CredentialInjection::Header("Authorization".to_string()),
+        injection: CredentialInjection::Header(HeaderName::new("Authorization")?),
     });
     let wire = json!({"transform": {
         "match_rules": [{
@@ -216,7 +217,7 @@ fn a_transform_rule_carries_a_credential_and_an_injection() -> TestResult {
             "ttl_seconds": 60,
             "requester": "svc-1",
         },
-        "injection": {"header": "Authorization"},
+        "injection": {"header": "authorization"},
     }});
     assert_eq!(serde_json::to_value(&action)?, wire);
     assert_eq!(serde_json::from_value::<DomainRuleAction>(wire)?, action);
@@ -264,6 +265,70 @@ fn a_forward_rule_defaults_its_ttl() -> TestResult {
         serde_json::to_value(&forward)?,
         json!({"forward_url": "https://proxy.example.com", "match_rules": [], "ttl_seconds": 60})
     );
+    Ok(())
+}
+
+#[test]
+fn a_forward_url_has_no_query_and_no_fragment() -> TestResult {
+    let url = ForwardUrl::new("https://proxy.example.com/relay")?;
+    assert_eq!(url.as_str(), "https://proxy.example.com/relay");
+    assert_eq!(url.to_string(), "https://proxy.example.com/relay");
+    assert_eq!("https://proxy.example.com/relay".parse::<ForwardUrl>()?, url);
+    assert_eq!(
+        ForwardUrl::try_from("https://proxy.example.com/relay".to_string())?,
+        url
+    );
+    assert_eq!(String::from(url.clone()), "https://proxy.example.com/relay");
+    assert_eq!(serde_json::to_value(&url)?, json!("https://proxy.example.com/relay"));
+    assert_eq!(
+        serde_json::from_value::<ForwardUrl>(json!("https://proxy.example.com/relay"))?,
+        url
+    );
+
+    let query = error_of(ForwardUrl::new("https://proxy.example.com/relay?debug=1"))?;
+    assert_eq!(
+        query,
+        ForwardUrlError::HasQuery("https://proxy.example.com/relay?debug=1".to_string())
+    );
+    assert_eq!(
+        query.to_string(),
+        "forward_url 'https://proxy.example.com/relay?debug=1' must not include a query string"
+    );
+    let fragment = error_of(ForwardUrl::new("https://proxy.example.com/relay#section"))?;
+    assert_eq!(
+        fragment,
+        ForwardUrlError::HasFragment("https://proxy.example.com/relay#section".to_string())
+    );
+    assert_eq!(
+        fragment.to_string(),
+        "forward_url 'https://proxy.example.com/relay#section' must not include a fragment"
+    );
+    assert_eq!(
+        error_of(ForwardUrl::new("https://proxy.example.com/relay?"))?,
+        ForwardUrlError::HasQuery("https://proxy.example.com/relay?".to_string())
+    );
+    let invalid = error_of(ForwardUrl::new("not a url"))?;
+    assert_eq!(invalid.to_string(), "invalid forward_url 'not a url'");
+    assert_eq!(
+        std::error::Error::source(&invalid).map(ToString::to_string),
+        Some("relative URL without a base".to_string())
+    );
+    for input in [
+        "https://proxy.example.com/relay?debug=1",
+        "https://proxy.example.com/relay#section",
+        "not a url",
+        "",
+    ] {
+        let wire = json!({"forward_url": input});
+        assert_eq!(
+            error_of(serde_json::from_value::<RequestForward>(wire.clone()))?.classify(),
+            Data
+        );
+        assert_eq!(
+            error_of(serde_json::from_str::<RequestForward>(&wire.to_string()))?.classify(),
+            Data
+        );
+    }
     Ok(())
 }
 

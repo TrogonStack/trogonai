@@ -319,7 +319,12 @@ reports. `NetworkPolicy` is `allow_all`, `deny_all`, or `user_defined` with
 `*.` wildcard, or `*`, with an optional `Port`; a `Host` is a lowercase DNS name
 or an IP address in WHATWG form, and an IPv4-mapped IPv6 address reads as IPv4.
 `HttpMethod`, `HeaderName`, `HeaderValue`, and `PathPrefix` bound and normalize
-what a request rule names. `DecideRequest` and `DecideResponse` carry a
+what a request rule names, and the matcher DSL and credential injection reuse
+`HttpMethod` and `HeaderName`. A `ForwardUrl` is a URL with no query or
+fragment, a `Base64Data` is standard base64, and a `RefusedRequest` cuts the
+query and fragment of its target on deserialization too. `DeniedDomain` exposes
+its `target` and `port` rather than a `DomainPattern`, and `PortAccess` and
+`SshAccess` redact secrets in `Debug`. `DecideRequest` and `DecideResponse` carry a
 connection verdict, and `RequestDecideRequest` and `RequestDecideResponse` carry
 a per-request one, whose `Debug` shows header names but never values.
 `EgressViolation` and `FsViolation` report a refusal, using a `SecretName` or a
