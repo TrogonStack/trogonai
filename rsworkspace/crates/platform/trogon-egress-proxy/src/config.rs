@@ -1,6 +1,8 @@
 //! Command line and environment configuration, validated into typed values.
 //!
-//! There is deliberately no switch that turns enforcement off or that starts
+//! Enforcement is the default, and the only way off it is naming `dry_run`
+//! explicitly (an unknown value refuses startup). Dry run changes only the
+//! answer for an authenticated caller with no permit, and no setting starts
 //! without a policy (ADR#0084): an explicit policy source is required. Audit is required
 //! for the same reason (ADR#0085 Decision 5): the tenant, the project, the
 //! instance name and the NATS servers have no default, and the NATS connection
@@ -19,6 +21,7 @@ use trogon_std::env::{ReadEnv, SystemEnv};
 use crate::audit_config::AuditConfig;
 use crate::connection_limit::{ConnectionLimit, ConnectionLimitError};
 use crate::constants::{AUDIT_COMPONENT, MIN_HEAD_BYTES, WRITER_ID_PREFIX};
+use crate::enforcement_mode::{EnforcementMode, EnforcementModeError};
 use crate::limits::Limits;
 use crate::live_policy::{KvPolicyConfig, PolicyConfigError, PolicyTransportError};
 use crate::mtls::TlsFiles;
@@ -104,6 +107,12 @@ pub struct Args {
     #[arg(long, env = "TROGON_EGRESS_REGISTRATION_FENCE", requires = "workload_api_endpoint")]
     pub registration_fence: Option<NonZeroU64>,
 
+    /// What happens to an authenticated caller with no permit: `enforce`
+    /// refuses it, `dry_run` forwards it and audits `would_deny`. Anything else
+    /// refuses startup.
+    #[arg(long, env = "TROGON_EGRESS_ENFORCEMENT_MODE", default_value = "enforce")]
+    pub enforcement_mode: String,
+
     /// Trust domain of the agent URI SAN: spiffe://<trust-domain>/agent/<agent-id>.
     #[arg(long, env = "TROGON_EGRESS_TRUST_DOMAIN")]
     pub trust_domain: String,
@@ -156,6 +165,7 @@ pub struct Config {
     pub audit: AuditConfig,
     pub non_tls_ports: Vec<NonZeroU16>,
     pub limits: Limits,
+    pub enforcement_mode: EnforcementMode,
 }
 
 #[derive(Debug, Clone)]
@@ -182,6 +192,8 @@ pub enum ConfigError {
     LivePolicy(#[source] PolicyConfigError),
     #[error("live policy transport is not authenticated")]
     LivePolicyTransport(#[source] PolicyTransportError),
+    #[error("invalid enforcement mode")]
+    EnforcementMode(#[source] EnforcementModeError),
     #[error("invalid trust domain")]
     TrustDomain(#[source] TrustDomainError),
     #[error("invalid tenant")]
@@ -216,6 +228,7 @@ impl Config {
     /// Validates `args`, reading the NATS connection settings from `env`.
     pub fn resolve<E: ReadEnv>(args: Args, env: &E) -> Result<Self, ConfigError> {
         let trust_domain = TrustDomain::new(&args.trust_domain).map_err(ConfigError::TrustDomain)?;
+        let enforcement_mode = args.enforcement_mode.parse().map_err(ConfigError::EnforcementMode)?;
         let audit = audit_config(&args, env)?;
         let policy = match (&args.policy_file, &args.policy_bucket, args.policy_incarnation) {
             (Some(path), None, None) => PolicyInput::StaticFile(path.clone()),
@@ -277,6 +290,7 @@ impl Config {
             trust_domain,
             audit,
             non_tls_ports,
+            enforcement_mode,
             limits: Limits {
                 max_connections: ConnectionLimit::new(args.max_connections).map_err(ConfigError::ConnectionLimit)?,
                 max_head_bytes: args.max_head_bytes,

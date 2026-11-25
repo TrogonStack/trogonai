@@ -8,6 +8,7 @@
 //! | calling agent             | `actor` (the agent arm)                        |
 //! | destination `host:port`   | `gateway_decision.target`                      |
 //! | permitted or refused      | `attribution.decision`, enforced, and the subject terminal |
+//! | dry-run permit absent     | allow, `ENFORCEMENT_MODE_DRY_RUN`, `would_deny`, reason `no_permit` |
 //! | refusal fault             | `attribution.reason_code`, lower snake case    |
 //! | policy snapshot kind      | `attribution.policy_source`                    |
 //! | never intercepted         | `gateway_decision.tls_mode` = passthrough      |
@@ -32,6 +33,7 @@ use crate::audit::{AuditEvent, Decision};
 use crate::audit_error::AuditError;
 use crate::constants::NO_DESTINATION_TARGET;
 use crate::destination::Destination;
+use crate::fault::Fault;
 use crate::policy_source::PolicySource;
 
 pub(crate) fn decision_record(
@@ -69,16 +71,17 @@ pub(crate) fn decision_record(
 fn outcome(decision: Decision) -> DecisionOutcome {
     match decision {
         Decision::Permitted => DecisionOutcome::Allow(Enforcement::Enforce),
+        Decision::WouldDeny => DecisionOutcome::WouldDeny,
         Decision::Refused(_) => DecisionOutcome::Deny,
     }
 }
 
 fn reason(decision: Decision) -> Result<Option<ReasonCode>, AuditError> {
-    decision
-        .fault()
-        .map(|fault| ReasonCode::new(fault.reason_code()))
-        .transpose()
-        .map_err(AuditError::from)
+    let code = match decision {
+        Decision::WouldDeny => Some(Fault::NoPermit.reason_code()),
+        Decision::Permitted | Decision::Refused(_) => decision.fault().map(Fault::reason_code),
+    };
+    code.map(ReasonCode::new).transpose().map_err(AuditError::from)
 }
 
 /// The destination as `host:port`, or a name that says there was none.

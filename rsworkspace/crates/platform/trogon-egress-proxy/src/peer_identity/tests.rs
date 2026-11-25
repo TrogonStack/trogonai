@@ -106,11 +106,16 @@ fn a_delayed_wall_clock_read_consumes_the_peer_path_lifetime() {
     let began = std::cell::Cell::new(None);
     let wall = SystemTime::now();
     let lifetime = Duration::from_secs(60);
-    let peer = PeerIdentity::with_clock(AgentId::new("agent-1").expect("agent"), wall + lifetime, || {
-        began.set(Some(Instant::now()));
-        std::thread::sleep(Duration::from_millis(20));
-        wall
-    })
+    let peer = PeerIdentity::with_clock(
+        AgentId::new("agent-1").expect("agent"),
+        String::new(),
+        wall + lifetime,
+        || {
+            began.set(Some(Instant::now()));
+            std::thread::sleep(Duration::from_millis(20));
+            wall
+        },
+    )
     .expect("identity");
     assert!(
         peer.deadline() <= began.get().expect("clock sampled") + lifetime,

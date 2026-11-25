@@ -186,6 +186,7 @@ async fn workload_runtime_uses_scoped_replies_for_policy_registration_and_audit(
         audit,
         non_tls_ports: Vec::new(),
         limits: Limits::default(),
+        enforcement_mode: Default::default(),
     })
     .await;
     let server = match started {

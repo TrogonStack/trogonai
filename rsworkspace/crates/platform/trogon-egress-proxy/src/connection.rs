@@ -9,6 +9,12 @@
 //! 4. answer `200`, then check that the first TLS record names the CONNECT
 //!    host, and only then forward bytes.
 //!
+//! In dry run (opt-in, never the default) one answer changes: an authenticated
+//! caller with no permit for the destination is forwarded and audited as
+//! `would_deny`. Every other refusal is the same in both modes, so dry run
+//! never relaxes who may connect, how long a certificate may live, which
+//! addresses may be dialled or what happens while policy is unavailable.
+//!
 //! A tunnel is audited twice at most. The permit is recorded after the dial
 //! succeeds and before `200`, and is acknowledged first: a proxy that cannot
 //! record a permit refuses with `AUDIT_UNAVAILABLE` and forwards nothing. Every
@@ -37,6 +43,7 @@ use crate::constants::{CONNECTION_ESTABLISHED, DENIAL_AUDIT_TIMEOUT, POLICY_RECH
 use crate::destination::Destination;
 use crate::destination_host::DestinationHost;
 use crate::dial_targets::dial_targets;
+use crate::enforcement_mode::EnforcementMode;
 use crate::fault::Fault;
 use crate::first_record::read_first_record;
 use crate::host_name::HostName;
@@ -46,6 +53,7 @@ use crate::policy_revision::PolicyRevision;
 use crate::policy_snapshot::PolicySnapshot;
 use crate::policy_snapshot::SnapshotVerdict;
 use crate::resolver::Resolver;
+use crate::telemetry::metrics::ConnectionMetrics;
 
 struct EndedAuthority {
     destination: Option<Destination>,
@@ -57,6 +65,14 @@ struct ObservedUpstream {
     stream: TcpStream,
     address: SocketAddr,
     policy_revision: Option<PolicyRevision>,
+    standing: Standing,
+}
+
+/// Whether the caller holds a permit. `WouldDeny` exists only in dry run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Standing {
+    Granted,
+    WouldDeny,
 }
 
 /// Everything a connection needs besides the connection itself.
@@ -67,6 +83,8 @@ pub struct Proxy<C = SystemClock> {
     audit: Arc<dyn AuditSink>,
     limits: Limits,
     non_tls_ports: HashSet<NonZeroU16>,
+    mode: EnforcementMode,
+    metrics: ConnectionMetrics,
 }
 
 impl Proxy<SystemClock> {
@@ -86,6 +104,8 @@ impl Proxy<SystemClock> {
             audit,
             limits,
             non_tls_ports,
+            mode: EnforcementMode::default(),
+            metrics: ConnectionMetrics::global(),
         }
     }
 }
@@ -99,7 +119,30 @@ impl<Clock: EpochClock> Proxy<Clock> {
             audit: self.audit,
             limits: self.limits,
             non_tls_ports: self.non_tls_ports,
+            mode: self.mode,
+            metrics: self.metrics,
         }
+    }
+
+    /// Selects what happens to an authenticated caller with no permit. The
+    /// default is [`EnforcementMode::Enforce`].
+    pub fn with_mode(mut self, mode: EnforcementMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn mode(&self) -> EnforcementMode {
+        self.mode
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_metrics(mut self, metrics: ConnectionMetrics) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    pub(crate) fn metrics(&self) -> &ConnectionMetrics {
+        &self.metrics
     }
 
     pub fn limits(&self) -> &Limits {
@@ -251,6 +294,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
             stream: mut upstream,
             address,
             policy_revision,
+            standing,
         }) = dialled
         else {
             return self
@@ -259,8 +303,12 @@ impl<Clock: EpochClock> Proxy<Clock> {
         };
 
         let resolved = Some(address.ip());
+        let decision = match standing {
+            Standing::Granted => Decision::Permitted,
+            Standing::WouldDeny => Decision::WouldDeny,
+        };
         if self
-            .record(peer, Some(destination), resolved, Decision::Permitted, policy_revision)
+            .record(peer, Some(destination), resolved, decision, policy_revision)
             .await
             .is_err()
         {
@@ -268,6 +316,19 @@ impl<Clock: EpochClock> Proxy<Clock> {
             return self
                 .refuse(client, peer, Some(destination), resolved, Fault::AuditUnavailable)
                 .await;
+        }
+        if standing == Standing::WouldDeny {
+            // Bound first: line coverage cannot attribute a call inside the macro.
+            let peer_id = peer.spiffe_id();
+            let mode = EnforcementMode::DryRun.as_str();
+            tracing::warn!(
+                event = "egress_would_deny",
+                peer.spiffe_id = peer_id,
+                %agent,
+                %destination,
+                mode,
+                "dry run: the caller has no permit for this destination and is forwarded"
+            );
         }
 
         if !self
@@ -320,15 +381,26 @@ impl<Clock: EpochClock> Proxy<Clock> {
         }))
     }
 
-    fn check_request_authority(&self, peer: &PeerIdentity, destination: &Destination) -> Result<(), Fault> {
+    fn check_request_authority(&self, peer: &PeerIdentity, destination: &Destination) -> Result<Standing, Fault> {
         let now = self.clock.system_time();
         if !peer.is_current(now) {
             return Err(Fault::AuthorityExpired);
         }
-        if let Admission::Refuse(fault) = admit(self.snapshot.as_ref(), peer.agent(), destination, now) {
-            return Err(fault);
+        match admit(self.snapshot.as_ref(), peer.agent(), destination, now) {
+            Admission::Permit => Ok(Standing::Granted),
+            Admission::Refuse(Fault::NoPermit) if self.mode == EnforcementMode::DryRun => Ok(Standing::WouldDeny),
+            Admission::Refuse(fault) => Err(fault),
         }
-        Ok(())
+    }
+
+    /// The one verdict dry run reinterprets. Unavailable stays a refusal.
+    fn standing(&self, verdict: SnapshotVerdict) -> Result<Standing, Fault> {
+        match verdict {
+            SnapshotVerdict::Permitted => Ok(Standing::Granted),
+            SnapshotVerdict::NotPermitted if self.mode == EnforcementMode::DryRun => Ok(Standing::WouldDeny),
+            SnapshotVerdict::NotPermitted => Err(Fault::NoPermit),
+            SnapshotVerdict::Unavailable => Err(Fault::PolicyUnavailable),
+        }
     }
 
     fn observe_authority(
@@ -336,17 +408,13 @@ impl<Clock: EpochClock> Proxy<Clock> {
         peer: &PeerIdentity,
         destination: &Destination,
         address: SocketAddr,
-    ) -> Result<Option<PolicyRevision>, Fault> {
+    ) -> Result<(Option<PolicyRevision>, Standing), Fault> {
         let now = self.clock.system_time();
         if !peer.is_current(now) {
             return Err(Fault::AuthorityExpired);
         }
         let observed = self.snapshot.observe(peer.agent(), destination, now);
-        match observed.verdict {
-            SnapshotVerdict::Permitted => {}
-            SnapshotVerdict::NotPermitted => return Err(Fault::NoPermit),
-            SnapshotVerdict::Unavailable => return Err(Fault::PolicyUnavailable),
-        }
+        let standing = self.standing(observed.verdict)?;
         dial_targets(
             self.snapshot.as_ref(),
             peer.agent(),
@@ -360,7 +428,7 @@ impl<Clock: EpochClock> Proxy<Clock> {
         {
             return Err(Fault::PolicyUnavailable);
         }
-        Ok(observed.revision)
+        Ok((observed.revision, standing))
     }
 
     fn check_authority(
@@ -400,10 +468,8 @@ impl<Clock: EpochClock> Proxy<Clock> {
             let observed = self
                 .snapshot
                 .observe(peer.agent(), destination, self.clock.system_time());
-            match observed.verdict {
-                SnapshotVerdict::Permitted => {}
-                SnapshotVerdict::NotPermitted => return Fault::NoPermit,
-                SnapshotVerdict::Unavailable => return Fault::PolicyUnavailable,
+            if let Err(fault) = self.standing(observed.verdict) {
+                return fault;
             }
             let deadline = observed.deadline.unwrap_or(peer.deadline());
             tokio::select! {
@@ -462,11 +528,12 @@ impl<Clock: EpochClock> Proxy<Clock> {
             match attempt {
                 Ok(stream) => {
                     let _ = selected.set(target.ip());
-                    let policy_revision = self.observe_authority(peer, destination, *target)?;
+                    let (policy_revision, standing) = self.observe_authority(peer, destination, *target)?;
                     return Ok(Some(ObservedUpstream {
                         stream,
                         address: *target,
                         policy_revision,
+                        standing,
                     }));
                 }
                 Err(error) => tracing::debug!(error = %error, "upstream connect failed"),

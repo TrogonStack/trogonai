@@ -149,7 +149,7 @@ impl<S: Sink> AuditSink for WriterAudit<S> {
 /// Nothing from the request but the names below reaches it.
 fn log(event: &AuditEvent<'_>, outcome: &Result<Disposition, AuditError>) {
     let decision = match (event.decision, outcome) {
-        (Decision::Permitted, Err(_)) => Decision::Refused(Fault::AuditUnavailable),
+        (Decision::Permitted | Decision::WouldDeny, Err(_)) => Decision::Refused(Fault::AuditUnavailable),
         (decision, _) => decision,
     };
     let destination = event.destination.map(ToString::to_string);

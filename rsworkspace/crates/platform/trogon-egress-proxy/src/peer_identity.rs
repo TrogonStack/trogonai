@@ -14,7 +14,7 @@ use x509_parser::prelude::FromDer;
 
 use crate::agent_id::AgentId;
 use crate::agent_id::AgentIdError;
-use crate::peer_certificate::{PeerIdentityError, agent_id_from_certificate};
+use crate::peer_certificate::{PeerIdentityError, agent_id_from_certificate, claimed_uri};
 use crate::trust_domain::TrustDomain;
 
 use crate::constants::MAX_SESSION_LIFETIME;
@@ -25,6 +25,7 @@ use crate::constants::MAX_SESSION_LIFETIME;
 #[derive(Clone)]
 pub struct PeerIdentity {
     agent: AgentId,
+    spiffe_id: String,
     expires_at: SystemTime,
     deadline: Instant,
     workload: Option<WorkloadSession>,
@@ -53,6 +54,7 @@ impl fmt::Debug for PeerIdentity {
         formatter
             .debug_struct("PeerIdentity")
             .field("agent", &self.agent)
+            .field("spiffe_id", &self.spiffe_id)
             .field("expires_at", &self.expires_at)
             .field("deadline", &self.deadline)
             .field(
@@ -105,8 +107,13 @@ impl PeerIdentity {
             verifier_bundle_sha256: fact.bundle_sha256().to_vec(),
         })
         .map_err(WorkloadPeerIdentityError::Evidence)?;
-        let mut identity = Self::with_clock(agent, peer.expires_at().min(lease.expires_at()), read_wall)
-            .map_err(WorkloadPeerIdentityError::Validity)?;
+        let mut identity = Self::with_clock(
+            agent,
+            peer.spiffe_id().to_string(),
+            peer.expires_at().min(lease.expires_at()),
+            read_wall,
+        )
+        .map_err(WorkloadPeerIdentityError::Validity)?;
         identity.deadline = identity.deadline.min(lease.deadline()).min(peer.deadline());
         if !lease.is_current() {
             return Err(WorkloadPeerIdentityError::Material(MaterialError::Unavailable));
@@ -124,6 +131,7 @@ impl PeerIdentity {
     ) -> Result<Self, PeerIdentityError> {
         let leaf = certificates.first().ok_or(PeerIdentityError::NoUriSan)?;
         let agent = agent_id_from_certificate(leaf.as_ref(), trust_domain)?;
+        let spiffe_id = claimed_uri(leaf.as_ref()).ok_or(PeerIdentityError::NoUriSan)?;
         let mut expires_at = None;
         for der in certificates {
             let (rest, certificate) =
@@ -138,13 +146,14 @@ impl PeerIdentity {
                 .ok_or(PeerIdentityError::Validity)?;
             expires_at = Some(expires_at.map_or(expiry, |current: SystemTime| current.min(expiry)));
         }
-        Self::with_clock(agent, expires_at.ok_or(PeerIdentityError::Validity)?, || {
+        Self::with_clock(agent, spiffe_id, expires_at.ok_or(PeerIdentityError::Validity)?, || {
             SystemClock.system_time()
         })
     }
 
     fn with_clock(
         agent: AgentId,
+        spiffe_id: String,
         expires_at: SystemTime,
         read_wall: impl FnOnce() -> SystemTime,
     ) -> Result<Self, PeerIdentityError> {
@@ -157,6 +166,7 @@ impl PeerIdentity {
             .ok_or(PeerIdentityError::Validity)?;
         Ok(Self {
             agent,
+            spiffe_id,
             expires_at,
             deadline: observed + remaining.min(MAX_SESSION_LIFETIME),
             workload: None,
@@ -165,11 +175,17 @@ impl PeerIdentity {
 
     #[cfg(test)]
     fn at(agent: AgentId, expires_at: SystemTime, now: SystemTime) -> Result<Self, PeerIdentityError> {
-        Self::with_clock(agent, expires_at, || now)
+        let spiffe_id = format!("spiffe://trogon.example/agent/{agent}");
+        Self::with_clock(agent, spiffe_id, expires_at, || now)
     }
 
     pub fn agent(&self) -> &AgentId {
         &self.agent
+    }
+
+    /// The verified peer's full SPIFFE ID, for logs. Never an authorization input.
+    pub fn spiffe_id(&self) -> &str {
+        &self.spiffe_id
     }
 
     pub fn expires_at(&self) -> SystemTime {

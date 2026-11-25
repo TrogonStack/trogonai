@@ -31,6 +31,7 @@ fn config(policy_file: &Path) -> Config {
         },
         non_tls_ports: Vec::new(),
         limits: Limits::default(),
+        enforcement_mode: Default::default(),
     }
 }
 
@@ -95,8 +96,9 @@ async fn audit_settings_that_cannot_build_a_connection_stop_startup() {
 }
 
 #[test]
-fn the_only_mode_is_enforce() {
+fn the_modes_are_named_for_the_startup_line() {
     assert_eq!(EnforcementMode::Enforce.as_str(), "enforce");
+    assert_eq!(EnforcementMode::DryRun.as_str(), "dry_run");
 }
 
 #[tokio::test]

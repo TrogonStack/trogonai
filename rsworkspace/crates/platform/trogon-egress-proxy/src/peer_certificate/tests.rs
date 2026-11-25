@@ -121,3 +121,23 @@ fn rejects_garbage_and_trailing_bytes() {
         Err(PeerIdentityError::Unparsable)
     );
 }
+
+#[test]
+fn the_claimed_uri_is_the_single_uri_san_and_nothing_else() {
+    let one = certificate(
+        vec![uri("spiffe://other.example/agent/a"), dns("a.example")],
+        Some("cn"),
+    );
+    assert_eq!(claimed_uri(&one).as_deref(), Some("spiffe://other.example/agent/a"));
+    let two = certificate(vec![uri("spiffe://a.example/x"), uri("spiffe://a.example/y")], None);
+    assert_eq!(claimed_uri(&two), None);
+    assert_eq!(claimed_uri(&certificate(vec![dns("a.example")], Some("cn"))), None);
+    assert_eq!(claimed_uri(&[0, 1, 2]), None);
+}
+
+#[test]
+fn a_certificate_with_trailing_bytes_claims_no_uri() {
+    let mut der = certificate(vec![uri("spiffe://other.example/agent/a")], None);
+    der.push(0);
+    assert_eq!(claimed_uri(&der), None);
+}
