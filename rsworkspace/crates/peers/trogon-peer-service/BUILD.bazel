@@ -1,5 +1,10 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
-    integration_tests = {"enrollment": {}},
+    integration_tests = {
+        "application_tests": {},
+        "command_grants": {},
+        "enrollment": {},
+        "message_history_admission": {},
+    },
 )
