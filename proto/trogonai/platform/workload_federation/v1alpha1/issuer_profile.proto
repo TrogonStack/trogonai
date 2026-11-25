@@ -37,11 +37,20 @@ enum PublishedKeySetProfile {
 // Admission validates discovery/JWKS equality, signer purpose and algorithm,
 // access isolation, key rotation overlap and recipient cache behavior. Tokens
 // have one recipient audience selected from a current binding, never a wildcard.
+//
+// max_assertion_lifetime is capped at 300 seconds because a JWT-SVID lives for
+// minutes. Provider-defined lifetimes are provider credentials, not SVIDs, and
+// are bounded by their own contracts.
 message IssuerProfileDefinition {
   option (buf.validate.message).cel = {
     id: "issuer_profile.rsa_keys"
     message: "an RSA-only published key set requires RS256 assertions"
     expression: "this.published_key_set_profile != 2 || this.algorithm == 1"
+  };
+  option (buf.validate.message).cel = {
+    id: "issuer_profile.native_spire_algorithm"
+    message: "a native SPIRE issuer cannot select EdDSA; JWT-SVIDs allow only RS, ES and PS algorithms"
+    expression: "!has(this.native_spire) || this.algorithm != 4"
   };
   option (buf.validate.message).cel = {
     id: "issuer_profile.signing_scope"
@@ -86,7 +95,10 @@ message IssuerProfileDefinition {
   SigningProfileRef signing_profile_ref = 6 [features.field_presence = LEGACY_REQUIRED];
   google.protobuf.Duration max_assertion_lifetime = 7 [
     features.field_presence = LEGACY_REQUIRED,
-    (buf.validate.field).duration.gt = {}
+    (buf.validate.field).duration = {
+      gt: {}
+      lte: {seconds: 300}
+    }
   ];
   PublishedKeySetProfile published_key_set_profile = 8 [
     features.field_presence = LEGACY_REQUIRED,

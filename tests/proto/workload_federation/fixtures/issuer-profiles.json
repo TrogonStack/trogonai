@@ -434,6 +434,82 @@
       "name": "separate issuer records native incompatibility decision",
       "template": "separate",
       "violations": []
+    },
+    {
+      "name": "issuer assertion lifetime cannot exceed 300 seconds",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxAssertionLifetime",
+          "value": "301s"
+        }
+      ],
+      "violations": [
+        "less than or equal to 300s"
+      ]
+    },
+    {
+      "name": "issuer assertion lifetime of 300 seconds is accepted",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/maxAssertionLifetime",
+          "value": "300s"
+        }
+      ]
+    },
+    {
+      "name": "native SPIRE issuer refuses EdDSA",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/algorithm",
+          "value": 4
+        },
+        {
+          "op": "replace",
+          "path": "/publishedKeySetProfile",
+          "value": 1
+        }
+      ],
+      "violations": [
+        "a native SPIRE issuer cannot select EdDSA"
+      ]
+    },
+    {
+      "name": "native SPIRE issuer accepts ES256 with a single-algorithm key set",
+      "template": "issuer",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/algorithm",
+          "value": 2
+        },
+        {
+          "op": "replace",
+          "path": "/publishedKeySetProfile",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "name": "separate issuer may select EdDSA",
+      "template": "separate",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/algorithm",
+          "value": 4
+        },
+        {
+          "op": "replace",
+          "path": "/publishedKeySetProfile",
+          "value": 1
+        }
+      ]
     }
   ]
 }

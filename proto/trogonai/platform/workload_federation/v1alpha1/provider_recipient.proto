@@ -55,6 +55,11 @@ message AwsWebIdentityRecipient {
       min_len: 1
       max_len: 2048
       pattern: "^[^*]+$"
+    },
+    (buf.validate.field).cel = {
+      id: "recipient.assertion_audience.names_one_recipient"
+      message: "assertion_audience must name one recipient, not a bare SPIFFE trust domain"
+      expression: "!this.matches('^[Ss][Pp][Ii][Ff][Ff][Ee]://[^/]*/?$')"
     }
   ];
   // The documented web-identity minimum is 900 seconds. Provider role limits
@@ -112,7 +117,7 @@ message AwsRolesAnywhereRecipient {
     (buf.validate.field).string = {
       min_len: 1
       max_len: 2048
-      pattern: "^spiffe://"
+      pattern: "^spiffe://[a-z0-9._-]{1,255}(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|[.][A-Za-z0-9_-][A-Za-z0-9._-]*|[.][.][A-Za-z0-9._-]+))+$"
     }
   ];
   google.protobuf.Duration requested_session_duration = 6 [
@@ -160,6 +165,11 @@ message GoogleCloudOidcRecipient {
       min_len: 1
       max_len: 2048
       pattern: "^[^*]+$"
+    },
+    (buf.validate.field).cel = {
+      id: "recipient.assertion_audience.names_one_recipient"
+      message: "assertion_audience must name one recipient, not a bare SPIFFE trust domain"
+      expression: "!this.matches('^[Ss][Pp][Ii][Ff][Ff][Ee]://[^/]*/?$')"
     }
   ];
   GoogleCloudAccessMode access = 5 [features.field_presence = LEGACY_REQUIRED];
@@ -180,7 +190,7 @@ message GoogleCloudX509Recipient {
     (buf.validate.field).string = {
       min_len: 1
       max_len: 2048
-      pattern: "^spiffe://"
+      pattern: "^spiffe://[a-z0-9._-]{1,255}(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|[.][A-Za-z0-9_-][A-Za-z0-9._-]*|[.][.][A-Za-z0-9._-]+))+$"
     }
   ];
   GoogleCloudAccessMode access = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -210,7 +220,7 @@ message GoogleCloudCertificateBoundOidcRecipient {
     (buf.validate.field).string = {
       min_len: 1
       max_len: 2048
-      pattern: "^spiffe://"
+      pattern: "^spiffe://[a-z0-9._-]{1,255}(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|[.][A-Za-z0-9_-][A-Za-z0-9._-]*|[.][.][A-Za-z0-9._-]+))+$"
     }
   ];
   ProviderPreviewApprovalRef preview_approval_ref = 3 [features.field_presence = LEGACY_REQUIRED];
@@ -251,6 +261,11 @@ message EntraRecipient {
       min_len: 1
       max_len: 2048
       pattern: "^[^*]+$"
+    },
+    (buf.validate.field).cel = {
+      id: "recipient.assertion_audience.names_one_recipient"
+      message: "assertion_audience must name one recipient, not a bare SPIFFE trust domain"
+      expression: "!this.matches('^[Ss][Pp][Ii][Ff][Ff][Ee]://[^/]*/?$')"
     }
   ];
   string resource_scope = 6 [

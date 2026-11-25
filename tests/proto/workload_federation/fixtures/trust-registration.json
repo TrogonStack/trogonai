@@ -12,7 +12,7 @@
             "id": "trust_1",
             "revision": "1",
             "recoveryFence": "1",
-            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
           }
         },
         "definition": {
@@ -33,12 +33,15 @@
             "refresh": {
               "refreshInterval": "30s",
               "maxStaleness": "60s",
-              "rotationOverlap": "10s"
+              "rotationOverlap": "90s"
+            },
+            "owner": {
+              "value": "principal_1"
             }
           }
         },
         "artifact": {
-          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpZCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAghaKg0KC3ByaW5jaXBhbF8xEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
         }
       }
     },
@@ -113,7 +116,7 @@
             "id": "trust_1",
             "revision": "1",
             "recoveryFence": "1",
-            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
           }
         },
         "approvalRef": {
@@ -125,7 +128,7 @@
             "id": "trust_1",
             "revision": "1",
             "recoveryFence": "1",
-            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
           },
           "approvalId": {
             "value": "approval_1"
@@ -142,7 +145,7 @@
             "id": "trust_1",
             "revision": "1",
             "recoveryFence": "1",
-            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
           },
           "validationId": {
             "value": "validation_1"
@@ -165,7 +168,7 @@
               "id": "trust_1",
               "revision": "1",
               "recoveryFence": "1",
-              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+              "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
             }
           },
           "definition": {
@@ -186,12 +189,15 @@
               "refresh": {
                 "refreshInterval": "30s",
                 "maxStaleness": "60s",
-                "rotationOverlap": "10s"
+                "rotationOverlap": "90s"
+              },
+              "owner": {
+                "value": "principal_1"
               }
             }
           },
           "artifact": {
-            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpZCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAghaKg0KC3ByaW5jaXBhbF8xEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
           }
         },
         "lifecycle": 1,
@@ -211,7 +217,7 @@
               "id": "trust_1",
               "revision": "1",
               "recoveryFence": "1",
-              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+              "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
             }
           },
           "definition": {
@@ -232,12 +238,15 @@
               "refresh": {
                 "refreshInterval": "30s",
                 "maxStaleness": "60s",
-                "rotationOverlap": "10s"
+                "rotationOverlap": "90s"
+              },
+              "owner": {
+                "value": "principal_1"
               }
             }
           },
           "artifact": {
-            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpZCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAghaKg0KC3ByaW5jaXBhbF8xEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
           }
         },
         "lifecycle": 2,
@@ -252,7 +261,7 @@
               "id": "trust_1",
               "revision": "1",
               "recoveryFence": "1",
-              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+              "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
             }
           },
           "approvalRef": {
@@ -264,7 +273,7 @@
               "id": "trust_1",
               "revision": "1",
               "recoveryFence": "1",
-              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+              "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
             },
             "approvalId": {
               "value": "approval_1"
@@ -281,7 +290,7 @@
               "id": "trust_1",
               "revision": "1",
               "recoveryFence": "1",
-              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+              "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
             },
             "validationId": {
               "value": "validation_1"
@@ -311,7 +320,7 @@
                   "id": "trust_1",
                   "revision": "1",
                   "recoveryFence": "1",
-                  "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+                  "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
                 }
               },
               "definition": {
@@ -332,12 +341,15 @@
                   "refresh": {
                     "refreshInterval": "30s",
                     "maxStaleness": "60s",
-                    "rotationOverlap": "10s"
+                    "rotationOverlap": "90s"
+                  },
+                  "owner": {
+                    "value": "principal_1"
                   }
                 }
               },
               "artifact": {
-                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+                "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpZCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAghaKg0KC3ByaW5jaXBhbF8xEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
               }
             },
             "lifecycle": 1,
@@ -368,7 +380,7 @@
             "id": "trust_1",
             "revision": "1",
             "recoveryFence": "1",
-            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+            "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
           }
         },
         "proposed": {
@@ -381,7 +393,7 @@
               "id": "trust_1",
               "revision": "2",
               "recoveryFence": "1",
-              "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+              "configurationSha256": "s+bl4XUmKoyg0A2WhWhqbFCCk1NVLSAkORTN5oHk0+c="
             }
           },
           "definition": {
@@ -402,12 +414,15 @@
               "refresh": {
                 "refreshInterval": "30s",
                 "maxStaleness": "60s",
-                "rotationOverlap": "10s"
+                "rotationOverlap": "90s"
+              },
+              "owner": {
+                "value": "principal_1"
               }
             }
           },
           "artifact": {
-            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpKCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
+            "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpZCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAghaKg0KC3ByaW5jaXBhbF8xEioKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGU="
           }
         }
       }
@@ -424,7 +439,7 @@
             "id": "trust_tls",
             "revision": "1",
             "recoveryFence": "1",
-            "configurationSha256": "qOimNJH2u4FymkNLinGEbENwNob1MV+IWLw0YqKjUiE="
+            "configurationSha256": "H2Mwa/2BN8sD6L89d/QfEcam9EtjgmyB96cOSpmKbLc="
           }
         },
         "definition": {
@@ -440,7 +455,7 @@
             "refresh": {
               "refreshInterval": "30s",
               "maxStaleness": "60s",
-              "rotationOverlap": "10s"
+              "rotationOverlap": "90s"
             },
             "httpsSpiffe": {
               "endpoint": {
@@ -452,11 +467,14 @@
                   "der": "AQID"
                 }
               ]
+            },
+            "owner": {
+              "value": "principal_1"
             }
           }
         },
         "artifact": {
-          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARpxCg4KDGV4YW1wbGUudGVzdCIMCgIIHhICCDwaAggKGlEKKAomaHR0cHM6Ly9mZWRlcmF0aW9uLmV4YW1wbGUudGVzdC9idW5kbGUSHnNwaWZmZTovL3B1Ymxpc2hlci50ZXN0L3NlcnZlchoFCgMBAgM="
+          "definitionBytes": "ChUKCHRlbmFudF8xEglwcm9qZWN0XzEQARqAAQoOCgxleGFtcGxlLnRlc3QiDAoCCB4SAgg8GgIIWioNCgtwcmluY2lwYWxfMRpRCigKJmh0dHBzOi8vZmVkZXJhdGlvbi5leGFtcGxlLnRlc3QvYnVuZGxlEh5zcGlmZmU6Ly9wdWJsaXNoZXIudGVzdC9zZXJ2ZXIaBQoDAQID"
         }
       }
     },
@@ -878,6 +896,325 @@
       ],
       "violations": [
         "must be at least 1 byte"
+      ]
+    },
+    {
+      "name": "trust expected endpoint ID refuses bare trust domain",
+      "template": "tls",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/httpsSpiffe/expectedSpiffeId",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "trust expected endpoint ID refuses dot-dot segment",
+      "template": "tls",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/httpsSpiffe/expectedSpiffeId",
+          "value": "spiffe://example.test/a/../b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "trust expected endpoint ID accepts a multi-segment path",
+      "template": "tls",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/httpsSpiffe/expectedSpiffeId",
+          "value": "spiffe://example.test/team/service"
+        }
+      ]
+    },
+    {
+      "name": "trust/refresh interval cannot exceed 300 seconds",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/refreshInterval",
+          "value": "301s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/maxStaleness",
+          "value": "900s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/rotationOverlap",
+          "value": "1000s"
+        }
+      ],
+      "violations": [
+        "a SPIFFE bundle refresh interval cannot exceed 300 seconds"
+      ]
+    },
+    {
+      "name": "trust/refresh interval of 300 seconds with three-interval overlap is accepted",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/refreshInterval",
+          "value": "300s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/maxStaleness",
+          "value": "600s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/rotationOverlap",
+          "value": "900s"
+        }
+      ]
+    },
+    {
+      "name": "trust/rotation overlap below three refresh intervals refused",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/rotationOverlap",
+          "value": "89s"
+        }
+      ],
+      "violations": [
+        "rotation overlap must be at least three refresh intervals"
+      ]
+    },
+    {
+      "name": "trust/zero rotation overlap refused",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/rotationOverlap",
+          "value": "0s"
+        }
+      ],
+      "violations": [
+        "rotation overlap must be at least three refresh intervals"
+      ]
+    },
+    {
+      "name": "trust/oidc refresh policy is not bound by the SPIFFE bundle rules",
+      "template": "oidc",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/oidc/refresh/refreshInterval",
+          "value": "600s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/oidc/refresh/maxStaleness",
+          "value": "1200s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/oidc/refresh/rotationOverlap",
+          "value": "0s"
+        }
+      ]
+    },
+    {
+      "name": "trust/spiffe registration refuses an empty owner",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/owner/value",
+          "value": ""
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "trust/spiffe registration refuses an owner with control characters",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/owner/value",
+          "value": "principal\u0007_1"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "trust/rotation overlap of exactly five refresh intervals accepted",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/refreshInterval",
+          "value": "30s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/maxStaleness",
+          "value": "60s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/rotationOverlap",
+          "value": "150s"
+        }
+      ]
+    },
+    {
+      "name": "trust/rotation overlap above five refresh intervals refused",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/refreshInterval",
+          "value": "30s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/maxStaleness",
+          "value": "60s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/rotationOverlap",
+          "value": "151s"
+        }
+      ],
+      "violations": [
+        "rotation overlap cannot exceed five refresh intervals"
+      ]
+    },
+    {
+      "name": "trust/rotation overlap of five intervals at the 300 second ceiling accepted",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/refreshInterval",
+          "value": "300s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/maxStaleness",
+          "value": "600s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/rotationOverlap",
+          "value": "1500s"
+        }
+      ]
+    },
+    {
+      "name": "trust/rotation overlap above five intervals at the 300 second ceiling refused",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/refreshInterval",
+          "value": "300s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/maxStaleness",
+          "value": "600s"
+        },
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/refresh/rotationOverlap",
+          "value": "1501s"
+        }
+      ],
+      "violations": [
+        "rotation overlap cannot exceed five refresh intervals"
+      ]
+    },
+    {
+      "name": "trust/spiffe registration refuses a missing endpoint profile",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/definition/spiffe/httpsWeb"
+        }
+      ],
+      "violations": [
+        "exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "trust/spiffe registration refuses a missing endpoint profile with a bootstrap profile configured elsewhere",
+      "template": "tls",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/definition/spiffe/httpsSpiffe"
+        }
+      ],
+      "violations": [
+        "exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "trust expected endpoint ID refuses a port",
+      "template": "tls",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/httpsSpiffe/expectedSpiffeId",
+          "value": "spiffe://example.test:8443/server"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "trust expected endpoint ID refuses userinfo",
+      "template": "tls",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/httpsSpiffe/expectedSpiffeId",
+          "value": "spiffe://user@example.test/server"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "trust expected endpoint ID refuses userinfo with a password",
+      "template": "tls",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/httpsSpiffe/expectedSpiffeId",
+          "value": "spiffe://user:secret@example.test/server"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
       ]
     }
   ]

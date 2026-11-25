@@ -212,17 +212,6 @@
       ]
     },
     {
-      "name": "registered trust-domain identity needs no inferred path",
-      "template": "snapshot",
-      "patch": [
-        {
-          "op": "replace",
-          "path": "/bindings/0/spiffeId",
-          "value": "spiffe://example.test"
-        }
-      ]
-    },
-    {
       "name": "empty trust withdrawal can also remove every binding",
       "template": "snapshot",
       "patch": [
@@ -256,6 +245,235 @@
       ],
       "violations": [
         "must be greater than 0"
+      ]
+    },
+    {
+      "name": "registration binding refuses bare trust domain",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses trailing slash",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/a/"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses a port",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test:8443/a"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses userinfo",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://user@example.test/a"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses a query",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/a?x=1"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses a fragment",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/a#b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses empty segment",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/a//b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses dot segment",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/a/./b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses dot-dot segment",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/a/../b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses query",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/a?x=1"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses fragment",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/a#x"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses upper case trust domain",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://Example.test/a"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses trust domain over 255 bytes",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/a"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "registration binding refuses ID over 2048 bytes",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "violations": [
+        "must be at most 2048"
+      ]
+    },
+    {
+      "name": "registration binding accepts dotted segments are ordinary",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/a/.hidden/..x/b..."
+        }
+      ]
+    },
+    {
+      "name": "registration binding accepts trust domain of exactly 255 bytes",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/a"
+        }
+      ]
+    },
+    {
+      "name": "registration binding accepts upper case path is a distinct ID",
+      "template": "snapshot",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bindings/0/spiffeId",
+          "value": "spiffe://example.test/Team/Service"
+        }
       ]
     }
   ]

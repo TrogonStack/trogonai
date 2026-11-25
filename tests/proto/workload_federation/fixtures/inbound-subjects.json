@@ -919,6 +919,73 @@
       "violations": [
         "does not match regex pattern"
       ]
+    },
+    {
+      "name": "inbound SPIFFE subject refuses bare trust domain",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/spiffeId",
+          "value": "spiffe://example.test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "inbound SPIFFE subject refuses dot-dot segment",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/spiffeId",
+          "value": "spiffe://example.test/a/../b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "inbound SPIFFE subject accepts a multi-segment path",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/spiffeId",
+          "value": "spiffe://example.test/team/service"
+        }
+      ]
+    },
+    {
+      "name": "inbound SPIFFE subject refuses a port",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/spiffeId",
+          "value": "spiffe://example.test:8443/worker"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "inbound SPIFFE subject refuses userinfo",
+      "template": "spiffe",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/definition/spiffe/spiffeId",
+          "value": "spiffe://user@example.test/worker"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
     }
   ]
 }

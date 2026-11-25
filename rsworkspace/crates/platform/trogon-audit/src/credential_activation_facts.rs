@@ -84,8 +84,7 @@ impl CredentialActivationFacts {
 pub(crate) fn valid_binding(binding: &RegistrationBinding) -> bool {
     if !bounded_name(&binding.tenant, MAX_WORKLOAD_SCOPE_BYTES, false)
         || !bounded_name(&binding.project, MAX_WORKLOAD_SCOPE_BYTES, false)
-        || binding.spiffe_id.len() > MAX_WORKLOAD_SPIFFE_ID_BYTES
-        || SpiffeId::try_from(binding.spiffe_id.as_str()).is_err()
+        || !canonical_workload_id(&binding.spiffe_id)
     {
         return false;
     }
@@ -96,6 +95,15 @@ pub(crate) fn valid_binding(binding: &RegistrationBinding) -> bool {
         (Some(WorkloadRole::EgressProxy | WorkloadRole::Supervisor), None) => true,
         _ => false,
     }
+}
+
+/// The same accept set as the supervisor's workload id: the canonical text of a
+/// SPIFFE ID that names a path, within the byte cap. The audit crate cannot
+/// depend on the supervisor crate, so the rule is repeated here and pinned by
+/// the shared vectors in both crates' tests.
+fn canonical_workload_id(value: &str) -> bool {
+    value.len() <= MAX_WORKLOAD_SPIFFE_ID_BYTES
+        && SpiffeId::new(value).is_ok_and(|id| id.to_string() == value && !id.path().is_empty())
 }
 
 fn bounded_name(value: &str, limit: usize, allow_colon: bool) -> bool {

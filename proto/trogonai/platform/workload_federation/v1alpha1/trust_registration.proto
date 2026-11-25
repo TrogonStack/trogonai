@@ -4,6 +4,7 @@ package trogonai.platform.workload_federation.v1alpha1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
 import "trogonai/platform/workload_federation/v1alpha1/assertion_algorithm.proto";
 import "trogonai/platform/workload_federation/v1alpha1/common.proto";
 import "trogonai/platform/workload_federation/v1alpha1/references.proto";
@@ -48,7 +49,9 @@ message PublicTrustCertificate {
 }
 
 // These are selected local limits, not a claim about HTTP cache directives or
-// remote revocation. Explicit removal bypasses stale-cache tolerance.
+// remote revocation. Explicit removal bypasses stale-cache tolerance. The
+// interval is an upper bound on polling. Profiles add their own bounds: see
+// SpiffeTrustProfile.
 message TrustRefreshPolicy {
   option (buf.validate.message).cel = {
     id: "trust_refresh_policy.interval"
@@ -86,7 +89,7 @@ message SpiffeHttpsSpiffeEndpoint {
     (buf.validate.field).string = {
       min_len: 1
       max_len: 2048
-      pattern: "^spiffe://[a-z0-9._-]+(/[^?#]*)?$"
+      pattern: "^spiffe://[a-z0-9._-]{1,255}(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|[.][A-Za-z0-9_-][A-Za-z0-9._-]*|[.][.][A-Za-z0-9._-]+))+$"
     }
   ];
   repeated PublicTrustCertificate bootstrap_roots = 3 [(buf.validate.field).repeated = {
@@ -98,7 +101,29 @@ message SpiffeHttpsSpiffeEndpoint {
 // One approved domain-to-bundle relationship. It is directional and does not
 // admit platform subjects or grant transitive trust. Bundle validation preserves
 // this exact domain association and refuses cross-domain CA substitution.
+//
+// A SPIFFE bundle's spiffe_refresh_hint takes precedence when it asks for
+// faster refresh, and five minutes applies when the bundle carries none, so the
+// configured interval cannot exceed 300 seconds. Keys are published at least
+// three and at most five refresh intervals before first signing use. The owner
+// is the principal accountable for the federated partner relationship; it is
+// documented here and never inferred from the bundle or its endpoint.
 message SpiffeTrustProfile {
+  option (buf.validate.message).cel = {
+    id: "spiffe_trust_profile.refresh_interval"
+    message: "a SPIFFE bundle refresh interval cannot exceed 300 seconds"
+    expression: "this.refresh.refresh_interval <= duration('300s')"
+  };
+  option (buf.validate.message).cel = {
+    id: "spiffe_trust_profile.rotation_overlap_max"
+    message: "rotation overlap cannot exceed five refresh intervals"
+    expression: "this.refresh.rotation_overlap <= this.refresh.refresh_interval + this.refresh.refresh_interval + this.refresh.refresh_interval + this.refresh.refresh_interval + this.refresh.refresh_interval"
+  };
+  option (buf.validate.message).cel = {
+    id: "spiffe_trust_profile.rotation_overlap"
+    message: "rotation overlap must be at least three refresh intervals"
+    expression: "this.refresh.rotation_overlap >= this.refresh.refresh_interval + this.refresh.refresh_interval + this.refresh.refresh_interval"
+  };
   SpiffeTrustDomain trust_domain = 1 [features.field_presence = LEGACY_REQUIRED];
   oneof endpoint_profile {
     option (buf.validate.oneof).required = true;
@@ -106,6 +131,7 @@ message SpiffeTrustProfile {
     SpiffeHttpsSpiffeEndpoint https_spiffe = 3;
   }
   TrustRefreshPolicy refresh = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.PrincipalId owner = 5 [features.field_presence = LEGACY_REQUIRED];
 }
 
 // Literal approved discovery/JWKS locations. Verification requires exact issuer

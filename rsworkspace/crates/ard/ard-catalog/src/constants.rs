@@ -13,3 +13,6 @@ pub(crate) const URN_AIR_PREFIX: &str = "urn:air:";
 
 pub(crate) const MIN_REPRESENTATIVE_QUERIES: usize = 2;
 pub(crate) const MAX_REPRESENTATIVE_QUERIES: usize = 5;
+
+pub(crate) const MAX_SPIFFE_ID_BYTES: usize = 2048;
+pub(crate) const MAX_TRUST_DOMAIN_BYTES: usize = 255;
