@@ -1,4 +1,5 @@
 use crate::constants::{CONFLICT_RETRY_LIMIT, PEER_REPLAY_LIMIT};
+use crate::scoped_peer_store::ScopedPeerStore;
 use trogon_decider_runtime::{
     CommandAuthorizer, CommandExecution, CommandPrincipal, PrincipalId, PrincipalKind, StreamAppend, StreamRead,
 };
@@ -18,7 +19,7 @@ pub struct PeerService<Store, Authorizer, Clock> {
 
 impl<Store, Authorizer, Clock> PeerService<Store, Authorizer, Clock>
 where
-    Store: StreamRead<PeerId> + StreamAppend<PeerId>,
+    Store: StreamRead<PeerId> + StreamAppend<PeerId> + ScopedPeerStore,
     Authorizer: CommandAuthorizer<Enroll> + CommandAuthorizer<Attach> + Send + Sync,
     Clock: PeerClock,
 {
@@ -35,6 +36,9 @@ where
         owner: &TrustedPeerOwner,
         request: v1alpha1::EnrollRequest,
     ) -> EnrollResult<<Store as StreamRead<PeerId>>::Error, <Store as StreamAppend<PeerId>>::Error> {
+        if self.store.tenant() != owner.tenant() {
+            return Err(EnrollServiceError::Scope);
+        }
         let installation = InstallationId::new(request.installation_id.ok_or(EnrollServiceError::MissingInput {
             field: EnrollmentField::InstallationId,
         })?)
