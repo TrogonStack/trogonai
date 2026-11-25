@@ -73,6 +73,18 @@ fn port_access_omits_empty_headers() -> TestResult {
 }
 
 #[test]
+fn port_access_debug_shows_header_names_and_never_values() {
+    let access = PortAccess {
+        base_url: "https://x.test".to_string(),
+        headers: BTreeMap::from([("x-token".to_string(), "hunter2".to_string())]),
+    };
+    assert_eq!(
+        format!("{access:?}"),
+        r#"PortAccess { base_url: "https://x.test", headers: {"x-token": "[REDACTED]"} }"#
+    );
+}
+
+#[test]
 fn every_domain_outcome_is_tagged() -> TestResult {
     round_trip(
         &GetSandboxDomainResponse::Available {
@@ -185,6 +197,30 @@ fn an_ssh_request_omits_an_unset_ttl() -> TestResult {
     };
     round_trip(&ttl, json!({"lease_id": "lease-1", "ttl_seconds": 60}))?;
     rejects::<SshAccessRequest>(json!({"lease_id": "lease-1", "ttl_seconds": -1}))
+}
+
+#[test]
+fn ssh_access_debug_never_shows_the_user_or_command() {
+    let access = SshAccess {
+        host: "h.test".to_string(),
+        port: 22,
+        user: "hunter2".to_string(),
+        command: Some("ssh hunter2@h.test".to_string()),
+        expires_at: Some(7),
+    };
+    assert_eq!(
+        format!("{access:?}"),
+        r#"SshAccess { host: "h.test", port: 22, user: "[REDACTED]", command: Some("[REDACTED]"), expires_at: Some(7) }"#
+    );
+    let bare = SshAccess {
+        command: None,
+        expires_at: None,
+        ..access
+    };
+    assert_eq!(
+        format!("{bare:?}"),
+        r#"SshAccess { host: "h.test", port: 22, user: "[REDACTED]", command: None, expires_at: None }"#
+    );
 }
 
 #[test]

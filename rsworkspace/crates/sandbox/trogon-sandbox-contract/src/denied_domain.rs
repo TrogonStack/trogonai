@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{DomainPattern, DomainPatternError};
+use crate::{DomainPattern, DomainPatternError, PatternTarget, Port};
 
 /// An entry of a deny list.
 ///
@@ -19,8 +19,14 @@ impl DeniedDomain {
         DomainPattern::parse_with(input, true).map(Self)
     }
 
-    pub fn as_pattern(&self) -> &DomainPattern {
-        &self.0
+    /// What the entry names, which is every destination for a bare `*`.
+    pub fn target(&self) -> &PatternTarget {
+        self.0.target()
+    }
+
+    /// The port the entry is limited to, or `None` for every port.
+    pub fn port(&self) -> Option<Port> {
+        self.0.port()
     }
 }
 

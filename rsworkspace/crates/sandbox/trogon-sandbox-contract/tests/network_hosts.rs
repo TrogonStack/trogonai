@@ -30,10 +30,10 @@ fn pattern(value: &str) -> Result<DomainPattern, Box<dyn std::error::Error>> {
 }
 
 fn domain_name(value: &str) -> Result<DomainName, Box<dyn std::error::Error>> {
-    match host(value)? {
-        Host::Domain(name) => Ok(name),
-        Host::Ip(_) => Err("expected a domain".into()),
-    }
+    host(value)?
+        .as_domain()
+        .cloned()
+        .ok_or_else(|| "expected a domain".into())
 }
 
 #[test]
@@ -133,11 +133,19 @@ fn a_host_rejects_what_the_resolver_would_read_differently() -> TestResult {
         too_many_labels.as_str(),
     ] {
         assert_eq!(
-            error_of(Host::new(input))?,
-            HostError::Invalid(input.to_string()),
+            error_of(Host::new(input))?.to_string(),
+            format!("host '{input}' is not a valid host name or IP address"),
             "{input:?}"
         );
     }
+    assert_eq!(
+        error_of(Host::new("evil.com%00.allowed.com"))?,
+        HostError::Invalid("evil.com%00.allowed.com".to_string())
+    );
+    assert_eq!(
+        error_of(Host::new("a..b.com"))?,
+        HostError::Invalid("a..b.com".to_string())
+    );
     assert_eq!(
         error_of(Host::new("a b.com"))?.to_string(),
         "host 'a b.com' is not a valid host name or IP address"
@@ -146,13 +154,61 @@ fn a_host_rejects_what_the_resolver_would_read_differently() -> TestResult {
 }
 
 #[test]
+fn a_host_error_keeps_the_parser_error_as_its_source() -> TestResult {
+    let ipv6 = error_of(Host::new("evil.com:443"))?;
+    assert_eq!(
+        ipv6,
+        HostError::InvalidIpv6 {
+            input: "evil.com:443".to_string(),
+            source: error_of("evil.com:443".parse::<std::net::Ipv6Addr>())?,
+        }
+    );
+    assert_eq!(
+        std::error::Error::source(&ipv6).map(ToString::to_string),
+        Some("invalid IPv6 address syntax".to_string())
+    );
+    let name = error_of(Host::new("a b.com"))?;
+    assert_eq!(
+        std::error::Error::source(&name).map(ToString::to_string),
+        Some("invalid international domain name".to_string())
+    );
+    assert!(std::error::Error::source(&HostError::Empty).is_none());
+    assert!(std::error::Error::source(&HostError::Invalid("x".to_string())).is_none());
+    Ok(())
+}
+
+#[test]
+fn a_wildcard_keeps_the_host_error_of_its_suffix() -> TestResult {
+    let error = error_of(DomainPattern::new("*.exa mple.com"))?;
+    assert_eq!(
+        error.to_string(),
+        "wildcard in '*.exa mple.com' must be a single leading '*.' with at least two labels after it"
+    );
+    let source = std::error::Error::source(&error).ok_or("expected a source")?;
+    assert_eq!(
+        source.to_string(),
+        "host 'exa mple.com' is not a valid host name or IP address"
+    );
+    assert!(matches!(
+        error,
+        DomainPatternError::InvalidWildcardHost {
+            source: HostError::Unparsable { .. },
+            ..
+        }
+    ));
+    Ok(())
+}
+
+#[test]
 fn a_host_built_from_an_ip_address_is_canonical() -> TestResult {
     let v4 = IpAddr::from([203, 0, 113, 7]);
-    assert_eq!(Host::from(v4), Host::Ip(v4));
+    assert_eq!(Host::from(v4).as_ip(), Some(v4));
     let v6: IpAddr = "2001:db8::1".parse()?;
-    assert_eq!(Host::from(v6), Host::Ip(v6));
+    assert_eq!(Host::from(v6).as_ip(), Some(v6));
     let mapped: IpAddr = "::ffff:203.0.113.7".parse()?;
-    assert_eq!(Host::from(mapped), Host::Ip(v4));
+    assert_eq!(host("example.com")?.as_ip(), None);
+    assert_eq!(Host::from(v4).as_domain(), None);
+    assert_eq!(Host::from(mapped).as_ip(), Some(v4));
     Ok(())
 }
 
@@ -263,7 +319,6 @@ fn a_pattern_rejects_malformed_input_with_a_reason() -> TestResult {
     for input in [
         "*example.com",
         "*.com",
-        "*.",
         "*.*.example.com",
         "foo.*.com",
         "a*b.com",
@@ -277,6 +332,13 @@ fn a_pattern_rejects_malformed_input_with_a_reason() -> TestResult {
         );
     }
     assert_eq!(
+        error_of(DomainPattern::new("*."))?,
+        DomainPatternError::InvalidWildcardHost {
+            input: "*.".to_string(),
+            source: HostError::Empty,
+        }
+    );
+    assert_eq!(
         error_of(DomainPattern::new("not-a-domain"))?,
         DomainPatternError::SingleLabel("not-a-domain".to_string())
     );
@@ -287,9 +349,11 @@ fn a_pattern_rejects_malformed_input_with_a_reason() -> TestResult {
         "evil%2ecom.test",
         "evil.com\u{0}.allowed.com",
     ] {
+        let error = error_of(DomainPattern::new(input))?;
+        assert!(matches!(error, DomainPatternError::Host(_)), "{input:?}");
         assert_eq!(
-            error_of(DomainPattern::new(input))?,
-            DomainPatternError::Host(HostError::Invalid(input.to_string())),
+            error.to_string(),
+            format!("host '{input}' is not a valid host name or IP address"),
             "{input:?}"
         );
     }
@@ -376,12 +440,12 @@ fn a_pattern_serializes_as_its_canonical_string() -> TestResult {
 fn a_denied_domain_may_be_a_bare_wildcard() -> TestResult {
     let everything = DeniedDomain::new("*")?;
     assert_eq!(everything.to_string(), "*");
-    assert_eq!(everything.as_pattern().target(), &PatternTarget::Any);
-    assert_eq!(everything.as_pattern().port(), None);
+    assert_eq!(everything.target(), &PatternTarget::Any);
+    assert_eq!(everything.port(), None);
 
     let ssh = DeniedDomain::new("*:22")?;
     assert_eq!(ssh.to_string(), "*:22");
-    assert_eq!(ssh.as_pattern().port(), Some(Port::new(22)?));
+    assert_eq!(ssh.port(), Some(Port::new(22)?));
     assert_eq!("*:22".parse::<DeniedDomain>()?, ssh);
     assert_eq!(DeniedDomain::try_from("*:22".to_string())?, ssh);
     assert_eq!(String::from(ssh.clone()), "*:22");

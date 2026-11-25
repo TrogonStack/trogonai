@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::MatchRule;
+use crate::{ForwardUrl, MatchRule};
 
 /// Request-forwarding rule shape for a domain rule.
 ///
@@ -17,7 +17,7 @@ use crate::MatchRule;
 /// [`RequestForward::DEFAULT_TTL_SECONDS`] since tokens are minted fresh per forwarded request rather than cached.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RequestForward {
-    pub forward_url: String,
+    pub forward_url: ForwardUrl,
     #[serde(default)]
     pub match_rules: Vec<MatchRule>,
     #[serde(default = "RequestForward::default_ttl_seconds")]
