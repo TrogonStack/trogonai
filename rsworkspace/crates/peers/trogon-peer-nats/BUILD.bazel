@@ -12,6 +12,9 @@ workspace_crate(
         "rpc_dispatch_contract": {},
         "rpc_fault_boundary_tests": {},
         "rpc_telemetry_contract_tests": {},
+        "scoped_store_clone_tests": {},
+        "scoped_store_replay_tests": {},
+        "scoped_store_tests": {},
         "store_admission_tests": {},
     },
 )
