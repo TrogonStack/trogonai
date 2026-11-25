@@ -7,11 +7,14 @@ use std::net::SocketAddr;
 use crate::credential_source::CredentialSource;
 
 pub(crate) fn accepted(peer: SocketAddr, spiffe_id: &str, source: CredentialSource) {
+    // Field values that call a method are evaluated inside the tracing macro,
+    // where line coverage cannot attribute them, so they are bound first.
+    let credential_source = source.as_str();
     tracing::info!(
         event = "peer_connection_accepted",
         %peer,
         peer.spiffe_id = spiffe_id,
-        credential_source = source.as_str(),
+        credential_source,
         "mTLS connection accepted"
     );
 }

@@ -390,6 +390,51 @@ fn config_with_anchors(anchors: &[&CertifiedIssuer<'static, KeyPair>]) -> Result
 }
 
 #[test]
+fn an_anchor_whose_san_is_not_a_uri_is_accepted() {
+    let mut params = CertificateParams::default();
+    params.distinguished_name = DistinguishedName::new();
+    params.distinguished_name.push(DnType::CommonName, "dns-ca");
+    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+    params.subject_alt_names = vec![SanType::DnsName(Ia5String::try_from("ca.example").expect("ia5"))];
+    let anchor = CertifiedIssuer::self_signed(params, KeyPair::generate().expect("key")).expect("ca");
+    assert!(config_with_anchors(&[&anchor]).is_ok());
+}
+
+/// Parses as X.509, but the outer signature algorithm differs from the one the
+/// certificate signs with, which the trust store refuses.
+fn anchor_with_mismatched_signature_algorithms() -> CertificateDer<'static> {
+    // ecdsa-with-SHA256 and ecdsa-with-SHA384 object identifiers.
+    const SHA256: [u8; 10] = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02];
+    let mut der = ca_naming(&["spiffe://trogon.example"]).der().to_vec();
+    let outer = der
+        .windows(SHA256.len())
+        .rposition(|window| window == SHA256)
+        .expect("outer signature algorithm");
+    der[outer + SHA256.len() - 1] = 0x03;
+    CertificateDer::from(der)
+}
+
+#[test]
+fn an_anchor_the_trust_store_refuses_is_named_in_the_error() {
+    let signer = ca("signer");
+    let key = KeyPair::generate().expect("key");
+    let server = server_params().signed_by(&key, &signer).expect("server");
+    let error = server_config(
+        vec![server.der().clone()],
+        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der())),
+        vec![anchor_with_mismatched_signature_algorithms()],
+        Path::new("anchors.pem"),
+        domain(),
+    )
+    .expect_err("refused");
+    assert!(
+        matches!(&error, TlsError::InvalidTrustAnchor { path, .. } if path == Path::new("anchors.pem")),
+        "{error:?}"
+    );
+}
+
+#[test]
 fn an_anchor_naming_exactly_the_configured_trust_domain_is_accepted() {
     let own = ca_naming(&["spiffe://trogon.example"]);
     assert!(config_with_anchors(&[&own]).is_ok());

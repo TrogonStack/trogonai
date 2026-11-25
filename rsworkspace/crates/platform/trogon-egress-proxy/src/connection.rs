@@ -318,12 +318,15 @@ impl<Clock: EpochClock> Proxy<Clock> {
                 .await;
         }
         if standing == Standing::WouldDeny {
+            // Bound first: line coverage cannot attribute a call inside the macro.
+            let peer_id = peer.spiffe_id();
+            let mode = EnforcementMode::DryRun.as_str();
             tracing::warn!(
                 event = "egress_would_deny",
-                peer.spiffe_id = peer.spiffe_id(),
+                peer.spiffe_id = peer_id,
                 %agent,
                 %destination,
-                mode = EnforcementMode::DryRun.as_str(),
+                mode,
                 "dry run: the caller has no permit for this destination and is forwarded"
             );
         }
