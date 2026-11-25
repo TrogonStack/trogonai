@@ -118,7 +118,9 @@ sandbox deployment:
   launch, signals, output and confirmed descendant cleanup. Its caller still
   supplies container or VM isolation and authorization.
 - `trogon-sandbox-contract` defines validated worker, dispatch and durable
-  operation identifiers, operation kinds and legal operation-state transitions.
+  operation identifiers, SHA-256 content digests, artifact media types, provider
+  identities, isolation tiers, operation kinds and legal operation-state
+  transitions.
   The contract describes which transitions are allowed; it does not persist
   operations, perform provider effects or prove their completion.
 

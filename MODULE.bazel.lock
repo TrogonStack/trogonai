@@ -327,7 +327,7 @@
         "usagesDigest": "dnMvMkyLB/1kjDqZO50ReUEi0SbRl1IoO08MaAMa6NE=",
         "recordedInputs": [
           "REPO_MAPPING:mise-bazel+,toml.bzl toml.bzl+",
-          "FILE:@@//.config/mise/config.toml fc9bcb2c35b3c71c69b509aa1d665c76a798ceaaebaf887ef9daf4419d67cc3e"
+          "FILE:@@//.config/mise/config.toml 684c1fd775c8036679c217744c79cbf36b694be9b95fce108c7d303986198bd2"
         ],
         "generatedRepoSpecs": {
           "mise_bazel": {
@@ -369,10 +369,10 @@
               "executable": "kubeconform"
             }
           },
-          "mise_ubi_open_telemetry_weaver": {
+          "mise_github_open_telemetry_weaver": {
             "repoRuleId": "@@mise-bazel+//mise:repositories.bzl%mise_tool",
             "attributes": {
-              "tool": "ubi:open-telemetry/weaver",
+              "tool": "github:open-telemetry/weaver",
               "version": "0.24.2",
               "executable": "weaver"
             }
@@ -482,7 +482,7 @@
                 "actionlint": "mise_github_rhysd_actionlint",
                 "buf": "mise_buf",
                 "kubeconform": "mise_kubeconform",
-                "weaver": "mise_ubi_open_telemetry_weaver",
+                "weaver": "mise_github_open_telemetry_weaver",
                 "cargo-dylint": "mise_cargo_cargo_dylint",
                 "dylint-link": "mise_cargo_dylint_link",
                 "protoc-gen-buffa": "mise_cargo_protoc_gen_buffa",
@@ -873,7 +873,7 @@
           "FILE:@@//rsworkspace/crates/policy/trogon-policy-cel/Cargo.toml b4a3ec18a62f1838338c221ca515acce35334ace959e7a0554793a00ad638ed4",
           "FILE:@@//rsworkspace/crates/policy/trogon-policy-eval/Cargo.toml 3c07dd604aaf56460979176ac12a94d3aab3713a587b069ff3c6eb4ea456fb68",
           "FILE:@@//rsworkspace/crates/provider/trogon-provider-gateway/Cargo.toml f60bc4004240dd006fd769bd7dd966fbc2194f9ddeaf078269b2b2c204b3278a",
-          "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-contract/Cargo.toml 423a82cbeaa087bc32ffe99342398acd2c87869806851935a2ae43557dcf4da3",
+          "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-contract/Cargo.toml 89afb596309ac4cecc529591dbd72febf2b3d1b8421665b44db48a07af75db55",
           "FILE:@@//rsworkspace/crates/scheduler/trogon-scheduler/Cargo.toml c1b8eea5c74f55979bed648dde9999cafc44d280e68df5a07fd55f50c5f33aef",
           "FILE:@@//rsworkspace/crates/session/trogon-session-plan/Cargo.toml 78f86980c32e8728408cb1d7b794bd5312f9df307057c58994f99179204cabcc",
           "FILE:@@//rsworkspace/crates/session/trogon-session-store/Cargo.toml 48abbba7225b8091782fed521f6c585e7e36b495f4c4466e6d1fc6e6aa9c3e1e",

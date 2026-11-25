@@ -4,7 +4,7 @@ bazel = "9.3.2"
 buf = "1.70.0"
 go = ["1.26.5", "1.27.3"]
 kubeconform = "0.8.0"
-"ubi:open-telemetry/weaver" = { version = "0.24.2", exe = "weaver" }
+"github:open-telemetry/weaver" = "0.24.2"
 "cargo:cargo-dylint" = "6.0.1"
 "cargo:dylint-link" = "6.0.1"
 "cargo:protoc-gen-buffa" = "0.9.2"
