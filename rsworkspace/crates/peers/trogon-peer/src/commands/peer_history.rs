@@ -1,8 +1,8 @@
 use super::accepted_outbox::AcceptedOutbox;
 use super::domain::IdempotencyKey;
+use super::state::PeerState;
 use super::state::{self, ProjectionUpdate};
-use super::{AcceptedMessage, EnrollmentFacts, EvolveError};
-use crate::commands::state::PeerState;
+use super::{AcceptedMessage, EnrollmentFacts, EvolveError, IntakenMessage};
 use trogonai_proto::peers::v1alpha1::PeerEvent;
 
 #[derive(Debug, Clone)]
@@ -10,6 +10,7 @@ pub struct PeerHistory {
     state: PeerState,
     enrollment: Option<EnrollmentFacts>,
     accepted: Vec<AcceptedOutbox>,
+    inbox: Vec<IntakenMessage>,
 }
 
 impl PeerHistory {
@@ -18,6 +19,7 @@ impl PeerHistory {
             state: state::initial_state(),
             enrollment: None,
             accepted: Vec::new(),
+            inbox: Vec::new(),
         }
     }
 
@@ -25,15 +27,24 @@ impl PeerHistory {
         let transition = state::transition(self.state, event)?;
         let mut enrollment = self.enrollment;
         let mut accepted = self.accepted;
+        let mut inbox = self.inbox;
         match transition.update {
             Some(ProjectionUpdate::Enrolled(facts)) => enrollment = Some(facts),
             Some(ProjectionUpdate::Accepted(message)) => accepted.push(*message),
+            Some(ProjectionUpdate::Intaken(message)) => inbox.push(*message),
+            Some(ProjectionUpdate::InboxReplacements(replacements)) => {
+                for replacement in replacements {
+                    // Receipt slots belong to this cursor's push-only inbox; no raw-state input can change its alignment.
+                    inbox[replacement.slot].entry = replacement.entry;
+                }
+            }
             None => {}
         }
         Ok(Self {
             state: transition.state,
             enrollment,
             accepted,
+            inbox,
         })
     }
 
@@ -50,6 +61,10 @@ impl PeerHistory {
             .iter()
             .find(|entry| &entry.key == key)
             .map(|entry| &entry.evidence)
+    }
+
+    pub fn inbox(&self) -> std::slice::Iter<'_, IntakenMessage> {
+        self.inbox.iter()
     }
 
     pub fn into_state(self) -> PeerState {
