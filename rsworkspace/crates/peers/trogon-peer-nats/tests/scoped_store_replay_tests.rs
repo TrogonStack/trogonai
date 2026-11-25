@@ -7,7 +7,7 @@ use trogon_nats::test_support::JetStreamTestServer;
 use trogon_peer::{CallerId, EnrollmentIdentity, InstallationId, NativeSessionId, TenantId, TrustedPeerOwner};
 use trogon_peer_nats::{
     PeerTenant,
-    peer::{PeerJetStreamStore, PeerStorageBudget, PeerStoreConfig, open_store},
+    peer::{PeerJetStreamStore, PeerStorageBudget, PeerStoreConfig},
 };
 use trogon_peer_service::ScopedPeerStore;
 use trogonai_proto::peers::v1alpha1 as proto;
@@ -35,7 +35,7 @@ fn event(index: u128) -> Result<Event, Box<dyn std::error::Error + Send + Sync>>
 async fn scoped_store_bounded_replay_and_conflict_classification_preserve_committed_events() -> TestResult {
     let broker = JetStreamTestServer::start_with_atomic_batches().await;
     let config = PeerStoreConfig::new(PeerTenant::new("alpha")?, PeerStorageBudget::new(65_536)?);
-    let store = PeerJetStreamStore::new(open_store(broker.jetstream().await, &config).await?)?;
+    let store = PeerJetStreamStore::open(broker.jetstream().await, &config).await?;
     assert_eq!(store.tenant().as_str(), "alpha");
     let identity = EnrollmentIdentity::new(
         TrustedPeerOwner::new(TenantId::new("alpha")?, CallerId::new("alice")?),
