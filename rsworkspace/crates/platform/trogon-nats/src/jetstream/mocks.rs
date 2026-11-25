@@ -28,11 +28,12 @@ use tokio::io::AsyncReadExt;
 use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRef};
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamGetKeyValue,
-    JetStreamGetRawMessage, JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl,
-    JetStreamKeyValueDeleteExpectRevision, JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate,
-    JetStreamKvEntry, JetStreamKvGet, JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage,
-    JetStreamPublisher, JetStreamSubjectPurger, ProvisionedStreamField, reconciled_stream_config,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
+    JetStreamFirstRawMessageBySubject, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStream,
+    JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision,
+    JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet,
+    JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage, JetStreamPublisher,
+    JetStreamSubjectPurger, ProvisionedStreamField, reconciled_stream_config,
 };
 use crate::mocks::MockError;
 
@@ -91,6 +92,7 @@ impl JetStreamSubjectPurger for MockJetStreamPurger {
     }
 }
 
+#[derive(Clone)]
 pub struct MockJsMessage {
     inner: async_nats::Message,
     signals: Arc<Mutex<Vec<AckKindSnapshot>>>,
@@ -227,6 +229,7 @@ pub enum MockStreamProvisionError {
 pub struct MockJetStreamContext {
     created_streams: Arc<Mutex<Vec<stream::Config>>>,
     should_fail: Arc<Mutex<bool>>,
+    should_refuse_owned: Arc<Mutex<bool>>,
     stream_writes: Arc<Mutex<usize>>,
 }
 
@@ -235,6 +238,7 @@ impl MockJetStreamContext {
         Self {
             created_streams: Arc::new(Mutex::new(Vec::new())),
             should_fail: Arc::new(Mutex::new(false)),
+            should_refuse_owned: Arc::new(Mutex::new(false)),
             stream_writes: Arc::new(Mutex::new(0)),
         }
     }
@@ -254,8 +258,22 @@ impl MockJetStreamContext {
         *self.should_fail.lock().unwrap() = true;
     }
 
+    pub fn refuse_next_owned_reconciliation(&self) {
+        *self.should_refuse_owned.lock().unwrap() = true;
+    }
+
     fn take_failure(&self) -> bool {
         let mut flag = self.should_fail.lock().unwrap();
+        if *flag {
+            *flag = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn take_owned_refusal(&self) -> bool {
+        let mut flag = self.should_refuse_owned.lock().unwrap();
         if *flag {
             *flag = false;
             true
@@ -268,6 +286,32 @@ impl MockJetStreamContext {
 impl Default for MockJetStreamContext {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl JetStreamGetStream for MockJetStreamContext {
+    type Error = GetStreamError;
+    type Stream = MockJetStreamStream;
+
+    async fn get_stream<T: AsRef<str> + Send>(&self, stream_name: T) -> Result<Self::Stream, GetStreamError> {
+        let config = self
+            .created_streams()
+            .into_iter()
+            .find(|config| config.name == stream_name.as_ref());
+        let Some(config) = config else {
+            let error = serde_json::from_value(serde_json::json!({
+                "code": 404,
+                "err_code": 10059,
+                "description": "stream not found",
+            }))
+            .unwrap();
+            return Err(GetStreamError::new(GetStreamErrorKind::JetStream(error)));
+        };
+        let mut info = mock_stream_info(0, 0);
+        info.config = config;
+        let factory = MockJetStreamConsumerFactory::new();
+        factory.set_info(info);
+        factory.get_stream(stream_name).await
     }
 }
 
@@ -316,6 +360,42 @@ impl JetStreamContext for MockJetStreamContext {
         }
         *self.stream_writes.lock().unwrap() += 1;
         Ok(())
+    }
+
+    async fn create_or_reconcile_stream_if_owned<S: Into<stream::Config> + Send>(
+        &self,
+        desired: S,
+        owned: &[ProvisionedStreamField],
+        subject_namespace: &str,
+    ) -> Result<bool, MockStreamProvisionError> {
+        let desired = desired.into();
+        if self.take_failure() {
+            return Err(MockStreamProvisionError::Reconciliation);
+        }
+        if self.take_owned_refusal() {
+            return Ok(false);
+        }
+        let mut streams = self.created_streams.lock().unwrap();
+        let Some(existing) = streams.iter_mut().find(|existing| existing.name == desired.name) else {
+            streams.push(desired);
+            *self.stream_writes.lock().unwrap() += 1;
+            return Ok(true);
+        };
+        if existing.subjects.is_empty()
+            || !existing
+                .subjects
+                .iter()
+                .all(|subject| subject.starts_with(subject_namespace))
+        {
+            return Ok(false);
+        }
+        let reconciled = reconciled_stream_config(existing, &desired, owned);
+        if reconciled == *existing {
+            return Ok(true);
+        }
+        *existing = reconciled;
+        *self.stream_writes.lock().unwrap() += 1;
+        Ok(true)
     }
 }
 
@@ -709,6 +789,23 @@ impl JetStreamLastRawMessageBySubject for MockJetStreamPublishMessage {
             .find(|message| message.subject == subject)
             .map(MockPublishedOutboundMessage::stream_message)
             .ok_or_else(|| LastRawMessageError::new(LastRawMessageErrorKind::NoMessageFound))
+    }
+}
+
+impl JetStreamFirstRawMessageBySubject for MockJetStreamPublishMessage {
+    async fn get_first_raw_message_by_subject(
+        &self,
+        subject: &str,
+        sequence: u64,
+    ) -> Result<StreamMessage, RawMessageError> {
+        self.published
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|message| message.subject == subject && message.sequence >= sequence)
+            .min_by_key(|message| message.sequence)
+            .map(MockPublishedOutboundMessage::stream_message)
+            .ok_or_else(|| RawMessageError::new(LastRawMessageErrorKind::NoMessageFound))
     }
 }
 

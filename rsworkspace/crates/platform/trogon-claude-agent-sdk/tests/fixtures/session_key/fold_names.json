@@ -1,0 +1,80 @@
+{
+ "capture": "Lowercased names from Node String.prototype.toLowerCase and Python str.lower; both agree on every row. Upstream folds a project directory name this way on Windows only and compares it exactly elsewhere.",
+ "names": [
+  {
+   "name": "Plain",
+   "windows": "plain",
+   "posix": "Plain"
+  },
+  {
+   "name": "-Users-Work-Repo",
+   "windows": "-users-work-repo",
+   "posix": "-Users-Work-Repo"
+  },
+  {
+   "name": "C--Work-Repo",
+   "windows": "c--work-repo",
+   "posix": "C--Work-Repo"
+  },
+  {
+   "name": "ÉCOLE",
+   "windows": "école",
+   "posix": "ÉCOLE"
+  },
+  {
+   "name": "İstanbul",
+   "windows": "i̇stanbul",
+   "posix": "İstanbul"
+  },
+  {
+   "name": "ΟΔΥΣΣΕΥΣ",
+   "windows": "οδυσσευς",
+   "posix": "ΟΔΥΣΣΕΥΣ"
+  },
+  {
+   "name": "ΣΑΣ",
+   "windows": "σας",
+   "posix": "ΣΑΣ"
+  },
+  {
+   "name": "Σ",
+   "windows": "σ",
+   "posix": "Σ"
+  },
+  {
+   "name": "Kelvin",
+   "windows": "kelvin",
+   "posix": "Kelvin"
+  },
+  {
+   "name": "Straße",
+   "windows": "straße",
+   "posix": "Straße"
+  },
+  {
+   "name": "ǅungla",
+   "windows": "ǆungla",
+   "posix": "ǅungla"
+  },
+  {
+   "name": "აბგ",
+   "windows": "აბგ",
+   "posix": "აბგ"
+  },
+  {
+   "name": "ǄǅǆΩ",
+   "windows": "ǆǆǆω",
+   "posix": "ǄǅǆΩ"
+  },
+  {
+   "name": "-Users-ÀÉÎ-proj",
+   "windows": "-users-àéî-proj",
+   "posix": "-Users-ÀÉÎ-proj"
+  },
+  {
+   "name": "-AbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAb-z1x2c3",
+   "windows": "-abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab-z1x2c3",
+   "posix": "-AbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAbAb-z1x2c3"
+  }
+ ]
+}

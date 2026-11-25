@@ -665,18 +665,21 @@ impl ::buffa::Message for GatewayAuthentication {
         self.mode = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for GatewayAuthentication {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for GatewayAuthentication {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = GatewayAuthentication;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct GatewayAuthentication")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<GatewayAuthentication, A::Error> {
@@ -691,11 +694,11 @@ impl<'de> serde::Deserialize<'de> for GatewayAuthentication {
                         "authorization" => {
                             __f_authorization = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::core::option::Option<
                                         ::buffa::EnumValue<AuthorizationScheme>,
                                     >;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -722,7 +725,7 @@ impl<'de> serde::Deserialize<'de> for GatewayAuthentication {
                             if let Some(v) = v {
                                 if __oneof_mode.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'mode'",
                                         ),
                                     );
@@ -746,7 +749,7 @@ impl<'de> serde::Deserialize<'de> for GatewayAuthentication {
                             if let Some(v) = v {
                                 if __oneof_mode.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'mode'",
                                         ),
                                     );
@@ -772,7 +775,7 @@ impl<'de> serde::Deserialize<'de> for GatewayAuthentication {
                             if let Some(v) = v {
                                 if __oneof_mode.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'mode'",
                                         ),
                                     );
@@ -798,7 +801,7 @@ impl<'de> serde::Deserialize<'de> for GatewayAuthentication {
                             if let Some(v) = v {
                                 if __oneof_mode.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'mode'",
                                         ),
                                     );
@@ -811,7 +814,7 @@ impl<'de> serde::Deserialize<'de> for GatewayAuthentication {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -1089,18 +1092,21 @@ impl ::buffa::Message for CredentialBindingConfiguration {
         self.contract_version.clear();
     }
 }
-impl<'de> serde::Deserialize<'de> for CredentialBindingConfiguration {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for CredentialBindingConfiguration {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = CredentialBindingConfiguration;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct CredentialBindingConfiguration")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<CredentialBindingConfiguration, A::Error> {
@@ -1115,9 +1121,9 @@ impl<'de> serde::Deserialize<'de> for CredentialBindingConfiguration {
                         "contractVersion" | "contract_version" => {
                             __f_contract_version = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::string::String;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -1142,7 +1148,7 @@ impl<'de> serde::Deserialize<'de> for CredentialBindingConfiguration {
                             if let Some(v) = v {
                                 if __oneof_authentication.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'authentication'",
                                         ),
                                     );
@@ -1168,7 +1174,7 @@ impl<'de> serde::Deserialize<'de> for CredentialBindingConfiguration {
                             if let Some(v) = v {
                                 if __oneof_authentication.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'authentication'",
                                         ),
                                     );
@@ -1192,7 +1198,7 @@ impl<'de> serde::Deserialize<'de> for CredentialBindingConfiguration {
                             if let Some(v) = v {
                                 if __oneof_authentication.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'authentication'",
                                         ),
                                     );
@@ -1205,7 +1211,7 @@ impl<'de> serde::Deserialize<'de> for CredentialBindingConfiguration {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }

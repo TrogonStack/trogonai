@@ -1,43 +1,35 @@
+use trogon_credential_aggregate::proto::{active_credential_ref, decode_message_field, rotated_to_proto};
+use trogon_credential_domain::{CredentialKey, CredentialMetadata};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
-use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, v1};
 
-use super::domain::CredentialMetadata;
-use super::proto::{active_credential_ref, decode_message_field, rotated_to_proto};
-use super::state::{
-    CredentialDecideError, CredentialEvolveError, validate_activation_metadata, validate_newer_version,
-    validate_same_logical_ref,
-};
+use super::state::{CredentialDecideError, ensure_active_metadata, ensure_recorded_identity};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActivateCredentialRotation {
+    stream_id: CredentialKey,
     metadata: CredentialMetadata,
 }
 
 impl ActivateCredentialRotation {
     pub fn new(metadata: CredentialMetadata) -> Self {
-        Self { metadata }
+        Self {
+            stream_id: metadata.reference().key(),
+            metadata,
+        }
     }
 }
 
 impl Decider for ActivateCredentialRotation {
-    type StreamId = str;
-    type State = state_v1::CredentialStateSnapshot;
+    type StreamId = CredentialKey;
+    type State = super::state::CredentialState;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
-    type EvolveError = CredentialEvolveError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.metadata.reference().id().as_str()
-    }
-
-    fn initial_state() -> Self::State {
-        super::state::initial_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        &self.stream_id
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -50,9 +42,14 @@ impl Decider for ActivateCredentialRotation {
         let active = decode_message_field("rotation_pending.active", &rotation.active)?;
         let previous_credential_ref = active_credential_ref(active)?;
 
-        validate_activation_metadata(&command.metadata)?;
-        validate_same_logical_ref(&previous_credential_ref, command.metadata.reference())?;
-        validate_newer_version(&previous_credential_ref, command.metadata.reference())?;
+        ensure_active_metadata(&command.metadata)?;
+        ensure_recorded_identity(
+            previous_credential_ref.identity(),
+            command.metadata.reference().identity(),
+        )?;
+        if command.metadata.reference().version() <= previous_credential_ref.version() {
+            return Err(CredentialDecideError::RotationVersionNotNewer);
+        }
 
         Ok(Decision::event(v1::CredentialEvent {
             event: Some(rotated_to_proto(&previous_credential_ref, &command.metadata).into()),

@@ -90,6 +90,21 @@ pub trait JetStreamContext: Send + Sync + Clone + 'static {
         desired: S,
         owned: &[ProvisionedStreamField],
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Reconcile only when the live stream still belongs to `subject_namespace`.
+    ///
+    /// The ownership check is performed immediately before an update. A false
+    /// result means the stream was observed with subjects outside that
+    /// namespace and no write was attempted. Implementations cannot make the
+    /// read and `STREAM.UPDATE` atomic because JetStream exposes no expected
+    /// revision for stream updates; callers must treat a true result as a
+    /// mutation-time check, not a cross-process transaction.
+    fn create_or_reconcile_stream_if_owned<S: Into<stream::Config> + Send>(
+        &self,
+        desired: S,
+        owned: &[ProvisionedStreamField],
+        subject_namespace: &str,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 }
 
 pub trait JetStreamKeyValueStatus: Send + Sync + Clone + 'static {
@@ -194,6 +209,16 @@ pub trait JetStreamLastRawMessageBySubject: Send + 'static {
     ) -> impl Future<Output = Result<StreamMessage, LastRawMessageError>> + Send;
 }
 
+/// Reads, from the stream leader, the first message on `subject` at or after
+/// `sequence`.
+pub trait JetStreamFirstRawMessageBySubject: Send + Sync + 'static {
+    fn get_first_raw_message_by_subject(
+        &self,
+        subject: &str,
+        sequence: u64,
+    ) -> impl Future<Output = Result<StreamMessage, stream::RawMessageError>> + Send;
+}
+
 pub trait JetStreamGetStreamInfo: Send + Sync + Clone + 'static {
     fn get_info(&self) -> impl Future<Output = Result<stream::Info, stream::InfoError>> + Send;
 }
@@ -229,6 +254,13 @@ pub trait JetStreamCreateConsumer: Send + 'static {
 
     fn create_consumer(&self, config: pull::Config)
     -> impl Future<Output = Result<Self::Consumer, Self::Error>> + Send;
+}
+
+pub trait JetStreamDeleteConsumer: Send + Sync + 'static {
+    type Error: Error + Send + Sync;
+    type Response: Send;
+
+    fn delete_consumer(&self, name: &str) -> impl Future<Output = Result<Self::Response, Self::Error>> + Send;
 }
 
 pub trait JetStreamConsumer: Send + Sync + 'static {
@@ -342,9 +374,28 @@ impl JetStreamCreateConsumer for jetstream::stream::Stream {
     }
 }
 
+impl<I: Send + Sync + 'static> JetStreamDeleteConsumer for jetstream::stream::Stream<I> {
+    type Error = stream::ConsumerError;
+    type Response = stream::DeleteStatus;
+
+    async fn delete_consumer(&self, name: &str) -> Result<Self::Response, Self::Error> {
+        jetstream::stream::Stream::delete_consumer(self, name).await
+    }
+}
+
 impl JetStreamLastRawMessageBySubject for jetstream::stream::Stream {
     async fn get_last_raw_message_by_subject(&self, subject: &str) -> Result<StreamMessage, LastRawMessageError> {
         jetstream::stream::Stream::get_last_raw_message_by_subject(self, subject).await
+    }
+}
+
+impl JetStreamFirstRawMessageBySubject for jetstream::stream::Stream {
+    async fn get_first_raw_message_by_subject(
+        &self,
+        subject: &str,
+        sequence: u64,
+    ) -> Result<StreamMessage, stream::RawMessageError> {
+        jetstream::stream::Stream::get_first_raw_message_by_subject(self, subject, sequence).await
     }
 }
 

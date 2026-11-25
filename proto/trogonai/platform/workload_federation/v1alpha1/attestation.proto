@@ -1,0 +1,80 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+message QualifiedAttestorRef {
+  string attestor_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
+  ];
+}
+
+// Exact literal selector admitted by the qualified attestor. This is not an
+// expression language or caller-selected pattern; plugin-specific semantics,
+// protected origin and selector completeness are qualification obligations.
+// SPIRE selectors read type:value, so the Kubernetes service account selector
+// is type k8s with value sa:<name> and the Unix UID selector is type unix with
+// value uid:<number>.
+message AttestationSelector {
+  string type = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[A-Za-z0-9_.-]+$"
+    }
+  ];
+  string value = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      not_in: ["*"]
+    }
+  ];
+}
+
+// Every SPIFFE ID field in this package names a workload: a lowercase trust
+// domain of at most 255 bytes, then one or more non-empty path segments that are
+// neither `.` nor `..`, with no trailing slash, query or fragment, within 2048
+// bytes. The same rule applies wherever this package carries a workload ID.
+//
+// References pinned attestor implementations and constrained issuer parent.
+// Neither possession of an application key nor node admission alone admits a
+// workload. The selected deployment artifact supplies native SPIRE configuration;
+// this record does not reproduce its plugin wire protocol (ADR#0098).
+message AttestationProfile {
+  option (buf.validate.message).cel = {
+    id: "attestation_profile.selectors"
+    message: "node and workload selector pairs must be unique"
+    expression: "this.node_selectors.map(s, s.type + ':' + s.value).unique() && this.workload_selectors.map(s, s.type + ':' + s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "attestation_profile.stable_workload_selector"
+    message: "workload selectors must include a Kubernetes service account (type k8s, value sa:...) or a Unix UID (type unix, value uid:...)"
+    expression: "this.workload_selectors.exists(s, (s.type == 'k8s' && s.value.startsWith('sa:')) || (s.type == 'unix' && s.value.startsWith('uid:')))"
+  };
+  QualifiedAttestorRef node_attestor_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  QualifiedAttestorRef workload_attestor_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  string parent_spiffe_id = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+      pattern: "^spiffe://[a-z0-9._-]{1,255}(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|[.][A-Za-z0-9_-][A-Za-z0-9._-]*|[.][.][A-Za-z0-9._-]+))+$"
+    }
+  ];
+  repeated AttestationSelector node_selectors = 4 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 64
+  }];
+  repeated AttestationSelector workload_selectors = 5 [(buf.validate.field).repeated = {
+    min_items: 2
+    max_items: 64
+  }];
+}

@@ -6,8 +6,10 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 
 use crate::audit_sink::AuditSink;
-use crate::constants::{STREAM_AUDIT, STREAM_DUPLICATE_WINDOW};
+use crate::checkpoint_sink::CheckpointSink;
+use crate::constants::{STREAM_AUDIT, STREAM_AUDIT_CHECKPOINT, STREAM_DUPLICATE_WINDOW};
 use crate::sealed_record::SealedRecord;
+use crate::signed_checkpoint::SignedCheckpoint;
 use crate::sink_error::SinkError;
 use crate::stored_ack::StoredAck;
 use crate::stored_audit_record::StoredAuditRecord;
@@ -20,6 +22,9 @@ use crate::stored_audit_record::StoredAuditRecord;
 /// stored inside the window is acknowledged as a duplicate at the first copy's
 /// sequence and stores nothing, and one after the window is stored again. The
 /// window is measured on the tokio clock, so a paused test can step past it.
+///
+/// It also stands in for `AUDIT_CHECKPOINT`: checkpoints share its attempts,
+/// holds and failures, and are kept apart from the records.
 #[derive(Debug, Clone)]
 pub struct MemorySink {
     state: Arc<Mutex<MemoryState>>,
@@ -29,6 +34,7 @@ pub struct MemorySink {
 #[derive(Debug)]
 struct MemoryState {
     stored: Vec<StoredMessage>,
+    checkpoints: Vec<SignedCheckpoint>,
     attempts: usize,
     failures: VecDeque<SinkError>,
     lost_acks: usize,
@@ -54,6 +60,7 @@ impl MemorySink {
         Self {
             state: Arc::new(Mutex::new(MemoryState {
                 stored: Vec::new(),
+                checkpoints: Vec::new(),
                 attempts: 0,
                 failures: VecDeque::new(),
                 lost_acks: 0,
@@ -98,6 +105,11 @@ impl MemorySink {
             .collect()
     }
 
+    /// Every checkpoint stored, in stream order.
+    pub fn checkpoints(&self) -> Vec<SignedCheckpoint> {
+        self.state().checkpoints.clone()
+    }
+
     /// How many publishes were attempted, stored or not, counted as each begins.
     pub fn attempts(&self) -> usize {
         self.state().attempts
@@ -137,8 +149,10 @@ impl MemorySink {
     }
 }
 
-impl AuditSink for MemorySink {
-    async fn publish(&self, record: &SealedRecord) -> Result<StoredAck, SinkError> {
+impl MemorySink {
+    /// Counts the attempt, waits while held, then takes the injected failure if
+    /// one is due.
+    async fn begin(&self) -> Result<MutexGuard<'_, MemoryState>, SinkError> {
         self.state().attempts += 1;
         let mut held = self.held.subscribe();
         drop(held.wait_for(|held| !*held).await);
@@ -149,6 +163,13 @@ impl AuditSink for MemorySink {
         if let Some(error) = state.failures.pop_front() {
             return Err(error);
         }
+        Ok(state)
+    }
+}
+
+impl AuditSink for MemorySink {
+    async fn publish(&self, record: &SealedRecord) -> Result<StoredAck, SinkError> {
+        let mut state = self.begin().await?;
         let now = Instant::now();
         let window = state.duplicate_window;
         let original = state
@@ -173,6 +194,18 @@ impl AuditSink for MemorySink {
             return Err(SinkError::Timeout);
         }
         Ok(ack)
+    }
+}
+
+impl CheckpointSink for MemorySink {
+    async fn publish_checkpoint(&self, checkpoint: &SignedCheckpoint) -> Result<StoredAck, SinkError> {
+        let mut state = self.begin().await?;
+        state.checkpoints.push(checkpoint.clone());
+        Ok(StoredAck::new(
+            STREAM_AUDIT_CHECKPOINT,
+            state.checkpoints.len() as u64,
+            false,
+        ))
     }
 }
 

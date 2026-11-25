@@ -196,6 +196,9 @@ fn every_actor_kind_maps_to_its_message() {
         Actor::Agent {
             agent_id: name("agent-7"),
         },
+        Actor::Service {
+            service_id: name("billing-runner"),
+        },
     ];
     let mut kinds = Vec::new();
     for actor in actors {
@@ -207,11 +210,47 @@ fn every_actor_kind_maps_to_its_message() {
         kinds.push(format!("{:?}", record.message().actor.kind));
     }
     kinds.dedup();
-    assert_eq!(kinds.len(), 5);
+    assert_eq!(kinds.len(), 6);
     assert!(kinds[1].contains("key-1"));
     assert!(kinds[2].contains("issuer-1"));
     assert!(kinds[3].contains("host-1"));
     assert!(kinds[4].contains("agent-7"));
+    assert!(kinds[5].contains("billing-runner"));
+}
+
+#[test]
+fn a_service_is_named_as_a_service_and_never_as_an_agent() {
+    let stamper = stamper();
+    let record = Record::decision(
+        scope_for(Actor::Service {
+            service_id: name("billing-runner"),
+        }),
+        decision_facts(DecisionOutcome::Deny, ReadOnly::Undeclared),
+        stamper.stamp(),
+    );
+    assert_eq!(
+        record.message().actor,
+        MessageField::some(AuditActor {
+            kind: Some(
+                ServiceActor {
+                    service_id: "billing-runner".to_owned(),
+                }
+                .into()
+            ),
+        })
+    );
+}
+
+#[test]
+fn a_secrets_release_decision_maps_to_its_surface() {
+    let stamper = stamper();
+    let mut facts = decision_facts(DecisionOutcome::Deny, ReadOnly::Undeclared);
+    facts.surface = Surface::SecretsRelease;
+    let record = Record::decision(scope(), facts, stamper.stamp());
+    assert_eq!(
+        gateway(&record).surface,
+        EnumValue::from(GatewaySurface::GATEWAY_SURFACE_SECRETS_RELEASE)
+    );
 }
 
 #[test]
@@ -239,6 +278,7 @@ fn a_credential_use_is_must_before_the_effect_with_an_allow_attribution() {
     );
     assert_eq!(usage.destination, None);
     assert_eq!(usage.decision_record_id, None);
+    assert_eq!(usage.location, None);
 }
 
 #[test]
@@ -248,6 +288,7 @@ fn a_release_links_to_its_decision_and_destination() {
     let mut facts = CredentialFacts::new(CredentialTerminal::Release, name("api_key"), name("binding_2"));
     facts.destination = Some(name("api.example.com"));
     facts.decision_record_id = Some(decision.id());
+    facts.location = Some(name("header:authorization"));
     let record = Record::credential_use(scope(), facts, stamper.stamp());
     assert_eq!(
         record.subject().render(),
@@ -262,6 +303,7 @@ fn a_release_links_to_its_decision_and_destination() {
     );
     assert_eq!(usage.destination.as_deref(), Some("api.example.com"));
     assert_eq!(usage.decision_record_id, Some(decision.id().to_string()));
+    assert_eq!(usage.location.as_deref(), Some("header:authorization"));
 }
 
 #[test]

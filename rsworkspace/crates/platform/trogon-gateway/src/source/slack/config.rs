@@ -6,8 +6,8 @@ use super::ack_budget::AckBudget;
 use super::constants::APPS_CONNECTIONS_OPEN_METHOD;
 use super::slack_socket_mode_intended_use::SlackSocketModeIntendedUse;
 
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::{EmptySecretError, HttpBodySizeMax, NonZeroDuration, SecretString};
 
 #[derive(Clone)]
@@ -131,7 +131,7 @@ impl SlackTransport {
 
 #[derive(Clone)]
 pub struct SlackConfig {
-    pub subject_prefix: NatsToken,
+    pub subject_prefix: DottedNatsToken,
     pub stream_name: NatsToken,
     pub stream_max_age: StreamMaxAge,
     pub ack_budget: AckBudget,

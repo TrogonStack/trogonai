@@ -1,0 +1,11 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    binaries = {
+        # The fixture tests read tests/fixtures relative to the manifest directory at run time.
+        "trogon-gateway": {"rustc_env": {"CARGO_MANIFEST_DIR": "{package}"}},
+    },
+    data = ["tests/fixtures/**"],
+    # Some unit tests start NATS and OpenBao servers in containers through Docker.
+    unit_test_tags = ["requires-network"],
+)

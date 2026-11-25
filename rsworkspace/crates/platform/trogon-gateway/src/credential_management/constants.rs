@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use trogon_credential_domain::{CredentialKind, SourceKind};
+
 use super::ManagedCredentialTarget;
-use crate::credential::commands::domain::{CredentialKind, SourceKind};
 
 pub(super) const ADMIN_TOKEN_HEADER: &str = "x-trogon-admin-token";
 pub(super) const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
@@ -13,6 +14,11 @@ pub(super) const CREDENTIAL_MANAGEMENT_IDEMPOTENCY_IN_PROGRESS_LEASE: Duration =
 
 pub(super) const GITHUB_WEBHOOK_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
     source: SourceKind::GitHub,
+    kind: CredentialKind::WebhookSecret,
+};
+
+pub(super) const GENERIC_WEBHOOK_SECRET: ManagedCredentialTarget = ManagedCredentialTarget {
+    source: SourceKind::Webhook,
     kind: CredentialKind::WebhookSecret,
 };
 

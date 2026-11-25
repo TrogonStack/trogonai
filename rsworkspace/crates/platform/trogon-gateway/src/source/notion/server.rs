@@ -5,17 +5,16 @@ use axum::{
     Router, body::Bytes, extract::DefaultBodyLimit, extract::State, http::HeaderMap, http::StatusCode, routing::post,
 };
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
+use trogon_credential_domain::{CredentialKind, SourceIntegrationId, SourceKind};
+use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut, PublishOutcome,
 };
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 use trogon_semconv::span::NOTION_WEBHOOK;
 use trogon_std::{EmptySecretError, NonZeroDuration};
 
-use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
-use crate::source_integration_id::SourceIntegrationId;
 
 use super::NotionEventType;
 use super::NotionVerificationToken;
@@ -100,7 +99,7 @@ fn outcome_to_status<E: fmt::Display>(outcome: PublishOutcome<E>) -> StatusCode 
 
 async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: &ClaimCheckPublisher<P, S>,
-    subject_prefix: &NatsToken,
+    subject_prefix: &DottedNatsToken,
     metadata: &EventMetadata,
     reason: RejectReason,
     body: Bytes,
@@ -125,7 +124,7 @@ async fn publish_unroutable<P: JetStreamPublisher, S: ObjectStorePut>(
 
 async fn publish_verification<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: &ClaimCheckPublisher<P, S>,
-    subject_prefix: &NatsToken,
+    subject_prefix: &DottedNatsToken,
     body: Bytes,
     ack_timeout: NonZeroDuration,
 ) -> StatusCode {
@@ -147,7 +146,7 @@ async fn publish_verification<P: JetStreamPublisher, S: ObjectStorePut>(
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     verification_token: NotionVerificationToken,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -156,7 +155,7 @@ struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
     publisher: ClaimCheckPublisher<P, S>,
     credential_resolver: RuntimeCredentialResolver<G>,
     runtime_key: RuntimeIntegrationKey,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -373,7 +372,7 @@ where
 
 async fn publish_verified_webhook<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
     body: Bytes,
 ) -> StatusCode {

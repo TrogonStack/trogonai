@@ -1,0 +1,6 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    # Store tests start a NATS JetStream server in a container through Docker.
+    unit_test_tags = ["requires-network"],
+)

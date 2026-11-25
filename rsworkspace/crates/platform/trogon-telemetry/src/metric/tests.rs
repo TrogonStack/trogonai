@@ -1,6 +1,7 @@
 use super::*;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
+use std::time::Duration;
 
 #[test]
 // Exercises the export pipeline with a throwaway resource attribute that has no
@@ -17,5 +18,5 @@ fn init_provider_returns_valid_provider() {
 
 #[test]
 fn shutdown_succeeds_when_provider_not_initialized() {
-    assert!(shutdown().is_ok());
+    assert!(shutdown(Duration::from_secs(1)).is_ok());
 }

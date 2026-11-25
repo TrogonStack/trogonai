@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.peers.v1alpha1;
+
+import "google/protobuf/timestamp.proto";
+import "trogonai/peers/v1alpha1/delivery_capability.proto";
+import "trogonai/peers/v1alpha1/peer_availability.proto";
+import "trogonai/peers/v1alpha1/peer_condition.proto";
+
+// An observation is not an authorization grant or an atomic roster snapshot.
+message PeerPresence {
+  string peer_id = 1;
+  string display_name = 2;
+  PeerAvailability availability = 3;
+  PeerCondition condition = 4;
+  DeliveryCapability delivery_capability = 5;
+  google.protobuf.Timestamp observed_at = 6;
+  google.protobuf.Timestamp expires_at = 7;
+  google.protobuf.Timestamp active_at = 8;
+}

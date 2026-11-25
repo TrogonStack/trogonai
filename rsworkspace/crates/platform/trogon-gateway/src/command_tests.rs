@@ -18,10 +18,13 @@ struct EmptyCredentialEventStore {
 #[error("empty credential event store failed")]
 struct EmptyCredentialEventStoreError;
 
-impl StreamRead<str> for EmptyCredentialEventStore {
+impl StreamRead<CredentialKey> for EmptyCredentialEventStore {
     type Error = EmptyCredentialEventStoreError;
 
-    async fn read_stream(&self, request: ReadStreamRequest<'_, str>) -> Result<ReadStreamResponse, Self::Error> {
+    async fn read_stream(
+        &self,
+        request: ReadStreamRequest<'_, CredentialKey>,
+    ) -> Result<ReadStreamResponse, Self::Error> {
         let start = match request.from {
             ReadFrom::Beginning => 1,
             ReadFrom::Position(position) => position.as_u64(),
@@ -30,12 +33,14 @@ impl StreamRead<str> for EmptyCredentialEventStore {
         Ok(ReadStreamResponse {
             current_position: events
                 .iter()
-                .filter(|event| event.stream_id() == request.stream_id)
+                .filter(|event| event.stream_id() == request.stream_id.to_string())
                 .map(|event| event.stream_position)
                 .max(),
             events: events
                 .iter()
-                .filter(|event| event.stream_id() == request.stream_id && event.stream_position.as_u64() >= start)
+                .filter(|event| {
+                    event.stream_id() == request.stream_id.to_string() && event.stream_position.as_u64() >= start
+                })
                 .cloned()
                 .collect(),
         })
@@ -139,8 +144,8 @@ verification_token = "configured-token"
     config::load(Some(file.path())).unwrap()
 }
 
-fn integration(value: &str) -> source_integration_id::SourceIntegrationId {
-    source_integration_id::SourceIntegrationId::new(value).unwrap()
+fn integration(value: &str) -> trogon_credential_domain::SourceIntegrationId {
+    trogon_credential_domain::SourceIntegrationId::new(value).unwrap()
 }
 
 fn nats_message(subject: &str, payload: &'static [u8]) -> async_nats::Message {
@@ -165,18 +170,114 @@ fn stream_message(subject: &str, payload: Bytes) -> StreamMessage {
     }
 }
 
-#[tokio::test]
-async fn serve_rejects_empty_sources_before_connecting() {
+#[test]
+fn empty_sources_are_valid_by_default() {
     let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
     let resolved = config::load(Some(file.path())).unwrap();
-    let error = serve(resolved, std::future::pending()).await.unwrap_err();
-    assert!(error.to_string().starts_with("no sources configured"));
+    assert!(!resolved.has_any_source());
+    assert_eq!(
+        claim_retention_for_sources(&resolved).unwrap().bucket_max_age(),
+        Duration::from_secs(8 * 24 * 60 * 60)
+    );
+}
+
+#[test]
+fn claim_retention_tracks_the_default_for_a_configured_source() {
+    let resolved = resolved_config();
+    assert!(resolved.has_any_source());
+    assert_eq!(
+        claim_retention_for_sources(&resolved).unwrap().bucket_max_age(),
+        Duration::from_secs(8 * 24 * 60 * 60)
+    );
+}
+
+#[test]
+fn claim_retention_tracks_the_longest_configured_age_without_a_default_floor() {
+    for longest_age in [7200, 14 * 24 * 60 * 60] {
+        let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+        write!(
+            file,
+            r#"
+[sources.notion.integrations.short]
+stream_max_age_secs = 3600
+[sources.notion.integrations.short.webhook]
+verification_token = "configured-short"
+
+[sources.notion.integrations.long]
+stream_max_age_secs = {longest_age}
+[sources.notion.integrations.long.webhook]
+verification_token = "configured-long"
+"#
+        )
+        .unwrap();
+        let resolved = config::load(Some(file.path())).unwrap();
+        assert_eq!(
+            claim_retention_for_sources(&resolved).unwrap().bucket_max_age(),
+            Duration::from_secs(longest_age) + Duration::from(CLAIM_CHECK_TTL_GRACE)
+        );
+    }
+}
+
+#[tokio::test]
+async fn empty_source_mode_logs_and_reaches_connection_setup() {
+    let events = trogon_std::log_capture::CapturedEvents::new();
+    let _guard = events.install(trogon_std::log_capture::LevelFilter::INFO);
+    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    resolved.nats.auth =
+        trogon_nats::NatsAuth::Credentials(trogon_nats::Location::Path(directory.path().join("missing.creds")));
+    let error = tokio::time::timeout(
+        Duration::from_secs(5),
+        serve_with_env(resolved, std::future::pending(), &trogon_std::env::InMemoryEnv::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<trogon_nats::ConnectError>(),
+        Some(trogon_nats::ConnectError::InvalidCredentials(_))
+    ));
+    assert!(
+        events
+            .events()
+            .iter()
+            .any(|event| event.message() == Some("starting with no source integrations configured"))
+    );
+}
+
+#[tokio::test]
+async fn serve_without_sources_provisions_the_default_claim_retention_before_shutdown() {
+    let server = JetStreamTestServer::start().await;
+    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    assert!(!resolved.has_any_source());
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &trogon_std::env::InMemoryEnv::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let js = server.jetstream().await;
+    js.get_stream(credential::constants::CREDENTIAL_STREAM).await.unwrap();
+    let mut claims = js.get_stream(format!("OBJ_{}", ClaimBucket::default())).await.unwrap();
+    assert_eq!(
+        claims.info().await.unwrap().config.max_age,
+        Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS) + Duration::from(CLAIM_CHECK_TTL_GRACE)
+    );
 }
 
 #[tokio::test]
 async fn serve_provisions_stream_and_claim_bucket_before_graceful_shutdown() {
     let server = JetStreamTestServer::start().await;
     let mut resolved = resolved_config();
+    let stream_max_age_secs = DEFAULT_STREAM_MAX_AGE_SECS * 2;
+    resolved.notion[0].config.stream_max_age = StreamMaxAge::from_secs(stream_max_age_secs).unwrap();
     resolved.http_server.port = 0;
     resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
     tokio::time::timeout(Duration::from_secs(10), serve(resolved, std::future::ready(())))
@@ -189,6 +290,35 @@ async fn serve_provisions_stream_and_claim_bucket_before_graceful_shutdown() {
     NatsObjectStore::bind_claim_bucket(&js, ClaimBucket::default())
         .await
         .unwrap();
+    let mut claims = js.get_stream(format!("OBJ_{}", ClaimBucket::default())).await.unwrap();
+    assert_eq!(
+        claims.info().await.unwrap().config.max_age,
+        Duration::from_secs(stream_max_age_secs) + Duration::from(CLAIM_CHECK_TTL_GRACE)
+    );
+}
+
+#[tokio::test]
+async fn serve_without_sources_keeps_claims_for_the_default_stream_age() {
+    let server = JetStreamTestServer::start().await;
+    let file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
+
+    tokio::time::timeout(Duration::from_secs(10), serve(resolved, std::future::ready(())))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let js = server.jetstream().await;
+    let mut claims = js
+        .get_stream(format!("OBJ_{}", ClaimBucket::default().as_str()))
+        .await
+        .unwrap();
+    assert_eq!(
+        claims.info().await.unwrap().config.max_age,
+        Duration::from_secs(DEFAULT_STREAM_MAX_AGE_SECS) + Duration::from(CLAIM_CHECK_TTL_GRACE)
+    );
 }
 
 #[tokio::test]
@@ -317,6 +447,123 @@ fn management_env(address: &str) -> trogon_std::env::InMemoryEnv {
     env.set(OPENBAO_TOKEN, "openbao-token");
     env.set(OPENBAO_ALLOW_PLAINTEXT, "true");
     env
+}
+
+fn generic_webhook_configuration(server: &JetStreamTestServer) -> config::ResolvedConfig {
+    let mut file = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+    file.write_all(b"[webhooks]\n").unwrap();
+    let mut resolved = config::load(Some(file.path())).unwrap();
+    resolved.http_server.port = 0;
+    resolved.nats = trogon_nats::NatsConfig::from_url(server.address()).with_tls(trogon_nats::NatsTls::Disabled);
+    resolved
+}
+
+fn generic_webhook_environment() -> trogon_std::env::InMemoryEnv {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(OPENBAO_ADDR, "https://openbao.invalid:8200");
+    env.set(OPENBAO_TOKEN, "test-openbao-token");
+    env
+}
+
+#[tokio::test]
+async fn generic_webhooks_serve_assembles_the_receiver_and_durable_registry_without_provider_sources() {
+    let server = JetStreamTestServer::start().await;
+    let resolved = generic_webhook_configuration(&server);
+    let environment = generic_webhook_environment();
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &environment),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    let context = server.jetstream().await;
+    let registry = context.get_key_value("GATEWAY_WEBHOOK_ENDPOINTS").await.unwrap();
+    let registry_status = registry.status().await.unwrap();
+    assert!(registry_status.max_age().is_zero());
+    assert_eq!(registry_status.history(), 1);
+    assert_eq!(registry_status.values(), 0);
+    let delivery_stream = context.get_stream("WEBHOOKS").await.unwrap();
+    let config = &delivery_stream.cached_info().config;
+    assert_eq!(config.subjects, vec!["webhooks.>"]);
+    assert_eq!(config.max_age, Duration::from_secs(604_800));
+    assert_eq!(config.duplicate_window, Duration::from_secs(604_800));
+}
+
+#[tokio::test]
+async fn generic_webhooks_serve_refuses_missing_credential_backend_configuration() {
+    let server = JetStreamTestServer::start().await;
+    let resolved = generic_webhook_configuration(&server);
+    let environment = trogon_std::env::InMemoryEnv::new();
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &environment),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+
+    assert!(matches!(
+        error.downcast_ref::<std::env::VarError>(),
+        Some(std::env::VarError::NotPresent)
+    ));
+    assert_eq!(
+        error.to_string(),
+        format!("{OPENBAO_ADDR} must be set when webhooks is enabled")
+    );
+    assert!(
+        server
+            .jetstream()
+            .await
+            .get_key_value("GATEWAY_WEBHOOK_ENDPOINTS")
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn generic_webhooks_serve_refuses_an_expiring_registry_before_starting_ingress() {
+    let server = JetStreamTestServer::start().await;
+    let context = server.jetstream().await;
+    let registry = context
+        .create_key_value(async_nats::jetstream::kv::Config {
+            bucket: "GATEWAY_WEBHOOK_ENDPOINTS".to_owned(),
+            history: 1,
+            max_age: Duration::from_secs(60),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    registry
+        .put("existing-registration", Bytes::from_static(b"retained-registration"))
+        .await
+        .unwrap();
+    let resolved = generic_webhook_configuration(&server);
+    let environment = generic_webhook_environment();
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        serve_with_env(resolved, std::future::ready(()), &environment),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+
+    assert!(matches!(
+        error.downcast_ref::<webhooks::RegistryOpenError>(),
+        Some(webhooks::RegistryOpenError::Configuration {
+            field: webhooks::RegistryConfigurationField::Retention,
+        })
+    ));
+    let registry = context.get_key_value("GATEWAY_WEBHOOK_ENDPOINTS").await.unwrap();
+    assert_eq!(registry.status().await.unwrap().max_age(), Duration::from_secs(60));
+    assert_eq!(
+        registry.get("existing-registration").await.unwrap().unwrap(),
+        Bytes::from_static(b"retained-registration")
+    );
 }
 
 struct NonUnicodeEnv;
@@ -620,8 +867,8 @@ fn openbao_store_rejects_a_plaintext_address_by_default() {
     let error = openbao_secret_store_from_env(&env, "management").unwrap_err();
 
     assert!(matches!(
-        error.downcast_ref::<secret_store::openbao_secret_store::OpenBaoSecretStoreConfigError>(),
-        Some(secret_store::openbao_secret_store::OpenBaoSecretStoreConfigError::PlaintextAddress)
+        error.downcast_ref::<trogon_secret_store::OpenBaoSecretStoreConfigError>(),
+        Some(trogon_secret_store::OpenBaoSecretStoreConfigError::PlaintextAddress)
     ));
 }
 

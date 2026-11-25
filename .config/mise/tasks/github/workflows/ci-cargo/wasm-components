@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Build the decider components the trogon-decider-publish gate test loads"
+#MISE depends=["artifacts:wasm-components"]
+set -euo pipefail

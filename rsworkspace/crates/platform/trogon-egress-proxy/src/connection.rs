@@ -9,6 +9,12 @@
 //! 4. answer `200`, then check that the first TLS record names the CONNECT
 //!    host, and only then forward bytes.
 //!
+//! In dry run (opt-in, never the default) one answer changes: an authenticated
+//! caller with no permit for the destination is forwarded and audited as
+//! `would_deny`. Every other refusal is the same in both modes, so dry run
+//! never relaxes who may connect, how long a certificate may live, which
+//! addresses may be dialled or what happens while policy is unavailable.
+//!
 //! A tunnel is audited twice at most. The permit is recorded after the dial
 //! succeeds and before `200`, and is acknowledged first: a proxy that cannot
 //! record a permit refuses with `AUDIT_UNAVAILABLE` and forwards nothing. Every
@@ -22,39 +28,66 @@ use std::collections::HashSet;
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU16;
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::sync::{Arc, OnceLock};
 
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
-use tokio::time::timeout;
+use tokio::time::{MissedTickBehavior, interval, sleep_until, timeout};
+use trogon_std::{EpochClock, SystemClock};
 
 use crate::admission::{Admission, admit};
-use crate::agent_id::AgentId;
 use crate::audit::{AuditEvent, AuditSink, Decision};
 use crate::audit_error::AuditError;
 use crate::connect_request::{Request, RequestError, read_request};
-use crate::constants::CONNECTION_ESTABLISHED;
+use crate::constants::{CONNECTION_ESTABLISHED, DENIAL_AUDIT_TIMEOUT, POLICY_RECHECK_INTERVAL};
 use crate::destination::Destination;
 use crate::destination_host::DestinationHost;
 use crate::dial_targets::dial_targets;
+use crate::enforcement_mode::EnforcementMode;
 use crate::fault::Fault;
 use crate::first_record::read_first_record;
 use crate::host_name::HostName;
 use crate::limits::Limits;
+use crate::peer_identity::PeerIdentity;
+use crate::policy_revision::PolicyRevision;
 use crate::policy_snapshot::PolicySnapshot;
+use crate::policy_snapshot::SnapshotVerdict;
 use crate::resolver::Resolver;
+use crate::telemetry::metrics::ConnectionMetrics;
+
+struct EndedAuthority {
+    destination: Option<Destination>,
+    address: Option<IpAddr>,
+    fault: Fault,
+}
+
+struct ObservedUpstream {
+    stream: TcpStream,
+    address: SocketAddr,
+    policy_revision: Option<PolicyRevision>,
+    standing: Standing,
+}
+
+/// Whether the caller holds a permit. `WouldDeny` exists only in dry run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Standing {
+    Granted,
+    WouldDeny,
+}
 
 /// Everything a connection needs besides the connection itself.
-pub struct Proxy {
+pub struct Proxy<C = SystemClock> {
+    clock: C,
     snapshot: Arc<dyn PolicySnapshot>,
     resolver: Arc<dyn Resolver>,
     audit: Arc<dyn AuditSink>,
     limits: Limits,
     non_tls_ports: HashSet<NonZeroU16>,
+    mode: EnforcementMode,
+    metrics: ConnectionMetrics,
 }
 
-impl Proxy {
+impl Proxy<SystemClock> {
     /// `non_tls_ports` are destination ports whose tunnels are not TLS, so the
     /// SNI check is skipped for them.
     pub fn new(
@@ -65,12 +98,51 @@ impl Proxy {
         non_tls_ports: HashSet<NonZeroU16>,
     ) -> Self {
         Self {
+            clock: SystemClock,
             snapshot,
             resolver,
             audit,
             limits,
             non_tls_ports,
+            mode: EnforcementMode::default(),
+            metrics: ConnectionMetrics::global(),
         }
+    }
+}
+
+impl<Clock: EpochClock> Proxy<Clock> {
+    pub fn with_clock<D: EpochClock>(self, clock: D) -> Proxy<D> {
+        Proxy {
+            clock,
+            snapshot: self.snapshot,
+            resolver: self.resolver,
+            audit: self.audit,
+            limits: self.limits,
+            non_tls_ports: self.non_tls_ports,
+            mode: self.mode,
+            metrics: self.metrics,
+        }
+    }
+
+    /// Selects what happens to an authenticated caller with no permit. The
+    /// default is [`EnforcementMode::Enforce`].
+    pub fn with_mode(mut self, mode: EnforcementMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn mode(&self) -> EnforcementMode {
+        self.mode
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_metrics(mut self, metrics: ConnectionMetrics) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    pub(crate) fn metrics(&self) -> &ConnectionMetrics {
+        &self.metrics
     }
 
     pub fn limits(&self) -> &Limits {
@@ -81,21 +153,62 @@ impl Proxy {
         Arc::clone(&self.audit)
     }
 
-    /// Serves one connection whose caller is already authenticated as `agent`.
-    pub async fn serve<C>(&self, mut client: C, agent: &AgentId)
+    /// Serves one connection with the exact peer identity verified by its transport.
+    pub async fn serve<C>(&self, mut client: C, peer: &PeerIdentity)
     where
         C: AsyncRead + AsyncWrite + Unpin,
     {
-        if let Err(error) = self.run(&mut client, agent).await {
-            tracing::debug!(%agent, error = %error, "connection ended with an i/o error");
+        let ended = if peer.is_current(self.clock.system_time()) {
+            tokio::select! {
+                biased;
+                () = peer.authority_changed() => Some(EndedAuthority {
+                    destination: None,
+                    address: None,
+                    fault: Fault::AuthorityExpired,
+                }),
+                () = sleep_until(peer.deadline()) => Some(EndedAuthority {
+                    destination: None,
+                    address: None,
+                    fault: Fault::AuthorityExpired,
+                }),
+                outcome = self.run(&mut client, peer) => match outcome {
+                    Ok(ended) => ended,
+                    Err(error) => {
+                        tracing::debug!(agent = %peer.agent(), error = %error, "connection ended with an i/o error");
+                        None
+                    }
+                }
+            }
+        } else {
+            Some(EndedAuthority {
+                destination: None,
+                address: None,
+                fault: Fault::AuthorityExpired,
+            })
+        };
+        if let Some(ended) = ended {
+            drop(client);
+            let _ = timeout(
+                DENIAL_AUDIT_TIMEOUT,
+                self.record(
+                    peer,
+                    ended.destination.as_ref(),
+                    ended.address,
+                    Decision::Refused(ended.fault),
+                    None,
+                ),
+            )
+            .await;
+        } else {
+            let _ = tokio::time::timeout_at(peer.deadline(), client.shutdown()).await;
         }
-        let _ = client.shutdown().await;
     }
 
-    async fn run<C>(&self, client: &mut C, agent: &AgentId) -> io::Result<()>
+    async fn run<C>(&self, client: &mut C, peer: &PeerIdentity) -> io::Result<Option<EndedAuthority>>
     where
         C: AsyncRead + AsyncWrite + Unpin,
     {
+        let agent = peer.agent();
         let head = timeout(
             self.limits.head_timeout,
             read_request(client, self.limits.max_head_bytes),
@@ -104,90 +217,278 @@ impl Proxy {
         let (request, leftover) = match head {
             Err(_) => {
                 tracing::debug!(%agent, "request head timed out");
-                return Ok(());
+                return Ok(None);
             }
-            Ok(Err(RequestError::Closed)) => return Ok(()),
+            Ok(Err(RequestError::Closed)) => return Ok(None),
             Ok(Err(RequestError::Io(error))) => return Err(error),
             Ok(Err(error)) => {
                 tracing::debug!(%agent, error = %error, "request refused");
-                return self.refuse(client, agent, None, None, Fault::BadRequest).await;
+                return self.refuse(client, peer, None, None, Fault::BadRequest).await;
             }
             Ok(Ok(parsed)) => parsed,
         };
         let destination = match request {
             Request::Connect(destination) => destination,
             Request::OtherMethod => {
-                return self.refuse(client, agent, None, None, Fault::MethodNotAllowed).await;
+                return self.refuse(client, peer, None, None, Fault::MethodNotAllowed).await;
             }
         };
 
-        if let Admission::Refuse(fault) = admit(self.snapshot.as_ref(), agent, &destination, SystemTime::now()) {
-            return self.refuse(client, agent, Some(&destination), None, fault).await;
+        if let Err(fault) = self.check_request_authority(peer, &destination) {
+            return self.refuse(client, peer, Some(&destination), None, fault).await;
         }
 
-        let candidates = match self.candidates(&destination).await {
+        let selected = OnceLock::new();
+        tokio::select! {
+            biased;
+            fault = self.monitor_policy(peer, &destination) => Ok(Some(EndedAuthority {
+                destination: Some(destination.clone()), address: selected.get().copied(), fault,
+            })),
+            result = self.run_authorized(client, peer, &destination, leftover, &selected) => result,
+        }
+    }
+
+    async fn run_authorized<C>(
+        &self,
+        client: &mut C,
+        peer: &PeerIdentity,
+        destination: &Destination,
+        leftover: Vec<u8>,
+        selected: &OnceLock<IpAddr>,
+    ) -> io::Result<Option<EndedAuthority>>
+    where
+        C: AsyncRead + AsyncWrite + Unpin,
+    {
+        let agent = peer.agent();
+
+        let candidates = match self.candidates(destination).await {
             Some(candidates) => candidates,
             None => {
                 return self
-                    .refuse(client, agent, Some(&destination), None, Fault::UpstreamUnreachable)
+                    .refuse(client, peer, Some(destination), None, Fault::UpstreamUnreachable)
                     .await;
             }
         };
+        if let Err(fault) = self.check_request_authority(peer, destination) {
+            return self.refuse(client, peer, Some(destination), None, fault).await;
+        }
         let targets = match dial_targets(
             self.snapshot.as_ref(),
             agent,
             destination.port(),
             &candidates,
-            SystemTime::now(),
+            self.clock.system_time(),
         ) {
             Ok(targets) => targets,
-            Err(fault) => return self.refuse(client, agent, Some(&destination), None, fault).await,
+            Err(fault) => return self.refuse(client, peer, Some(destination), None, fault).await,
         };
-        let Some((mut upstream, address)) = self.dial(&targets).await else {
+        let dialled = match self.dial(peer, destination, &targets, selected).await {
+            Ok(dialled) => dialled,
+            Err(fault) => {
+                return self
+                    .refuse(client, peer, Some(destination), selected.get().copied(), fault)
+                    .await;
+            }
+        };
+        let Some(ObservedUpstream {
+            stream: mut upstream,
+            address,
+            policy_revision,
+            standing,
+        }) = dialled
+        else {
             return self
-                .refuse(client, agent, Some(&destination), None, Fault::UpstreamUnreachable)
+                .refuse(client, peer, Some(destination), None, Fault::UpstreamUnreachable)
                 .await;
         };
 
         let resolved = Some(address.ip());
+        let decision = match standing {
+            Standing::Granted => Decision::Permitted,
+            Standing::WouldDeny => Decision::WouldDeny,
+        };
         if self
-            .record(agent, Some(&destination), resolved, Decision::Permitted)
+            .record(peer, Some(destination), resolved, decision, policy_revision)
             .await
             .is_err()
         {
             drop(upstream);
             return self
-                .refuse(client, agent, Some(&destination), resolved, Fault::AuditUnavailable)
+                .refuse(client, peer, Some(destination), resolved, Fault::AuditUnavailable)
+                .await;
+        }
+        if standing == Standing::WouldDeny {
+            // Bound first: line coverage cannot attribute a call inside the macro.
+            let peer_id = peer.spiffe_id();
+            let mode = EnforcementMode::DryRun.as_str();
+            tracing::warn!(
+                event = "egress_would_deny",
+                peer.spiffe_id = peer_id,
+                %agent,
+                %destination,
+                mode,
+                "dry run: the caller has no permit for this destination and is forwarded"
+            );
+        }
+
+        if !self
+            .snapshot
+            .revision_is_current(policy_revision, self.clock.system_time())
+        {
+            drop(upstream);
+            return self
+                .refuse(client, peer, Some(destination), resolved, Fault::PolicyUnavailable)
                 .await;
         }
 
-        client.write_all(CONNECTION_ESTABLISHED).await?;
-        client.flush().await?;
-
-        let mut pending = leftover;
-        if let Some(expected) = self.expected_sni(&destination) {
-            match read_first_record(client, pending, self.limits.first_record_timeout).await {
-                Ok((requested, record)) if requested == *expected => pending = record,
-                outcome => {
-                    if let Err(error) = &outcome {
-                        tracing::debug!(%agent, error = %error, "first record rejected");
-                    }
-                    let _ = self
-                        .record(
-                            agent,
-                            Some(&destination),
-                            resolved,
-                            Decision::Refused(Fault::SniMismatch),
-                        )
-                        .await;
-                    return Ok(());
-                }
-            }
+        if let Err(fault) = self.check_authority(peer, destination, address) {
+            drop(upstream);
+            return self.refuse(client, peer, Some(destination), resolved, fault).await;
         }
 
-        upstream.write_all(&pending).await?;
-        copy_bidirectional(client, &mut upstream).await?;
+        let tunnel = async {
+            client.write_all(CONNECTION_ESTABLISHED).await?;
+            client.flush().await?;
+
+            let mut pending = leftover;
+            if let Some(expected) = self.expected_sni(destination) {
+                match read_first_record(client, pending, self.limits.first_record_timeout).await {
+                    Ok((requested, record)) if requested == *expected => pending = record,
+                    outcome => {
+                        if let Err(error) = &outcome {
+                            tracing::debug!(%agent, error = %error, "first record rejected");
+                        }
+                        return io::Result::Ok(Some(Fault::SniMismatch));
+                    }
+                }
+            }
+            if let Err(fault) = self.check_authority(peer, destination, address) {
+                return Ok(Some(fault));
+            }
+            upstream.write_all(&pending).await?;
+            copy_bidirectional(client, &mut upstream).await?;
+            Ok(None)
+        };
+        let fault = tokio::select! {
+            biased;
+            fault = self.monitor_authority(peer, destination, address) => Some(fault),
+            result = tunnel => result?,
+        };
+        Ok(fault.map(|fault| EndedAuthority {
+            destination: Some(destination.clone()),
+            address: resolved,
+            fault,
+        }))
+    }
+
+    fn check_request_authority(&self, peer: &PeerIdentity, destination: &Destination) -> Result<Standing, Fault> {
+        let now = self.clock.system_time();
+        if !peer.is_current(now) {
+            return Err(Fault::AuthorityExpired);
+        }
+        match admit(self.snapshot.as_ref(), peer.agent(), destination, now) {
+            Admission::Permit => Ok(Standing::Granted),
+            Admission::Refuse(Fault::NoPermit) if self.mode == EnforcementMode::DryRun => Ok(Standing::WouldDeny),
+            Admission::Refuse(fault) => Err(fault),
+        }
+    }
+
+    /// The one verdict dry run reinterprets. Unavailable stays a refusal.
+    fn standing(&self, verdict: SnapshotVerdict) -> Result<Standing, Fault> {
+        match verdict {
+            SnapshotVerdict::Permitted => Ok(Standing::Granted),
+            SnapshotVerdict::NotPermitted if self.mode == EnforcementMode::DryRun => Ok(Standing::WouldDeny),
+            SnapshotVerdict::NotPermitted => Err(Fault::NoPermit),
+            SnapshotVerdict::Unavailable => Err(Fault::PolicyUnavailable),
+        }
+    }
+
+    fn observe_authority(
+        &self,
+        peer: &PeerIdentity,
+        destination: &Destination,
+        address: SocketAddr,
+    ) -> Result<(Option<PolicyRevision>, Standing), Fault> {
+        let now = self.clock.system_time();
+        if !peer.is_current(now) {
+            return Err(Fault::AuthorityExpired);
+        }
+        let observed = self.snapshot.observe(peer.agent(), destination, now);
+        let standing = self.standing(observed.verdict)?;
+        dial_targets(
+            self.snapshot.as_ref(),
+            peer.agent(),
+            destination.port(),
+            &[address.ip()],
+            now,
+        )?;
+        if !self
+            .snapshot
+            .revision_is_current(observed.revision, self.clock.system_time())
+        {
+            return Err(Fault::PolicyUnavailable);
+        }
+        Ok((observed.revision, standing))
+    }
+
+    fn check_authority(
+        &self,
+        peer: &PeerIdentity,
+        destination: &Destination,
+        address: SocketAddr,
+    ) -> Result<(), Fault> {
+        self.check_request_authority(peer, destination)?;
+        let now = self.clock.system_time();
+        dial_targets(
+            self.snapshot.as_ref(),
+            peer.agent(),
+            destination.port(),
+            &[address.ip()],
+            now,
+        )?;
         Ok(())
+    }
+
+    async fn monitor_authority(&self, peer: &PeerIdentity, destination: &Destination, address: SocketAddr) -> Fault {
+        let mut checks = interval(POLICY_RECHECK_INTERVAL);
+        checks.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            checks.tick().await;
+            if let Err(fault) = self.check_authority(peer, destination, address) {
+                return fault;
+            }
+        }
+    }
+
+    async fn monitor_policy(&self, peer: &PeerIdentity, destination: &Destination) -> Fault {
+        let mut updates = self.snapshot.subscribe();
+        let mut checks = interval(POLICY_RECHECK_INTERVAL);
+        checks.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            let observed = self
+                .snapshot
+                .observe(peer.agent(), destination, self.clock.system_time());
+            if let Err(fault) = self.standing(observed.verdict) {
+                return fault;
+            }
+            let deadline = observed.deadline.unwrap_or(peer.deadline());
+            tokio::select! {
+                biased;
+                changed = async {
+                    match updates.as_mut() {
+                        Some(updates) => updates.changed().await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if changed.is_err() { return Fault::PolicyUnavailable; }
+                },
+                () = sleep_until(deadline) => {},
+                _ = checks.tick() => {},
+            }
+            if let Err(fault) = self.check_request_authority(peer, destination) {
+                return fault;
+            }
+        }
     }
 
     /// Resolves a name once; an IP literal is its own only candidate.
@@ -212,17 +513,33 @@ impl Proxy {
     }
 
     /// Tries the validated addresses in order; nothing else is ever dialed.
-    async fn dial(&self, targets: &[SocketAddr]) -> Option<(TcpStream, SocketAddr)> {
+    async fn dial(
+        &self,
+        peer: &PeerIdentity,
+        destination: &Destination,
+        targets: &[SocketAddr],
+        selected: &OnceLock<IpAddr>,
+    ) -> Result<Option<ObservedUpstream>, Fault> {
         for target in targets {
+            self.check_authority(peer, destination, *target)?;
             let attempt = timeout(self.limits.connect_timeout, TcpStream::connect(target))
                 .await
                 .unwrap_or_else(|_| Err(io::ErrorKind::TimedOut.into()));
             match attempt {
-                Ok(stream) => return Some((stream, *target)),
+                Ok(stream) => {
+                    let _ = selected.set(target.ip());
+                    let (policy_revision, standing) = self.observe_authority(peer, destination, *target)?;
+                    return Ok(Some(ObservedUpstream {
+                        stream,
+                        address: *target,
+                        policy_revision,
+                        standing,
+                    }));
+                }
                 Err(error) => tracing::debug!(error = %error, "upstream connect failed"),
             }
         }
-        None
+        Ok(None)
     }
 
     /// The name the first TLS record must carry. An IP literal has no name to
@@ -238,37 +555,40 @@ impl Proxy {
     async fn refuse<C>(
         &self,
         client: &mut C,
-        agent: &AgentId,
+        peer: &PeerIdentity,
         destination: Option<&Destination>,
         resolved: Option<IpAddr>,
         fault: Fault,
-    ) -> io::Result<()>
+    ) -> io::Result<Option<EndedAuthority>>
     where
         C: AsyncWrite + Unpin,
     {
         if fault != Fault::AuditUnavailable {
             let _ = self
-                .record(agent, destination, resolved, Decision::Refused(fault))
+                .record(peer, destination, resolved, Decision::Refused(fault), None)
                 .await;
         }
         client.write_all(&fault.response()).await?;
-        client.flush().await
+        client.flush().await.map(|()| None)
     }
 
     async fn record(
         &self,
-        agent: &AgentId,
+        peer: &PeerIdentity,
         destination: Option<&Destination>,
         resolved: Option<IpAddr>,
         decision: Decision,
+        policy_revision: Option<PolicyRevision>,
     ) -> Result<(), AuditError> {
         self.audit
             .record(&AuditEvent {
-                agent,
+                agent: peer.agent(),
+                workload_peer: peer.workload_peer(),
                 destination,
                 resolved_address: resolved,
                 decision,
                 snapshot_source: self.snapshot.source(),
+                policy_revision,
             })
             .await
     }

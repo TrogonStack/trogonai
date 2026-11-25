@@ -22,7 +22,7 @@ where
         Ok(response) => Ok(response),
         Err(JsonRpcRequestError::Agent(error)) => Err(error),
         Err(JsonRpcRequestError::Wire(_)) => Err(agent_client_protocol::Error::new(
-            agent_client_protocol::ErrorCode::InternalError.into(),
+            agent_client_protocol::ErrorCode::INTERNAL_ERROR,
             "Invalid response from agent",
         )),
         Err(error @ JsonRpcRequestError::Nats(_)) => Err(map_nats_error(error.into_nats_error(&subject_str))),

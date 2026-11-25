@@ -1,0 +1,39 @@
+{
+  "captured_from": {
+    "typescript": "sdk.mjs 0.3.323",
+    "python": "claude_agent_sdk 0.2.181"
+  },
+  "scenarios": {
+    "order_inbound_before_init": {
+      "argv": [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json"
+      ],
+      "env": {
+        "CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH": "1",
+        "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH": "1"
+      },
+      "requests": [
+        "{\"request_id\":\"<id>\",\"type\":\"control_request\",\"request\":{\"subtype\":\"initialize\",\"systemPrompt\":[\"\"]}}"
+      ],
+      "responses": [
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"e1\",\"response\":{\"accessToken\":\"tok\"}}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"e2\",\"response\":{\"authToken\":\"ht\"}}}",
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"e3\",\"response\":{\"accessToken\":\"tok\"}}}"
+      ],
+      "order": [
+        "sdk writes initialize request",
+        "cli sends oauth_token_refresh e1",
+        "cli sends host_auth_token_refresh e2",
+        "sdk writes success response e1",
+        "sdk writes success response e2",
+        "cli answers initialize",
+        "cli sends oauth_token_refresh e3",
+        "sdk writes success response e3"
+      ]
+    }
+  }
+}

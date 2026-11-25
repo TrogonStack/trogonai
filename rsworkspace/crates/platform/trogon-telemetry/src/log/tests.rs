@@ -1,5 +1,6 @@
 use super::*;
 use opentelemetry::KeyValue;
+use std::time::Duration;
 use trogon_std::env::InMemoryEnv;
 use trogon_std::fs::MemFs;
 
@@ -56,5 +57,5 @@ fn init_provider_lifecycle() {
 
 #[test]
 fn shutdown_is_noop_when_logger_provider_not_initialized() {
-    assert!(shutdown().is_ok());
+    assert!(shutdown(Duration::from_secs(1)).is_ok());
 }

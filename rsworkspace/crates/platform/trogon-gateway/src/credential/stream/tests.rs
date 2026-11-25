@@ -1,42 +1,5 @@
 use super::*;
 
-fn credential_id(raw: &str) -> CredentialId {
-    CredentialId::new(raw).unwrap()
-}
-
-#[test]
-fn key_derivation_is_deterministic_for_the_same_credential_id() {
-    let first = CredentialKey::derive(&credential_id("openbao:tenant-1:github/primary:webhook_secret"));
-    let second = CredentialKey::derive(&credential_id("openbao:tenant-1:github/primary:webhook_secret"));
-
-    assert_eq!(first, second);
-}
-
-#[test]
-fn key_derivation_keeps_nats_unsafe_ids_out_of_subject_tokens() {
-    let key = CredentialKey::derive(&credential_id("openbao:tenant-1:github/primary:webhook_secret"));
-    let subject = CredentialSubject::event(&key).unwrap();
-
-    assert_eq!(
-        subject.as_str(),
-        format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.{}", key.simple())
-    );
-    assert_eq!(subject.key(), &key);
-    assert_eq!(key.simple().len(), 32);
-    assert!(key.simple().chars().all(|ch| ch.is_ascii_hexdigit()));
-}
-
-#[test]
-fn stream_id_routing_preserves_key_derivation() {
-    let raw = "openbao:tenant-1:github/primary:webhook_secret";
-    let stream_id = CredentialStreamId::from(raw);
-
-    assert_eq!(
-        CredentialKey::for_stream(&stream_id),
-        CredentialKey::derive(&credential_id(raw))
-    );
-}
-
 #[test]
 fn stream_config_matches_credential_contract() {
     let config = stream_config();
@@ -44,6 +7,96 @@ fn stream_config_matches_credential_contract() {
     assert_eq!(config.name, CREDENTIAL_STREAM);
     assert_eq!(config.subjects, vec![format!("{CREDENTIAL_EVENT_SUBJECT_PREFIX}.>")]);
     assert!(config.allow_atomic_publish);
+}
+
+#[test]
+fn the_stream_config_keeps_every_event() {
+    assert_eq!(validate_stream_config(&stream_config()), Ok(()));
+}
+
+#[test]
+fn a_stream_reported_unlimited_keeps_every_event() {
+    let reported = stream::Config {
+        max_messages_per_subject: -1,
+        max_messages: -1,
+        max_bytes: -1,
+        ..stream_config()
+    };
+
+    assert_eq!(validate_stream_config(&reported), Ok(()));
+}
+
+#[test]
+fn each_setting_that_could_drop_events_is_refused() {
+    let cases = [
+        (
+            stream::Config {
+                storage: stream::StorageType::Memory,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::NotOnDisk,
+        ),
+        (
+            stream::Config {
+                retention: stream::RetentionPolicy::WorkQueue,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::DiscardsConsumedEvents,
+        ),
+        (
+            stream::Config {
+                retention: stream::RetentionPolicy::Interest,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::DiscardsConsumedEvents,
+        ),
+        (
+            stream::Config {
+                max_age: std::time::Duration::from_secs(3600),
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::ExpiresByAge,
+        ),
+        (
+            stream::Config {
+                max_messages_per_subject: 1,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::CapsEventsPerSubject,
+        ),
+        (
+            stream::Config {
+                max_messages: 1,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::CapsEvents,
+        ),
+        (
+            stream::Config {
+                max_bytes: 1,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::CapsBytes,
+        ),
+        (
+            stream::Config {
+                allow_message_ttl: true,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::ExpiresPerEvent,
+        ),
+        (
+            stream::Config {
+                allow_rollup: true,
+                ..stream_config()
+            },
+            CredentialEventStreamMismatchError::RollsUpSubjects,
+        ),
+    ];
+
+    for (config, expected) in cases {
+        assert_eq!(validate_stream_config(&config), Err(expected));
+    }
 }
 
 mod jetstream_tests;

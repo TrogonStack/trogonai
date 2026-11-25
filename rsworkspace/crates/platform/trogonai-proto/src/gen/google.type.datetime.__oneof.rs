@@ -30,19 +30,19 @@ pub mod date_time {
             Self::Some(TimeOffset::from(v))
         }
     }
-    impl serde::Serialize for TimeOffset {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for TimeOffset {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::UtcOffset(v) => {
-                    map.serialize_entry("utcOffset", v)?;
+                    map.serialize_entry("utcOffset", &**v)?;
                 }
                 Self::TimeZone(v) => {
-                    map.serialize_entry("timeZone", v)?;
+                    map.serialize_entry("timeZone", &**v)?;
                 }
             }
             map.end()

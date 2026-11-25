@@ -9,7 +9,6 @@ import { FieldError, RadioCards, TextField, type RadioCardOption } from '@/compo
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { useNotify } from '@/components/ui/toaster';
 
 import { keyCapabilityDescriptions, keyCapabilityLabels } from '../domain/capability';
 import type { KeyRef, PurposeId } from '../domain/identifiers';
@@ -36,12 +35,10 @@ function ValidateStep({
 }) {
   const staged = useStagedChecks(plan.attemptId, plan.checks);
   const complete = useCompleteBinding();
-  const notify = useNotify();
 
   const finish = async () => {
     try {
       const key = await complete.mutateAsync(plan.attemptId);
-      notify.success('Key bound', key.keyRef);
       onDone(key.keyRef);
     } catch {
       return;

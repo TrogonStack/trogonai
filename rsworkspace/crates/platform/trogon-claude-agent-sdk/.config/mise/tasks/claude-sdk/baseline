@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="Explicitly write a candidate Claude SDK review baseline for selected source releases"
+#MISE depends=["claude-sdk:install"]
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+output="${CLAUDE_SDK_BASELINE_OUT:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/claude-sdk-baseline-review}"
+cd "$root"
+exec python3 "$root/.config/mise/lib/claude-sdk-freshness/check.py" \
+  --write-baseline "$root/.config/mise/lib/claude-sdk-freshness/baseline.json" \
+  --out "$output" "$@"

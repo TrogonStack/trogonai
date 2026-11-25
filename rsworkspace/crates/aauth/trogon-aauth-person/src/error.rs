@@ -32,6 +32,8 @@ pub enum RequestVerificationError {
     /// match the presenting agent's confirmation key.
     #[error("resource_token agent_jkt does not match the presenting agent's cnf.jwk")]
     ResourceTokenAgentKeyMismatch,
+    #[error("resource_token agent does not name the presenting agent")]
+    ResourceTokenAgentIdentifierMismatch,
     /// "Parent-Mediated Authorization" step 3: for a sub-agent request,
     /// `resource_token.agent_jkt` must match the *subagent* token's `cnf.jwk`.
     #[error("resource_token agent_jkt does not match subagent_token cnf.jwk")]
@@ -180,6 +182,7 @@ impl PersonServerError {
             PersonServerError::Verification(RequestVerificationError::ResourceToken(_))
             | PersonServerError::Verification(RequestVerificationError::ResourceTokenWrongAudience { .. })
             | PersonServerError::Verification(RequestVerificationError::ResourceTokenAgentKeyMismatch)
+            | PersonServerError::Verification(RequestVerificationError::ResourceTokenAgentIdentifierMismatch)
             | PersonServerError::Verification(RequestVerificationError::ResourceTokenSubagentKeyMismatch)
             | PersonServerError::Verification(RequestVerificationError::ResourceTokenSubagentIdentifierMismatch) => {
                 TokenEndpointError::InvalidResourceToken

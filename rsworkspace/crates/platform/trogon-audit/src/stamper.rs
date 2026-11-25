@@ -1,7 +1,10 @@
+use std::time::SystemTime;
+
 use trogon_std::NowV7;
 use trogon_std::time::EpochClock;
 
 use crate::chain_id::ChainId;
+use crate::checkpoint_id::CheckpointId;
 use crate::record_id::RecordId;
 use crate::stamp::Stamp;
 
@@ -31,6 +34,16 @@ impl<C: EpochClock, G: NowV7> Stamper<C, G> {
     /// chain.
     pub(crate) fn chain_id(&self) -> ChainId {
         ChainId::generate(&self.ids)
+    }
+
+    /// A fresh checkpoint id from the same UUIDv7 source.
+    pub(crate) fn checkpoint_id(&self) -> CheckpointId {
+        CheckpointId::generate(&self.ids)
+    }
+
+    /// The time a checkpoint is issued at, from the same clock as the records.
+    pub(crate) fn now(&self) -> SystemTime {
+        self.clock.system_time()
     }
 }
 

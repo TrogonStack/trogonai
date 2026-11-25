@@ -1,0 +1,776 @@
+#!/usr/bin/env node
+// Deterministic Rust type generator for the pinned upstream TypeScript declarations.
+//
+// It reads published `.d.ts` files with the same pinned TypeScript compiler the freshness
+// extractor uses and emits serde types with the upstream wire shape:
+//   * every object type keeps undeclared keys in a flattened `extra` map and remembers the key
+//     order it was decoded with, so decoding then encoding is lossless and byte-identical;
+//   * typed maps are insertion ordered;
+//   * string-literal unions become enums whose `Unknown(String)` fallback round-trips;
+//   * `field?: T` (omitted), `field: T | null` (null) and `field?: T | null` are distinct;
+//   * unions of other shapes pick the member that round-trips exactly with the fewest undeclared
+//     keys (earliest declared on ties), otherwise keep the raw JSON value in their own
+//     `Unknown` variant;
+//   * a member a target lists under `untyped_members` holds any JSON object, for an option upstream takes as
+//     a raw caller object and reads key by key later instead of through its declared type;
+//   * nothing is validated.
+//
+// Usage: generate_types.mjs --typescript-package DIR --config types.json --out-root DIR [--check]
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import ts from 'typescript';
+
+class GenerateError extends Error {}
+
+function fail(message) {
+  throw new GenerateError(message);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Naming
+// ---------------------------------------------------------------------------------------------
+
+const RUST_KEYWORDS = new Set([
+  'as', 'break', 'const', 'continue', 'else', 'enum', 'extern', 'false', 'fn', 'for', 'if', 'impl', 'in', 'let',
+  'loop', 'match', 'mod', 'move', 'mut', 'pub', 'ref', 'return', 'static', 'struct', 'trait', 'true', 'type',
+  'unsafe', 'use', 'where', 'while', 'async', 'await', 'dyn', 'abstract', 'become', 'box', 'do', 'final', 'macro',
+  'override', 'priv', 'typeof', 'unsized', 'virtual', 'yield', 'try', 'gen',
+]);
+const UNRAWABLE = new Set(['self', 'Self', 'super', 'crate']);
+
+function words(text) {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean);
+}
+
+function pascal(text) {
+  const joined = words(text).map(word => word[0].toUpperCase() + word.slice(1).toLowerCase()).join('');
+  if (joined === '') fail(`Cannot derive a Rust type name from ${JSON.stringify(text)}`);
+  return /^[0-9]/.test(joined) ? `V${joined}` : joined;
+}
+
+function snake(text) {
+  const prefix = text.startsWith('-') ? 'dash_' : '';
+  const joined = words(text).map(word => word.toLowerCase()).join('_');
+  if (joined === '') fail(`Cannot derive a Rust field name from ${JSON.stringify(text)}`);
+  const name = `${prefix}${/^[0-9]/.test(joined) ? `n_${joined}` : joined}`;
+  if (UNRAWABLE.has(name)) return `${name}_`;
+  return RUST_KEYWORDS.has(name) ? `r#${name}` : name;
+}
+
+function rustString(value) {
+  return JSON.stringify(value);
+}
+
+function docLines(node, indent) {
+  const docs = node.jsDoc;
+  if (!docs || docs.length === 0) return '';
+  const text = ts.getTextOfJSDocComment(docs[docs.length - 1].comment);
+  if (!text) return '';
+  const lines = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim().replace(/\u2014/g, '-').replace(/\u2013/g, '-');
+    if (line.startsWith('```')) continue;
+    const escaped = line.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]').replace(/</g, '\\<').replace(/>/g, '\\>');
+    lines.push(escaped === '' ? `${indent}///` : `${indent}/// ${escaped}`);
+  }
+  while (lines.length && lines[lines.length - 1] === `${indent}///`) lines.pop();
+  return lines.length ? `${lines.join('\n')}\n` : '';
+}
+
+// ---------------------------------------------------------------------------------------------
+// TypeScript to intermediate representation
+// ---------------------------------------------------------------------------------------------
+
+function key(ir) {
+  return JSON.stringify(ir, (name, value) => (name === 'doc' || name === 'lit' ? undefined : value));
+}
+
+function unionOf(members) {
+  const flat = [];
+  const visit = member => (member.k === 'union' ? member.members.forEach(visit) : flat.push(member));
+  members.forEach(visit);
+  let nullable = false;
+  const literals = [];
+  const others = [];
+  const seen = new Set();
+  const push = member => {
+    const id = key(member);
+    if (!seen.has(id)) {
+      seen.add(id);
+      others.push(member);
+    }
+  };
+  for (const member of flat) {
+    if (member.k === 'null') nullable = true;
+    else if (member.k === 'nullable') {
+      nullable = true;
+      if (member.inner.k === 'strenum') literals.push(...member.inner.values);
+      else push(member.inner);
+    } else if (member.k === 'strenum') literals.push(...member.values);
+    else push(member);
+  }
+  if (others.some(member => member.k === 'unknown')) return { k: 'unknown' };
+  if (others.some(member => member.k === 'string')) {
+    literals.length = 0;
+  }
+  if (literals.length) push({ k: 'strenum', values: [...new Set(literals)] });
+  let result;
+  if (others.length === 0) return { k: 'null' };
+  if (others.length === 1) result = others[0];
+  else result = { k: 'union', members: others };
+  return nullable ? { k: 'nullable', inner: result } : result;
+}
+
+function parseObject(members, source) {
+  const props = [];
+  let index = null;
+  for (const member of members) {
+    if (ts.isPropertySignature(member)) {
+      if (!member.type) fail(`Property without a type at ${source.fileName}`);
+      const name = ts.isIdentifier(member.name) || ts.isStringLiteral(member.name) ? member.name.text : fail(`Computed property name ${member.name.getText(source)}`);
+      props.push({ name, optional: Boolean(member.questionToken), type: parseType(member.type, source), doc: docLines(member, '    ') });
+    } else if (ts.isIndexSignatureDeclaration(member)) {
+      if (member.parameters.length !== 1 || member.parameters[0].type?.kind !== ts.SyntaxKind.StringKeyword) fail('Only string index signatures are supported');
+      if (index) fail('Duplicate index signature');
+      index = parseType(member.type, source);
+    } else {
+      fail(`Unsupported member ${ts.SyntaxKind[member.kind]} in ${source.fileName}`);
+    }
+  }
+  return { k: 'object', props, index };
+}
+
+function parseType(node, source) {
+  if (ts.isParenthesizedTypeNode(node)) return parseType(node.type, source);
+  switch (node.kind) {
+    case ts.SyntaxKind.StringKeyword: return { k: 'string' };
+    case ts.SyntaxKind.NumberKeyword: return { k: 'number' };
+    case ts.SyntaxKind.BooleanKeyword: return { k: 'bool' };
+    case ts.SyntaxKind.UnknownKeyword:
+    case ts.SyntaxKind.AnyKeyword: return { k: 'unknown' };
+    default: break;
+  }
+  if (ts.isLiteralTypeNode(node)) {
+    const literal = node.literal;
+    if (ts.isStringLiteral(literal)) return { k: 'strenum', values: [literal.text] };
+    if (ts.isNumericLiteral(literal)) return { k: 'number' };
+    // A boolean literal is a plain `bool` on the wire; `lit` only lets a tagged union dispatch on it.
+    if (literal.kind === ts.SyntaxKind.TrueKeyword) return { k: 'bool', lit: true };
+    if (literal.kind === ts.SyntaxKind.FalseKeyword) return { k: 'bool', lit: false };
+    if (literal.kind === ts.SyntaxKind.NullKeyword) return { k: 'null' };
+    fail(`Unsupported literal type ${node.getText(source)}`);
+  }
+  if (ts.isArrayTypeNode(node)) return { k: 'array', el: parseType(node.elementType, source) };
+  if (ts.isTupleTypeNode(node)) {
+    const elements = node.elements.map(element => {
+      if (ts.isRestTypeNode(element)) {
+        const inner = parseType(element.type, source);
+        if (inner.k !== 'array') fail('Rest element must be an array');
+        return inner.el;
+      }
+      if (ts.isOptionalTypeNode(element)) return parseType(element.type, source);
+      if (ts.isNamedTupleMember(element)) fail('Named tuple members are unsupported');
+      return parseType(element, source);
+    });
+    const ids = new Set(elements.map(key));
+    if (ids.size !== 1) fail(`Heterogeneous tuple ${node.getText(source)}`);
+    return { k: 'array', el: elements[0] };
+  }
+  if (ts.isTypeLiteralNode(node)) return parseObject(node.members, source);
+  if (ts.isIndexedAccessTypeNode(node)) {
+    const index = node.indexType;
+    if (!ts.isLiteralTypeNode(index) || !ts.isStringLiteral(index.literal)) fail(`Unsupported indexed access ${node.getText(source)}`);
+    return { k: 'indexed', object: parseType(node.objectType, source), prop: index.literal.text };
+  }
+  if (ts.isUnionTypeNode(node)) return unionOf(node.types.map(type => parseType(type, source)));
+  if (ts.isIntersectionTypeNode(node)) return { k: 'intersection', members: node.types.map(type => parseType(type, source)) };
+  if (ts.isTypeReferenceNode(node)) {
+    // `coreTypes` re-exports declarations of the same file, so `coreTypes.X` is `X`.
+    const qualified = ts.isQualifiedName(node.typeName) && node.typeName.left.getText(source) === 'coreTypes';
+    const name = qualified ? node.typeName.right.text : node.typeName.getText(source);
+    // `Partial<T>` only makes keys optional; a map already has optional keys.
+    if (name === 'Partial' && node.typeArguments?.length === 1) return parseType(node.typeArguments[0], source);
+    // `keyof X` of an interface with a string index signature is `string | number`, and a named key
+    // type (a union of string literals such as `HookEvent`) does not limit what arrives. The wire key
+    // is always text.
+    const stringKey = argument => argument.kind === ts.SyntaxKind.StringKeyword
+      || ts.isTypeReferenceNode(argument)
+      || (ts.isTypeOperatorNode(argument) && argument.operator === ts.SyntaxKind.KeyOfKeyword);
+    if (name === 'Record' && node.typeArguments?.length === 2 && stringKey(node.typeArguments[0])) {
+      return { k: 'map', val: parseType(node.typeArguments[1], source) };
+    }
+    if (name === 'Array' && node.typeArguments?.length === 1) return { k: 'array', el: parseType(node.typeArguments[0], source) };
+    if (node.typeArguments) fail(`Generic reference ${node.getText(source)} is unsupported`);
+    return { k: 'ref', name };
+  }
+  return fail(`Unsupported type ${ts.SyntaxKind[node.kind]}: ${node.getText(source)}`);
+}
+
+function simplifyObject(ir) {
+  // `{ [k: string]: V }` with no properties is a plain map.
+  if (ir.k === 'object' && ir.props.length === 0 && ir.index) return { k: 'map', val: ir.index };
+  return ir;
+}
+
+function normalize(ir) {
+  switch (ir.k) {
+    case 'array': return { k: 'array', el: normalize(ir.el) };
+    case 'map': return { k: 'map', val: normalize(ir.val) };
+    case 'nullable': return { k: 'nullable', inner: normalize(ir.inner) };
+    case 'object': return simplifyObject({
+      k: 'object',
+      props: ir.props.map(prop => ({ ...prop, type: normalize(prop.type) })),
+      index: ir.index ? normalize(ir.index) : null,
+    });
+    case 'union': return unionOf(ir.members.map(normalize));
+    default: return ir;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Emission
+// ---------------------------------------------------------------------------------------------
+
+class Emitter {
+  constructor(declarations, source) {
+    this.declarations = declarations;
+    this.source = source;
+    this.claimed = new Set();
+    this.chunks = [];
+    this.pending = [];
+    this.emitted = new Set();
+    this.omit = new Map();
+    this.externs = new Map();
+    this.foreign = new Map();
+    this.tagged = new Map();
+    this.taggedEmitted = new Set();
+    this.untyped = new Map();
+    this.untypedEmitted = new Set();
+  }
+
+  claim(name) {
+    if (this.claimed.has(name)) fail(`Generated Rust type name ${name} is not unique`);
+    this.claimed.add(name);
+  }
+
+  request(name) {
+    if (this.externs.has(name)) return;
+    if (this.foreign.has(name)) fail(`Foreign type ${name} reached emission unresolved`);
+    if (!this.declarations.has(name)) fail(`Reference to ${name}, which is not declared in the source file`);
+    if (!this.emitted.has(name)) {
+      this.emitted.add(name);
+      this.pending.push(name);
+    }
+  }
+
+  // Replaces references to `foreign` names (types imported from other packages, or declared
+  // with constructs the generator does not model) with the wire shape the config gives them,
+  // and indexed access types with the property they name.
+  resolve(ir) {
+    switch (ir.k) {
+      case 'ref': return this.foreign.get(ir.name) ?? ir;
+      case 'indexed': {
+        const object = this.resolve(ir.object);
+        if (object.k === 'unknown' || (object.k === 'map' && object.val.k === 'unknown')) return { k: 'unknown' };
+        const target = object.k === 'ref' ? this.declaration(object.name) : object;
+        const prop = target.k === 'object' ? target.props.find(candidate => candidate.name === ir.prop) : undefined;
+        if (!prop) fail(`Indexed access to ${ir.prop}, which the object does not declare`);
+        return prop.optional ? unionOf([prop.type, { k: 'null' }]) : prop.type;
+      }
+      case 'array': return { k: 'array', el: this.resolve(ir.el) };
+      case 'map': return { k: 'map', val: this.resolve(ir.val) };
+      case 'nullable': return { k: 'nullable', inner: this.resolve(ir.inner) };
+      case 'object': return {
+        k: 'object',
+        props: ir.props.map(prop => ({ ...prop, type: this.resolve(prop.type) })),
+        index: ir.index ? this.resolve(ir.index) : null,
+      };
+      case 'union': return { k: 'union', members: ir.members.map(member => this.resolve(member)) };
+      case 'intersection': return this.intersection(ir.members);
+      default: return ir;
+    }
+  }
+
+  // `A & { b: B }` of object types is one object with the properties of every member. A property
+  // both declare must have the same type there; it is required when either requires it, as in
+  // TypeScript. Differing types are refused rather than guessed.
+  intersection(members) {
+    const props = [];
+    let index = null;
+    for (const member of members) {
+      const resolved = this.resolve(member);
+      let object = resolved.k === 'ref' ? this.declaration(resolved.name) : resolved;
+      if (object.k === 'map') object = { k: 'object', props: [], index: object.val };
+      if (object.k !== 'object') fail(`Intersection member ${resolved.k === 'ref' ? resolved.name : resolved.k} is not an object`);
+      for (const prop of object.props) {
+        const at = props.findIndex(existing => existing.name === prop.name);
+        if (at === -1) {
+          props.push(prop);
+          continue;
+        }
+        if (key(props[at].type) !== key(prop.type)) fail(`Intersection declares ${prop.name} with two types`);
+        props[at] = { ...props[at], optional: props[at].optional && prop.optional, doc: prop.doc || props[at].doc };
+      }
+      if (object.index) {
+        if (index) fail('Intersection merges two index signatures');
+        index = object.index;
+      }
+    }
+    return { k: 'object', props, index };
+  }
+
+  // `declare const NAME: readonly ['a', 'b']` becomes a Rust array of the listed strings.
+  constant(name, statement) {
+    const declaration = statement.declarationList.declarations[0];
+    let type = declaration.type;
+    if (type && ts.isTypeOperatorNode(type) && type.operator === ts.SyntaxKind.ReadonlyKeyword) type = type.type;
+    if (!type || !ts.isTupleTypeNode(type)) fail(`Constant ${name} is not a readonly tuple`);
+    const values = type.elements.map(element => (ts.isLiteralTypeNode(element) && ts.isStringLiteral(element.literal)
+      ? element.literal.text
+      : fail(`Constant ${name} lists something other than a string literal`)));
+    this.claim(name);
+    const doc = docLines(statement, '');
+    this.chunks.push(`${doc}pub const ${name}: [&str; ${values.length}] = [${values.map(rustString).join(', ')}];\n`);
+  }
+
+  declaration(name) {
+    if (this.foreign.has(name)) return this.foreign.get(name);
+    const node = this.declarations.get(name);
+    if (ts.isInterfaceDeclaration(node)) {
+      if (node.heritageClauses?.length) fail(`Interface ${name} extends another type`);
+      if (node.typeParameters?.length) fail(`Interface ${name} is generic`);
+      return normalize(this.resolve(parseObject(node.members, this.source)));
+    }
+    if (node.typeParameters?.length) fail(`Alias ${name} is generic`);
+    const ir = normalize(this.resolve(parseType(node.type, this.source)));
+    const omitted = this.omit.get(name);
+    if (!omitted) return ir;
+    if (ir.k !== 'union') fail(`omit_members target ${name} is not a union`);
+    const members = ir.members.filter(member => !(member.k === 'ref' && omitted.includes(member.name)));
+    return members.length === 1 ? members[0] : { k: 'union', members };
+  }
+
+  // Emits the named root; aliases of non-aggregate types become Rust type aliases.
+  root(name) {
+    const ir = this.declaration(name);
+    this.claim(name);
+    const doc = docLines(this.declarations.get(name), '');
+    switch (ir.k) {
+      case 'object': this.struct(name, ir, doc); break;
+      case 'union': this.union(name, ir, doc, this.tagged.get(name)); break;
+      case 'strenum': this.strenum(name, ir, doc); break;
+      case 'nullable': {
+        // `type X = 'a' | 'b' | null`: the non-null part gets its own name.
+        const type = this.type(ir.inner, `${name}Value`);
+        this.chunks.push(`${doc}pub type ${name} = Option<${type}>;\n`);
+        break;
+      }
+      default: {
+        const type = this.type(ir, name);
+        this.chunks.push(`${doc}pub type ${name} = ${type};\n`);
+      }
+    }
+  }
+
+  drain() {
+    while (this.pending.length) this.root(this.pending.shift());
+  }
+
+  type(ir, name) {
+    switch (ir.k) {
+      case 'string': return 'String';
+      case 'number': return 'serde_json::Number';
+      case 'bool': return 'bool';
+      case 'unknown': return 'serde_json::Value';
+      case 'raw': return 'crate::DeepJsonObject';
+      case 'null': return 'Option<serde_json::Value>';
+      case 'ref': this.request(ir.name); return this.externs.get(ir.name) ?? ir.name;
+      case 'array': return `Vec<${this.type(ir.el, `${name}Item`)}>`;
+      case 'map': return ir.val.k === 'unknown'
+        ? 'serde_json::Map<String, serde_json::Value>'
+        : `indexmap::IndexMap<String, ${this.type(ir.val, `${name}Value`)}>`;
+      case 'nullable': return `Option<${this.type(ir.inner, name)}>`;
+      case 'object': this.claim(name); this.struct(name, ir, ''); return name;
+      case 'strenum': this.claim(name); this.strenum(name, ir, ''); return name;
+      case 'union': this.claim(name); this.union(name, ir, '', this.tagged.get(name)); return name;
+      default: return fail(`Unhandled type ${ir.k}`);
+    }
+  }
+
+  struct(name, ir, doc) {
+    const used = new Set();
+    const fields = [];
+    for (const prop of ir.props) {
+      const field = snake(prop.name);
+      if (used.has(field)) fail(`Field name ${field} collides in ${name}`);
+      used.add(field);
+      const attrs = [];
+      let inner = prop.type;
+      let nullable = false;
+      if (inner.k === 'nullable') {
+        nullable = true;
+        inner = inner.inner;
+      }
+      if (this.untyped.get(name)?.includes(prop.name)) {
+        if (!prop.optional || nullable) fail(`untyped_members names ${name}.${prop.name}, which is not an optional, non-nullable property`);
+        this.untypedEmitted.add(`${name}.${prop.name}`);
+        inner = { k: 'raw' };
+      }
+      const rust = this.type(inner, `${name}${pascal(prop.name)}`);
+      let type;
+      if (prop.optional && nullable) {
+        type = `Option<Option<${rust}>>`;
+        attrs.push('default', 'skip_serializing_if = "Option::is_none"', 'with = "super::support::double_option"');
+      } else if (prop.optional) {
+        type = `Option<${rust}>`;
+        attrs.push('default', 'skip_serializing_if = "Option::is_none"');
+        if (inner.k === 'unknown') attrs.push('deserialize_with = "super::support::optional_value"');
+        if (inner.k === 'raw') attrs.push('serialize_with = "super::support::optional_shallow_object"');
+      } else if (nullable) {
+        type = `Option<${rust}>`;
+        attrs.push('default');
+      } else {
+        type = rust;
+        if (inner.k === 'unknown') attrs.push('default');
+      }
+      const rename = field.replace(/^r#/, '') === prop.name ? [] : [`rename = ${rustString(prop.name)}`];
+      const all = [...rename, ...attrs];
+      fields.push({
+        doc: prop.doc,
+        serde: all.length ? `    #[serde(${all.join(', ')})]\n` : '',
+        decl: `    pub ${field}: ${type},`,
+      });
+    }
+    for (const reserved of ['extra', 'key_order']) {
+      if (used.has(reserved)) fail(`Field name ${reserved} collides in ${name}`);
+    }
+    const typedExtra = ir.index && ir.index.k !== 'unknown';
+    const extraType = typedExtra
+      ? `indexmap::IndexMap<String, ${this.type(ir.index, `${name}Extra`)}>`
+      : 'indexmap::IndexMap<String, crate::DeepJsonValue>';
+    const extraSerde = typedExtra ? 'flatten' : 'flatten, serialize_with = "super::support::shallow_members"';
+    const extraDoc = '    /// Keys the pinned upstream declarations do not list, in the order they were decoded.\n';
+    const orderDoc = '    /// The key order this value was decoded with; encoding reproduces it.\n';
+    const wire = this.claimWire(name);
+    const plain = fields.map(field => `${field.doc}${field.decl}`);
+    plain.push(`${extraDoc}    pub extra: ${extraType},`, `${orderDoc}    pub key_order: super::support::KeyOrder,`);
+    const mirror = fields.map(field => `${field.serde}${field.decl}`);
+    mirror.push(`    #[serde(${extraSerde})]\n    pub extra: ${extraType},`, '    #[serde(skip)]\n    pub key_order: super::support::KeyOrder,');
+    const known = ir.props.map(prop => rustString(prop.name)).join(', ');
+    // String-literal properties: a value outside the listed ones would still decode (as the
+    // enum's `Unknown`), so a union that picks a member by shape counts it as a mismatch.
+    const literals = [];
+    for (const prop of ir.props) {
+      let inner = prop.type.k === 'nullable' ? prop.type.inner : prop.type;
+      if (inner.k === 'ref' && this.declaration(inner.name).k === 'strenum') inner = this.declaration(inner.name);
+      if (inner.k === 'strenum') literals.push(`(${rustString(prop.name)}, &[${inner.values.map(rustString).join(', ')}])`);
+    }
+    const out = [];
+    out.push(`${doc}#[derive(Clone, Debug, PartialEq, Eq)]\npub struct ${name} {\n${plain.join('\n')}\n}\n`);
+    out.push(`#[derive(Serialize, Deserialize)]\n#[serde(remote = "${name}")]\nstruct ${wire} {\n${mirror.join('\n')}\n}\n`);
+    out.push(`impl ${name} {`, '    /// The keys the pinned upstream declarations list for this object.', `    pub const KNOWN_KEYS: &'static [&'static str] = &[${known}];`, '', '    /// How far `value` is from this shape: undeclared keys plus string-literal properties holding an unlisted value.', '    pub fn match_score(value: &serde_json::Value) -> usize {', `        super::support::unknown_keys(value, Self::KNOWN_KEYS) + super::support::unlisted_literals(value, &[${literals.join(', ')}])`, '    }', '}', '');
+    out.push(`impl Serialize for ${name} {`, '    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {', `        super::support::ordered(${wire}::serialize(self, serde_json::value::Serializer), |text| ${wire}::serialize(self, text), &self.key_order, serializer)`, '    }', '}', '');
+    out.push(`impl<'de> Deserialize<'de> for ${name} {`, '    fn deserialize<D: serde::Deserializer<\'de>>(deserializer: D) -> Result<Self, D::Error> {', '        let value = serde_json::Value::deserialize(deserializer)?;', `        let mut decoded = ${wire}::deserialize(value.clone()).map_err(serde::de::Error::custom)?;`, '        decoded.key_order = super::support::KeyOrder::of(&value);', '        Ok(decoded)', '    }', '}', '');
+    this.chunks.push(out.join('\n'));
+  }
+
+  claimWire(name) {
+    const wire = `${name}Wire`;
+    this.claim(wire);
+    return wire;
+  }
+
+  strenum(name, ir, doc) {
+    // `Unknown(String)` is the fallback, so a listed `"unknown"` value is `UnknownValue`.
+    const variants = ir.values.map(value => ({ value, variant: pascal(value) === 'Unknown' ? 'UnknownValue' : pascal(value) }));
+    const names = new Set(['Unknown']);
+    for (const { variant, value } of variants) {
+      if (names.has(variant)) fail(`Enum variant ${variant} collides in ${name} (${JSON.stringify(value)})`);
+      names.add(variant);
+    }
+    const out = [];
+    out.push(`${doc}#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub enum ${name} {`);
+    for (const { variant, value } of variants) out.push(`    /// \`${rustString(value).slice(1, -1).replace(/`/g, '')}\`\n    ${variant},`);
+    out.push('    /// A value the pinned upstream declarations do not list; it round-trips unchanged.', '    Unknown(String),', '}', '');
+    out.push(`impl ${name} {`, '    pub fn as_str(&self) -> &str {', '        match self {');
+    for (const { variant, value } of variants) out.push(`            Self::${variant} => ${rustString(value)},`);
+    out.push('            Self::Unknown(value) => value,', '        }', '    }', '}', '');
+    out.push(`impl Serialize for ${name} {`, '    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {', '        serializer.serialize_str(self.as_str())', '    }', '}', '');
+    out.push(`impl<'de> Deserialize<'de> for ${name} {`, '    fn deserialize<D: serde::Deserializer<\'de>>(deserializer: D) -> Result<Self, D::Error> {', '        let value = String::deserialize(deserializer)?;', '        Ok(match value.as_str() {');
+    for (const { variant, value } of variants) out.push(`            ${rustString(value)} => Self::${variant},`);
+    out.push('            _ => Self::Unknown(value),', '        })', '    }', '}', '');
+    this.chunks.push(out.join('\n'));
+  }
+
+  union(name, ir, doc, tags) {
+    if (tags && ir.members.some(member => member.k !== 'ref')) fail(`Tagged union ${name} must list named members only`);
+    const objects = ir.members.filter(member => member.k === 'object');
+    const discriminator = this.discriminator(objects);
+    const variants = [];
+    const names = new Set(['Unknown']);
+    let objectIndex = 0;
+    for (const member of ir.members) {
+      let base;
+      switch (member.k) {
+        case 'string': base = 'Text'; break;
+        case 'number': base = 'Number'; break;
+        case 'bool': base = 'Bool'; break;
+        case 'unknown': base = 'Value'; break;
+        case 'array': base = 'List'; break;
+        case 'map': base = 'Map'; break;
+        case 'strenum': base = 'Literal'; break;
+        case 'ref': base = member.name; break;
+        case 'object': {
+          objectIndex += 1;
+          if (discriminator) {
+            const prop = member.props.find(candidate => candidate.name === discriminator);
+            base = prop.type.values.map(pascal).join('Or');
+          } else {
+            base = `Variant${objectIndex}`;
+          }
+          break;
+        }
+        default: fail(`Unsupported union member ${member.k} in ${name}`);
+      }
+      let variant = base;
+      for (let suffix = 2; names.has(variant); suffix += 1) variant = `${base}${suffix}`;
+      names.add(variant);
+      let kind = 'plain';
+      if (member.k === 'object') kind = 'struct';
+      else if (member.k === 'map') kind = 'map';
+      else if (member.k === 'ref') {
+        const target = this.declaration(member.name).k;
+        if (target === 'object') kind = 'struct';
+        else if (target === 'union') kind = 'union';
+        else if (target === 'map') kind = 'map';
+      }
+      variants.push({ variant, kind, type: this.type(member, `${name}${variant}`), member });
+    }
+    const out = [];
+    out.push(`${doc}#[derive(Clone, Debug, PartialEq, Eq)]\npub enum ${name} {`);
+    for (const { variant, type } of variants) out.push(`    ${variant}(${type}),`);
+    out.push('    /// A value matching none of the pinned upstream shapes exactly; it round-trips unchanged.', '    Unknown(serde_json::Value),', '}', '');
+    out.push(`impl Serialize for ${name} {`, '    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {', '        match self {');
+    for (const { variant } of variants) out.push(`            Self::${variant}(inner) => inner.serialize(serializer),`);
+    out.push('            Self::Unknown(inner) => inner.serialize(serializer),', '        }', '    }', '}', '');
+    if (tags) {
+      this.taggedEmitted.add(name);
+      this.taggedMatch(name, tags, variants, out);
+      this.chunks.push(out.join('\n'));
+      return;
+    }
+    out.push(`impl ${name} {`, '    /// Decodes `value` into the declared member that reproduces it exactly with the fewest', '    /// undeclared keys, earliest declared on ties, or `None` when no member matches.', '    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {', '        let mut best: Option<(usize, Self)> = None;');
+    for (const { variant, type, kind } of variants) {
+      let candidate;
+      if (kind === 'struct') candidate = `super::support::exact::<${type}>(value).map(|inner| (${type}::match_score(value), Self::${variant}(inner)))`;
+      else if (kind === 'union') candidate = `${type}::best_match(value).map(|(score, inner)| (score, Self::${variant}(inner)))`;
+      else if (kind === 'map') candidate = `super::support::exact::<${type}>(value).map(|inner| (super::support::unknown_keys(value, &[]), Self::${variant}(inner)))`;
+      else candidate = `super::support::exact::<${type}>(value).map(|inner| (0, Self::${variant}(inner)))`;
+      out.push(`        super::support::keep_best(&mut best, ${candidate});`);
+    }
+    out.push('        best', '    }', '}', '');
+    out.push(`impl<'de> Deserialize<'de> for ${name} {`, '    fn deserialize<D: serde::Deserializer<\'de>>(deserializer: D) -> Result<Self, D::Error> {', '        let value = serde_json::Value::deserialize(deserializer)?;', '        Ok(match Self::best_match(&value) {', '            Some((_, matched)) => matched,', '            None => Self::Unknown(value),', '        })', '    }', '}', '');
+    this.chunks.push(out.join('\n'));
+  }
+
+  // The object shapes a named union member stands for.
+  objectsOf(member) {
+    if (member.k === 'object') return [member];
+    if (member.k !== 'ref') fail(`Tagged union member ${member.k} is not a named object`);
+    const target = this.declaration(member.name);
+    if (target.k === 'object') return [target];
+    if (target.k === 'union') return target.members.flatMap(inner => this.objectsOf(inner));
+    return fail(`Tagged union member ${member.name} is not an object or a union of objects`);
+  }
+
+  // The literal values `key` must hold for `member`, or null when some shape of it leaves
+  // the key open (absent, optional or not a literal).
+  tagValues(member, key) {
+    const values = [];
+    for (const object of this.objectsOf(member)) {
+      const prop = object.props.find(candidate => candidate.name === key);
+      if (!prop || prop.optional) return null;
+      if (prop.type.k === 'strenum') values.push(...prop.type.values);
+      else if (prop.type.k === 'bool' && prop.type.lit !== undefined) values.push(prop.type.lit);
+      else return null;
+    }
+    return [...new Set(values)];
+  }
+
+  // A tagged union decodes only the members whose literal tags the value carries, preferring the
+  // member that pins the most tags, then the usual exact round trip with the fewest undeclared
+  // keys. A value whose tags no member lists (a newer upstream subtype, say) stays `Unknown`
+  // instead of being forced into a member it merely resembles.
+  taggedMatch(name, tags, variants, out) {
+    out.push(`impl ${name} {`, `    /// The keys whose literal values pick the member: ${tags.map(tag => `\`${tag}\``).join(', ')}.`, `    pub const TAGS: &'static [&'static str] = &[${tags.map(rustString).join(', ')}];`, '', '    /// Decodes `value` into the member whose literal tags it carries, preferring the member that', '    /// pins the most tags, then the one reproducing it exactly with the fewest undeclared keys,', '    /// earliest declared on ties. `None` when no member lists its tags or none reproduces it.', '    pub fn best_match(value: &serde_json::Value) -> Option<(usize, Self)> {', '        let mut best: Option<(usize, usize, Self)> = None;');
+    for (const { variant, type, kind, member } of variants) {
+      const checks = [];
+      for (const tag of tags) {
+        const values = this.tagValues(member, tag);
+        if (values === null) continue;
+        if (values.every(value => typeof value === 'boolean')) checks.push(`super::support::tag_bool(value, ${rustString(tag)}, &[${values.join(', ')}])`);
+        else if (values.every(value => typeof value === 'string')) checks.push(`super::support::tag_str(value, ${rustString(tag)}, &[${values.map(rustString).join(', ')}])`);
+        else fail(`Tag ${tag} of ${name} mixes string and boolean literals`);
+      }
+      if (checks.length === 0) fail(`Member ${variant} of tagged union ${name} pins none of its tags`);
+      let candidate;
+      if (kind === 'struct') candidate = `super::support::exact::<${type}>(value).map(|inner| (${type}::match_score(value), Self::${variant}(inner)))`;
+      else if (kind === 'union') candidate = `${type}::best_match(value).map(|(score, inner)| (score, Self::${variant}(inner)))`;
+      else fail(`Tagged union member ${variant} of ${name} is not an object`);
+      out.push(`        if ${checks.join(' && ')} {`, `            super::support::keep_most_specific(&mut best, ${checks.length}, ${candidate});`, '        }');
+    }
+    out.push('        best.map(|(_, score, matched)| (score, matched))', '    }', '}', '');
+    out.push(`impl<'de> Deserialize<'de> for ${name} {`, '    fn deserialize<D: serde::Deserializer<\'de>>(deserializer: D) -> Result<Self, D::Error> {', '        let value = serde_json::Value::deserialize(deserializer)?;', '        Ok(match Self::best_match(&value) {', '            Some((_, matched)) => matched,', '            None => Self::Unknown(value),', '        })', '    }', '}', '');
+  }
+
+  // A property every object member declares as disjoint string literals names the variants.
+  discriminator(objects) {
+    if (objects.length < 2) return null;
+    for (const prop of objects[0].props) {
+      if (prop.type.k !== 'strenum') continue;
+      const seen = new Set();
+      let ok = true;
+      for (const object of objects) {
+        const other = object.props.find(candidate => candidate.name === prop.name);
+        if (!other || other.optional || other.type.k !== 'strenum') { ok = false; break; }
+        for (const value of other.type.values) {
+          if (seen.has(value)) ok = false;
+          seen.add(value);
+        }
+        if (!ok) break;
+      }
+      if (ok) return prop.name;
+    }
+    return null;
+  }
+}
+
+function declarationsOf(sourceFile) {
+  const declarations = new Map();
+  const constants = new Map();
+  for (const statement of sourceFile.statements) {
+    if (ts.isInterfaceDeclaration(statement) || ts.isTypeAliasDeclaration(statement)) declarations.set(statement.name.text, statement);
+    else if (ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.Const) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) constants.set(declaration.name.text, statement);
+      }
+    }
+  }
+  return { declarations, constants };
+}
+
+export function generate({ packageDir, target, label }) {
+  const file = path.join(packageDir, target.source);
+  if (!fs.existsSync(file)) fail(`Missing declaration file ${target.source}`);
+  const text = fs.readFileSync(file, 'utf8');
+  const sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const { declarations, constants } = declarationsOf(sourceFile);
+  const emitter = new Emitter(declarations, sourceFile);
+  for (const [name, omitted] of Object.entries(target.omit_members ?? {})) {
+    if (!declarations.has(name)) fail(`omit_members names ${name}, which is not declared`);
+    emitter.omit.set(name, omitted);
+  }
+  const FOREIGN = { string: { k: 'string' }, object: { k: 'map', val: { k: 'unknown' } }, unknown: { k: 'unknown' } };
+  for (const [name, shape] of Object.entries(target.foreign ?? {})) {
+    if (!FOREIGN[shape]) fail(`foreign ${name} has unsupported shape ${JSON.stringify(shape)}`);
+    emitter.foreign.set(name, FOREIGN[shape]);
+  }
+  // A tagged name is a declared union or one the emitter derives for an inline property union
+  // (such as `SyncHookJSONOutputHookSpecificOutput`); the check after emission catches a typo.
+  for (const [name, keys] of Object.entries(target.tagged ?? {})) {
+    if (!Array.isArray(keys) || keys.length === 0) fail(`tagged ${name} needs at least one key`);
+    emitter.tagged.set(name, keys);
+  }
+  for (const [name, members] of Object.entries(target.untyped_members ?? {})) {
+    if (!declarations.has(name)) fail(`untyped_members names ${name}, which is not declared`);
+    if (!Array.isArray(members) || members.length === 0) fail(`untyped_members ${name} needs at least one member`);
+    emitter.untyped.set(name, members);
+  }
+  for (const [name, rustPath] of Object.entries(target.extern ?? {})) {
+    if (!declarations.has(name)) fail(`extern names ${name}, which is not declared`);
+    emitter.externs.set(name, rustPath);
+  }
+  for (const name of target.roots) {
+    if (constants.has(name)) {
+      emitter.constant(name, constants.get(name));
+      continue;
+    }
+    if (!declarations.has(name)) fail(`Root ${name} is not declared in ${target.source}`);
+    if (emitter.emitted.has(name)) continue;
+    emitter.emitted.add(name);
+    emitter.root(name);
+    emitter.drain();
+  }
+  for (const name of emitter.tagged.keys()) {
+    if (!emitter.taggedEmitted.has(name)) fail(`tagged names ${name}, which is not a union emitted for ${target.output}`);
+  }
+  for (const [name, members] of emitter.untyped) {
+    for (const member of members) {
+      if (!emitter.untypedEmitted.has(`${name}.${member}`)) fail(`untyped_members names ${name}.${member}, which is not a property emitted for ${target.output}`);
+    }
+  }
+  const header = [
+    `// @generated by .config/mise/lib/claude-sdk-freshness/generate_types.mjs from ${label} ${target.source}.`,
+    '// Do not edit by hand; run `mise run claude-sdk:types` from the SDK crate to regenerate.',
+    '',
+    'use serde::{Deserialize, Serialize};',
+    '',
+  ].join('\n');
+  return `${header}\n${emitter.chunks.join('\n')}`;
+}
+
+function parseArgs(argv) {
+  const options = { check: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--check') options.check = true;
+    else if (['--typescript-package', '--config', '--out-root'].includes(arg)) {
+      options[arg.slice(2).replace(/-/g, '_')] = argv[++index];
+    } else fail(`Unknown argument ${arg}`);
+  }
+  for (const required of ['typescript_package', 'config', 'out_root']) {
+    if (!options[required]) fail(`Missing --${required.replace(/_/g, '-')}`);
+  }
+  return options;
+}
+
+function main(argv) {
+  const options = parseArgs(argv);
+  const config = JSON.parse(fs.readFileSync(options.config, 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(options.typescript_package, 'package.json'), 'utf8'));
+  if (manifest.name !== config.package) fail(`Expected package ${config.package}, found ${manifest.name}`);
+  if (manifest.version !== config.version) fail(`Expected ${config.package} ${config.version}, found ${manifest.version}`);
+  const label = `${manifest.name} ${manifest.version}`;
+  const drift = [];
+  for (const target of config.targets) {
+    const output = generate({ packageDir: options.typescript_package, target, label });
+    const destination = path.resolve(options.out_root, target.output);
+    if (options.check) {
+      const current = fs.existsSync(destination) ? fs.readFileSync(destination, 'utf8') : null;
+      if (current !== output) drift.push(target.output);
+    } else {
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, output);
+    }
+  }
+  if (drift.length) {
+    process.stderr.write(`Generated types differ from the pinned upstream output: ${drift.join(', ')}\nRun \`mise run claude-sdk:types\` and review the diff.\n`);
+    return 1;
+  }
+  return 0;
+}
+
+if (import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+  try {
+    process.exitCode = main(process.argv.slice(2));
+  } catch (error) {
+    if (!(error instanceof GenerateError)) throw error;
+    process.stderr.write(`generate_types: ${error.message}\n`);
+    process.exitCode = 2;
+  }
+}

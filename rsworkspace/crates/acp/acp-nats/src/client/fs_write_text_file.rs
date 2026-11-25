@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{WriteTextFileRequest, WriteTextFileResponse};
+use agent_client_protocol::v1::schema::{WriteTextFileRequest, WriteTextFileResponse};
 use async_nats::header::HeaderMap;
 use serde::de::Error as SerdeDeError;
 use tracing::{instrument, warn};
@@ -17,13 +17,15 @@ pub enum FsWriteTextFileError {
     ClientError(#[source] agent_client_protocol::Error),
 }
 
-pub fn error_code_and_message(e: &FsWriteTextFileError) -> (ErrorCode, String) {
-    match e {
-        FsWriteTextFileError::InvalidRequest(inner) => (
-            ErrorCode::InvalidParams,
-            format!("Invalid write_text_file request: {}", inner),
-        ),
-        FsWriteTextFileError::ClientError(inner) => (inner.code, inner.message.clone()),
+impl From<&FsWriteTextFileError> for agent_client_protocol::Error {
+    fn from(error: &FsWriteTextFileError) -> Self {
+        match error {
+            FsWriteTextFileError::InvalidRequest(inner) => Self::new(
+                ErrorCode::INVALID_PARAMS,
+                format!("Invalid write_text_file request: {}", inner),
+            ),
+            FsWriteTextFileError::ClientError(inner) => inner.clone(),
+        }
     }
 }
 
@@ -54,21 +56,14 @@ pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
             rpc_reply::publish_success_reply(nats, reply_to, response_id, &response, "fs_write_text_file reply").await;
         }
         Err(e) => {
-            let (code, message) = error_code_and_message(&e);
+            let error = agent_client_protocol::Error::from(&e);
             warn!(
                 error = %e,
                 session_id = %session_id,
                 "Failed to handle fs_write_text_file"
             );
-            rpc_reply::publish_error_reply(
-                nats,
-                reply_to,
-                response_id,
-                code,
-                &message,
-                "fs_write_text_file error reply",
-            )
-            .await;
+            rpc_reply::publish_agent_error_reply(nats, reply_to, response_id, &error, "fs_write_text_file error reply")
+                .await;
         }
     }
 }

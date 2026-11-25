@@ -3,6 +3,7 @@
 
 /// Who may record a proposal verdict. The issuer is read from the event envelope
 /// (ADR#0069); nothing in a verdict names its own author.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum VerdictAuthority {

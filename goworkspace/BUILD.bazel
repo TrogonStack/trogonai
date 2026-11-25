@@ -1,0 +1,52 @@
+load("@rules_go//go:def.bzl", "TOOLS_NOGO", "nogo")
+
+exports_files([
+    "go.mod",
+    "go.sum",
+])
+
+# The analyzers `go vet` runs by default, so Bazel compiles fail where vet
+# would have.
+_VET_ANALYZERS = [
+    "appends",
+    "asmdecl",
+    "assign",
+    "atomic",
+    "bools",
+    "buildtag",
+    "composite",
+    "copylock",
+    "defers",
+    "directive",
+    "errorsas",
+    "framepointer",
+    "httpresponse",
+    "ifaceassert",
+    "loopclosure",
+    "lostcancel",
+    "nilfunc",
+    "printf",
+    "shift",
+    "sigchanyzer",
+    "slog",
+    "stdmethods",
+    "stringintconv",
+    "structtag",
+    "testinggoroutine",
+    "tests",
+    "timeformat",
+    "unmarshal",
+    "unreachable",
+    "unsafeptr",
+    "unusedresult",
+]
+
+nogo(
+    name = "nogo",
+    visibility = ["//visibility:public"],
+    deps = [
+        analyzer
+        for analyzer in TOOLS_NOGO
+        if analyzer.split("/passes/")[1].split(":")[0] in _VET_ANALYZERS
+    ],
+)

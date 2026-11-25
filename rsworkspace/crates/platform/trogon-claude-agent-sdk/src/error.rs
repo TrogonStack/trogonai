@@ -1,0 +1,871 @@
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+use std::{io, process::ExitStatus};
+
+use crate::{JsonObject, StderrTail};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlOperation {
+    Initialize,
+    Interrupt,
+    SetModel,
+    SetPermissionMode,
+    RewindFiles,
+    McpStatus,
+    ContextUsage,
+    McpReconnect,
+    McpToggle,
+    McpReadResource,
+    StopTask,
+    BackgroundTasks,
+    McpSetServers,
+    SetMcpPermissionModeOverride,
+    SetMaxThinkingTokens,
+    ApplyFlagSettings,
+    UpdateSettings,
+    GetUsage,
+    ReadFile,
+    ReloadPlugins,
+    ReloadSkills,
+    ReloadOutputStyles,
+    SeedReadState,
+    RemoteControl,
+    ClaimSession,
+}
+
+impl std::fmt::Display for ControlOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Initialize => "initialize",
+            Self::Interrupt => "interrupt",
+            Self::SetModel => "set_model",
+            Self::SetPermissionMode => "set_permission_mode",
+            Self::RewindFiles => "rewind_files",
+            Self::McpStatus => "mcp_status",
+            Self::ContextUsage => "get_context_usage",
+            Self::McpReconnect => "mcp_reconnect",
+            Self::McpToggle => "mcp_toggle",
+            Self::McpReadResource => "mcp_read_resource",
+            Self::StopTask => "stop_task",
+            Self::BackgroundTasks => "background_tasks",
+            Self::McpSetServers => "mcp_set_servers",
+            Self::SetMcpPermissionModeOverride => "set_mcp_permission_mode_override",
+            Self::SetMaxThinkingTokens => "set_max_thinking_tokens",
+            Self::ApplyFlagSettings => "apply_flag_settings",
+            Self::UpdateSettings => "update_settings",
+            Self::GetUsage => "get_usage",
+            Self::ReadFile => "read_file",
+            Self::ReloadPlugins => "reload_plugins",
+            Self::ReloadSkills => "reload_skills",
+            Self::ReloadOutputStyles => "reload_output_styles",
+            Self::SeedReadState => "seed_read_state",
+            Self::RemoteControl => "remote_control",
+            Self::ClaimSession => "claim_session",
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProtocolError {
+    #[error("invalid JSON protocol frame")]
+    Json(#[from] serde_json::Error),
+    #[error("invalid permission update")]
+    PermissionUpdate(#[from] crate::PermissionUpdateError),
+    #[error("duplicate incoming control request ID")]
+    DuplicateControlRequest,
+    /// A message Python `parse_message` rejects, with its error text.
+    #[error("{0}")]
+    InvalidMessage(String),
+}
+
+#[derive(thiserror::Error)]
+#[error("Claude Code rejected the control request")]
+pub struct ControlRejectionError {
+    message: String,
+    error_code: Option<String>,
+}
+
+impl ControlRejectionError {
+    /// TypeScript keeps an `error_code` only when it is a lowercase identifier (`/^[a-z][a-z0-9_]{0,63}$/`);
+    /// Python never reads it.
+    pub(crate) fn new(message: String, error_code: Option<serde_json::Value>, style: crate::ArgvStyle) -> Self {
+        let error_code = match (style, error_code) {
+            (crate::ArgvStyle::TypeScript, Some(serde_json::Value::String(code))) if error_code_shape(&code) => {
+                Some(code)
+            }
+            _ => None,
+        };
+        Self { message, error_code }
+    }
+
+    /// The `error` text the CLI sent.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// TypeScript's `errorCode`: the CLI's machine-readable reason, when it sent a well-formed one.
+    pub fn error_code(&self) -> Option<&str> {
+        self.error_code.as_deref()
+    }
+}
+
+fn error_code_shape(code: &str) -> bool {
+    let mut bytes = code.bytes();
+    code.len() <= 64
+        && bytes.next().is_some_and(|first| first.is_ascii_lowercase())
+        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+impl std::fmt::Debug for ControlRejectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ControlRejectionError { .. }")
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("the CLI path cannot be started safely")]
+    CliPath(#[from] crate::CliPathError),
+    #[error(transparent)]
+    CliNotFound(#[from] crate::cli_not_found_error::CliNotFoundError),
+    /// Node `os.homedir()` or Python `Path.home()` found no home directory where the dialect needs one.
+    #[error(transparent)]
+    HomeDirectory(#[from] crate::HomeDirectoryError),
+    #[error(transparent)]
+    Session(#[from] crate::SessionError),
+    /// Python `CLIConnectionError("Failed to start Claude Code: ...")` for any spawn failure other than the two below.
+    #[error("Failed to start Claude Code: {0}")]
+    Spawn(#[source] io::Error),
+    /// Python `CLIConnectionError("Working directory does not exist: ...")`, raised when the spawn finds no
+    /// executable and the configured working directory is missing.
+    #[error("Working directory does not exist: {}", .0.display())]
+    WorkingDirectoryMissing(std::path::PathBuf),
+    /// Python `CLINotFoundError("Claude Code not found at: ...")`, raised when the configured executable is missing.
+    #[error("Claude Code not found at: {}", .0.display())]
+    CliNotFoundAt(std::path::PathBuf),
+    #[error("a piped subprocess stream was unavailable")]
+    PipeUnavailable,
+    #[error("Claude Code subprocess I/O failed")]
+    Io(#[source] io::Error),
+    #[error(transparent)]
+    Protocol(#[from] ProtocolError),
+    /// The CLI exited unsuccessfully. `Display` is Python's `ProcessError` text and `typescript_message` is the
+    /// TypeScript text; `stderr` carries the real tail, a superset of both upstream messages.
+    #[error("{}", process_message(.status))]
+    Process { status: ExitStatus, stderr: StderrTail },
+    /// Python `CLIConnectionError("ProcessTransport is not ready for writing")` and the TypeScript error of the
+    /// same text: a write after stdin was closed.
+    #[error("ProcessTransport is not ready for writing")]
+    NotReadyForWriting,
+    /// Python `CLIConnectionError("Cannot write to terminated process (exit code: N)")`. TypeScript's text carries no
+    /// exit code, see `typescript_message`.
+    #[error("Cannot write to terminated process (exit code: {})", .exit_code.map_or_else(|| "None".to_owned(), |code| code.to_string()))]
+    WriteToTerminatedProcess { exit_code: Option<i32> },
+    /// `Failed to write to process stdin: ...` in both upstream SDKs.
+    #[error("Failed to write to process stdin: {0}")]
+    WriteFailed(#[source] io::Error),
+    /// Python `CLIJSONDecodeError`.
+    #[error(transparent)]
+    JsonDecode(#[from] JsonDecodeError),
+    /// Python `RecursionError` from `json.loads`: a CLI stdout line nested past the C recursion limit of the Python
+    /// SDK's message reader. It is not a `CLIJSONDecodeError`, so an unterminated tail at end of file raises it too.
+    #[error("{0}")]
+    Recursion(&'static str),
+    /// Python `ValueError` from `json.loads`: a CLI stdout line holds an integer of more than 4,300 digits, which
+    /// `int` does not convert. It is not a `CLIJSONDecodeError`, so an unterminated tail at end of file raises it too.
+    #[error("{0}")]
+    IntDigits(String),
+    /// Python `UnicodeDecodeError`: CLI stdout is not UTF-8. Python decodes each chunk it reads from the pipe as it
+    /// arrives, so the position counts from the start of that chunk and the lines before it in the chunk are lost.
+    #[error("{0}")]
+    UnicodeDecode(String),
+    /// TypeScript `TypeError`: a CLI stdout line is the JSON `null`, whose `type` the message loop reads.
+    #[error("{0}")]
+    NullMessage(&'static str),
+    /// An option the upstream SDK rejects before it starts the CLI.
+    #[error(transparent)]
+    Option(#[from] crate::OptionError),
+    /// Python `CLIConnectionError("Failed to load settings: ...")`, raised while the command is built when the
+    /// settings a sandbox is merged into cannot be loaded.
+    #[error(transparent)]
+    SettingsLoad(#[from] crate::SettingsLoadError),
+    /// Python `MessageParseError`.
+    #[error(transparent)]
+    MessageParse(#[from] MessageParseError),
+    /// Python `ResultError` / TypeScript "Claude Code returned an error result": the CLI exited unsuccessfully
+    /// after reporting an `is_error` result, so the result replaces the bare exit error.
+    #[error(transparent)]
+    Result(#[from] ResultError),
+    /// TypeScript `AbortError`.
+    #[error(transparent)]
+    Aborted(#[from] AbortError),
+    /// A failure reported by a custom [`crate::Transport`], carried unchanged. Python lets a transport raise any
+    /// exception and the SDK propagates it as is.
+    #[error(transparent)]
+    Transport(Box<dyn std::error::Error + Send + Sync>),
+    #[error("Claude Code closed stdout before completing the current operation")]
+    UnexpectedEof,
+    #[error("the message queue filled; consume messages or increase its capacity")]
+    MessageQueueFull,
+    #[error("too many outstanding control requests")]
+    TooManyControls,
+    #[error("too many background tasks in the SDK ledger")]
+    TooManyTasks,
+    #[error("input has been completed")]
+    InputClosed,
+    #[error("too many queued user inputs")]
+    TooManyInputs,
+    /// A hook set to block on failure, and the initialize response did not report `hook_on_failure_supported`.
+    /// `Display` is Python's text, `typescript_message` TypeScript's.
+    #[error(
+        "The process answering initialize does not honor on_failure on hook matchers, so a hook that fails would not block. Update Claude Code if it is old, or remove on_failure=\"block\" from your hooks."
+    )]
+    BlockingHooksUnsupported,
+    /// A hook set to block on failure, and the initialize response reported `hooks_applied: false`. `Display` is
+    /// Python's text, `typescript_message` TypeScript's.
+    #[error(
+        "This session was already running and did not register your hooks, so a hook set to on_failure=\"block\" would never run. Start a new session, or remove on_failure=\"block\" from your hooks."
+    )]
+    HooksNotApplied,
+    /// TypeScript: the initialize request carried `managedSettings` and the response did not report
+    /// `managed_settings_applied: true`.
+    #[error(
+        "Claude Code did not confirm the managed settings sent with managedSettingsDelivery 'initialize', so the session was ended and no further prompt was sent. For a cloud session, use 'argv', because it does not read this delivery. Otherwise check that no wrapper changes the launch flags or the initialize request."
+    )]
+    ManagedSettingsNotApplied,
+    /// TypeScript `supportedDialogKinds` without `onUserDialog`.
+    #[error(
+        "supportedDialogKinds requires an onUserDialog callback -- declaring dialog kinds without a handler would park dialogs nothing can answer. Provide onUserDialog, or omit supportedDialogKinds."
+    )]
+    DialogKindsWithoutHandler,
+    #[error("SDK configuration could not be encoded")]
+    InvalidConfiguration,
+    /// TypeScript's refusal of `sessionStore` together with `persistSession: false`.
+    #[error(
+        "sessionStore cannot be used with persistSession: false -- the storage adapter requires local writes to mirror from. To avoid keeping a local copy, pass env: {{ ...process.env, CLAUDE_CONFIG_DIR: dir }}, where dir is a new private directory such as fs.mkdtempSync(path.join(os.tmpdir(), 'claude-')), and delete dir when the query ends."
+    )]
+    SessionStoreWithoutPersistence,
+    /// File checkpointing together with a session store. `Display` is TypeScript's text, `python_message`
+    /// Python's.
+    #[error(
+        "enableFileCheckpointing is not yet supported with sessionStore (backup blobs are not mirrored, so rewindFiles() fails after a store-backed resume)."
+    )]
+    FileCheckpointingWithSessionStore,
+    /// `continue` against a session store that cannot list sessions. `Display` is TypeScript's text,
+    /// `python_message` Python's.
+    #[error("Options.continue with sessionStore requires store.listSessions to be implemented")]
+    ContinueRequiresListSessions,
+    /// Python's text for a control request that went unanswered for the configured wait.
+    #[error("Control request timeout: {operation}")]
+    ControlTimeout { operation: ControlOperation },
+    /// TypeScript's text when initialize goes unanswered while a hook is set to block on failure.
+    #[error(
+        "Claude Code did not answer initialize, so a hook set to onFailure: \"block\" could not be confirmed and the prompt was not sent. Check the connection and start a new session."
+    )]
+    InitializeNotConfirmed,
+    /// TypeScript's text when initialize goes unanswered after carrying managed settings and no hook blocks.
+    #[error(
+        "Claude Code did not answer initialize, so the managed settings could not be confirmed and the prompt was not sent. Start a new session."
+    )]
+    ManagedSettingsNotConfirmed,
+    /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` that is not an integer.
+    #[error("invalid literal for int() with base 10: {literal}")]
+    InvalidStreamCloseTimeout { literal: String },
+    /// Python's `int()` error for a `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` with more digits than its default limit.
+    #[error(
+        "Exceeds the limit (4300 digits) for integer string conversion: value has {digits} digits; use sys.set_int_max_str_digits() to increase the limit"
+    )]
+    StreamCloseTimeoutDigits { digits: usize },
+    /// Python's error when `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` is too large for the float it is divided as.
+    #[error("int too large to convert to float")]
+    StreamCloseTimeoutOverflow,
+    #[error("the {operation} control request was rejected")]
+    ControlRejected {
+        operation: ControlOperation,
+        #[source]
+        rejection: ControlRejectionError,
+    },
+    #[error("subprocess write timed out")]
+    WriteTimeout,
+    #[error("the command queue did not accept a request before its deadline")]
+    CommandQueueTimeout,
+    #[error("Claude Code could not be reaped before the shutdown deadline")]
+    ShutdownTimeout,
+    #[error("stderr did not close before the shutdown deadline")]
+    StderrDrainTimeout,
+    #[error("cleanup failed after an SDK error")]
+    Cleanup {
+        primary: Box<Error>,
+        #[source]
+        cleanup: Box<Error>,
+    },
+    #[error("the SDK driver has stopped; receive remaining messages for its terminal error")]
+    DriverStopped,
+    /// TypeScript's rejection of a control request still waiting for its answer when the query is closed.
+    #[error("Query closed before response received")]
+    QueryClosed,
+    #[error("the client is not initialized")]
+    NotInitialized,
+    /// The first initialize failed. TypeScript rejects `initializationResult()` with the same error that ended
+    /// the run, so the text is the inner error's.
+    #[error(transparent)]
+    InitializationFailed(std::sync::Arc<Error>),
+    /// A `TypeError` the TypeScript SDK leaves to its JavaScript engine, worded as the engine chosen with
+    /// [`crate::JsRuntime`] words it.
+    #[error("{0}")]
+    TypeError(String),
+    #[error("control request counter exhausted")]
+    RequestIdExhausted,
+    #[error("SDK driver task failed")]
+    DriverTask(#[source] tokio::task::JoinError),
+    #[error("permission callback task failed")]
+    CallbackTask(#[source] tokio::task::JoinError),
+    /// TypeScript's `initialize_timeout` error: the CLI did not answer initialize within the startup limit.
+    #[error(transparent)]
+    InitializeTimeout(#[from] InitializeTimeoutError),
+    #[doc(hidden)]
+    #[error("the subprocess owner requested shutdown")]
+    ShutdownRequested,
+}
+
+fn process_message(status: &ExitStatus) -> String {
+    let code = exit_code(status).unwrap_or(-1);
+    format!("Command failed with exit code {code} (exit code: {code})\nError output: Check stderr output for details")
+}
+
+/// Python's `Process.returncode`: the exit code, or the negated signal number on Unix.
+pub(crate) fn exit_code(status: &ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        status.code().or_else(|| status.signal().map(|signal| -signal))
+    }
+    #[cfg(not(unix))]
+    {
+        status.code()
+    }
+}
+
+impl Error {
+    /// The exit code Python's `ProcessError.exit_code` carries (the negated signal number on Unix).
+    pub fn exit_code(&self) -> Option<i32> {
+        match self {
+            Self::Process { status, .. } => exit_code(status),
+            Self::Result(result) => result.exit_code(),
+            _ => None,
+        }
+    }
+
+    /// Python's text for the errors whose `Display` is TypeScript's and whose wording differs between the two SDKs.
+    pub fn python_message(&self) -> Option<&'static str> {
+        match self {
+            Self::FileCheckpointingWithSessionStore => Some(
+                "session_store cannot be combined with enable_file_checkpointing (checkpoints are local-disk only and would diverge from the mirrored transcript)",
+            ),
+            Self::ContinueRequiresListSessions => {
+                Some("continue_conversation with session_store requires the store to implement list_sessions()")
+            }
+            _ => None,
+        }
+    }
+
+    /// TypeScript's text for an unsuccessful exit: `Claude Code process exited with code N. stderr: <tail>` or
+    /// `Claude Code process terminated by signal SIG<NAME>`, with the stderr tail appended when it is not blank.
+    pub fn typescript_message(&self) -> Option<String> {
+        match self {
+            Self::InitializationFailed(inner) => return inner.typescript_message(),
+            Self::WriteToTerminatedProcess { .. } => return Some("Cannot write to terminated process".to_owned()),
+            Self::BlockingHooksUnsupported => {
+                return Some(
+                    "The process answering initialize does not honor onFailure on hook matchers, so a hook that fails would not block. Update Claude Code if it is old, or remove onFailure: \"block\" from your hooks."
+                        .to_owned(),
+                );
+            }
+            Self::HooksNotApplied => {
+                return Some(
+                    "This session was already running and did not register your hooks, so a hook set to onFailure: \"block\" would never run. Start a new session, or remove onFailure: \"block\" from your hooks."
+                        .to_owned(),
+                );
+            }
+            Self::Spawn(source) => {
+                return Some(
+                    match source
+                        .get_ref()
+                        .and_then(|inner| inner.downcast_ref::<SpawnFailureError>())
+                    {
+                        Some(failure) => launch_message(&failure.path),
+                        None => format!(
+                            "Failed to spawn Claude Code process: {}",
+                            crate::stderr_redaction::redact(&source.to_string())
+                        ),
+                    },
+                );
+            }
+            Self::CliNotFoundAt(path) => return Some(launch_message(path)),
+            _ => {}
+        }
+        let Self::Process { status, stderr } = self else {
+            return None;
+        };
+        let tail = String::from_utf8_lossy(stderr.as_bytes());
+        let tail = crate::session_prompt::js_trim(&tail);
+        let tail = if tail.is_empty() {
+            String::new()
+        } else {
+            format!(". stderr: {tail}")
+        };
+        if let Some(code) = status.code() {
+            return Some(format!("Claude Code process exited with code {code}{tail}"));
+        }
+        #[cfg(unix)]
+        {
+            if let Some(signal) = status.signal() {
+                return Some(format!(
+                    "Claude Code process terminated by signal {}{tail}",
+                    signal_name(signal)
+                ));
+            }
+        }
+        None
+    }
+}
+
+/// A spawn error that carries the path it tried to start, so TypeScript's launch-failure text can name it.
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
+pub(crate) struct SpawnFailureError {
+    path: std::path::PathBuf,
+    error: io::Error,
+}
+
+/// Whether TypeScript words a spawn failure as a failed launch of the executable: the errors a missing or
+/// unusable path produces.
+fn is_launch_failure(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied) || has_launch_errno(error)
+}
+
+#[cfg(unix)]
+fn has_launch_errno(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc::ENOTDIR | libc::ELOOP | libc::ENAMETOOLONG | libc::EROFS)
+    )
+}
+
+#[cfg(not(unix))]
+fn has_launch_errno(_error: &io::Error) -> bool {
+    false
+}
+
+/// Keeps the kind and text of a spawn error and, for a launch failure, the path that was started.
+pub(crate) fn launch_failure(path: &std::path::Path, error: io::Error) -> io::Error {
+    if is_launch_failure(&error) {
+        io::Error::new(
+            error.kind(),
+            SpawnFailureError {
+                path: path.to_path_buf(),
+                error,
+            },
+        )
+    } else {
+        error
+    }
+}
+
+/// TypeScript's text for a path that could not be started, which depends on whether it names a native binary and
+/// whether it exists.
+fn launch_message(path: &std::path::Path) -> String {
+    let native = !crate::process_options::is_script(path, crate::ArgvStyle::TypeScript);
+    let shown = crate::stderr_redaction::redact(&path.to_string_lossy());
+    match (native, path.exists()) {
+        (true, true) => format!(
+            "Claude Code native binary at {shown} exists but failed to launch. This usually means the binary does not match this system's libc \u{2014} e.g. spawning a musl-linked binary on a glibc Linux host fails because the musl dynamic loader (/lib/ld-musl-*) is missing. Specify a matching binary with options.pathToClaudeCodeExecutable."
+        ),
+        (false, true) => format!("Claude Code executable at {shown} exists but failed to launch."),
+        (true, false) => format!(
+            "Claude Code native binary not found at {shown}. Please ensure Claude Code is installed via native installer or specify a valid path with options.pathToClaudeCodeExecutable."
+        ),
+        (false, false) => {
+            format!("Claude Code executable not found at {shown}. Is options.pathToClaudeCodeExecutable set?")
+        }
+    }
+}
+
+#[cfg(unix)]
+fn signal_name(signal: i32) -> &'static str {
+    match signal {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        6 => "SIGABRT",
+        9 => "SIGKILL",
+        13 => "SIGPIPE",
+        14 => "SIGALRM",
+        15 => "SIGTERM",
+        _ => "unknown",
+    }
+}
+
+/// TypeScript's `errorClass: "initialize_timeout"` error of `startup()` and `prewarm()`.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct InitializeTimeoutError {
+    message: String,
+    hooks_open: usize,
+    startup_mark: Option<String>,
+    startup_mark_age_ms: Option<u64>,
+}
+
+impl InitializeTimeoutError {
+    pub(crate) fn new(message: String, hooks_open: usize) -> Self {
+        Self {
+            message,
+            hooks_open,
+            startup_mark: None,
+            startup_mark_age_ms: None,
+        }
+    }
+
+    /// Records the last startup mark the CLI reported, `none` when it reported no mark.
+    pub(crate) fn with_mark(mut self, mark: Option<(String, u64)>) -> Self {
+        match mark {
+            Some((mark, age)) => {
+                self.startup_mark = Some(mark);
+                self.startup_mark_age_ms = Some(age);
+            }
+            None => self.startup_mark = Some("none".to_owned()),
+        }
+        self
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// TypeScript's `telemetryMessage`: the first sentence of the message, without its period.
+    pub fn telemetry_message(&self) -> &str {
+        self.message
+            .split_once(". ")
+            .map_or(self.message.as_str(), |(head, _)| head)
+    }
+
+    /// TypeScript's `startupHooksOpen`: the SessionStart or Setup hooks still running when the wait ran out.
+    pub fn startup_hooks_open(&self) -> usize {
+        self.hooks_open
+    }
+
+    /// TypeScript's `startupMark`: the last mark the CLI reported, or `none`.
+    pub fn startup_mark(&self) -> Option<&str> {
+        self.startup_mark.as_deref()
+    }
+
+    /// TypeScript's `startupMarkAgeMs`: how long before the timeout that mark arrived.
+    pub fn startup_mark_age_ms(&self) -> Option<u64> {
+        self.startup_mark_age_ms
+    }
+}
+
+/// Python `CLIJSONDecodeError`: a CLI stdout line that is not valid JSON, or a message that outgrew
+/// `max_buffer_size`.
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to decode JSON: {}...", self.line.chars().take(100).collect::<String>())]
+pub struct JsonDecodeError {
+    line: String,
+    #[source]
+    original_error: JsonDecodeSourceError,
+}
+
+/// The exception Python carries as `CLIJSONDecodeError.original_error`.
+#[derive(Debug, thiserror::Error)]
+pub enum JsonDecodeSourceError {
+    /// The JSON parser's error for a corrupt line.
+    #[error(transparent)]
+    Json(serde_json::Error),
+    /// Python's `ValueError` raised when one message exceeds the buffer limit.
+    #[error("Buffer size {length} exceeds limit {limit}")]
+    BufferExceeded { length: usize, limit: usize },
+}
+
+impl JsonDecodeError {
+    pub(crate) fn new(line: &[u8], original_error: serde_json::Error) -> Self {
+        Self {
+            line: String::from_utf8_lossy(line).into_owned(),
+            original_error: JsonDecodeSourceError::Json(original_error),
+        }
+    }
+
+    /// Python's guard for a message longer than `max_buffer_size`: the text is the `line`, the `ValueError` the
+    /// original error.
+    pub(crate) fn buffer_exceeded(limit: usize, length: usize) -> Self {
+        Self {
+            line: format!("JSON message exceeded maximum buffer size of {limit} bytes"),
+            original_error: JsonDecodeSourceError::BufferExceeded { length, limit },
+        }
+    }
+
+    /// Python `CLIJSONDecodeError.__init__(line, original_error)` for a parser failure.
+    pub fn from_line(line: &str, original_error: serde_json::Error) -> Self {
+        Self {
+            line: line.to_owned(),
+            original_error: JsonDecodeSourceError::Json(original_error),
+        }
+    }
+
+    /// The offending line, complete.
+    pub fn line(&self) -> &str {
+        &self.line
+    }
+
+    pub fn original_error(&self) -> &JsonDecodeSourceError {
+        &self.original_error
+    }
+}
+
+/// Python `MessageParseError`: a JSON frame that does not decode as a message, with the raw frame.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+pub struct MessageParseError {
+    message: String,
+    data: Option<JsonObject>,
+    #[source]
+    source: ProtocolError,
+}
+
+impl MessageParseError {
+    pub(crate) fn new(source: ProtocolError, data: Option<JsonObject>) -> Self {
+        Self {
+            message: source.to_string(),
+            data,
+            source,
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// The decoded JSON object the message was parsed from, when the line was an object.
+    pub fn data(&self) -> Option<&JsonObject> {
+        self.data.as_ref()
+    }
+}
+
+impl crate::deep_json::OwnedValues for MessageParseError {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        crate::deep_json::OwnedValues::each_value(&mut self.data, visit);
+    }
+}
+
+crate::deep_json::drop_values_iteratively!(MessageParseError);
+
+/// TypeScript `AbortError`: the operation was cancelled by the caller.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct AbortError {
+    message: &'static str,
+}
+
+impl AbortError {
+    /// The process was stopped by the caller (`Claude Code process aborted by user`).
+    pub(crate) const PROCESS: Self = Self {
+        message: "Claude Code process aborted by user",
+    };
+    /// A write or other operation attempted after the abort (`Operation aborted`).
+    pub(crate) const OPERATION: Self = Self {
+        message: "Operation aborted",
+    };
+
+    pub fn message(&self) -> &'static str {
+        self.message
+    }
+}
+
+/// Python `ResultError`: the payload of the error `result` the CLI reported before exiting unsuccessfully.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[error("{message}")]
+pub struct ResultError {
+    message: String,
+    data: JsonObject,
+    exit_code: Option<i32>,
+}
+
+impl crate::deep_json::OwnedValues for ResultError {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut serde_json::Value)) {
+        crate::deep_json::OwnedValues::each_value(&mut self.data, visit);
+    }
+}
+
+crate::deep_json::drop_values_iteratively!(ResultError);
+
+impl ResultError {
+    pub(crate) fn new(message: String, data: JsonObject, exit_code: Option<i32>) -> Self {
+        Self {
+            message,
+            data,
+            exit_code,
+        }
+    }
+
+    /// Python `ResultError.__init__(message, data, exit_code)`: `data` is optional and anything but an object
+    /// is treated as empty.
+    pub fn from_python(message: &str, data: Option<JsonObject>, exit_code: Option<i32>) -> Self {
+        Self::new(message.to_owned(), data.unwrap_or_default(), exit_code)
+    }
+
+    /// `str()` of the Python exception: the message followed by the exit code, as `ProcessError.__init__` builds
+    /// it (a `ResultError` carries no stderr).
+    pub fn python_text(&self) -> String {
+        python_process_error_text(&self.message, self.exit_code, None)
+    }
+
+    /// `Claude Code returned an error result: <text>`.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// The raw `result` frame as the CLI emitted it.
+    pub fn data(&self) -> &JsonObject {
+        &self.data
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        self.exit_code
+    }
+
+    pub fn subtype(&self) -> Option<&str> {
+        self.data.get("subtype").and_then(serde_json::Value::as_str)
+    }
+
+    /// The `errors` strings, trimmed and without blanks; a bare string is accepted like Python does.
+    pub fn errors(&self) -> Vec<String> {
+        normalized_errors(self.data.get("errors"))
+    }
+
+    pub fn result(&self) -> Option<&str> {
+        self.data.get("result").and_then(serde_json::Value::as_str)
+    }
+
+    pub fn api_error_status(&self) -> Option<i64> {
+        self.data.get("api_error_status").and_then(serde_json::Value::as_i64)
+    }
+
+    pub fn terminal_reason(&self) -> Option<&str> {
+        self.data.get("terminal_reason").and_then(serde_json::Value::as_str)
+    }
+
+    pub fn session_id(&self) -> Option<&str> {
+        self.data.get("session_id").and_then(serde_json::Value::as_str)
+    }
+
+    /// TypeScript's `startupFailureReason`: the error result's `startup_failure_reason` when it is a string.
+    pub fn startup_failure_reason(&self) -> Option<crate::upstream::messages::SDKStartupFailureReason> {
+        let reason = self.data.get("startup_failure_reason")?;
+        if !reason.is_string() {
+            return None;
+        }
+        serde_json::from_value(reason.clone()).ok()
+    }
+}
+
+/// Python `CLINotFoundError.__init__(message, cli_path)`: the message (default `Claude Code not found`), then
+/// `: <cli_path>` when the path is non-empty.
+pub fn python_cli_not_found_text(message: Option<&str>, cli_path: Option<&str>) -> String {
+    let message = message.unwrap_or("Claude Code not found");
+    match cli_path {
+        Some(path) if !path.is_empty() => format!("{message}: {path}"),
+        _ => message.to_owned(),
+    }
+}
+
+/// Python `ProcessError.__init__(message, exit_code, stderr)`: the exit code is appended when given (zero
+/// included) and a non-empty stderr goes on its own line.
+pub fn python_process_error_text(message: &str, exit_code: Option<i32>, stderr: Option<&str>) -> String {
+    let mut text = message.to_owned();
+    if let Some(code) = exit_code {
+        text = format!("{text} (exit code: {code})");
+    }
+    match stderr {
+        Some(output) if !output.is_empty() => format!("{text}\nError output: {output}"),
+        _ => text,
+    }
+}
+
+fn normalized_errors(raw: Option<&serde_json::Value>) -> Vec<String> {
+    let strings: Vec<&str> = match raw {
+        Some(serde_json::Value::String(text)) => vec![text.as_str()],
+        Some(serde_json::Value::Array(items)) => items.iter().filter_map(serde_json::Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    strings
+        .into_iter()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Python `_error_result_text`: errors, then result, then a non-success subtype, then the HTTP status.
+pub(crate) fn python_error_result_text(data: &JsonObject) -> String {
+    let errors = normalized_errors(data.get("errors"));
+    if !errors.is_empty() {
+        return errors.join("; ");
+    }
+    if let Some(result) = data.get("result").and_then(serde_json::Value::as_str)
+        && !result.trim().is_empty()
+    {
+        return result.trim().to_owned();
+    }
+    if let Some(subtype) = data.get("subtype").and_then(serde_json::Value::as_str)
+        && !subtype.is_empty()
+        && subtype != "success"
+    {
+        return subtype.to_owned();
+    }
+    if let Some(status) = data.get("api_error_status")
+        && !status.is_null()
+    {
+        let status = status
+            .as_i64()
+            .map_or_else(|| status.to_string(), |number| number.to_string());
+        return format!("API error (HTTP {status})");
+    }
+    "unknown error".to_owned()
+}
+
+/// TypeScript's text: the `result` for the `success` subtype, otherwise the joined `errors`; blank means none.
+pub(crate) fn typescript_error_result_text(data: &JsonObject) -> Option<String> {
+    let text = if data.get("subtype").and_then(serde_json::Value::as_str) == Some("success") {
+        data.get("result")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    } else {
+        normalized_errors(data.get("errors")).join("; ")
+    };
+    (!text.is_empty()).then_some(text)
+}
+
+/// The `result` frame as a JSON object, for `ResultError::data`.
+pub(crate) fn error_result_data(result: &crate::ResultMessage) -> JsonObject {
+    let mut data = crate::deep_json::clone_object(&result.additional_fields);
+    data.insert("type".into(), "result".into());
+    data.insert("subtype".into(), result.subtype.clone().into());
+    data.insert("is_error".into(), true.into());
+    data.insert("session_id".into(), result.session_id.as_str().into());
+    if let Some(text) = &result.result {
+        data.insert("result".into(), text.clone().into());
+    }
+    if let Some(errors) = &result.errors {
+        data.insert("errors".into(), errors.clone().into());
+    }
+    if let Some(status) = result.api_error_status {
+        data.insert("api_error_status".into(), status.into());
+    }
+    if let Some(reason) = &result.terminal_reason {
+        data.insert("terminal_reason".into(), reason.clone().into());
+    }
+    data
+}
+
+#[cfg(test)]
+#[path = "error_tests.rs"]
+mod tests;

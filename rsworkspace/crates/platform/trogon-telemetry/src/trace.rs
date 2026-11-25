@@ -1,6 +1,7 @@
 use opentelemetry_otlp::SpanExporter;
 use opentelemetry_sdk::{Resource, trace as sdktrace};
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::TelemetryProviderShutdownError;
 
@@ -17,9 +18,9 @@ pub(crate) fn init_provider(resource: &Resource) -> anyhow::Result<sdktrace::Sdk
     Ok(provider)
 }
 
-pub(crate) fn shutdown() -> Result<(), TelemetryProviderShutdownError> {
+pub(crate) fn shutdown(timeout: Duration) -> Result<(), TelemetryProviderShutdownError> {
     if let Some(provider) = TRACER_PROVIDER.get()
-        && let Err(source) = provider.shutdown()
+        && let Err(source) = provider.shutdown_with_timeout(timeout)
     {
         return Err(TelemetryProviderShutdownError::Tracer { source: source.into() });
     }

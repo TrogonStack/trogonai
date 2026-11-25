@@ -1,0 +1,36 @@
+load("//.config/bazel:rust.bzl", "workspace_compile_fail_library", "workspace_crate")
+
+workspace_crate(
+    compile_data = ["src/session_gen/*.json"],
+    integration_tests = {
+        "peer_semantic_fingerprint_contract": {},
+        "recipient_receipt_sender": {},
+    },
+)
+
+workspace_compile_fail_library(
+    crate_features = [
+        "schedules",
+        "chrono",
+    ],
+)
+
+# The committed output of `mise run proto:generate`, which
+# //proto:trogonai_proto_generated_test regenerates and compares.
+filegroup(
+    name = "generated",
+    srcs = glob(["src/gen/**"]),
+    visibility = ["//proto:__pkg__"],
+)
+
+filegroup(
+    name = "session_generated",
+    srcs = glob(["src/session_gen/**"]),
+    visibility = ["//proto:__pkg__"],
+)
+
+# The test formats the regenerated tree with this crate's edition.
+exports_files(
+    ["Cargo.toml"],
+    visibility = ["//proto:__pkg__"],
+)

@@ -6,6 +6,7 @@
 /// rather than copying policies, so a past decision can be reconstructed from
 /// the policy streams at the recorded revisions without the stream ever being
 /// pinned (ADR#0025 "authorization never pins"). Unknown kinds reject.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum PolicyRuleKind {
@@ -16,6 +17,7 @@ pub enum PolicyRuleKind {
     POLICY_RULE_KIND_MODEL_CEILING = 4i32,
     POLICY_RULE_KIND_DELEGATION_PERMISSION = 5i32,
     POLICY_RULE_KIND_CONNECTION_PERMISSION = 6i32,
+    POLICY_RULE_KIND_EGRESS_PERMISSION = 7i32,
 }
 impl PolicyRuleKind {
     ///Idiomatic alias for [`Self::POLICY_RULE_KIND_UNSPECIFIED`]; `Debug` prints the variant name.
@@ -39,6 +41,9 @@ impl PolicyRuleKind {
     ///Idiomatic alias for [`Self::POLICY_RULE_KIND_CONNECTION_PERMISSION`]; `Debug` prints the variant name.
     #[allow(non_upper_case_globals)]
     pub const ConnectionPermission: Self = Self::POLICY_RULE_KIND_CONNECTION_PERMISSION;
+    ///Idiomatic alias for [`Self::POLICY_RULE_KIND_EGRESS_PERMISSION`]; `Debug` prints the variant name.
+    #[allow(non_upper_case_globals)]
+    pub const EgressPermission: Self = Self::POLICY_RULE_KIND_EGRESS_PERMISSION;
 }
 impl ::core::default::Default for PolicyRuleKind {
     fn default() -> Self {
@@ -151,6 +156,9 @@ impl ::buffa::Enumeration for PolicyRuleKind {
                     Self::POLICY_RULE_KIND_CONNECTION_PERMISSION,
                 )
             }
+            7i32 => {
+                ::core::option::Option::Some(Self::POLICY_RULE_KIND_EGRESS_PERMISSION)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -171,6 +179,9 @@ impl ::buffa::Enumeration for PolicyRuleKind {
             }
             Self::POLICY_RULE_KIND_CONNECTION_PERMISSION => {
                 "POLICY_RULE_KIND_CONNECTION_PERMISSION"
+            }
+            Self::POLICY_RULE_KIND_EGRESS_PERMISSION => {
+                "POLICY_RULE_KIND_EGRESS_PERMISSION"
             }
         }
     }
@@ -201,6 +212,9 @@ impl ::buffa::Enumeration for PolicyRuleKind {
                     Self::POLICY_RULE_KIND_CONNECTION_PERMISSION,
                 )
             }
+            "POLICY_RULE_KIND_EGRESS_PERMISSION" => {
+                ::core::option::Option::Some(Self::POLICY_RULE_KIND_EGRESS_PERMISSION)
+            }
             _ => ::core::option::Option::None,
         }
     }
@@ -213,6 +227,7 @@ impl ::buffa::Enumeration for PolicyRuleKind {
             Self::POLICY_RULE_KIND_MODEL_CEILING,
             Self::POLICY_RULE_KIND_DELEGATION_PERMISSION,
             Self::POLICY_RULE_KIND_CONNECTION_PERMISSION,
+            Self::POLICY_RULE_KIND_EGRESS_PERMISSION,
         ]
     }
 }

@@ -1,0 +1,67 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//.config/bazel:go.bzl", "gofmt_test")
+load(":bazel_test.bzl", "protowit_test")
+
+go_library(
+    name = "protowit",
+    srcs = [
+        "errors.go",
+        "generate.go",
+        "names.go",
+        "render.go",
+        "run.go",
+    ],
+    importpath = "github.com/TrogonStack/trogonai/goworkspace/internal/protowit",
+    visibility = ["//goworkspace:__subpackages__"],
+    deps = [
+        "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//reflect/protodesc",
+        "@org_golang_google_protobuf//reflect/protoreflect",
+        "@org_golang_google_protobuf//types/descriptorpb",
+        "@org_golang_google_protobuf//types/pluginpb",
+    ],
+)
+
+go_test(
+    name = "protowit_test_binary",
+    srcs = ["generate_test.go"],
+    data = glob(["testdata/**"]),
+    embed = [":protowit"],
+    race = "on",
+    tags = ["manual"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//types/descriptorpb",
+        "@org_golang_google_protobuf//types/pluginpb",
+    ],
+)
+
+protowit_test(
+    name = "protowit_test",
+    test_binary = ":protowit_test_binary",
+    buf = "//.config/bazel:buf",
+    schemas = "//proto/trogonai/scheduler/schedules/v1:schedule_fixture_sources",
+    go_mod = "//goworkspace:go.mod",
+)
+
+gofmt_test(
+    name = "gofmt_test",
+    srcs = glob(["*.go"]),
+)
+
+# The snapshots must stay valid WIT packages, not just match what the generator
+# last produced.
+sh_test(
+    name = "wit_snapshots_test",
+    srcs = ["wit_snapshots_test.sh"],
+    args = [
+        "$(rootpath @mise//tools/wasm-tools)",
+        package_name() + "/testdata/snapshots",
+    ],
+    data = [
+        "@mise//tools/wasm-tools",
+    ] + glob(["testdata/snapshots/**/*.wit"]),
+)

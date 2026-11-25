@@ -1,0 +1,44 @@
+{
+  "platform": "linux",
+  "env": {
+    "CLAUDE_CODE_ENTRYPOINT": "remote_cowork"
+  },
+  "process": {
+    "euid": 0,
+    "uid": 0,
+    "egid": 0,
+    "gid": 0,
+    "groups": [
+      0
+    ]
+  },
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": [],
+    "managedSettings": {
+      "allowManagedMcpServersOnly": true,
+      "allowedMcpServers": [
+        {
+          "serverName": "slack"
+        }
+      ],
+      "enforceAvailableModels": true,
+      "strictKnownMarketplaces": [],
+      "permissions": {
+        "allow": [
+          "Bash(git:*)"
+        ],
+        "deny": [
+          "Bash(curl:*)"
+        ]
+      },
+      "sandbox": {
+        "network": {
+          "allowedDomains": [
+            "example.com"
+          ]
+        }
+      }
+    }
+  }
+}

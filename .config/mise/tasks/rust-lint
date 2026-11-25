@@ -3,16 +3,18 @@
 #
 # Usage: mise run rust-lint
 #
-# Mirrors the `lint` job in .github/workflows/ci-rust.yml exactly, in order, so a
-# green run locally means a green lint job in CI. Each step prints PASS/FAIL on
-# its own line and the script stops at the first failure, so the offending gate
-# is unambiguous before you push. This exists because fixing one lint error and
+# Runs with Cargo the lint gates CI runs through Bazel (.github/workflows/ci-bazel.yml)
+# and Dylint (.github/workflows/ci-dylint.yml). Each step prints PASS/FAIL on its
+# own line and the script stops at the first failure, so the offending gate is
+# unambiguous before you push. This exists because fixing one lint error and
 # pushing only surfaces the next gate; run this to catch them all at once.
 set -u
 set -o pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 RSWS="$ROOT/rsworkspace"
+# shellcheck source=../lib/rustup-path.sh
+source "$ROOT/.config/mise/lib/rustup-path.sh"
 if ! cd "$RSWS"; then
     echo "Unable to enter workspace: $RSWS" >&2
     exit 1
@@ -108,7 +110,7 @@ step "policy-lint-tests" bash -c 'cd dylints/trogonai_dylint && rustup run "$1" 
 
 # Mirrors CI 'Run repo Rust policy lints': note `--all-targets` so test-target
 # violations (inline test modules, function-local `use`, ...) are caught too.
-step "policy-lints" env -u RUSTUP_TOOLCHAIN RUSTC_WRAPPER="" CARGO_BUILD_RUSTC_WRAPPER="" rustup run "$DYLINT_TOOLCHAIN" \
+step "policy-lints" env -u RUSTUP_TOOLCHAIN PATH="$(rustup_proxy_path)" RUSTC_WRAPPER="" CARGO_BUILD_RUSTC_WRAPPER="" rustup run "$DYLINT_TOOLCHAIN" \
     cargo dylint --all --workspace --no-deps -- --all-features --all-targets
 
 # 5. clippy: mirrors CI 'Run clippy'.

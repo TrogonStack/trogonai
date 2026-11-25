@@ -3,9 +3,9 @@ use axum::http::Request;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore, StreamMaxAge};
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::NonZeroDuration;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -34,7 +34,7 @@ fn make_app() -> (MockJetStreamPublisher, axum::Router) {
     );
     let config = super::config::LinearConfig {
         webhook_secret: super::config::LinearWebhookSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("linear").expect("valid token"),
+        subject_prefix: DottedNatsToken::new("linear").expect("valid token"),
         stream_name: NatsToken::new("LINEAR").expect("valid token"),
         stream_max_age: StreamMaxAge::from_secs(604800).unwrap(),
         // Disable timestamp check so fixtures with old timestamps are accepted.

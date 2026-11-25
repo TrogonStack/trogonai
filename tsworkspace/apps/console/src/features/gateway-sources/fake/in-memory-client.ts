@@ -3,11 +3,14 @@ import type { SourceCommand } from '../domain/commands';
 import { SourceFault } from '../domain/faults';
 import { decideSource, settleSource, type IntegrationState } from '../domain/integration';
 import { parseIntegrationId } from '../domain/integration-id';
+import type { WebhookDraft, WebhookEndpoint, WebhookTarget, WebhookTestRequest } from '../domain/webhook-endpoint';
+import { InMemoryWebhookEndpoints } from './webhook-endpoints';
 
 export const DEMO_PROJECT = 'proj-demo';
 const SETTLE_LATENCY_FACTOR = 6;
 
 export interface InMemoryClientOptions {
+  readonly seeded?: boolean;
   readonly latencyMs?: number;
   readonly settleMs?: number;
   readonly clock?: () => Date;
@@ -19,6 +22,7 @@ function sleep(milliseconds: number): Promise<void> {
 }
 
 export class InMemorySourcesClient implements SourcesClient {
+  private readonly endpoints: InMemoryWebhookEndpoints;
   private readonly integrations = new Map<string, IntegrationState>();
   private readonly latencyMs: number;
   private readonly settleMs: number;
@@ -27,9 +31,35 @@ export class InMemorySourcesClient implements SourcesClient {
   private ready: Promise<void> | undefined;
 
   constructor(options: InMemoryClientOptions = {}) {
+    this.endpoints = new InMemoryWebhookEndpoints(options);
     this.latencyMs = options.latencyMs ?? 0;
     this.settleMs = options.settleMs ?? this.latencyMs * SETTLE_LATENCY_FACTOR;
     this.clock = options.clock ?? (() => new Date());
+  }
+
+  listWebhookEndpoints() {
+    return this.endpoints.listWebhookEndpoints();
+  }
+  createWebhookEndpoint(draft: WebhookDraft) {
+    return this.endpoints.createWebhookEndpoint(draft);
+  }
+  updateWebhookEndpoint(target: WebhookTarget, draft: WebhookDraft) {
+    return this.endpoints.updateWebhookEndpoint(target, draft);
+  }
+  setWebhookEnabled(target: WebhookTarget, enabled: boolean) {
+    return this.endpoints.setWebhookEnabled(target, enabled);
+  }
+  rotateWebhookCredential(target: WebhookTarget) {
+    return this.endpoints.rotateWebhookCredential(target);
+  }
+  revokeWebhookCredential(target: WebhookTarget) {
+    return this.endpoints.revokeWebhookCredential(target);
+  }
+  deleteWebhookEndpoint(target: WebhookTarget) {
+    return this.endpoints.deleteWebhookEndpoint(target);
+  }
+  simulateWebhookDelivery(id: WebhookEndpoint['id'], request: WebhookTestRequest) {
+    return this.endpoints.simulateWebhookDelivery(id, request);
   }
 
   seedWith(populate: () => readonly IntegrationState[]): void {

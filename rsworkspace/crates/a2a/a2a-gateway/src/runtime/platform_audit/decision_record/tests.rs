@@ -314,14 +314,12 @@ fn a_service_has_no_actor_arm_and_is_unattributed() {
 }
 
 #[test]
-fn a_hashed_principal_id_is_recorded_under_its_digest_name_and_still_records() {
-    let hashed = SubjectPrincipal::new(
-        trogon_identity_types::PrincipalKind::Person,
-        trogon_identity_types::SubjectPrincipalId::from_credential(
-            &trogon_identity_types::PrincipalId::new("alice@example.com").expect("id"),
-        )
-        .expect("subject id"),
-    );
+fn a_hashed_principal_id_is_recorded_under_the_token_the_bus_carries() {
+    let token = trogon_identity_types::SubjectPrincipalId::from_credential(
+        &trogon_identity_types::PrincipalId::new("alice@example.com").expect("id"),
+    )
+    .expect("subject id");
+    let hashed = SubjectPrincipal::new(trogon_identity_types::PrincipalKind::Person, token.clone());
     let agent = agent();
     let record = build(&event(
         &hashed,
@@ -332,6 +330,6 @@ fn a_hashed_principal_id_is_recorded_under_its_digest_name_and_still_records() {
         allowed(None),
     ));
     let actor = format!("{:?}", record.message().actor);
-    assert!(actor.contains("sha256:"), "{actor}");
+    assert!(actor.contains(token.as_str()), "{actor}");
     assert!(!actor.contains("example.com"), "{actor}");
 }

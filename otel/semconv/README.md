@@ -25,6 +25,8 @@ otel/semconv/
     gateway.yaml     # trogon-gateway webhooks and credentials
     std.yaml         # trogon-std (HTTP server span)
     provider.yaml    # trogon-provider-gateway (standard HTTP duration)
+    secrets.yaml     # trogon-secrets-client (release cache and invalidation reader)
+    egress_proxy.yaml # trogon-egress-proxy (accepted connections)
   policies/          # Rego policies (metric + attribute naming)
     trogon_naming.rego
   templates/         # Weaver Forge codegen templates, one subtree per target
@@ -45,7 +47,7 @@ All commands run through `mise`:
 - `mise run semconv:generate` regenerates the Rust bindings, then `cargo fmt`s
   them.
 
-CI runs `semconv:check` (via the `otel/weaver` image) on any change under
+CI Bazel runs the same check as `//otel/semconv:check_test` on any change under
 `otel/semconv/`. Generation is a developer step whose output is committed, exactly
 like `proto:generate`.
 

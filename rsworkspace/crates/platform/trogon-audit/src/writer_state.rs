@@ -2,7 +2,6 @@ use std::collections::{HashMap, VecDeque};
 
 use trogonai_proto::platform::audit::v1::AuditClass;
 
-use crate::chain_head::ChainHead;
 use crate::failure_reason::FailureReason;
 use crate::record::Record;
 use crate::writer_stats::WriterStats;
@@ -19,7 +18,6 @@ pub(crate) struct WriterState {
     pub(crate) blocked: bool,
     /// The retry buffer filled and has not emptied since.
     pub(crate) overflowed: bool,
-    pub(crate) head: Option<ChainHead>,
     pub(crate) dropped: HashMap<(AuditClass, FailureReason), u64>,
     pub(crate) refused: HashMap<FailureReason, u64>,
     pub(crate) possible_duplicates: u64,

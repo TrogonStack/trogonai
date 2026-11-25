@@ -1,0 +1,38 @@
+{
+  "platform": "linux",
+  "env": {
+    "CLAUDE_CODE_ENTRYPOINT": "remote_cowork"
+  },
+  "process": {
+    "euid": 0,
+    "uid": 0,
+    "egid": 0,
+    "gid": 0,
+    "groups": [
+      0
+    ]
+  },
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": []
+  },
+  "steps": [
+    {
+      "at": 0,
+      "files": {}
+    },
+    {
+      "at": 1800000,
+      "files": {
+        "proc/version": "Linux version 5.15.153.1-microsoft-standard-WSL2\n"
+      }
+    },
+    {
+      "at": 1800001,
+      "files": {
+        "mnt/c/Windows/System32/hklm.big": null,
+        "mnt/c/Windows/System32/hklm.txt": "    Settings    REG_SZ    {\"model\":\"registry\",\"availableModels\":[\"opus\"],\"allowManagedHooksOnly\":true,\"permissions\":{\"allow\":[\"Bash(git:*)\"],\"deny\":[\"WebFetch\"]},\"env\":{\"R\":\"1\"}}\n"
+      }
+    }
+  ]
+}

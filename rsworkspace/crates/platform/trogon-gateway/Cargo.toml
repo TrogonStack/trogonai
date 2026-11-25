@@ -44,12 +44,16 @@ tracing = { workspace = true }
 twilight-gateway = { workspace = true }
 twilight-model = { workspace = true }
 trogon-nats = { workspace = true }
+trogon-webhooks = { workspace = true }
 trogon-semconv = { workspace = true }
 trogonai-proto = { workspace = true, features = ["gateway"] }
 trogon-decider-nats = { workspace = true }
 trogon-decider-runtime = { workspace = true }
 trogon-service-config = { workspace = true }
 trogon-config-value = { workspace = true }
+trogon-credential-aggregate = { workspace = true }
+trogon-credential-domain = { workspace = true }
+trogon-secret-store = { workspace = true }
 trogon-std = { workspace = true, features = ["clap", "signal", "telemetry-http", "tls"] }
 url = "2.5"
 uuid = { workspace = true, features = ["v5"] }
@@ -65,4 +69,5 @@ tower = "0.5"
 tracing-subscriber = { workspace = true }
 trogon-decider = { workspace = true, features = ["test-support"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-secret-store = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

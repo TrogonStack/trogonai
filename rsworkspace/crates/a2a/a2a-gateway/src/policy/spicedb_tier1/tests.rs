@@ -481,10 +481,12 @@ fn tier1_principal_from_caller_resolves_to_a_spicedb_subject() {
 }
 
 #[test]
-fn owner_emit_error_from_status_keeps_the_status_message() {
-    let status = Status::unavailable("outage");
-    let expected = OwnerEmitError::new(status.to_string());
-    assert_eq!(OwnerEmitError::from(status), expected);
+fn owner_emit_error_from_status_keeps_the_typed_status() {
+    let error = OwnerEmitError::from(Status::unavailable("outage"));
+    let source = std::error::Error::source(&error).unwrap();
+    let status = source.downcast_ref::<Status>().unwrap();
+    assert_eq!(status.code(), tonic::Code::Unavailable);
+    assert_eq!(status.message(), "outage");
 }
 
 #[test]
@@ -498,7 +500,6 @@ fn spicedb_import_gate_build_error_lifts_into_tier1_error() {
     let from = Tier1SpiceDbBuildError::from(SpiceDbImportGateBuildError::Connect("bad".into()));
     assert!(matches!(from, Tier1SpiceDbBuildError::Connect(_)));
 }
-
 #[test]
 fn live_gate_debug_does_not_expose_its_client() {
     let client = Arc::new(FakeBulkClient::new(vec![]));

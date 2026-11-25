@@ -52,22 +52,22 @@ pub mod connection_permission_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::ConnectionPermissionInitialized(v) => {
-                    map.serialize_entry("connectionPermissionInitialized", v)?;
+                    map.serialize_entry("connectionPermissionInitialized", &**v)?;
                 }
                 Self::ConnectionPermissionSet(v) => {
-                    map.serialize_entry("connectionPermissionSet", v)?;
+                    map.serialize_entry("connectionPermissionSet", &**v)?;
                 }
                 Self::ConnectionPermissionCleared(v) => {
-                    map.serialize_entry("connectionPermissionCleared", v)?;
+                    map.serialize_entry("connectionPermissionCleared", &**v)?;
                 }
             }
             map.end()

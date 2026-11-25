@@ -1,5 +1,9 @@
 //! Shared NATS infrastructure for integration tests.
 
+mod tls_cluster;
+
+pub use tls_cluster::TlsJetStreamCluster;
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -14,9 +18,10 @@ use trogon_std::env::SystemEnv;
 
 use crate::auth::NatsConfig;
 use crate::connect::build_options;
+use crate::telemetry::fixture_diagnostics::FixtureDiagnostics;
 use crate::tls::NatsTls;
 
-const NATS_IMAGE_TAG: &str = "2.10.14";
+const NATS_IMAGE_TAG: &str = "2.14.2-alpine";
 const NATS_CLIENT_PORT: u16 = 4222;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const SERVER_NAMES: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
@@ -37,11 +42,16 @@ fn image(command: impl IntoIterator<Item = impl Into<String>>) -> ContainerReque
 struct TestServer {
     _container: ContainerAsync<Nats>,
     address: String,
+    diagnostics: Option<FixtureDiagnostics>,
 }
 
 impl TestServer {
     async fn start(request: ContainerRequest<Nats>) -> Self {
-        let container = request.start().await.expect("start NATS testcontainer");
+        let diagnostics = FixtureDiagnostics::for_request(&request);
+        let container = match &diagnostics {
+            Some(diagnostics) => diagnostics.start(request).await,
+            None => request.start().await.expect("start NATS testcontainer"),
+        };
         let host = container.get_host().await.expect("get NATS testcontainer host");
         let port = container
             .get_host_port_ipv4(NATS_CLIENT_PORT)
@@ -51,6 +61,7 @@ impl TestServer {
         Self {
             _container: container,
             address: format!("{host}:{port}"),
+            diagnostics,
         }
     }
 
@@ -82,6 +93,11 @@ impl JetStreamTestServer {
         Self(TestServer::start(image(&NatsServerCmd::default().with_jetstream())).await)
     }
 
+    /// Starts the isolated server on an existing Docker network.
+    pub async fn start_on_network(network: &str) -> Self {
+        Self(TestServer::start(image(&NatsServerCmd::default().with_jetstream()).with_network(network)).await)
+    }
+
     /// Connects to the isolated server and returns its JetStream context.
     pub async fn jetstream(&self) -> jetstream::Context {
         jetstream::new(self.client().await)
@@ -92,7 +108,20 @@ impl JetStreamTestServer {
     pub async fn client(&self) -> async_nats::Client {
         self.0.client().await
     }
+
+    /// Collects bounded, selected evidence from this plain fixture before it is dropped.
+    pub async fn failure_diagnostics(&self) -> String {
+        self.0
+            .diagnostics
+            .as_ref()
+            .expect("plain JetStream fixture diagnostics")
+            .capture(&self.0._container)
+            .await
+    }
 }
+
+#[cfg(test)]
+mod tests;
 
 /// An isolated NATS server with only core NATS, for bindings that live on
 /// request/reply and NATS Services rather than on streams.
@@ -105,6 +134,17 @@ impl CoreTestServer {
     /// Starts the pinned NATS image and waits until it accepts client connections.
     pub async fn start() -> Self {
         Self(TestServer::start(image(&NatsServerCmd::default())).await)
+    }
+
+    /// Starts an isolated server with account and permission boundaries supplied by the test.
+    pub async fn start_with_config(config: &str) -> Self {
+        Self(
+            TestServer::start(
+                image(["--config", "/etc/nats/test.conf"])
+                    .with_copy_to("/etc/nats/test.conf", config.as_bytes().to_vec()),
+            )
+            .await,
+        )
     }
 
     /// Starts the pinned NATS image so it turns away every client that does not
@@ -185,7 +225,7 @@ impl ClientCertificates {
     }
 }
 
-/// An isolated core NATS server that only accepts TLS, with a CA generated
+/// An isolated NATS server that only accepts TLS, with a CA generated
 /// for it alone.
 ///
 /// The CA and a client certificate it issued are written to a temporary
@@ -200,16 +240,21 @@ impl TlsTestServer {
     /// Starts a server that proves its identity to clients but asks none of
     /// them for a certificate.
     pub async fn start() -> Self {
-        Self::start_with(ClientCertificates::NotRequested).await
+        Self::start_with(ClientCertificates::NotRequested, &[]).await
     }
 
     /// Starts a server that turns away every client without a certificate
     /// issued by its CA.
     pub async fn start_verifying_clients() -> Self {
-        Self::start_with(ClientCertificates::Required).await
+        Self::start_with(ClientCertificates::Required, &[]).await
     }
 
-    async fn start_with(clients: ClientCertificates) -> Self {
+    /// Starts JetStream behind the same verified-client TLS boundary.
+    pub async fn start_jetstream_verifying_clients() -> Self {
+        Self::start_with(ClientCertificates::Required, &["--jetstream"]).await
+    }
+
+    async fn start_with(clients: ClientCertificates, extra_flags: &[&str]) -> Self {
         let certificates = TestCertificates::generate();
         let files = tempfile::tempdir().expect("create a directory for TLS test files");
         for (name, pem) in [
@@ -222,6 +267,7 @@ impl TlsTestServer {
 
         let mut command = vec!["--tlscert", SERVER_CERT, "--tlskey", SERVER_KEY];
         command.extend(clients.server_flags());
+        command.extend(extra_flags.iter().copied());
         let request = image(command)
             .with_copy_to(SERVER_CERT, certificates.server.cert.into_bytes())
             .with_copy_to(SERVER_KEY, certificates.server.key.into_bytes())

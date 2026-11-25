@@ -1,21 +1,26 @@
-use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
-use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
-
-use super::domain::{CredentialDestroyReason, CredentialRef};
-use super::proto::{
+use trogon_credential_aggregate::proto::{
     decode_cleanup_failed_state, decode_destroyed_state, decode_revoked_state, destroy_requested_to_proto,
 };
-use super::state::{CredentialDecideError, CredentialEvolveError, validate_same_ref};
+use trogon_credential_domain::{CredentialDestroyReason, CredentialKey, CredentialRef};
+use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, v1};
+
+use super::state::{CredentialDecideError, ensure_recorded_ref};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestCredentialDestroy {
+    stream_id: CredentialKey,
     credential_ref: CredentialRef,
     reason: CredentialDestroyReason,
 }
 
 impl RequestCredentialDestroy {
     pub fn new(credential_ref: CredentialRef, reason: CredentialDestroyReason) -> Self {
-        Self { credential_ref, reason }
+        Self {
+            stream_id: credential_ref.key(),
+            credential_ref,
+            reason,
+        }
     }
 
     pub fn credential_ref(&self) -> &CredentialRef {
@@ -24,24 +29,15 @@ impl RequestCredentialDestroy {
 }
 
 impl Decider for RequestCredentialDestroy {
-    type StreamId = str;
-    type State = state_v1::CredentialStateSnapshot;
+    type StreamId = CredentialKey;
+    type State = super::state::CredentialState;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
-    type EvolveError = CredentialEvolveError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.credential_ref.id().as_str()
-    }
-
-    fn initial_state() -> Self::State {
-        super::state::initial_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        &self.stream_id
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -49,15 +45,15 @@ impl Decider for RequestCredentialDestroy {
         match current {
             CredentialStateSnapshotCase::Revoked(revoked) => {
                 let current_ref = decode_revoked_state(revoked)?;
-                validate_same_ref(&current_ref, &command.credential_ref)?;
+                ensure_recorded_ref(&current_ref, &command.credential_ref)?;
             }
             CredentialStateSnapshotCase::CleanupFailed(cleanup_failed) => {
                 let (current_ref, _) = decode_cleanup_failed_state(cleanup_failed)?;
-                validate_same_ref(&current_ref, &command.credential_ref)?;
+                ensure_recorded_ref(&current_ref, &command.credential_ref)?;
             }
             CredentialStateSnapshotCase::Destroyed(destroyed) => {
                 let current_ref = decode_destroyed_state(destroyed)?;
-                validate_same_ref(&current_ref, &command.credential_ref)?;
+                ensure_recorded_ref(&current_ref, &command.credential_ref)?;
                 return Err(CredentialDecideError::CredentialAlreadyDestroyed {
                     credential_id: command.credential_ref.id().clone(),
                 });

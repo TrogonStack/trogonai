@@ -99,34 +99,34 @@ pub mod schedule_event {
             Self::Some(Event::from(v))
         }
     }
-    impl serde::Serialize for Event {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Event {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::ScheduleCreated(v) => {
-                    map.serialize_entry("scheduleCreated", v)?;
+                    map.serialize_entry("scheduleCreated", &**v)?;
                 }
                 Self::SchedulePaused(v) => {
-                    map.serialize_entry("schedulePaused", v)?;
+                    map.serialize_entry("schedulePaused", &**v)?;
                 }
                 Self::ScheduleResumed(v) => {
-                    map.serialize_entry("scheduleResumed", v)?;
+                    map.serialize_entry("scheduleResumed", &**v)?;
                 }
                 Self::ScheduleRemoved(v) => {
-                    map.serialize_entry("scheduleRemoved", v)?;
+                    map.serialize_entry("scheduleRemoved", &**v)?;
                 }
                 Self::ScheduleOccurrenceRecorded(v) => {
-                    map.serialize_entry("scheduleOccurrenceRecorded", v)?;
+                    map.serialize_entry("scheduleOccurrenceRecorded", &**v)?;
                 }
                 Self::ScheduleOccurrenceScheduled(v) => {
-                    map.serialize_entry("scheduleOccurrenceScheduled", v)?;
+                    map.serialize_entry("scheduleOccurrenceScheduled", &**v)?;
                 }
                 Self::ScheduleCompleted(v) => {
-                    map.serialize_entry("scheduleCompleted", v)?;
+                    map.serialize_entry("scheduleCompleted", &**v)?;
                 }
             }
             map.end()

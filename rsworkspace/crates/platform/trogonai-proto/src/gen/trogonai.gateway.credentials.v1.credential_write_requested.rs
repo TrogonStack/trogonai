@@ -5,50 +5,17 @@
 #[derive(::serde::Serialize, ::serde::Deserialize)]
 #[serde(default)]
 pub struct CredentialWriteRequested {
-    /// Field 1: `credential_id`
-    #[serde(
-        rename = "credentialId",
-        alias = "credential_id",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub credential_id: ::buffa::alloc::string::String,
-    /// Field 2: `owner_id`
-    #[serde(
-        rename = "ownerId",
-        alias = "owner_id",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub owner_id: ::buffa::alloc::string::String,
-    /// Field 3: `source`
-    #[serde(
-        rename = "source",
-        with = "::buffa::json_helpers::opt_enum",
-        skip_serializing_if = "::core::option::Option::is_none"
-    )]
-    pub source: ::core::option::Option<::buffa::EnumValue<CredentialSource>>,
-    /// Field 4: `kind`
-    #[serde(
-        rename = "kind",
-        with = "::buffa::json_helpers::opt_enum",
-        skip_serializing_if = "::core::option::Option::is_none"
-    )]
-    pub kind: ::core::option::Option<::buffa::EnumValue<CredentialKind>>,
-    /// Field 5: `scope_key`
-    #[serde(
-        rename = "scopeKey",
-        alias = "scope_key",
-        with = "::buffa::json_helpers::proto_string"
-    )]
-    pub scope_key: ::buffa::alloc::string::String,
+    /// Field 1: `identity`
+    #[serde(rename = "identity")]
+    pub identity: ::buffa::MessageField<
+        CredentialIdentity,
+        ::buffa::Inline<CredentialIdentity>,
+    >,
 }
 impl ::core::fmt::Debug for CredentialWriteRequested {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         f.debug_struct("CredentialWriteRequested")
-            .field("credential_id", &self.credential_id)
-            .field("owner_id", &self.owner_id)
-            .field("source", &self.source)
-            .field("kind", &self.kind)
-            .field("scope_key", &self.scope_key)
+            .field("identity", &self.identity)
             .finish()
     }
 }
@@ -58,28 +25,6 @@ impl CredentialWriteRequested {
     ///
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/trogonai.gateway.credentials.v1.CredentialWriteRequested";
-}
-impl CredentialWriteRequested {
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
-    ///Sets [`Self::source`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_source(
-        mut self,
-        value: impl Into<::buffa::EnumValue<CredentialSource>>,
-    ) -> Self {
-        self.source = Some(value.into());
-        self
-    }
-    #[must_use = "with_* setters return `self` by value; assign or chain the result"]
-    #[inline]
-    ///Sets [`Self::kind`] to `Some(value)`, consuming and returning `self`.
-    pub fn with_kind(
-        mut self,
-        value: impl Into<::buffa::EnumValue<CredentialKind>>,
-    ) -> Self {
-        self.kind = Some(value.into());
-        self
-    }
 }
 ::buffa::impl_default_instance!(CredentialWriteRequested);
 impl ::buffa::MessageName for CredentialWriteRequested {
@@ -97,37 +42,35 @@ impl ::buffa::Message for CredentialWriteRequested {
     /// above [`::buffa::MAX_MESSAGE_BYTES`] that the encode entry
     /// points reject, never a silently wrapped size.
     #[allow(clippy::let_and_return)]
-    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.credential_id) as u64;
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.owner_id) as u64;
-        if let Some(ref v) = self.source {
-            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
+        if self.identity.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.identity.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
         }
-        if let Some(ref v) = self.kind {
-            size += 1u64 + ::buffa::types::int32_encoded_len(v.to_i32()) as u64;
-        }
-        size += 1u64 + ::buffa::types::string_encoded_len(&self.scope_key) as u64;
         ::buffa::saturate_size(size)
     }
     fn write_to(
         &self,
-        _cache: &mut ::buffa::SizeCache,
+        __cache: &mut ::buffa::SizeCache,
         buf: &mut impl ::buffa::EncodeSink,
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        ::buffa::types::put_string_field(1u32, &self.credential_id, buf);
-        ::buffa::types::put_string_field(2u32, &self.owner_id, buf);
-        if let Some(ref v) = self.source {
-            ::buffa::types::put_int32_field(3u32, v.to_i32(), buf);
+        if self.identity.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                1u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.identity.write_to(__cache, buf);
         }
-        if let Some(ref v) = self.kind {
-            ::buffa::types::put_int32_field(4u32, v.to_i32(), buf);
-        }
-        ::buffa::types::put_string_field(5u32, &self.scope_key, buf);
     }
     fn merge_field(
         &mut self,
@@ -145,39 +88,11 @@ impl ::buffa::Message for CredentialWriteRequested {
                     tag,
                     ::buffa::encoding::WireType::LengthDelimited,
                 )?;
-                ::buffa::types::merge_string(&mut self.credential_id, buf)?;
-            }
-            2u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
+                ::buffa::Message::merge_length_delimited(
+                    self.identity.get_or_insert_default(),
+                    buf,
+                    ctx,
                 )?;
-                ::buffa::types::merge_string(&mut self.owner_id, buf)?;
-            }
-            3u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                self.source = ::core::option::Option::Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?),
-                );
-            }
-            4u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::Varint,
-                )?;
-                self.kind = ::core::option::Option::Some(
-                    ::buffa::EnumValue::from(::buffa::types::decode_int32(buf)?),
-                );
-            }
-            5u32 => {
-                ::buffa::encoding::check_wire_type(
-                    tag,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )?;
-                ::buffa::types::merge_string(&mut self.scope_key, buf)?;
             }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
@@ -186,11 +101,7 @@ impl ::buffa::Message for CredentialWriteRequested {
         ::core::result::Result::Ok(())
     }
     fn clear(&mut self) {
-        self.credential_id.clear();
-        self.owner_id.clear();
-        self.source = ::core::option::Option::None;
-        self.kind = ::core::option::Option::None;
-        self.scope_key.clear();
+        self.identity = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for CredentialWriteRequested {

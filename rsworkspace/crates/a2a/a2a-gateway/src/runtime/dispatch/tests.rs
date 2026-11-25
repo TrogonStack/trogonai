@@ -303,7 +303,7 @@ async fn owner_write_failure_preserves_authorized_forwarding() -> TestResult {
     let mut fixture = DispatchFixture::new().await?;
     fixture.tier1 = Arc::new(RecordingTier1::new(Tier1AuthorizeOutcome::Allowed { zed_token: None }));
     let owner = Arc::new(RecordingOwner {
-        failure: Some(OwnerEmitError::new("test outage")),
+        failure: std::sync::Mutex::new(Some(OwnerEmitError::new(std::io::Error::other("test outage")))),
         ..Default::default()
     });
     fixture.owner = Some(owner.clone());
@@ -571,7 +571,8 @@ async fn oversized_forward_is_audited_as_publish_failure_for_unary_and_task_meth
         assert_eq!(audit["code"], -32803);
         assert_eq!(audit["req_id"], "request-7");
         assert_empty(&fixture.client, &mut fixture.agents, "a2a.v1.agents.barrier").await?;
-        assert_empty(&fixture.client, &mut fixture.replies, "_INBOX.dispatch").await?;
+        let response = fixture.denied(-32803, json!("request-7")).await?;
+        assert_eq!(response["error"]["message"], "gateway failed to publish to agent");
     }
     Ok(())
 }

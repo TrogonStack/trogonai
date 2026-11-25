@@ -1,0 +1,9 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    integration_tests = {
+        # Loads target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
+        # built by cargo component outside Bazel, and reads a suite from a sibling crate.
+        "gate": {"tags": ["manual"]},
+    },
+)

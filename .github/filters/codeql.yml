@@ -1,0 +1,17 @@
+go:
+  - 'goworkspace/**'
+  - '.config/mise/config.toml'
+  - '.config/mise/mise.lock'
+  - '.github/codeql/**'
+
+javascript-typescript:
+  - 'tsworkspace/**'
+  - '.config/mise/config.toml'
+  - '.config/mise/mise.lock'
+  - '.github/codeql/**'
+
+rust:
+  - 'rsworkspace/**'
+  - '.config/mise/config.toml'
+  - '.config/mise/mise.lock'
+  - '.github/codeql/**'

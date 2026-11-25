@@ -24,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useBackendQuery, useCustodyQuery } from '@/features/custody/queries';
 import { useEnvironmentQuery, useEnvironmentsQuery } from '@/features/environments/queries';
 import { useSourceQuery, useSourcesQuery } from '@/features/gateway-sources/queries';
+import { useWebhookEndpointsQuery } from '@/features/gateway-sources/webhook-queries';
 import type { NodeId } from '@/features/hierarchy/domain/node-id';
 import { useHierarchyView } from '@/features/hierarchy/queries';
 import { ProjectSwitcher } from '@/features/projects/components/project-switcher';
@@ -112,6 +113,7 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
   const environments = useEnvironmentsQuery();
   const custody = useCustodyQuery();
   const sources = useSourcesQuery();
+  const webhooks = useWebhookEndpointsQuery();
   const schedules = useSchedulesQuery();
   const label = collapsed ? 'hidden' : 'hidden lg:inline';
   const block = collapsed ? 'hidden' : 'hidden lg:flex';
@@ -240,7 +242,10 @@ function Sidebar({ collapsed }: { collapsed: boolean }) {
             />
             <WebhookIcon className="size-4 shrink-0" aria-hidden="true" />
             <span className={label}>Sources</span>
-            <NavCount collapsed={collapsed} count={sources.data?.length} />
+            <NavCount
+              collapsed={collapsed}
+              count={sources.data && webhooks.data ? sources.data.length + webhooks.data.length : undefined}
+            />
           </Link>
         </div>
         <div className="flex flex-col gap-1">
@@ -441,6 +446,14 @@ function SourceCrumbs({ integrationId }: { integrationId: string }) {
   return <ScopedCrumbs crumbs={[{ label: 'Sources', to: '/sources' }, { label: name }]} />;
 }
 
+function WebhookCrumbs({ endpointId }: { endpointId: string }) {
+  const query = useWebhookEndpointsQuery();
+  const endpoint = query.data?.find((entry) => entry.id === endpointId);
+  return (
+    <ScopedCrumbs crumbs={[{ label: 'Sources', to: '/sources' }, { label: endpoint?.displayName ?? endpointId }]} />
+  );
+}
+
 function Breadcrumbs({ crumbs }: { crumbs: readonly Crumb[] }) {
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
@@ -512,6 +525,8 @@ function RouteBreadcrumbs() {
     );
   }
   if (segments[0] === 'sources') {
+    if (segments[1] === 'webhooks' && segments[2])
+      return <WebhookCrumbs endpointId={decodeURIComponent(segments[2])} />;
     if (segments[1]) return <SourceCrumbs integrationId={decodeURIComponent(segments[1])} />;
     return <ScopedCrumbs crumbs={[{ label: 'Sources' }]} />;
   }

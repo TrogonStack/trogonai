@@ -1,22 +1,23 @@
 use super::*;
 use std::time::Duration;
 
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use crate::source::gitlab::constants::{HEADER_WEBHOOK_ID, HEADER_WEBHOOK_SIGNATURE, HEADER_WEBHOOK_TIMESTAMP};
 use crate::source::standard_webhooks::sign_for_test;
-use crate::source_integration_id::SourceIntegrationId;
 use axum::body::Body;
 use axum::http::Request;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
 const TEST_SIGNING_TOKEN: &str = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=";
 const RUNTIME_SIGNING_TOKEN: &str = "whsec_YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=";
@@ -32,7 +33,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 fn test_config() -> GitlabConfig {
     GitlabConfig {
         signing_token: GitLabSigningToken::new(TEST_SIGNING_TOKEN).unwrap(),
-        subject_prefix: NatsToken::new("gitlab").unwrap(),
+        subject_prefix: DottedNatsToken::new("gitlab").unwrap(),
         stream_name: NatsToken::new("GITLAB").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
@@ -54,12 +55,14 @@ async fn runtime_app(publisher: MockJetStreamPublisher, token: &str) -> Router {
     let integration_id = SourceIntegrationId::new("primary").unwrap();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Gitlab,
-                integration_id.clone(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Gitlab,
+                    integration_id.clone(),
+                ),
+                CredentialKind::SigningToken,
             ),
-            CredentialKind::SigningToken,
             trogon_std::SecretString::new(token).unwrap(),
         )
         .await
@@ -67,7 +70,7 @@ async fn runtime_app(publisher: MockJetStreamPublisher, token: &str) -> Router {
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
 
     runtime_router(
@@ -460,7 +463,7 @@ async fn subject_uses_configured_prefix() {
     let state = AppState {
         publisher: wrap_publisher(publisher.clone()),
         signing_token: signing_token(),
-        subject_prefix: NatsToken::new("custom").unwrap(),
+        subject_prefix: DottedNatsToken::new("custom").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         timestamp_tolerance: NonZeroDuration::from_secs(300).unwrap(),
     };
@@ -499,7 +502,7 @@ async fn dedup_id_comes_from_signed_webhook_id_not_idempotency_key() {
     let state = AppState {
         publisher: wrap_publisher(publisher.clone()),
         signing_token: signing_token(),
-        subject_prefix: NatsToken::new("gitlab").unwrap(),
+        subject_prefix: DottedNatsToken::new("gitlab").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         timestamp_tolerance: NonZeroDuration::from_secs(300).unwrap(),
     };
@@ -575,7 +578,7 @@ async fn ack_failure_returns_500() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         signing_token: signing_token(),
-        subject_prefix: NatsToken::new("gitlab").unwrap(),
+        subject_prefix: DottedNatsToken::new("gitlab").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
         timestamp_tolerance: NonZeroDuration::from_secs(300).unwrap(),
     };
@@ -602,7 +605,7 @@ async fn ack_timeout_returns_500() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         signing_token: signing_token(),
-        subject_prefix: NatsToken::new("gitlab").unwrap(),
+        subject_prefix: DottedNatsToken::new("gitlab").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_millis(10).unwrap(),
         timestamp_tolerance: NonZeroDuration::from_secs(300).unwrap(),
     };

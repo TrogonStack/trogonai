@@ -3,8 +3,9 @@
 #
 # Usage: mise run rust-pr-check <crate-name>
 #
-# Mirrors .github/workflows/ci-rust.yml on a single crate so a green run
-# locally means a green run in CI. Each step prints PASS/FAIL on its own
+# Runs with Cargo, on a single crate, the checks CI runs through Bazel
+# (.github/workflows/ci-bazel.yml), so most failures show up before you push.
+# Each step prints PASS/FAIL on its own
 # line so the failing gate is unambiguous before pushing.
 set -u
 set -o pipefail
@@ -17,6 +18,8 @@ fi
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 RSWS="$ROOT/rsworkspace"
+# shellcheck source=../lib/rustup-path.sh
+source "$ROOT/.config/mise/lib/rustup-path.sh"
 
 if [[ ! -d "$RSWS/crates/$CRATE" ]]; then
     echo "FAIL: crate '$CRATE' not found under $RSWS/crates/" >&2
@@ -58,7 +61,7 @@ if [[ ${#DYLINT_COMPONENTS[@]} -gt 0 ]]; then
     step "repo-rust-policy-lint-components" rustup component add "${DYLINT_COMPONENTS[@]}" --toolchain "$DYLINT_TOOLCHAIN"
 fi
 step "repo-rust-policy-lint-tests" bash -c 'cd dylints/trogonai_dylint && rustup run "$1" cargo test' _ "$DYLINT_TOOLCHAIN"
-step "repo-rust-policy-lints" env -u RUSTUP_TOOLCHAIN RUSTC_WRAPPER="" CARGO_BUILD_RUSTC_WRAPPER="" DYLINT_RUSTFLAGS='-Derror-string-comparison' rustup run "$DYLINT_TOOLCHAIN" cargo dylint --all --workspace --no-deps -- --all-features
+step "repo-rust-policy-lints" env -u RUSTUP_TOOLCHAIN PATH="$(rustup_proxy_path)" RUSTC_WRAPPER="" CARGO_BUILD_RUSTC_WRAPPER="" DYLINT_RUSTFLAGS='-Derror-string-comparison' rustup run "$DYLINT_TOOLCHAIN" cargo dylint --all --workspace --no-deps -- --all-features
 
 # 3. clippy from a clean cache — workspace lints (deny warnings, unwrap_used,
 #    expect_used, panic) only fire on a real rebuild; cached builds skip them.

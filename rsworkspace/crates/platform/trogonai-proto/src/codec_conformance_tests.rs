@@ -63,6 +63,8 @@ mod scheduler_presence_tests;
 mod scheduler_retained_tests;
 #[cfg(feature = "schedules")]
 mod scheduler_tests;
+#[cfg(feature = "secrets-exchange")]
+mod secrets_exchange_tests;
 
 fn assert_wire_codec<M>(wire: &[u8], expected: &M)
 where

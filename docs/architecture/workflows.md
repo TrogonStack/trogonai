@@ -89,6 +89,30 @@ Exact serialized definition bytes and their digest are the source of each run
 plan. A decoded copy is derived by verification and validation rather than
 stored as another independently writable truth.
 
+## Workload identity requirements belong to the admitted plan
+
+An identity-aware definition selects an immutable approved execution profile.
+The profile constrains which authenticated workload may dispatch the workflow
+and which recipient bindings it may use. The workflow definition's contract
+version distinguishes this requirement from the earlier profile-free format;
+an unsupported reader must refuse the identity-aware version before execution.
+
+Run admission binds the exact plan/profile, current workload evidence and the
+existing `RunAuthority` to a finite validity interval. Dispatch and renewal
+still check live registration, policy and original authority. A renewed
+registration cannot extend an expired operation grant. Withdrawing run identity
+admission stops further dispatch while preserving paid work and unresolved
+effects for reconciliation.
+
+The dispatcher workload and the Session worker it launches have separate
+identity boundaries. Session and Connection admission still bind the worker's
+own current authority and confirmation key. The dispatcher's certificate is
+not evidence that the worker has that identity.
+
+The [configuration contract reference](../reference/workload-identity-configuration.md)
+maps the protobuf owners and evidence limits. These are design contracts and
+do not implement the workload configuration or admission control plane.
+
 ## A run preserves paid work and unresolved effects
 
 An occurrence identifies one entry into a node, including its nested iteration

@@ -49,6 +49,10 @@ impl AcpStream {
                 format!("{p}.v1.session.*.agent.resume"),
                 format!("{p}.v1.session.*.agent.close"),
                 format!("{p}.v1.session.*.agent.delete"),
+                format!("{p}.v1.session.*.agent.set_title"),
+                format!("{p}.v1.session.*.agent.status"),
+                format!("{p}.v1.session.*.agent.unarchive"),
+                format!("{p}.v1.session.*.agent.archive"),
             ],
             Self::Responses => vec![
                 format!("{p}.v1.session.*.agent.response"),

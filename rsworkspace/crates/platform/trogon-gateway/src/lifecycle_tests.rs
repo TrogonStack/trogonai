@@ -5,16 +5,17 @@ use std::time::Duration;
 
 use google_cloud_auth::build_errors;
 use tokio::sync::Mutex;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_nats::jetstream::{ClaimBucketBinding, MockJetStreamPublisher, MockObjectStore};
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut, SecretStoreRotate};
 
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use crate::credential_runtime_projection::{
     RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
 };
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut, SecretStoreRotate};
 use crate::source::google_pubsub::credentials::GoogleCredentialsError;
-use crate::source_integration_id::SourceIntegrationId;
 
 use super::*;
 
@@ -95,19 +96,21 @@ async fn telegram_runtime_resolver(
     if let Some(secret) = secret {
         let credential = store
             .put(
-                CredentialScope::integration(
-                    CredentialOwnerId::new("tenant-1").unwrap(),
-                    SourceKind::Telegram,
-                    SourceIntegrationId::new(integration_id).unwrap(),
+                CredentialIdentity::derive(
+                    CredentialScope::integration(
+                        CredentialOwnerId::new("tenant-1").unwrap(),
+                        SourceKind::Telegram,
+                        SourceIntegrationId::new(integration_id).unwrap(),
+                    ),
+                    CredentialKind::WebhookSecret,
                 ),
-                CredentialKind::WebhookSecret,
                 SecretString::new(secret).unwrap(),
             )
             .await
             .unwrap();
         registry
             .projections()
-            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+            .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
             .await;
     }
     registry.resolver(store)
@@ -184,19 +187,24 @@ async fn telegram_registration_follows_a_rotated_runtime_secret_and_skips_an_unc
     let registry = RuntimeCredentialRegistry::default();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Telegram,
-                SourceIntegrationId::new("first").unwrap(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Telegram,
+                    SourceIntegrationId::new("first").unwrap(),
+                ),
+                CredentialKind::WebhookSecret,
             ),
-            CredentialKind::WebhookSecret,
             SecretString::new("runtime-first").unwrap(),
         )
         .await
         .unwrap();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential.clone(), 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(
+            credential.clone(),
+            1,
+        ))
         .await;
     let resolver = registry.resolver(store.clone());
     let mut registrations = TelegramWebhookRegistrations::default();
@@ -230,7 +238,10 @@ async fn telegram_registration_follows_a_rotated_runtime_secret_and_skips_an_unc
         .unwrap();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(rotated.clone(), 2).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(
+            rotated.clone(),
+            2,
+        ))
         .await;
     register_telegram_webhooks(
         &telegram_integrations(),
@@ -244,7 +255,7 @@ async fn telegram_registration_follows_a_rotated_runtime_secret_and_skips_an_unc
     assert_eq!(
         registrations
             .registered_credentials
-            .get(&source_integration_id::SourceIntegrationId::new("first").unwrap()),
+            .get(&trogon_credential_domain::SourceIntegrationId::new("first").unwrap()),
         Some(rotated)
     );
 }
@@ -407,18 +418,23 @@ async fn put_discord_bot_token(
     store: &MockOpenBaoSecretStore,
     registry: &RuntimeCredentialRegistry,
     token: &str,
-) -> crate::credential::commands::domain::CredentialRef {
+) -> trogon_credential_domain::CredentialRef {
     let credential = store
         .put(
-            CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord),
-            CredentialKind::BotToken,
+            CredentialIdentity::derive(
+                CredentialScope::source(CredentialOwnerId::new("tenant-1").unwrap(), SourceKind::Discord),
+                CredentialKind::BotToken,
+            ),
             SecretString::new(token).unwrap(),
         )
         .await
         .unwrap();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential.clone(), 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(
+            credential.clone(),
+            1,
+        ))
         .await;
     credential
 }
@@ -500,7 +516,10 @@ async fn discord_runtime_gateway_restarts_the_shard_with_a_rotated_bot_token() {
         .unwrap();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(rotated.clone(), 2).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(
+            rotated.clone(),
+            2,
+        ))
         .await;
     let token = tokio::time::timeout(Duration::from_secs(60), observed_shard_tokens.recv())
         .await
@@ -916,19 +935,21 @@ async fn telegram_registration_skips_an_integration_whose_runtime_secret_cannot_
     let registry = RuntimeCredentialRegistry::default();
     let credential = writer
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Telegram,
-                SourceIntegrationId::new("first").unwrap(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Telegram,
+                    SourceIntegrationId::new("first").unwrap(),
+                ),
+                CredentialKind::WebhookSecret,
             ),
-            CredentialKind::WebhookSecret,
             SecretString::new("runtime-first").unwrap(),
         )
         .await
         .unwrap();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
     let resolver = registry.resolver(MockOpenBaoSecretStore::default());
     let attempts = AtomicUsize::new(0);
@@ -962,7 +983,7 @@ fn runtime_credential_env(flags: &[&str]) -> trogon_std::env::InMemoryEnv {
     env
 }
 
-type OpenBaoMounts = source_plugin::RuntimeCredentialMounts<secret_store::openbao_secret_store::OpenBaoSecretStore>;
+type OpenBaoMounts = source_plugin::RuntimeCredentialMounts<trogon_secret_store::OpenBaoSecretStore>;
 
 fn mounted_sources(mounts: &OpenBaoMounts) -> [bool; 11] {
     [

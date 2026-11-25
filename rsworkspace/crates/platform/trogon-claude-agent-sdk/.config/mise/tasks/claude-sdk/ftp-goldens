@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Record the FTP urlopen goldens from CPython 3.12.16 on macOS (--check compares)"
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+exec mise exec python@3.12.16 -- python3 -I "$root/.config/mise/lib/claude-sdk-freshness/python_ftp_goldens.py" \
+  "$root/tests/fixtures/sdk_mcp/python_ftp.json" "$@"

@@ -1,0 +1,189 @@
+//! The child environment as a pure plan, so tests can pin it without spawning.
+//!
+//! `Overlay` follows Python `subprocess_cli.py` (0.2.181) and `Replace`/`Inherit` follow `sdk.mjs` (0.3.323);
+//! `TypeScript` picks between those two the way `sdk.mjs` does.
+
+use crate::constants::{
+    AGENT_PROGRESS_SUMMARIES_ENV, DEFAULT_ENTRYPOINT, HOST_AUTH_REFRESH_ENV, OAUTH_REFRESH_ENV, QUESTION_EXTENDED_ENV,
+    QUESTION_OPTIONAL_DESCRIPTIONS_ENV, QUESTION_PREVIEW_FORMAT_ENV, SDK_VERSION,
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ffi::{OsStr, OsString},
+};
+
+use crate::{
+    ClaudeAgentOptions, FileCheckpointing,
+    process_options::{ArgvStyle, ClaudeCodeMarker, EnvironmentMode},
+};
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct EnvironmentPlan {
+    /// Start from an empty environment instead of the inherited one.
+    pub clear: bool,
+    pub set: BTreeMap<OsString, OsString>,
+    pub remove: BTreeSet<OsString>,
+}
+
+pub(crate) type Inherited = BTreeMap<OsString, OsString>;
+
+/// `Te(c.DEBUG_CLAUDE_AGENT_SDK)` in `sdk.mjs` 0.3.323, which trims the value before it compares.
+fn debug_enabled(inherited: &Inherited) -> bool {
+    crate::session_prompt::js_env_truthy(
+        inherited
+            .get(OsStr::new("DEBUG_CLAUDE_AGENT_SDK"))
+            .map(OsString::as_os_str),
+    )
+}
+
+pub(crate) fn plan(options: &ClaudeAgentOptions, inherited: &Inherited) -> EnvironmentPlan {
+    let configured: BTreeMap<OsString, OsString> = options
+        .env
+        .iter()
+        .map(|(key, value)| (OsString::from(key), OsString::from(value.expose())))
+        .collect();
+    let configured_has = |name: &str| configured.keys().any(|key| key == OsStr::new(name));
+    let configured_non_empty = |name: &str| configured.get(OsStr::new(name)).is_some_and(|value| !value.is_empty());
+    let entrypoint = options.entrypoint.as_deref().unwrap_or(DEFAULT_ENTRYPOINT);
+    let mut plan = EnvironmentPlan::default();
+    let mode = options.environment_mode.resolve(&options.env);
+
+    let remove_marker = match options.claude_code_marker {
+        ClaudeCodeMarker::Remove => true,
+        ClaudeCodeMarker::Keep => false,
+        ClaudeCodeMarker::ModeDefault => mode == EnvironmentMode::Overlay,
+    };
+    if remove_marker {
+        plan.remove.insert("CLAUDECODE".into());
+    }
+
+    match mode {
+        EnvironmentMode::Overlay => {
+            plan.set.insert("CLAUDE_CODE_ENTRYPOINT".into(), entrypoint.into());
+            plan.set.extend(configured.clone());
+            plan.set.insert("CLAUDE_AGENT_SDK_VERSION".into(), SDK_VERSION.into());
+            plan.remove.insert("CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP".into());
+            if let Some(cwd) = &options.cwd {
+                plan.set.insert("PWD".into(), cwd.as_os_str().to_owned());
+            }
+        }
+        EnvironmentMode::Replace => {
+            plan.clear = true;
+            plan.set.extend(configured.clone());
+            plan.set.remove(OsStr::new("NODE_OPTIONS"));
+            plan.set.remove(OsStr::new("DEBUG"));
+            if !configured_non_empty("CLAUDE_CODE_ENTRYPOINT") {
+                plan.set.insert("CLAUDE_CODE_ENTRYPOINT".into(), entrypoint.into());
+            }
+            if !configured_non_empty("CLAUDE_AGENT_SDK_VERSION") {
+                plan.set.insert("CLAUDE_AGENT_SDK_VERSION".into(), SDK_VERSION.into());
+            }
+            if debug_enabled(inherited) {
+                plan.set.insert("DEBUG".into(), "1".into());
+            }
+        }
+        EnvironmentMode::Inherit | EnvironmentMode::TypeScript => {
+            if !inherited.contains_key(OsStr::new("CLAUDE_CODE_ENTRYPOINT")) {
+                plan.set.insert("CLAUDE_CODE_ENTRYPOINT".into(), entrypoint.into());
+            }
+            plan.set.insert("CLAUDE_AGENT_SDK_VERSION".into(), SDK_VERSION.into());
+            plan.remove.insert("NODE_OPTIONS".into());
+            if debug_enabled(inherited) {
+                plan.set.insert("DEBUG".into(), "1".into());
+            } else {
+                plan.remove.insert("DEBUG".into());
+            }
+        }
+    }
+    // An explicit label wins over the configured env in every mode, as Python writes it after `options.env`.
+    if let Some(app) = &options.client_app {
+        plan.set.insert("CLAUDE_AGENT_SDK_CLIENT_APP".into(), app.into());
+    }
+
+    for (name, value) in [
+        (
+            "TRACEPARENT",
+            options.trace_context.as_ref().map(|t| t.traceparent.as_str()),
+        ),
+        (
+            "TRACESTATE",
+            options.trace_context.as_ref().and_then(|t| t.tracestate.as_deref()),
+        ),
+    ] {
+        if configured_has(name) {
+            continue;
+        }
+        plan.remove.insert(name.into());
+        if let Some(value) = value {
+            plan.remove.remove(OsStr::new(name));
+            plan.set.insert(name.into(), value.into());
+        }
+    }
+
+    callback_and_tool_config(&mut plan, options, mode, inherited);
+
+    if options.file_checkpointing == FileCheckpointing::Enabled {
+        plan.set
+            .insert("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING".into(), "true".into());
+    }
+
+    let reads = "CLAUDE_CODE_SDK_READS_SESSION_STATE";
+    // TypeScript's replace mode starts from `options.env` alone; the other modes see the inherited environment too.
+    let present = configured
+        .keys()
+        .any(|key| key.to_string_lossy().eq_ignore_ascii_case(reads))
+        || (mode != EnvironmentMode::Replace
+            && inherited
+                .keys()
+                .any(|key| key.to_string_lossy().eq_ignore_ascii_case(reads)));
+    if !present {
+        plan.set.insert(reads.into(), "1".into());
+    }
+    plan
+}
+
+/// `sdk.mjs` announces its token callbacks and writes `toolConfig` into the child environment after the
+/// checkpointing and session-state variables. claude_agent_sdk does neither, so the CLI never asks it for a token.
+fn callback_and_tool_config(
+    plan: &mut EnvironmentPlan,
+    options: &ClaudeAgentOptions,
+    mode: EnvironmentMode,
+    inherited: &Inherited,
+) {
+    if options.argv_style != ArgvStyle::TypeScript {
+        return;
+    }
+    if options.oauth_token_handler.is_some() {
+        plan.set.insert(OAUTH_REFRESH_ENV.into(), "1".into());
+    }
+    if options.host_auth_token_handler.is_some() {
+        plan.set.insert(HOST_AUTH_REFRESH_ENV.into(), "1".into());
+    }
+    let question = options.tool_config.ask_user_question;
+    if let Some(format) = question.preview_format {
+        plan.set
+            .insert(QUESTION_PREVIEW_FORMAT_ENV.into(), format.as_str().into());
+    }
+    for (enabled, name) in [
+        (question.extended_questions, QUESTION_EXTENDED_ENV),
+        (question.optional_descriptions, QUESTION_OPTIONAL_DESCRIPTIONS_ENV),
+        (false, AGENT_PROGRESS_SUMMARIES_ENV),
+    ] {
+        if enabled {
+            plan.set.insert(name.into(), "1".into());
+        } else if mode == EnvironmentMode::Inherit {
+            // Only an inherited environment is cleaned, and upstream matches the name in any case.
+            for key in inherited.keys() {
+                if key.to_string_lossy().eq_ignore_ascii_case(name) {
+                    plan.set.remove(key);
+                    plan.remove.insert(key.clone());
+                }
+            }
+            plan.set.remove(OsStr::new(name));
+            plan.remove.insert(name.into());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,5 +1,6 @@
 use crate::client_handler::ClientHandler;
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::v1::schema::{
     CompleteElicitationNotification, CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest,
     CreateTerminalResponse, ExtNotification, ExtRequest, ExtResponse, KillTerminalRequest, KillTerminalResponse,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
@@ -7,7 +8,7 @@ use agent_client_protocol::schema::v1::{
     TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
 };
-use agent_client_protocol::{Client, ConnectionTo, Error, Result, UntypedMessage};
+use agent_client_protocol::{Client, Error, Result, UntypedMessage};
 
 /// Adapts a connection handle to the bridge-owned [`ClientHandler`] trait.
 ///

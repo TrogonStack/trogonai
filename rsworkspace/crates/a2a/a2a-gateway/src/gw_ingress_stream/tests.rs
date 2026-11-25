@@ -157,6 +157,7 @@ fn caller_inflight_gate_enforces_limit_and_releases_on_drop() {
     drop(first);
     assert!(gate.clone().try_acquire(&caller).is_some(), "permit returned");
     drop(second);
+    assert!(gate.inflight.lock().expect("gate").is_empty());
 }
 
 #[test]

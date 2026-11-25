@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Bind coverage evidence to the checked out source"
+#MISE dir = "{{cwd}}"
+set -euo pipefail
+python3 "$MISE_PROJECT_ROOT/.config/mise/lib/coverage-report/provenance.py" capture

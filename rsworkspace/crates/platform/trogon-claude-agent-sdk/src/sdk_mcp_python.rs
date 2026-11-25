@@ -1,0 +1,564 @@
+//! The Python dialect of `LocalMcpServer`: the `mcp.server.Server` that `create_sdk_mcp_server` builds, as the
+//! Python SDK bridge answers it, with its `jsonschema` error selection and its tool content conversion.
+
+use super::{
+    LocalMcpSession, McpServerError, RequestId, ServerState, python_object, tool_error, typescript::initialize_issues,
+};
+use crate::{
+    CallbackError, CancellationToken, JsonObject, McpToolArgumentsError, McpToolRequest, PythonJsonObject,
+    PythonString, ToolResultStatus, constants, deep_json,
+    jsonrpc_message::{self, JsonRpcKind},
+    python_json::{is_truthy, python_repr},
+    python_json_load::drop_python_deep,
+    python_json_value::PythonJsonValue,
+    python_jsonschema::{self, Outcome},
+    python_value_repr::repr_json as py_repr,
+};
+use serde_json::Value;
+use std::sync::atomic::Ordering;
+
+/// `_build_input_schema`: a schema with a string `type` and `properties` is sent as declared; any other mapping
+/// is read as parameter names whose values are not Python types, each of which becomes a required string.
+pub(crate) fn input_schema(declared: &JsonObject) -> JsonObject {
+    if declared.get("type").is_some_and(Value::is_string) && declared.contains_key("properties") {
+        return declared.clone();
+    }
+    let string = || Value::Object(JsonObject::from_iter([("type".into(), "string".into())]));
+    let properties = declared.keys().map(|name| (name.clone(), string())).collect();
+    let required = declared.keys().map(|name| Value::from(name.as_str())).collect();
+    JsonObject::from_iter([
+        ("type".into(), "object".into()),
+        ("properties".into(), Value::Object(properties)),
+        ("required".into(), Value::Array(required)),
+    ])
+}
+
+/// A response, with the text of the exception a tool's validation raised, which the `serde_json` response holds
+/// with each lone surrogate read as U+FFFD.
+struct Answer {
+    response: JsonObject,
+    raised: Option<PythonString>,
+}
+
+impl Answer {
+    /// The response as Python holds it, with the raised text as it is.
+    fn into_python(self) -> PythonJsonObject {
+        let mut response = python_object(self.response);
+        if let Some(text) = self.raised {
+            response.insert(PythonString::from("result"), python_tool_error(text));
+        }
+        response
+    }
+}
+
+impl From<JsonObject> for Answer {
+    fn from(response: JsonObject) -> Self {
+        Self { response, raised: None }
+    }
+}
+
+/// The result [`tool_error`] builds, with its keys sorted, as Python holds it: the text as it is.
+fn python_tool_error(text: PythonString) -> PythonJsonValue {
+    let block = PythonJsonObject::from_iter([
+        (PythonString::from("text"), PythonJsonValue::String(text)),
+        (
+            PythonString::from("type"),
+            PythonJsonValue::String(PythonString::from("text")),
+        ),
+    ]);
+    PythonJsonValue::Object(PythonJsonObject::from_iter([
+        (
+            PythonString::from("content"),
+            PythonJsonValue::Array(vec![PythonJsonValue::Object(block)]),
+        ),
+        (PythonString::from("isError"), PythonJsonValue::Bool(true)),
+    ]))
+}
+
+pub(crate) async fn request(
+    session: &LocalMcpSession,
+    message: JsonObject,
+    signal: CancellationToken,
+) -> Result<Option<JsonObject>, McpServerError> {
+    Ok(answer(session, message, signal).await?.map(|answer| answer.response))
+}
+
+/// [`request`] as Python holds the response, whose raised text may hold a lone surrogate.
+pub(crate) async fn request_python(
+    session: &LocalMcpSession,
+    message: JsonObject,
+    signal: CancellationToken,
+) -> Result<Option<PythonJsonObject>, McpServerError> {
+    Ok(answer(session, message, signal).await?.map(Answer::into_python))
+}
+
+async fn answer(
+    session: &LocalMcpSession,
+    message: JsonObject,
+    signal: CancellationToken,
+) -> Result<Option<Answer>, McpServerError> {
+    if session.stopped.load(Ordering::SeqCst) {
+        // The bridge answers every message with the failure until an `initialize` starts a new session.
+        if message.get("method").and_then(Value::as_str) != Some("initialize") {
+            return Err(McpServerError::Protocol(format!(
+                "SDK MCP server {} stopped: its run() returned",
+                python_repr(session.state.name.as_str())
+            )));
+        }
+        session.initialized.store(false, Ordering::SeqCst);
+        session.stopped.store(false, Ordering::SeqCst);
+    }
+    // `parse_jsonrpc` raises the pydantic `ValidationError` for a message no JSON-RPC model accepts, which the
+    // bridge's caller answers as an internal error carrying its text.
+    let kind = jsonrpc_message::parse(&message).map_err(McpServerError::Protocol)?;
+    let method = message.get("method").and_then(Value::as_str).unwrap_or_default();
+    let params = match message.get("params") {
+        Some(Value::Object(params)) => Some(params),
+        _ => None,
+    };
+    match kind {
+        // A response to the server is read and dropped.
+        JsonRpcKind::Response => return Ok(None),
+        JsonRpcKind::Notification => {
+            notify(session, method, params);
+            return Ok(None);
+        }
+        JsonRpcKind::Request => {}
+    }
+    let Some(id) = message.get("id").and_then(request_id) else {
+        return Ok(None);
+    };
+    if signal.is_cancelled() {
+        return Err(CallbackError::Cancelled.into());
+    }
+    let token = signal.child_token();
+    let Some(_in_flight) = session.track_new(&id, token.clone()) else {
+        return Err(McpServerError::Protocol(format!(
+            "Request id {} is already in flight",
+            crate::mcp_wire_ids::marker_text(&id.value).unwrap_or_else(|| py_repr(&id.value))
+        )));
+    };
+    let answer = tokio::select! {
+        biased;
+        () = token.cancelled() => None,
+        answer = dispatch(session, method, params, &id, token.clone()) => Some(answer),
+    };
+    match answer {
+        // A handler's `CancelledError` ends the server's `run()`, and the bridge closes every request in flight.
+        Some(Err(McpServerError::Callback(CallbackError::Cancelled))) if !signal.is_cancelled() => {
+            session.stop();
+            Ok(Some(failure(&id, -32000, "Connection closed").into()))
+        }
+        None if signal.is_cancelled() => Err(CallbackError::Cancelled.into()),
+        None if session.stopped.load(Ordering::SeqCst) => Ok(Some(failure(&id, -32000, "Connection closed").into())),
+        // The bridge answers a request that `notifications/cancelled` names, which the server leaves unanswered.
+        None => Ok(Some(failure(&id, -32800, "Request cancelled").into())),
+        Some(answer) => answer.map(Some),
+    }
+}
+
+/// The bridge's own error answer, without the `data` that a server error carries.
+fn failure(id: &RequestId, code: i32, message: &str) -> JsonObject {
+    let error = JsonObject::from_iter([("code".into(), code.into()), ("message".into(), message.into())]);
+    JsonObject::from_iter([
+        ("jsonrpc".into(), "2.0".into()),
+        ("id".into(), id.value.clone()),
+        ("error".into(), Value::Object(error)),
+    ])
+}
+
+/// A string or an integer; `mcp` reads the id strictly, so a float or a boolean makes the message a notification.
+fn request_id(id: &Value) -> Option<RequestId> {
+    match id {
+        Value::String(text) => Some(RequestId::text(text)),
+        Value::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                return Some(RequestId::number(integer));
+            }
+            number.as_u64().map(|integer| RequestId {
+                value: Value::from(integer),
+                key: format!("n:{integer}"),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn notify(session: &LocalMcpSession, method: &str, params: Option<&JsonObject>) {
+    match method {
+        "notifications/initialized" => session.initialized.store(true, Ordering::SeqCst),
+        "notifications/cancelled" => {
+            if let Some(id) = params.and_then(|params| params.get("requestId")).and_then(request_id) {
+                session.cancel(&id.key);
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn dispatch(
+    session: &LocalMcpSession,
+    method: &str,
+    params: Option<&JsonObject>,
+    id: &RequestId,
+    signal: CancellationToken,
+) -> Result<Answer, McpServerError> {
+    if !constants::PYTHON_MCP_METHODS.contains(&method) {
+        return Ok(error(id, -32601, "Method not found", method).into());
+    }
+    let meta_is_invalid = params
+        .and_then(|params| params.get("_meta"))
+        .is_some_and(|meta| !meta.is_object() && !meta.is_null());
+    let initializes = method == "initialize";
+    if meta_is_invalid
+        || (initializes && !initialize_is_valid(params))
+        || (method == "tools/call" && !call_params_are_valid(params))
+        || (!initializes && method != "ping" && !session.initialized.load(Ordering::SeqCst))
+    {
+        return Ok(error(id, -32602, "Invalid request parameters", "").into());
+    }
+    let state = &session.state;
+    let mut raised = None;
+    let result = match method {
+        "initialize" => {
+            session.initialized.store(true, Ordering::SeqCst);
+            initialize_result(state, params)
+        }
+        "tools/list" => Value::Object(JsonObject::from_iter([(
+            "tools".into(),
+            Value::Array(list_tools(state)),
+        )])),
+        "tools/call" => match call_tool(state, params, signal).await? {
+            Ok((result, text)) => {
+                raised = text;
+                result
+            }
+            Err(error) => return Ok(errored(id, error).into()),
+        },
+        _ => Value::Object(JsonObject::new()),
+    };
+    let response = JsonObject::from_iter([
+        ("jsonrpc".into(), "2.0".into()),
+        ("id".into(), id.value.clone()),
+        ("result".into(), sort_keys(result)),
+    ]);
+    Ok(Answer { response, raised })
+}
+
+/// `InitializeRequestParams` under pydantic. The zod issues decide everything except the two models whose
+/// pydantic shape differs: `Icon` and `ElicitationCapability`, which accept `null` for every optional field and
+/// ignore the contents of `form` and `url`.
+fn initialize_is_valid(params: Option<&JsonObject>) -> bool {
+    let concerns = |issue: &JsonObject, prefix: &[&str]| {
+        issue.get("path").and_then(Value::as_array).is_some_and(|path| {
+            path.len() >= prefix.len() && path.iter().zip(prefix).all(|(step, name)| step.as_str() == Some(*name))
+        })
+    };
+    let others_valid = initialize_issues(params).iter().all(|issue| {
+        concerns(issue, &["params", "capabilities", "elicitation"])
+            || concerns(issue, &["params", "clientInfo", "icons"])
+    });
+    others_valid
+        && elicitation_is_valid(
+            params
+                .and_then(|params| params.get("capabilities"))
+                .and_then(|capabilities| capabilities.get("elicitation")),
+        )
+        && icons_are_valid(
+            params
+                .and_then(|params| params.get("clientInfo"))
+                .and_then(|client_info| client_info.get("icons")),
+        )
+}
+
+fn elicitation_is_valid(elicitation: Option<&Value>) -> bool {
+    match elicitation {
+        None | Some(Value::Null) => true,
+        Some(Value::Object(elicitation)) => ["form", "url"].into_iter().all(|key| {
+            elicitation
+                .get(key)
+                .is_none_or(|mode| mode.is_object() || mode.is_null())
+        }),
+        Some(_) => false,
+    }
+}
+
+fn icons_are_valid(icons: Option<&Value>) -> bool {
+    let icon_is_valid = |icon: &Value| {
+        let Some(icon) = icon.as_object() else {
+            return false;
+        };
+        icon.get("src").is_some_and(Value::is_string)
+            && icon
+                .get("mimeType")
+                .is_none_or(|mime| mime.is_string() || mime.is_null())
+            && icon.get("sizes").is_none_or(|sizes| {
+                sizes.is_null() || sizes.as_array().is_some_and(|sizes| sizes.iter().all(Value::is_string))
+            })
+            && icon
+                .get("theme")
+                .is_none_or(|theme| theme.is_null() || matches!(theme.as_str(), Some("light" | "dark")))
+    };
+    match icons {
+        None | Some(Value::Null) => true,
+        Some(Value::Array(icons)) => icons.iter().all(icon_is_valid),
+        Some(_) => false,
+    }
+}
+
+fn error(id: &RequestId, code: i32, message: &str, data: &str) -> JsonObject {
+    errored(
+        id,
+        JsonObject::from_iter([
+            ("code".into(), code.into()),
+            ("message".into(), message.into()),
+            ("data".into(), data.into()),
+        ]),
+    )
+}
+
+/// The JSON-RPC error response carrying `error`.
+fn errored(id: &RequestId, error: JsonObject) -> JsonObject {
+    JsonObject::from_iter([
+        ("jsonrpc".into(), "2.0".into()),
+        ("id".into(), id.value.clone()),
+        ("error".into(), Value::Object(error)),
+    ])
+}
+
+/// `CallToolRequestParams`: a string `name` and, when given, `arguments` that are a mapping or `null`.
+fn call_params_are_valid(params: Option<&JsonObject>) -> bool {
+    params.is_some_and(|params| {
+        params.get("name").is_some_and(Value::is_string)
+            && params
+                .get("arguments")
+                .is_none_or(|arguments| arguments.is_object() || arguments.is_null())
+    })
+}
+
+fn initialize_result(state: &ServerState, params: Option<&JsonObject>) -> Value {
+    let requested = params
+        .and_then(|params| params.get("protocolVersion"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let version = constants::PYTHON_MCP_PROTOCOL_VERSIONS
+        .into_iter()
+        .find(|supported| *supported == requested)
+        .unwrap_or(constants::PYTHON_MCP_LATEST_PROTOCOL_VERSION);
+    let tools = JsonObject::from_iter([("listChanged".into(), false.into())]);
+    let server_info = JsonObject::from_iter([
+        ("name".into(), state.name.as_str().into()),
+        ("version".into(), state.version().into()),
+    ]);
+    Value::Object(JsonObject::from_iter([
+        (
+            "capabilities".into(),
+            Value::Object(JsonObject::from_iter([("tools".into(), Value::Object(tools))])),
+        ),
+        ("protocolVersion".into(), version.into()),
+        ("serverInfo".into(), Value::Object(server_info)),
+    ]))
+}
+
+/// Every definition in registration order, each listed with the schema its name's last definition builds.
+fn list_tools(state: &ServerState) -> Vec<Value> {
+    let Some(tools) = &state.tools else {
+        return Vec::new();
+    };
+    tools
+        .values()
+        .map(|tool| {
+            let name = tool.name().as_str();
+            // Creating the server builds the schema of every name, so each tool has one to list.
+            let schema = state
+                .python_schemas
+                .get(name)
+                .map(|schema| schema.as_json().clone())
+                .unwrap_or_default();
+            let mut listed = JsonObject::from_iter([
+                ("name".into(), name.into()),
+                ("description".into(), tool.description().into()),
+                ("inputSchema".into(), Value::Object(schema)),
+            ]);
+            if let Some(annotations) = tool.annotations() {
+                let kept = constants::PYTHON_MCP_ANNOTATION_FIELDS
+                    .into_iter()
+                    .filter_map(|field| {
+                        annotations
+                            .get(field)
+                            .filter(|value| !value.is_null())
+                            .map(|value| (field.to_owned(), value.clone()))
+                    })
+                    .collect();
+                listed.insert("annotations".into(), Value::Object(kept));
+            }
+            Value::Object(listed)
+        })
+        .collect()
+}
+
+/// The `tools/call` result with the text of the exception validation raised, which the result carries lossily,
+/// or the JSON-RPC `error` of an exception that escaped the tool handler: `str()` of a
+/// `SchemaError` too deep to pretty-print raises `RecursionError` inside the handler's `except`, and the `mcp`
+/// server answers it with code 0 and the exception text. The arguments and the schema are copied and dropped
+/// without recursion, since Python takes them at any nesting.
+async fn call_tool(
+    state: &ServerState,
+    params: Option<&JsonObject>,
+    signal: CancellationToken,
+) -> Result<Result<(Value, Option<PythonString>), JsonObject>, McpServerError> {
+    let name = params
+        .and_then(|params| params.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let tool = state.tools.as_ref().and_then(|tools| tools.get(name));
+    let (Some(tool), Some(schema)) = (tool, state.python_schemas.get(name)) else {
+        return Ok(Ok((tool_error(format!("Tool '{name}' not found")), None)));
+    };
+    let arguments = match params.and_then(|params| params.get("arguments")) {
+        Some(Value::Object(arguments)) => deep_json::clone_object(arguments),
+        _ => JsonObject::new(),
+    };
+    let instance = PythonJsonValue::from(&arguments);
+    let schema = PythonJsonValue::from(schema.as_json());
+    let outcome = python_jsonschema::validate_retrieving(
+        &schema,
+        &instance,
+        state.remote_schema_retriever.as_ref(),
+        &state.re_cache,
+        state.hash_secret,
+    );
+    drop_python_deep(instance);
+    drop_python_deep(schema);
+    let rejected = match outcome {
+        Outcome::Valid => None,
+        Outcome::Invalid(message) => Some(Ok((tool_error(invalid_arguments(&message)), None))),
+        Outcome::Raised(text) => {
+            let lossy = text.to_str_lossy().into_owned();
+            Some(Ok((tool_error(lossy), Some(text))))
+        }
+        Outcome::Escaped(message) => Some(Err(JsonObject::from_iter([
+            ("code".into(), 0.into()),
+            ("message".into(), message.into()),
+        ]))),
+    };
+    if let Some(answer) = rejected {
+        deep_json::drop_value(Value::Object(arguments));
+        return Ok(answer);
+    }
+    match tool.call(McpToolRequest { arguments, signal }).await {
+        Ok(output) => match convert_content(&output.content) {
+            Ok(content) => {
+                let result = JsonObject::from_iter([
+                    ("content".into(), Value::Array(content)),
+                    (
+                        "isError".into(),
+                        matches!(output.status, ToolResultStatus::Error).into(),
+                    ),
+                ]);
+                Ok(Ok((Value::Object(result), None)))
+            }
+            Err(message) => Ok(Ok((tool_error(message), None))),
+        },
+        Err(CallbackError::Cancelled) => Err(CallbackError::Cancelled.into()),
+        Err(CallbackError::Failed(error)) => {
+            let message = match error.downcast_ref::<McpToolArgumentsError>() {
+                Some(invalid) => invalid_arguments(invalid.message()),
+                None => error.to_string(),
+            };
+            Ok(Ok((tool_error(message), None)))
+        }
+    }
+}
+
+/// The text of the result `run_tool` answers a `jsonschema.ValidationError` with.
+fn invalid_arguments(message: &str) -> String {
+    format!("Input validation error: {message}")
+}
+
+/// `_convert_tool_content`; a block missing a field it needs fails like the Python `KeyError`.
+fn convert_content(items: &[JsonObject]) -> Result<Vec<Value>, String> {
+    let field = |item: &JsonObject, key: &str| item.get(key).cloned().ok_or_else(|| python_repr(key));
+    let text = |text: Value| {
+        Value::Object(JsonObject::from_iter([
+            ("type".into(), "text".into()),
+            ("text".into(), text),
+        ]))
+    };
+    let mut content = Vec::new();
+    for item in items {
+        match item.get("type").and_then(Value::as_str) {
+            Some("text") => content.push(text(field(item, "text")?)),
+            Some("image") => {
+                let data = field(item, "data")?;
+                let mime_type = field(item, "mimeType")?;
+                content.push(Value::Object(JsonObject::from_iter([
+                    ("type".into(), "image".into()),
+                    ("data".into(), data),
+                    ("mimeType".into(), mime_type),
+                ])));
+            }
+            Some("resource_link") => {
+                let parts = ["name", "uri", "description"]
+                    .into_iter()
+                    .filter_map(|key| item.get(key).filter(|part| is_truthy(part)).map(py_str))
+                    .collect::<Vec<_>>();
+                let joined = if parts.is_empty() {
+                    "Resource link".to_owned()
+                } else {
+                    parts.join("\n")
+                };
+                content.push(text(joined.into()));
+            }
+            Some("resource") => content.extend(resource_text(item.get("resource"))?.map(text)),
+            _ => {}
+        }
+    }
+    Ok(content)
+}
+
+/// `resource = item.get("resource") or {}` then `if "text" in resource: resource["text"]`: an embedded resource
+/// that is not a mapping fails like that membership test or that index does on its Python value.
+fn resource_text(resource: Option<&Value>) -> Result<Option<Value>, String> {
+    match resource.filter(|resource| is_truthy(resource)) {
+        Some(Value::Object(resource)) => Ok(resource.get("text").cloned()),
+        Some(Value::String(resource)) if resource.contains("text") => {
+            Err("string indices must be integers, not 'str'".to_owned())
+        }
+        Some(Value::Array(items)) if items.iter().any(|item| item.as_str() == Some("text")) => {
+            Err("list indices must be integers or slices, not str".to_owned())
+        }
+        Some(Value::Bool(_)) => Err("argument of type 'bool' is not iterable".to_owned()),
+        Some(Value::Number(number)) => Err(format!(
+            "argument of type '{}' is not iterable",
+            if number.is_f64() { "float" } else { "int" }
+        )),
+        _ => Ok(None),
+    }
+}
+
+/// The result `mcp` writes back, whose mappings reach the CLI with their keys sorted.
+fn sort_keys(value: Value) -> Value {
+    match value {
+        Value::Object(object) => {
+            let mut entries = object.into_iter().collect::<Vec<_>>();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key, sort_keys(value)))
+                    .collect(),
+            )
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(sort_keys).collect()),
+        other => other,
+    }
+}
+
+/// Python `str`: a string is itself, anything else reads as its `repr`.
+fn py_str(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => py_repr(other),
+    }
+}
