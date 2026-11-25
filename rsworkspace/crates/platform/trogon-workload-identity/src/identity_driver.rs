@@ -4,6 +4,9 @@ use tokio_util::sync::CancellationToken;
 use crate::IdentityDriver;
 use crate::candidate::Candidate;
 use crate::constants::{CONNECT_TIMEOUT, LIFECYCLE_POLL, RECONNECT_DELAY};
+use crate::source_end::SourceEnd;
+use crate::source_fault::SourceFault;
+use crate::workload_context::WorkloadContext;
 
 impl IdentityDriver {
     pub async fn run(self, shutdown: CancellationToken) {
@@ -19,10 +22,18 @@ impl IdentityDriver {
     }
 
     async fn read(&self, shutdown: CancellationToken) {
+        let mut previous = None;
         loop {
             tokio::select! {
                 () = shutdown.cancelled() => break,
-                () = self.read_connection(shutdown.clone()) => self.store.withdraw_source(),
+                end = self.read_connection(shutdown.clone()) => {
+                    if let Some(end) = end {
+                        let repeated = !end.observed && previous == Some(end.fault);
+                        crate::telemetry::source_fault(end.fault, repeated);
+                        previous = (!end.observed).then_some(end.fault);
+                    }
+                    self.store.withdraw_source();
+                }
             }
             tokio::select! {
                 () = shutdown.cancelled() => break,
@@ -31,41 +42,51 @@ impl IdentityDriver {
         }
     }
 
-    async fn read_connection(&self, shutdown: CancellationToken) {
-        let Ok(Ok(mut stream)) = tokio::time::timeout(
+    /// Reads one connection until it fails. `None` means shutdown ended it.
+    async fn read_connection(&self, shutdown: CancellationToken) -> Option<SourceEnd> {
+        let mut stream = match tokio::time::timeout(
             CONNECT_TIMEOUT,
             crate::workload_stream::connect(self.store.config().endpoint()),
         )
         .await
-        else {
-            return;
+        {
+            Ok(Ok(stream)) => stream,
+            Ok(Err(_)) => return Some(SourceEnd::new(SourceFault::ConnectFailed, false)),
+            Err(_) => return Some(SourceEnd::new(SourceFault::ConnectTimedOut, false)),
         };
-        let first = tokio::time::timeout(CONNECT_TIMEOUT, stream.next()).await;
-        let Ok(Some(Ok(context))) = first else {
-            return;
-        };
-        let Ok(context) = crate::workload_context::WorkloadContext::from_wire(context) else {
-            return;
-        };
-        let Ok(candidate) = Candidate::parse(context, self.store.config().local().spiffe_id()) else {
-            return;
-        };
-        self.store.observe(candidate);
+        let mut observed = false;
+        let mut first = true;
         loop {
-            let context = tokio::select! {
-                () = shutdown.cancelled() => return,
-                update = stream.next() => update,
+            let update = if first {
+                match tokio::time::timeout(CONNECT_TIMEOUT, stream.next()).await {
+                    Ok(update) => update,
+                    Err(_) => return Some(SourceEnd::new(SourceFault::FirstResponseTimedOut, observed)),
+                }
+            } else {
+                tokio::select! {
+                    () = shutdown.cancelled() => return None,
+                    update = stream.next() => update,
+                }
             };
-            let Some(Ok(context)) = context else {
-                return;
+            first = false;
+            let context = match update {
+                Some(Ok(context)) => context,
+                Some(Err(_)) => return Some(SourceEnd::new(SourceFault::StreamError, observed)),
+                None => return Some(SourceEnd::new(SourceFault::StreamEnded, observed)),
             };
-            let Ok(context) = crate::workload_context::WorkloadContext::from_wire(context) else {
-                return;
+            let candidate = match WorkloadContext::from_wire(context) {
+                Ok(context) => {
+                    Candidate::parse(context, self.store.config().local().spiffe_id()).map_err(SourceFault::from)
+                }
+                Err(error) => Err(SourceFault::from(&error)),
             };
-            let Ok(candidate) = Candidate::parse(context, self.store.config().local().spiffe_id()) else {
-                return;
-            };
-            self.store.observe(candidate);
+            match candidate {
+                Ok(candidate) => {
+                    observed = true;
+                    self.store.observe(candidate);
+                }
+                Err(fault) => return Some(SourceEnd::new(fault, observed)),
+            }
         }
     }
 

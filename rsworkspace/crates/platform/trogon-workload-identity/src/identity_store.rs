@@ -227,6 +227,7 @@ impl IdentityStore {
     }
 
     pub(crate) fn withdraw_source(&self) {
+        let mut had_material = false;
         if let Ok(mut state) = self.inner.state.lock() {
             if let Some(registration) = &state.registration {
                 state.minimum_registration = state
@@ -238,9 +239,13 @@ impl IdentityStore {
             } else {
                 state.exhausted = true;
             }
+            had_material = state.candidate.is_some() || state.active.is_some();
             state.candidate = None;
             state.active = None;
             self.signal(&mut state);
+        }
+        if had_material {
+            crate::telemetry::source_withdrawn();
         }
     }
 

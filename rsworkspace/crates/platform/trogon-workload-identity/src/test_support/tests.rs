@@ -211,3 +211,83 @@ async fn fixture_can_close_a_complete_stream_and_finish_its_graceful_server_task
     tokio::time::timeout(TEST_TIMEOUT, task).await.unwrap().unwrap();
     drop(directory);
 }
+
+async fn open_jwt_bundles(
+    fixture: &WorkloadApiFixture,
+    with_header: bool,
+) -> Result<tonic::Streaming<WireJwtBundles>, tonic::Status> {
+    let channel = spiffe::transport::connect(&fixture.endpoint().endpoint())
+        .await
+        .unwrap();
+    let mut grpc = tonic::client::Grpc::new(channel);
+    grpc.ready().await.unwrap();
+    let mut request = Request::new(WireRequest {});
+    if with_header {
+        request
+            .metadata_mut()
+            .insert("workload.spiffe.io", "true".parse().unwrap());
+    }
+    grpc.server_streaming(
+        request,
+        http::uri::PathAndQuery::from_static("/SpiffeWorkloadAPI/FetchJWTBundles"),
+        tonic_prost::ProstCodec::<WireRequest, WireJwtBundles>::default(),
+    )
+    .await
+    .map(Response::into_inner)
+}
+
+#[tokio::test]
+async fn wire_fixture_refuses_a_jwt_bundles_request_without_the_security_header() {
+    let fixture = WorkloadApiFixture::start(Vec::new()).await;
+    let response = open_jwt_bundles(&fixture, false).await;
+    assert_eq!(response.err().unwrap().code(), tonic::Code::InvalidArgument);
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn the_jwt_bundles_stream_ends_when_the_fixture_stops_publishing() {
+    let fixture = WorkloadApiFixture::start(Vec::new()).await;
+    let mut stream = open_jwt_bundles(&fixture, true).await.unwrap();
+    let WorkloadApiFixture {
+        jwt_updates,
+        shutdown,
+        task,
+        directory,
+        ..
+    } = fixture;
+    drop(jwt_updates);
+    assert!(
+        tokio::time::timeout(TEST_TIMEOUT, stream.next())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    drop(stream);
+    shutdown.cancel();
+    tokio::time::timeout(TEST_TIMEOUT, task).await.unwrap().unwrap();
+    drop(directory);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_jwt_bundle_driver_reconnects_when_the_stream_ends() {
+    use crate::tests::jwt_bundle_source_tests::{capture_debug, drive_for, reasons};
+    use tracing::Level;
+
+    let fixture = WorkloadApiFixture::start(Vec::new()).await;
+    let endpoint = fixture.endpoint();
+    let WorkloadApiFixture {
+        jwt_updates,
+        shutdown,
+        task,
+        directory,
+        ..
+    } = fixture;
+    drop(jwt_updates);
+    let (captured, _guard) = capture_debug();
+    drive_for(endpoint, Duration::from_secs(1)).await;
+    assert_eq!(reasons(&captured, Level::WARN), ["stream_ended"]);
+    assert!(reasons(&captured, Level::DEBUG).contains(&"stream_ended".to_owned()));
+    shutdown.cancel();
+    tokio::time::timeout(TEST_TIMEOUT, task).await.unwrap().unwrap();
+    drop(directory);
+}

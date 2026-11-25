@@ -1,11 +1,11 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -163,10 +163,34 @@ impl From<Vec<TestIdentity>> for WireResponse {
     }
 }
 
+#[derive(Clone, PartialEq, prost::Message)]
+struct WireJwtBundles {
+    #[prost(btree_map = "string, bytes", tag = "1")]
+    bundles: BTreeMap<String, Vec<u8>>,
+}
+
+type JwtUpdate = Option<Result<WireJwtBundles, Status>>;
+
+/// What the fixture does once a client has opened the stream.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum StreamBehavior {
+    /// Send the current response, then every replacement.
+    Serve,
+    /// Open the stream and never send a response.
+    Silent,
+    /// Open the stream and end it without a response.
+    Closed,
+}
+
 #[derive(Clone)]
 struct WorkloadService {
     updates: watch::Receiver<Result<WireResponse, Status>>,
+    jwt_updates: watch::Receiver<JwtUpdate>,
+    jwt_requests: Arc<AtomicUsize>,
+    jwt_call_denied: Arc<AtomicBool>,
     requests: Arc<AtomicUsize>,
+    header_names: Arc<Mutex<BTreeSet<String>>>,
+    behavior: StreamBehavior,
 }
 
 type ResponseStream = Pin<Box<dyn Stream<Item = Result<WireResponse, Status>> + Send>>;
@@ -179,6 +203,7 @@ impl tonic::server::ServerStreamingService<WireRequest> for WorkloadService {
 
     fn call(&mut self, request: Request<WireRequest>) -> Self::Future {
         let updates = self.updates.clone();
+        let behavior = self.behavior;
         self.requests.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             if request
@@ -189,6 +214,15 @@ impl tonic::server::ServerStreamingService<WireRequest> for WorkloadService {
             {
                 return Err(Status::invalid_argument("required workload header"));
             }
+            match behavior {
+                StreamBehavior::Serve => {}
+                StreamBehavior::Silent => {
+                    return Ok(Response::new(Box::pin(futures::stream::pending()) as ResponseStream));
+                }
+                StreamBehavior::Closed => {
+                    return Ok(Response::new(Box::pin(futures::stream::empty()) as ResponseStream));
+                }
+            }
             let stream = futures::stream::unfold((updates, true), |(mut updates, first)| async move {
                 if !first && updates.changed().await.is_err() {
                     return None;
@@ -197,6 +231,55 @@ impl tonic::server::ServerStreamingService<WireRequest> for WorkloadService {
                 Some((value, (updates, false)))
             });
             Ok(Response::new(Box::pin(stream) as ResponseStream))
+        })
+    }
+}
+
+/// Serves `FetchJWTBundles`: nothing until the first set is published, then
+/// the current set and every replacement.
+#[derive(Clone)]
+struct JwtBundlesService {
+    updates: watch::Receiver<JwtUpdate>,
+    requests: Arc<AtomicUsize>,
+    denied: Arc<AtomicBool>,
+}
+
+type JwtBundlesStream = Pin<Box<dyn Stream<Item = Result<WireJwtBundles, Status>> + Send>>;
+
+impl tonic::server::ServerStreamingService<WireRequest> for JwtBundlesService {
+    type Response = WireJwtBundles;
+    type ResponseStream = JwtBundlesStream;
+    type Future = BoxResponse<Self::ResponseStream>;
+
+    fn call(&mut self, request: Request<WireRequest>) -> Self::Future {
+        let updates = self.updates.clone();
+        self.requests.fetch_add(1, Ordering::SeqCst);
+        let denied = self.denied.load(Ordering::SeqCst);
+        Box::pin(async move {
+            if request
+                .metadata()
+                .get("workload.spiffe.io")
+                .and_then(|value| value.to_str().ok())
+                != Some("true")
+            {
+                return Err(Status::invalid_argument("required workload header"));
+            }
+            if denied {
+                return Err(Status::permission_denied("bundles withdrawn"));
+            }
+            let stream = futures::stream::unfold((updates, true), |(mut updates, mut first)| async move {
+                loop {
+                    if !first && updates.changed().await.is_err() {
+                        return None;
+                    }
+                    first = false;
+                    let value = updates.borrow_and_update().clone();
+                    if let Some(value) = value {
+                        return Some((value, (updates, false)));
+                    }
+                }
+            });
+            Ok(Response::new(Box::pin(stream) as JwtBundlesStream))
         })
     }
 }
@@ -215,13 +298,28 @@ where
     }
     fn call(&mut self, request: http::Request<B>) -> Self::Future {
         let service = self.clone();
+        service
+            .header_names
+            .lock()
+            .unwrap()
+            .extend(request.headers().keys().map(|name| name.as_str().to_owned()));
         Box::pin(async move {
-            if request.uri().path() != "/SpiffeWorkloadAPI/FetchX509SVID" {
-                return Ok(Status::unimplemented("RPC").into_http());
+            match request.uri().path() {
+                "/SpiffeWorkloadAPI/FetchX509SVID" => {
+                    let mut grpc = tonic::server::Grpc::new(tonic_prost::ProstCodec::default());
+                    Ok(grpc.server_streaming(service, request).await)
+                }
+                "/SpiffeWorkloadAPI/FetchJWTBundles" => {
+                    let service = JwtBundlesService {
+                        updates: service.jwt_updates,
+                        requests: service.jwt_requests,
+                        denied: service.jwt_call_denied,
+                    };
+                    let mut grpc = tonic::server::Grpc::new(tonic_prost::ProstCodec::default());
+                    Ok(grpc.server_streaming(service, request).await)
+                }
+                _ => Ok(Status::unimplemented("RPC").into_http()),
             }
-            let codec = tonic_prost::ProstCodec::default();
-            let mut grpc = tonic::server::Grpc::new(codec);
-            Ok(grpc.server_streaming(service, request).await)
         })
     }
 }
@@ -233,7 +331,11 @@ impl tonic::server::NamedService for WorkloadService {
 pub struct WorkloadApiFixture {
     endpoint: UnixEndpoint,
     updates: watch::Sender<Result<WireResponse, Status>>,
+    jwt_updates: watch::Sender<JwtUpdate>,
     requests: Arc<AtomicUsize>,
+    jwt_requests: Arc<AtomicUsize>,
+    jwt_call_denied: Arc<AtomicBool>,
+    header_names: Arc<Mutex<BTreeSet<String>>>,
     shutdown: CancellationToken,
     task: JoinHandle<()>,
     directory: tempfile::TempDir,
@@ -241,15 +343,27 @@ pub struct WorkloadApiFixture {
 
 impl WorkloadApiFixture {
     pub async fn start(identities: Vec<TestIdentity>) -> Self {
+        Self::start_with(identities, StreamBehavior::Serve).await
+    }
+    pub async fn start_with(identities: Vec<TestIdentity>, behavior: StreamBehavior) -> Self {
         let directory = tempfile::tempdir().expect("socket directory");
         let path = directory.path().join("workload.sock");
         let listener = UnixListener::bind(&path).expect("Unix listener");
         let endpoint = UnixEndpoint::new(&format!("unix://{}", path.display())).expect("Unix endpoint");
         let (updates, receiver) = watch::channel(Ok(identities.into()));
         let requests = Arc::new(AtomicUsize::new(0));
+        let (jwt_updates, jwt_receiver) = watch::channel(None);
+        let jwt_requests = Arc::new(AtomicUsize::new(0));
+        let jwt_call_denied = Arc::new(AtomicBool::new(false));
+        let header_names = Arc::new(Mutex::new(BTreeSet::new()));
         let service = WorkloadService {
+            header_names: Arc::clone(&header_names),
             updates: receiver,
+            jwt_updates: jwt_receiver,
+            jwt_requests: Arc::clone(&jwt_requests),
+            jwt_call_denied: Arc::clone(&jwt_call_denied),
             requests: Arc::clone(&requests),
+            behavior,
         };
         let shutdown = CancellationToken::new();
         let stop = shutdown.clone();
@@ -263,7 +377,11 @@ impl WorkloadApiFixture {
         Self {
             endpoint,
             updates,
+            jwt_updates,
             requests,
+            jwt_requests,
+            jwt_call_denied,
+            header_names,
             shutdown,
             task,
             directory,
@@ -290,6 +408,38 @@ impl WorkloadApiFixture {
             self.updates
                 .send_replace(Err(Status::permission_denied("identity withdrawn"))),
         );
+    }
+    /// Publishes the JWT bundle set, as `(trust domain, JWKS document)` pairs.
+    pub fn replace_jwt_bundles(&self, bundles: &[(&str, &str)]) {
+        let bundles = bundles
+            .iter()
+            .map(|(domain, jwks)| ((*domain).to_owned(), jwks.as_bytes().to_vec()))
+            .collect();
+        drop(self.jwt_updates.send_replace(Some(Ok(WireJwtBundles { bundles }))));
+    }
+    pub fn jwt_bundles_permission_denied(&self) {
+        drop(
+            self.jwt_updates
+                .send_replace(Some(Err(Status::permission_denied("bundles withdrawn")))),
+        );
+    }
+    /// Makes every later `FetchJWTBundles` call fail with `PermissionDenied`
+    /// before any stream opens.
+    pub fn deny_jwt_bundle_calls(&self) {
+        self.jwt_call_denied.store(true, Ordering::SeqCst);
+    }
+    pub fn jwt_bundles_unavailable(&self) {
+        drop(
+            self.jwt_updates
+                .send_replace(Some(Err(Status::unavailable("agent restarting")))),
+        );
+    }
+    pub fn jwt_bundle_requests(&self) -> usize {
+        self.jwt_requests.load(Ordering::SeqCst)
+    }
+    /// Every HTTP/2 header name any request has carried so far.
+    pub fn request_header_names(&self) -> BTreeSet<String> {
+        self.header_names.lock().unwrap().clone()
     }
     pub fn requests(&self) -> usize {
         self.requests.load(Ordering::SeqCst)

@@ -2,6 +2,8 @@
 pub(crate) enum WorkloadResponseError {
     #[error("Workload API material violates the supported profile")]
     Material(#[from] crate::MaterialError),
+    #[error("Workload API trust bundles conflict")]
+    BundleConflict,
     #[error("Workload API SVID cannot be parsed")]
     Svid(#[from] spiffe::X509SvidError),
     #[error("Workload API trust bundle cannot be parsed")]

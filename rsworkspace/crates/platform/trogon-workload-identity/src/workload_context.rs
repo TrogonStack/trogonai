@@ -44,7 +44,7 @@ impl WorkloadContext {
             if let Some(previous) = bundles.get(svid.spiffe_id().trust_domain())
                 && BundleRoots::new(&previous)? != roots
             {
-                return Err(MaterialError::Identity.into());
+                return Err(WorkloadResponseError::BundleConflict);
             }
             bundles.add_bundle(bundle);
             svids.push(Arc::new(svid));
@@ -52,7 +52,7 @@ impl WorkloadContext {
         for (domain, bytes) in response.federated_bundles {
             let domain = TrustDomain::new(&domain)?;
             if bundles.get(&domain).is_some() {
-                return Err(MaterialError::Identity.into());
+                return Err(WorkloadResponseError::BundleConflict);
             }
             let bundle = X509Bundle::parse_from_der(domain, &bytes)?;
             BundleRoots::new(&bundle)?;

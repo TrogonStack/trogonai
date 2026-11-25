@@ -342,3 +342,81 @@ async fn an_expired_or_overlong_registration_cannot_preserve_existing_material()
     task.await.unwrap();
     fixture.stop().await;
 }
+
+#[tokio::test]
+async fn a_streamed_rotation_replaces_the_held_identity_without_a_restart() {
+    let ca = TestCa::new();
+    let fixture = WorkloadApiFixture::start(vec![ca.issue(LOCAL_ID, Duration::from_secs(600))]).await;
+    let (store, driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), local(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    store.replace_registration(registration(&ca)).unwrap();
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(driver.run(shutdown.clone()));
+    let first = *material(&store).await.fact().leaf_sha256();
+
+    fixture.replace(vec![ca.issue(LOCAL_ID, Duration::from_secs(600))]);
+    until(|| {
+        store
+            .material()
+            .is_some_and(|lease| lease.fact().leaf_sha256() != &first)
+    })
+    .await;
+    assert_eq!(
+        fixture.requests(),
+        1,
+        "rotation arrives on the open stream, not a new call"
+    );
+
+    shutdown.cancel();
+    task.await.unwrap();
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn an_already_expired_svid_never_activates() {
+    let ca = TestCa::new();
+    let mut params = rcgen::CertificateParams::default();
+    params.distinguished_name = rcgen::DistinguishedName::new();
+    params.is_ca = rcgen::IsCa::ExplicitNoCa;
+    params.subject_alt_names = vec![rcgen::SanType::URI(
+        rcgen::string::Ia5String::try_from(LOCAL_ID).unwrap(),
+    )];
+    params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
+    let now = time::OffsetDateTime::now_utc();
+    params.not_before = now - time::Duration::seconds(120);
+    params.not_after = now - time::Duration::seconds(60);
+    let fixture = WorkloadApiFixture::start(vec![ca.issue_with_params(LOCAL_ID, params)]).await;
+    let (store, driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), local(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    store.replace_registration(registration(&ca)).unwrap();
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(driver.run(shutdown.clone()));
+    until(|| fixture.requests() >= 2).await;
+    assert!(store.material().is_none());
+    shutdown.cancel();
+    task.await.unwrap();
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn a_held_svid_stops_being_served_at_its_expiry() {
+    let ca = TestCa::new();
+    let fixture = WorkloadApiFixture::start(vec![ca.issue(LOCAL_ID, Duration::from_secs(2))]).await;
+    let (store, driver) = IdentityStore::new(
+        IdentityConfig::new(fixture.endpoint(), local(), revision(1)),
+        Arc::new(Recorder::default()),
+    );
+    store.replace_registration(registration(&ca)).unwrap();
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(driver.run(shutdown.clone()));
+    let lease = material(&store).await;
+    until(|| !lease.is_current()).await;
+    assert!(store.material().is_none());
+    shutdown.cancel();
+    task.await.unwrap();
+    fixture.stop().await;
+}

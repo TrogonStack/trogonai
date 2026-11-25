@@ -21,3 +21,18 @@ fn delayed_wall_clock_read_does_not_restart_a_finite_source_lifetime() {
         "clock-read delay must consume authority instead of restarting it"
     );
 }
+
+#[test]
+fn an_expiry_already_in_the_past_has_no_deadline() {
+    let observation = TimeObservation::now();
+    assert!(
+        observation
+            .deadline(observation.wall() - Duration::from_secs(1))
+            .is_err()
+    );
+    assert!(
+        observation
+            .deadline(observation.wall() + Duration::from_secs(1))
+            .is_ok()
+    );
+}
