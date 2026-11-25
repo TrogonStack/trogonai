@@ -7747,9 +7747,11 @@ name = "trogon-sandbox-contract"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "regress",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "unicode-ident",
  "url",
 ]
 
