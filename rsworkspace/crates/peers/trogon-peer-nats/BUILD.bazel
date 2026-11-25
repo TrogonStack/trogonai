@@ -7,7 +7,11 @@ workspace_crate(
         "routing_contract": {},
         "rpc_admission_tests": {},
         "rpc_client_tests": {},
+        "rpc_composition_contract_tests": {},
+        "rpc_composition_tests": {},
         "rpc_dispatch_contract": {},
+        "rpc_fault_boundary_tests": {},
+        "rpc_telemetry_contract_tests": {},
         "store_admission_tests": {},
     },
 )
