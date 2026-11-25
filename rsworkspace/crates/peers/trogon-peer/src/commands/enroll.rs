@@ -1,11 +1,12 @@
-use crate::commands::state::PeerState;
 use buffa::MessageField;
 use chrono::{DateTime, Utc};
 use trogon_decider::{Decider, Decision, Events, WritePrecondition};
 use trogonai_proto::convert::timestamp_from_datetime;
 use trogonai_proto::peers::v1alpha1::{self as proto, PeerEvent};
 
+use super::constants::ATTACHMENT_LEASE;
 use super::domain::{CollaborationRef, ConnectorId, EnrollmentIdentity, PeerDisplayName, PeerId};
+use super::state::{self, PeerState};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EnrollError {
@@ -80,10 +81,10 @@ impl Decider for Enroll {
         }
         let expires_at = command
             .now
-            .checked_add_signed(chrono::Duration::seconds(10))
-            .filter(|at| (-62_135_596_800..=253_402_300_799).contains(&at.timestamp()))
+            .checked_add_signed(ATTACHMENT_LEASE)
+            .filter(|at| state::timestamp_seconds_supported(at.timestamp()))
             .ok_or(EnrollError::LeaseDeadlineOverflow)?;
-        if !(-62_135_596_800..=253_402_300_799).contains(&command.now.timestamp())
+        if !state::timestamp_seconds_supported(command.now.timestamp())
             || command.now.timestamp_subsec_nanos() >= 1_000_000_000
         {
             return Err(EnrollError::LeaseDeadlineOverflow);
