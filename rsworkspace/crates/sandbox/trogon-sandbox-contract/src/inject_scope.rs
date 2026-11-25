@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{InjectMethodSet, InjectPathPrefix, InjectScopeVersion};
+use crate::{DomainPattern, InjectMethodSet, InjectPathPrefix, InjectScopeVersion};
 
 /// Where on a destination one credential binding may be injected.
 ///
@@ -23,6 +23,17 @@ impl InjectScope {
     /// Reports whether no path or method restriction applies, so the host decides alone.
     pub fn is_request_independent(&self) -> bool {
         self.path_prefix.is_none() && self.methods.is_none()
+    }
+
+    /// The pattern with an omitted port made explicit when this scope's version says so, for comparing it against
+    /// allowed and denied domains.
+    pub(crate) fn effective_pattern(&self, pattern: &DomainPattern) -> DomainPattern {
+        if pattern.port().is_some() {
+            return pattern.clone();
+        }
+        self.scope_version
+            .omitted_port()
+            .map_or_else(|| pattern.clone(), |port| pattern.with_port(port))
     }
 
     /// Reports whether this is the unrestricted default scope.

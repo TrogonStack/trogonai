@@ -15,6 +15,9 @@ use crate::PortError;
 pub struct Port(NonZeroU16);
 
 impl Port {
+    /// Port 443, which an inject host without a port stands for under scope version 2.
+    pub(crate) const HTTPS: Self = Self(NonZeroU16::MIN.saturating_add(442));
+
     pub fn new(port: u16) -> Result<Self, PortError> {
         NonZeroU16::new(port)
             .map(Self)
