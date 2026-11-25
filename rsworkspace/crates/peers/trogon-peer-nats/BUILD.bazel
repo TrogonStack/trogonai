@@ -4,6 +4,7 @@ workspace_crate(
     integration_tests = {
         "application_exchange_tests": {},
         "authenticated_broker_tests": {},
+        "broker_fixture_contract": {},
         "requester_bounds_tests": {},
         "requester_headers_tests": {},
         "routing_contract": {},
