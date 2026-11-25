@@ -181,6 +181,7 @@ ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 toml = "=1.1.8"
 wasmtime = "=47.0.3"
 http = "=1.5.0"
+regress = { version = "=0.12.0", features = ["utf16"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rrule = "=0.14.0"
 sha2 = "=0.11.1"
@@ -189,6 +190,7 @@ testcontainers-modules = { version = "=0.15.0", features = ["nats"] }
 tempfile = "=3.27.0"
 filetime = "=0.2.29"
 time = "=0.3.55"
+unicode-ident = "=1.0.24"
 url = "=2.5.8"
 uuid = { version = "=1.24.0", features = ["v4", "v7"] }
 prost-reflect = "=0.14.7"

@@ -291,6 +291,17 @@ The `running` self-transition permits takeover of a stale claim, while returning
 to `queued` permits retry after a transient failure. Terminal states are immutable,
 including self-transitions.
 
+`SecretBinding` describes one credential the broker holds and the sandbox must never see in the clear: its
+name, its target (an environment variable or a file), whether it is masked or denied, an optional extract rule,
+the hosts it may be injected at, and an optional path, method, and port scope. The binding never holds the
+credential value. It accepts only a coherent set of fields: a `deny` binding takes no extract rule, response header
+stripping, or request scope, an environment variable target takes only a regex or jwt rule, and a no-match policy
+needs an extract rule. `SecretBindings` holds at most 64 bindings with distinct names and targets, and
+`AwsCredentialPairs` links masked bindings into an AWS credential. `ExtractPattern` accepts only an ECMAScript
+regular expression with at least one capture group. Construction and deserialization enforce every rule, and the
+JSON shape omits each defaulted field. Rules that need the sandbox spec, such as environment name collisions and
+inject hosts that the network policy denies, are not checked here.
+
 This package defines values and allowed transitions. It does not execute
 operations, persist state, authorize transitions, enforce claim ownership, or
 provide worker, provider, transport, or lease-generation behavior.
