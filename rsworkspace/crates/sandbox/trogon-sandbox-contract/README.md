@@ -198,6 +198,28 @@ deserialization both enforce these rules and reject unknown fields.
 supervisor, `unsupported` or `unavailable` with the binding and a reason, or
 `denied` with a reason. These types describe the probe; they do not run it.
 
+`RunCommandRequest` asks a worker to run a command in a lease's sandbox, and its
+`RunCommandResponse` is tagged by `outcome` as `completed`, `started`, or
+`denied`. Options only a detached command may use, namely interactive stdin, a
+lease deadline, and a `ProcessSpec`, live in `CommandExecution::Detached`, and
+deserialization rejects them on an attached command. A `CommandEnv` cannot set
+the reserved execution id variable, and `RedactValues` holds at most 64 values
+of at most 8192 bytes each. A `LaunchKey` is 1 to 128
+characters of `[A-Za-z0-9_-]`, a `ProcessName` is 1 to 64 characters of
+`[A-Za-z0-9._-]`, a `ReadinessNeedle` is 1 to 4096 bytes, and `ReadyPorts` holds
+at most 16 distinct nonzero ports. Each rule is enforced on construction and on
+deserialization. A `RedactValue` never shows its value in `Debug` and has no
+`Display`, but serialization carries it. Every wire boolean, such as
+`detached`, `stream_output`, `timed_out`, and `eof`, is a two-variant enum that
+still serializes as a JSON boolean. `UnixSignal` is a closed set of signal
+names, so a free-form string never reaches a worker. A `WriteStdinRequest`
+carries a `StdinChunk` of at most 64 KiB and must hold data or end the input.
+The stop, restart, kill, cancel launch, poll, wait for readiness, list
+processes, and read logs requests each have a tagged response. The file types
+`WriteFilesRequest` and `ReadFileRequest` write and read files as an optional
+`SandboxUserName`. These types describe the messages; they do not run commands,
+trim output, or move bytes.
+
 `DispatchTarget` names the worker and attempt a lease is dispatched to, with an
 optional `LeaseEpoch` for workers that support epochs.
 
