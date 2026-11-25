@@ -1,10 +1,10 @@
-use a2a_identity_types::JwtError;
+use a2a_identity_types::{JwtError, MintedUserJwt, MintedUserJwtError};
 use a2a_nats::{A2aPrefixError, AgentIdError};
 
 use std::net::SocketAddr;
 
-use a2a_identity_types::MintedUserJwt;
 use a2a_nats::client::A2aClient;
+use a2a_nats::constants::ENV_A2A_CALLER_JWT;
 use a2a_nats::{A2aAgentId, A2aPrefix, Config, NatsConfig};
 use tracing::info;
 use trogon_nats::jetstream::NatsJetStreamClient;
@@ -12,17 +12,19 @@ use trogon_std::env::SystemEnv;
 use trogon_std::signal::shutdown_signal;
 
 use crate::constants::{DEFAULT_BIND, ENV_HTTP_BIND};
-use crate::constants::{ENV_AGENT_ID, ENV_GATEWAY_CALLER_JWT, ENV_USE_GATEWAY};
+use crate::constants::{ENV_AGENT_ID, ENV_USE_GATEWAY};
 use crate::router;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
     #[error("{} environment variable is required", ENV_AGENT_ID)]
     MissingAgentId,
-    #[error("{} is required when {} is enabled", ENV_GATEWAY_CALLER_JWT, ENV_USE_GATEWAY)]
-    MissingGatewayCallerJwt,
-    #[error("invalid gateway caller JWT")]
-    InvalidGatewayCallerJwt(#[source] JwtError),
+    #[error("{} environment variable is required", ENV_A2A_CALLER_JWT)]
+    MissingCallerJwt,
+    #[error("invalid caller JWT")]
+    InvalidCallerJwt(#[source] JwtError),
+    #[error("caller JWT names no caller principal")]
+    InvalidCallerPrincipal(#[source] MintedUserJwtError),
     #[error("invalid agent id")]
     InvalidAgentId(#[source] AgentIdError),
     #[error("invalid A2A prefix")]
@@ -57,6 +59,14 @@ pub async fn run() -> Result<(), RuntimeError> {
         .parse()
         .map_err(RuntimeError::InvalidBind)?;
 
+    let raw_jwt =
+        trogon_std::env::ReadEnv::var(&env, ENV_A2A_CALLER_JWT).map_err(|_| RuntimeError::MissingCallerJwt)?;
+    let caller_jwt = MintedUserJwt::new(raw_jwt).map_err(RuntimeError::InvalidCallerJwt)?;
+    caller_jwt.ensure_fresh().map_err(RuntimeError::InvalidCallerJwt)?;
+    let caller = caller_jwt
+        .subject_principal()
+        .map_err(RuntimeError::InvalidCallerPrincipal)?;
+
     let nats_config = NatsConfig::from_env(&env);
     let connect_timeout = a2a_nats::nats_connect_timeout(&env);
     let nats_client = trogon_nats::connect(&nats_config, connect_timeout)
@@ -69,15 +79,9 @@ pub async fn run() -> Result<(), RuntimeError> {
     let a2a_config = Config::new(prefix.clone(), nats_config);
     let a2a_config = a2a_nats::apply_timeout_overrides(a2a_config, &env);
 
-    let client =
-        A2aClient::new(prefix, agent_id, nats_client, js_client).with_operation_timeout(a2a_config.operation_timeout());
+    let client = A2aClient::new(prefix, agent_id, caller, nats_client, js_client)
+        .with_operation_timeout(a2a_config.operation_timeout());
     let client = if env_flag(&env, ENV_USE_GATEWAY) {
-        let raw_jwt = trogon_std::env::ReadEnv::var(&env, ENV_GATEWAY_CALLER_JWT)
-            .map_err(|_| RuntimeError::MissingGatewayCallerJwt)?;
-        let caller_jwt = MintedUserJwt::new(raw_jwt).map_err(RuntimeError::InvalidGatewayCallerJwt)?;
-        caller_jwt
-            .ensure_fresh()
-            .map_err(RuntimeError::InvalidGatewayCallerJwt)?;
         info!("Routing HTTP requests through a2a-gateway ingress");
         client.routing_via_gateway_ingress(caller_jwt)
     } else {

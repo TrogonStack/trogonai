@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build every wasm-components/* decider + the decider-test CLI"
+#MISE depends=["artifacts:wasm-components"]
+
+cd rsworkspace && cargo build -p trogon-decider-test --release "$@"

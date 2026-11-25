@@ -251,6 +251,28 @@ webhook_secret = { env = "TROGON_GATEWAY_TEST_WEBHOOK_SECRET" }
 }
 
 #[test]
+fn whatsapp_resolves_distinct_credential_references() {
+    let file = write_toml(
+        r#"
+[sources.whatsapp.integrations.support.webhook]
+waba_id = "100"
+phone_number_id = "101"
+verify_token = { env = "WHATSAPP_TEST_VERIFY_TOKEN" }
+app_secret = { env = "WHATSAPP_TEST_APP_SECRET" }
+"#,
+    );
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set("WHATSAPP_TEST_VERIFY_TOKEN", "test-verification");
+    env.set("WHATSAPP_TEST_APP_SECRET", "test-signing");
+    let input = load_config::<GatewayConfig>(Some(file.path())).unwrap();
+    let config = resolve(input, &NatsArgs::default(), &env).unwrap();
+    let webhook = &config.whatsapp[0].config.webhook;
+
+    assert_eq!(webhook.verify_token.as_str(), "test-verification");
+    assert_eq!(webhook.app_secret.as_str(), "test-signing");
+}
+
+#[test]
 fn webhook_secret_missing_env_is_invalid() {
     let toml = r#"
 [sources.github.integrations.primary.webhook]
@@ -1717,7 +1739,7 @@ stream_max_age_secs = 0
 fn github_invalid_subject_prefix() {
     let toml = r#"
 [sources.github.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.github.integrations.primary.webhook]
 webhook_secret = "gh-secret"
@@ -2157,7 +2179,7 @@ fn discord_invalid_subject_prefix() {
     let toml = r#"
 [sources.discord]
 bot_token = "Bot token"
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 "#;
     let f = write_toml(toml);
     let result = load(Some(f.path()));
@@ -2182,7 +2204,7 @@ stream_name = "has.dots"
 fn slack_invalid_subject_prefix() {
     let toml = r#"
 [sources.slack.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.slack.integrations.primary.webhook]
 signing_secret = "slack-secret"
@@ -2198,7 +2220,7 @@ signing_secret = "slack-secret"
 fn telegram_invalid_subject_prefix() {
     let toml = r#"
 [sources.telegram.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.telegram.integrations.primary.webhook]
 webhook_secret = "tg-secret"
@@ -2214,7 +2236,7 @@ webhook_secret = "tg-secret"
 fn gitlab_invalid_subject_prefix() {
     let toml = r#"
 [sources.gitlab.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.gitlab.integrations.primary.webhook]
 signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
@@ -2230,7 +2252,7 @@ signing_token = "whsec_MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="
 fn linear_invalid_subject_prefix() {
     let toml = r#"
 [sources.linear.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.linear.integrations.primary.webhook]
 webhook_secret = "lin-secret"
@@ -2246,7 +2268,7 @@ webhook_secret = "lin-secret"
 fn microsoft_graph_invalid_subject_prefix() {
     let toml = r#"
 [sources.microsoft_graph.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.microsoft_graph.integrations.primary.webhook]
 client_state = "microsoft-graph-client-state"
@@ -2263,7 +2285,7 @@ fn incidentio_invalid_subject_prefix() {
     let toml = format!(
         r#"
 [sources.incidentio.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.incidentio.integrations.primary.webhook]
 signing_secret = "{}"
@@ -2281,7 +2303,7 @@ signing_secret = "{}"
 fn notion_invalid_subject_prefix() {
     let toml = r#"
 [sources.notion.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.notion.integrations.primary.webhook]
 verification_token = "notion-verification-token-example"
@@ -2297,7 +2319,7 @@ verification_token = "notion-verification-token-example"
 fn sentry_invalid_subject_prefix() {
     let toml = r#"
 [sources.sentry.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.sentry.integrations.primary.webhook]
 client_secret = "sentry-client-secret"
@@ -2313,7 +2335,7 @@ client_secret = "sentry-client-secret"
 fn twitter_invalid_subject_prefix() {
     let toml = r#"
 [sources.twitter.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.twitter.integrations.primary.webhook]
 consumer_secret = "twitter-consumer-secret"
@@ -3064,7 +3086,7 @@ credentials = '{"type":"service_account","project_id":"fake","private_key_id":"f
 fn google_pubsub_invalid_subject_prefix_is_error() {
     let toml = r#"
 [sources.google_pubsub.integrations.primary]
-subject_prefix = "bad.prefix"
+subject_prefix = "bad..prefix"
 
 [sources.google_pubsub.integrations.primary.streaming_pull]
 subscription = "projects/p/subscriptions/sub"
@@ -3700,7 +3722,7 @@ fn zoom_missing_secret_token_is_invalid() {
 fn zoom_invalid_subject_prefix() {
     let toml = r#"
 [sources.zoom.integrations.primary]
-subject_prefix = "has.dots"
+subject_prefix = "has..dots"
 
 [sources.zoom.integrations.primary.webhook]
 secret_token = "zoom-token"
@@ -3884,4 +3906,267 @@ public_webhook_url = "https://example.com/sources/telegram/primary/webhook"
             .any(|e| e.contains("telegram/primary: invalid bot_token") && e.contains("Telegram bot token format")),
         "{errs:?}"
     );
+}
+
+fn stream_binding_errors(toml: &str) -> Vec<String> {
+    let f = write_toml(toml);
+    match load(Some(f.path())) {
+        Err(ConfigError::Validation(errs)) => errs.iter().map(ToString::to_string).collect(),
+        Err(other) => panic!("expected a validation error, got {other}"),
+        Ok(_) => panic!("expected a validation error, config loaded"),
+    }
+}
+
+#[test]
+fn dotted_subject_prefixes_resolve() {
+    let toml = r#"
+[sources.github.integrations.primary]
+subject_prefix = "github.acme"
+
+[sources.github.integrations.primary.webhook]
+webhook_secret = "gh-secret"
+
+[sources.slack.integrations.primary]
+subject_prefix = "slack.acme"
+
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+
+[sources.discord]
+bot_token = "Bot token"
+subject_prefix = "discord.acme"
+"#;
+    let f = write_toml(toml);
+    let cfg = load(Some(f.path())).expect("load failed");
+
+    assert_eq!(cfg.github[0].config.subject_prefix.as_str(), "github.acme");
+    assert_eq!(cfg.slack[0].config.subject_prefix.as_str(), "slack.acme");
+    assert_eq!(cfg.discord.unwrap().subject_prefix.as_str(), "discord.acme");
+}
+
+#[test]
+fn subject_prefix_nested_under_another_integration_is_rejected() {
+    let errs = stream_binding_errors(
+        r#"
+[sources.github.integrations.primary]
+subject_prefix = "github"
+
+[sources.github.integrations.primary.webhook]
+webhook_secret = "gh-secret"
+
+[sources.github.integrations.acme]
+subject_prefix = "github.acme"
+
+[sources.github.integrations.acme.webhook]
+webhook_secret = "gh-secret"
+"#,
+    );
+
+    assert_eq!(
+        errs,
+        vec![
+            "github/acme: subject_prefix `github.acme` overlaps github/primary: subject_prefix `github`; each stream needs its own subjects"
+        ]
+    );
+}
+
+#[test]
+fn identical_subject_prefixes_across_sources_are_rejected() {
+    let errs = stream_binding_errors(
+        r#"
+[sources.github.integrations.primary]
+subject_prefix = "events.acme"
+
+[sources.github.integrations.primary.webhook]
+webhook_secret = "gh-secret"
+
+[sources.slack.integrations.primary]
+subject_prefix = "events.acme"
+
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+"#,
+    );
+
+    assert_eq!(
+        errs,
+        vec![
+            "github/primary: subject_prefix `events.acme` overlaps slack/primary: subject_prefix `events.acme`; each stream needs its own subjects"
+        ]
+    );
+}
+
+#[test]
+fn subject_prefix_over_the_credential_stream_is_rejected() {
+    let errs = stream_binding_errors(
+        r#"
+[sources.github.integrations.primary]
+subject_prefix = "credentials"
+
+[sources.github.integrations.primary.webhook]
+webhook_secret = "gh-secret"
+"#,
+    );
+
+    assert_eq!(
+        errs,
+        vec![
+            "gateway credentials: subject_prefix `credentials.events.v1` overlaps github/primary: subject_prefix `credentials`; each stream needs its own subjects"
+        ]
+    );
+}
+
+#[test]
+fn sibling_prefixes_sharing_leading_characters_do_not_overlap() {
+    let toml = r#"
+[sources.github.integrations.primary]
+subject_prefix = "github.sa"
+
+[sources.github.integrations.primary.webhook]
+webhook_secret = "gh-secret"
+
+[sources.github.integrations.acme]
+subject_prefix = "github.acme"
+
+[sources.github.integrations.acme.webhook]
+webhook_secret = "gh-secret"
+"#;
+    let f = write_toml(toml);
+
+    load(Some(f.path())).expect("sibling prefixes must not overlap");
+}
+
+#[test]
+fn duplicate_stream_names_are_rejected() {
+    let errs = stream_binding_errors(
+        r#"
+[sources.github.integrations.primary]
+stream_name = "EVENTS"
+
+[sources.github.integrations.primary.webhook]
+webhook_secret = "gh-secret"
+
+[sources.slack.integrations.primary]
+stream_name = "EVENTS"
+
+[sources.slack.integrations.primary.webhook]
+signing_secret = "slack-secret"
+"#,
+    );
+
+    assert_eq!(
+        errs,
+        vec!["github/primary and slack/primary both use stream_name `EVENTS`"]
+    );
+}
+
+#[test]
+fn generic_webhooks_enable_an_independent_source_without_provider_integrations() {
+    let file = write_toml("[webhooks]\n");
+    let config = load(Some(file.path())).expect("generic webhook config must load");
+
+    assert!(config.has_any_source());
+    assert_eq!(
+        config.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(604_800).unwrap())
+    );
+}
+
+#[test]
+fn generic_webhooks_retention_contributes_to_claim_check_lifetime() {
+    let file = write_toml("[webhooks]\nstream_max_age_secs = 1209600\n");
+    let config = load(Some(file.path())).expect("generic webhook config must load");
+
+    assert_eq!(
+        config.max_stream_max_age(),
+        Some(StreamMaxAge::from_secs(1_209_600).unwrap())
+    );
+}
+
+#[test]
+fn generic_webhooks_can_be_disabled_without_requiring_infrastructure() {
+    let file = write_toml("[webhooks]\nstatus = 'disabled'\n");
+    let config = load(Some(file.path())).expect("disabled webhook configuration must load");
+
+    assert!(config.webhooks.is_none());
+    assert!(!config.has_any_source());
+    assert_eq!(config.max_stream_max_age(), None);
+}
+
+#[test]
+fn generic_webhooks_reject_zero_retention_and_report_the_setting() {
+    let file = write_toml("[webhooks]\nstream_max_age_secs = 0\n");
+
+    let Err(ConfigError::Validation(errors)) = load(Some(file.path())) else {
+        panic!("zero webhook retention must be a configuration error");
+    };
+    assert!(matches!(
+        errors.as_ref(),
+        [ConfigValidationError::InvalidField {
+            source_name: "webhooks",
+            field: "configuration",
+            error,
+        }] if matches!(
+            error.downcast_ref::<crate::webhooks::config::WebhookConfigError>(),
+            Some(crate::webhooks::config::WebhookConfigError::ZeroDuration {
+                field: "stream_max_age_secs",
+                source: ZeroDurationError,
+            })
+        )
+    ));
+    assert!(errors.iter().any(|error| error.contains("stream_max_age_secs")));
+}
+
+#[test]
+fn generic_webhooks_cannot_deduplicate_beyond_the_retained_delivery_history() {
+    let file = write_toml("[webhooks]\nstream_max_age_secs = 60\nduplicate_window_secs = 61\n");
+
+    assert!(matches!(load(Some(file.path())), Err(ConfigError::Validation(_))));
+}
+
+#[test]
+fn generic_webhooks_reject_invalid_infrastructure_configuration() {
+    for setting in [
+        "registry_bucket = 'bad.bucket'",
+        "subject_prefix = 'webhooks.*'",
+        "stream_name = 'WEBHOOKS.*'",
+        "admission_timeout_secs = 0",
+        "duplicate_window_secs = 0",
+        "duplicate_window_secs = 604801",
+        "unknown_setting = 'refuse'",
+    ] {
+        let file = write_toml(&format!("[webhooks]\n{setting}\n"));
+        assert!(load(Some(file.path())).is_err(), "accepted {setting}");
+    }
+}
+
+#[test]
+fn generic_webhooks_refuse_subjects_over_the_credential_stream() {
+    let file = write_toml(&format!(
+        "[webhooks]\nsubject_prefix = '{}'\n",
+        crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX
+    ));
+
+    assert!(load(Some(file.path())).is_err());
+}
+
+#[test]
+fn generic_webhooks_refuse_overlapping_provider_subjects() {
+    let file = write_toml(
+        "[webhooks]\nsubject_prefix = 'github'\n\
+         [sources.github.integrations.primary]\nsubject_prefix = 'github.primary'\n\
+         [sources.github.integrations.primary.webhook]\nwebhook_secret = 'test-fixture'\n",
+    );
+
+    assert!(load(Some(file.path())).is_err());
+}
+
+#[test]
+fn generic_webhooks_refuse_duplicate_stream_names() {
+    let file = write_toml(&format!(
+        "[webhooks]\nstream_name = '{}'\n",
+        crate::credential::constants::CREDENTIAL_STREAM
+    ));
+
+    assert!(load(Some(file.path())).is_err());
 }

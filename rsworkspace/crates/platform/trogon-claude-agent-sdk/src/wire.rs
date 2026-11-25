@@ -1,0 +1,661 @@
+#[path = "runtime_payload.rs"]
+pub(crate) mod runtime_payload;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::{
+    ControlRequestId, DenialDisposition, JsonObject, Message, MessageDecoding, PermissionDecision, ProtocolError,
+    ToolName, ToolPermissionRequest, ToolUseId,
+    constants::{
+        PERMISSION_TOOL_USE_ID_FIELD, PYTHON_DICT_TYPE, PYTHON_NONE_TYPE, PYTHON_PERMISSION_RESULT_TYPE_ERROR,
+    },
+    deep_json::OwnedValues,
+    message_decode::Decoded,
+};
+
+pub(crate) enum Frame {
+    Message(Message),
+    /// TypeScript consumes `keep_alive` before anything else sees it.
+    KeepAlive,
+    /// Python `parse_message` skipped the message: the run counts it, the caller never sees it.
+    Unparsed,
+    ControlRequest {
+        id: ControlRequestId,
+        request: IncomingControl,
+    },
+    ControlResponse {
+        id: ControlRequestId,
+        response: ControlResponse,
+    },
+    Cancel {
+        id: ControlRequestId,
+    },
+    TranscriptMirror {
+        file_path: std::path::PathBuf,
+        entries: Vec<crate::SessionEntry>,
+    },
+}
+
+pub(crate) enum IncomingControl {
+    Permission(Box<ToolPermissionRequest>),
+    Hook {
+        callback_id: String,
+        input: JsonObject,
+        tool_use_id: Option<ToolUseId>,
+    },
+    /// The `server_name` and `message` fields as sent: either may be missing or of any JSON type, which the
+    /// TypeScript and Python routing each read their own way.
+    Mcp {
+        server_name: Option<Value>,
+        message: Option<Value>,
+    },
+    Elicitation(ElicitationWire),
+    UserDialog {
+        kind: String,
+        payload: JsonObject,
+        tool_use_id: Option<ToolUseId>,
+    },
+    OAuthTokenRefresh {
+        kind: Option<Value>,
+        token_state: Option<String>,
+    },
+    HostAuthTokenRefresh {
+        status: Option<Value>,
+    },
+    RemoteControlWork {
+        session_id: Option<Value>,
+    },
+    /// A `ui_*` subtype, with the request minus its `subtype`.
+    Ui {
+        subtype: String,
+        payload: JsonObject,
+    },
+    Unsupported {
+        subtype: String,
+    },
+}
+
+pub(crate) enum ControlResponse {
+    /// The `response` field, `None` when the success frame has none.
+    Success(Option<Value>),
+    Error {
+        message: String,
+        error_code: Option<Value>,
+    },
+}
+
+impl OwnedValues for Frame {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut Value)) {
+        match self {
+            Self::Message(message) => message.each_value(visit),
+            Self::ControlRequest { request, .. } => request.each_value(visit),
+            Self::ControlResponse {
+                response: ControlResponse::Success(response),
+                ..
+            } => response.each_value(visit),
+            Self::ControlResponse {
+                response: ControlResponse::Error { error_code, .. },
+                ..
+            } => error_code.each_value(visit),
+            Self::TranscriptMirror { entries, .. } => entries.each_value(visit),
+            Self::KeepAlive | Self::Unparsed | Self::Cancel { .. } => {}
+        }
+    }
+}
+
+impl OwnedValues for IncomingControl {
+    fn each_value(&mut self, visit: &mut dyn FnMut(&mut Value)) {
+        match self {
+            Self::Permission(request) => request.each_value(visit),
+            Self::Hook { input, .. } => input.each_value(visit),
+            Self::Mcp { server_name, message } => {
+                server_name.each_value(visit);
+                message.each_value(visit);
+            }
+            Self::Elicitation(request) => request.requested_schema.each_value(visit),
+            Self::UserDialog { payload, .. } | Self::Ui { payload, .. } => payload.each_value(visit),
+            Self::OAuthTokenRefresh { kind, .. } => kind.each_value(visit),
+            Self::HostAuthTokenRefresh { status } => status.each_value(visit),
+            Self::RemoteControlWork { session_id } => session_id.each_value(visit),
+            Self::Unsupported { .. } => {}
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct IncomingControlWire {
+    request_id: String,
+    request: IncomingRequestWire,
+}
+
+#[derive(Deserialize)]
+struct IncomingRequestWire {
+    subtype: String,
+    #[serde(flatten)]
+    data: JsonObject,
+}
+
+#[derive(Deserialize)]
+struct HookRequestWire {
+    callback_id: String,
+    input: JsonObject,
+    tool_use_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OAuthTokenWire {
+    kind: Option<Value>,
+    /// Read as TypeScript compares it, so a non-string state is just not one of the known ones.
+    token_state: Option<Value>,
+}
+
+#[derive(Deserialize)]
+struct HostAuthTokenWire {
+    status: Option<Value>,
+}
+
+#[derive(Deserialize)]
+struct UserDialogWire {
+    dialog_kind: String,
+    payload: JsonObject,
+    tool_use_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ElicitationWire {
+    #[serde(rename = "mcp_server_name")]
+    pub server_name: String,
+    pub message: String,
+    pub mode: Option<String>,
+    pub url: Option<String>,
+    pub elicitation_id: Option<String>,
+    pub requested_schema: Option<JsonObject>,
+    pub title: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TranscriptMirrorWire {
+    #[serde(rename = "filePath")]
+    file_path: std::path::PathBuf,
+    entries: Vec<JsonObject>,
+}
+
+#[derive(Deserialize)]
+struct ControlResponseFrameWire {
+    response: ControlResponseWire,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "subtype")]
+enum ControlResponseWire {
+    #[serde(rename = "success")]
+    Success {
+        request_id: String,
+        #[serde(default, deserialize_with = "present")]
+        response: Option<Value>,
+    },
+    #[serde(rename = "error")]
+    Error {
+        request_id: String,
+        error: String,
+        #[serde(default)]
+        error_code: Option<Value>,
+    },
+}
+
+#[derive(Deserialize)]
+struct CancelWire {
+    request_id: String,
+}
+
+/// Keeps a `null` field apart from a missing one: a present field is `Some`, even when it is `null`.
+fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
+}
+
+fn decode<T: serde::de::DeserializeOwned>(data: JsonObject) -> Result<T, ProtocolError> {
+    Ok(serde_json::from_value(Value::Object(data))?)
+}
+
+fn optional_tool_id(value: Option<String>) -> Result<Option<ToolUseId>, ProtocolError> {
+    Ok(value.map(ToolUseId::from))
+}
+
+/// Takes `key` out of `fields` when `accept` reads it, leaving any other value where it was.
+fn take<T>(fields: &mut JsonObject, key: &str, accept: impl FnOnce(&Value) -> Option<T>) -> Option<T> {
+    let value = fields.get(key).and_then(accept)?;
+    fields.shift_remove(key);
+    Some(value)
+}
+
+fn string(value: &Value) -> Option<String> {
+    value.as_str().map(str::to_owned)
+}
+
+/// Takes a key serde would read as an `Option`: a `null` is taken as nothing, any value `accept` refuses stays.
+fn take_nullable<T>(fields: &mut JsonObject, key: &str, accept: impl FnOnce(&Value) -> Option<T>) -> Option<T> {
+    take(fields, key, |value| {
+        if value.is_null() {
+            Some(None)
+        } else {
+            accept(value).map(Some)
+        }
+    })
+    .flatten()
+}
+
+/// The `mcp_server` provenance: an object with a string `name` and `source`.
+fn mcp_provenance(value: &Value) -> Option<crate::McpServerProvenance> {
+    Some(crate::McpServerProvenance {
+        name: string(value.get("name")?)?,
+        source: string(value.get("source")?)?,
+    })
+}
+
+/// TypeScript `computerFolder`: an object with a string `path` and `computer_name`, or nothing.
+fn computer_folder(value: &Value) -> Option<crate::ComputerFolder> {
+    Some(crate::ComputerFolder {
+        path: string(value.get("path")?)?,
+        computer_name: string(value.get("computer_name")?)?,
+    })
+}
+
+/// TypeScript `matchedAskRule`, with `ruleContent` only when the wire carries one.
+fn matched_ask_rule(value: &Value) -> Option<crate::MatchedAskRule> {
+    let rule_content = match value.get("rule_content") {
+        None => None,
+        Some(content) => Some(string(content)?),
+    };
+    Some(crate::MatchedAskRule {
+        source: string(value.get("source")?)?,
+        tool_name: string(value.get("tool_name")?)?,
+        rule_content,
+    })
+}
+
+/// Reads a `can_use_tool` request the way `sdk.mjs` hands it to `canUseTool`: nothing in it can fail the
+/// request. A field the typed view cannot hold stays in `additional_fields`, and `raw_request` keeps every
+/// field as sent.
+fn permission_request(data: JsonObject, id: &ControlRequestId) -> ToolPermissionRequest {
+    let raw_request = data.clone();
+    let mut fields = data;
+    let fields = &mut fields;
+    let tool_name = take(fields, "tool_name", string);
+    let input = take(fields, "input", |value| value.as_object().cloned());
+    let tool_use_id = take_nullable(fields, "tool_use_id", string);
+    let blocked_path = take_nullable(fields, "blocked_path", string);
+    let decision_reason = take_nullable(fields, "decision_reason", string);
+    let suggestions = take_nullable(fields, "permission_suggestions", |value| {
+        value
+            .as_array()
+            .map(Vec::as_slice)
+            .map(crate::permission_suggestions::typescript)
+    });
+    let agent_id = take_nullable(fields, "agent_id", string);
+    let mcp_server = take_nullable(fields, "mcp_server", mcp_provenance);
+    let title = take_nullable(fields, "title", string);
+    let display_name = take_nullable(fields, "display_name", string);
+    let description = take_nullable(fields, "description", string);
+    let default_to_no = take_nullable(fields, "default_to_no", Value::as_bool);
+    let suppress_always_allow_rule = take_nullable(fields, "suppress_always_allow_rule", Value::as_bool);
+    let requires_user_interaction = take_nullable(fields, "requires_user_interaction", Value::as_bool);
+    let decision_reason_type = take(fields, "decision_reason_type", string);
+    let decision_reason_code = take(fields, "decision_reason_code", string);
+    let server_policy_ask_only = take(fields, "server_policy_ask_only", Value::as_bool);
+    let plugin = take(fields, "plugin", string);
+    let server_prompt = take(fields, "server_prompt", string);
+    let computer_folder = take(fields, "computer_folder", computer_folder);
+    let matched_ask_rule = take(fields, "matched_ask_rule", matched_ask_rule);
+    ToolPermissionRequest {
+        tool_name: ToolName::from(tool_name.unwrap_or_default()),
+        input: input.unwrap_or_default(),
+        tool_use_id: tool_use_id.map(ToolUseId::from),
+        blocked_path,
+        decision_reason,
+        request_id: id.clone(),
+        signal: crate::CancellationToken::new(),
+        suggestions: suggestions.unwrap_or_default(),
+        agent_id,
+        mcp_server,
+        title,
+        display_name,
+        description,
+        default_to_no: default_to_no.into(),
+        suppress_always_allow_rule: suppress_always_allow_rule.into(),
+        requires_user_interaction: requires_user_interaction.into(),
+        decision_reason_type,
+        decision_reason_code,
+        server_policy_ask_only: server_policy_ask_only.into(),
+        plugin,
+        server_prompt,
+        computer_folder,
+        matched_ask_rule,
+        additional_fields: std::mem::take(fields),
+        raw_request,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn parse_frame(bytes: &[u8]) -> Result<Frame, ProtocolError> {
+    parse_value(&serde_json::from_slice(bytes)?, MessageDecoding::TypeScript)
+}
+
+/// Decodes an object a [`crate::Transport`] already parsed as JSON, at any nesting: the recursive decoding runs
+/// over the object with its deep containers set aside, and copies of them go back into the frame afterwards.
+pub(crate) fn parse_value(object: &JsonObject, mode: MessageDecoding) -> Result<Frame, ProtocolError> {
+    let Some(detached) = crate::deep_json::detach(object) else {
+        return parse_shallow(object, mode);
+    };
+    let mut frame = parse_shallow(&detached.skeleton, mode)?;
+    frame.each_value(&mut |value| detached.reattach(value));
+    Ok(frame)
+}
+
+fn parse_shallow(object: &JsonObject, mode: MessageDecoding) -> Result<Frame, ProtocolError> {
+    let data = || object.clone();
+    Ok(match object.get("type").and_then(Value::as_str) {
+        Some("control_request") => {
+            let wire: IncomingControlWire = decode(data())?;
+            let id = ControlRequestId::from(wire.request_id);
+            let request = if wire.request.subtype == "can_use_tool" {
+                IncomingControl::Permission(Box::new(permission_request(wire.request.data, &id)))
+            } else if wire.request.subtype == "hook_callback" {
+                let wire: HookRequestWire = decode(wire.request.data)?;
+                IncomingControl::Hook {
+                    callback_id: wire.callback_id,
+                    input: wire.input,
+                    tool_use_id: optional_tool_id(wire.tool_use_id)?,
+                }
+            } else if wire.request.subtype == "mcp_message" {
+                IncomingControl::Mcp {
+                    server_name: wire.request.data.get("server_name").cloned(),
+                    message: wire.request.data.get("message").cloned(),
+                }
+            } else if wire.request.subtype == "elicitation" {
+                IncomingControl::Elicitation(decode(wire.request.data)?)
+            } else if wire.request.subtype == "request_user_dialog" {
+                let wire: UserDialogWire = decode(wire.request.data)?;
+                IncomingControl::UserDialog {
+                    kind: wire.dialog_kind,
+                    payload: wire.payload,
+                    tool_use_id: optional_tool_id(wire.tool_use_id)?,
+                }
+            } else if wire.request.subtype == "oauth_token_refresh" {
+                let wire: OAuthTokenWire = decode(wire.request.data)?;
+                IncomingControl::OAuthTokenRefresh {
+                    kind: wire.kind,
+                    token_state: wire.token_state.as_ref().and_then(Value::as_str).map(str::to_owned),
+                }
+            } else if wire.request.subtype == "host_auth_token_refresh" {
+                let wire: HostAuthTokenWire = decode(wire.request.data)?;
+                IncomingControl::HostAuthTokenRefresh { status: wire.status }
+            } else if wire.request.subtype == "remote_control_work_secret" {
+                IncomingControl::RemoteControlWork {
+                    session_id: wire.request.data.get("session_id").cloned(),
+                }
+            } else if crate::constants::UI_SUBTYPES.contains(&wire.request.subtype.as_str()) {
+                IncomingControl::Ui {
+                    subtype: wire.request.subtype,
+                    payload: wire.request.data,
+                }
+            } else {
+                IncomingControl::Unsupported {
+                    subtype: wire.request.subtype,
+                }
+            };
+            Frame::ControlRequest { id, request }
+        }
+        Some("control_response") => {
+            let wire: ControlResponseFrameWire = decode(data())?;
+            match wire.response {
+                ControlResponseWire::Success { request_id, response } => Frame::ControlResponse {
+                    id: ControlRequestId::from(request_id),
+                    response: ControlResponse::Success(response),
+                },
+                ControlResponseWire::Error {
+                    request_id,
+                    error,
+                    error_code,
+                } => Frame::ControlResponse {
+                    id: ControlRequestId::from(request_id),
+                    response: ControlResponse::Error {
+                        message: error,
+                        error_code,
+                    },
+                },
+            }
+        }
+        Some("control_cancel_request") => {
+            let wire: CancelWire = decode(data())?;
+            Frame::Cancel {
+                id: ControlRequestId::from(wire.request_id),
+            }
+        }
+        Some("transcript_mirror") => {
+            let wire: TranscriptMirrorWire = decode(data())?;
+            Frame::TranscriptMirror {
+                file_path: wire.file_path,
+                entries: wire.entries.into_iter().map(crate::SessionEntry::new).collect(),
+            }
+        }
+        _ => match crate::message_decode::decode(object, mode)? {
+            Decoded::Message(message) => Frame::Message(*message),
+            Decoded::KeepAlive => Frame::KeepAlive,
+            Decoded::Unparsed => Frame::Unparsed,
+        },
+    })
+}
+
+pub(crate) fn control_request(
+    id: &ControlRequestId,
+    request: Value,
+    style: crate::ArgvStyle,
+) -> Result<Value, ProtocolError> {
+    match style {
+        crate::ArgvStyle::TypeScript => serde_json::to_value(runtime_payload::TypeScriptControlRequest {
+            request_id: id.as_str(),
+            kind: "control_request",
+            request,
+        }),
+        crate::ArgvStyle::Python => serde_json::to_value(runtime_payload::OutboundFrame::Request {
+            request_id: id.as_str(),
+            request,
+        }),
+    }
+    .map_err(ProtocolError::from)
+}
+
+/// The `mcp_message` control request for a message an in-process server sent on its own, in upstream key order.
+pub(crate) fn mcp_forward(id: &ControlRequestId, request: Value) -> Result<Value, ProtocolError> {
+    serde_json::to_value(runtime_payload::TypeScriptMcpForward {
+        kind: "control_request",
+        request_id: id.as_str(),
+        request,
+    })
+    .map_err(ProtocolError::from)
+}
+
+/// The `can_use_tool` answer in the dialect's shape, or `None` when the host answered out of band.
+///
+/// TypeScript writes `{...result, toolUseID}` with `updatedInput` only when the handler set it; a raw result keeps
+/// its keys in order, takes the request's `toolUseID` in place of its own and loses its own when the request had
+/// none, as the spread does. Python sends the original input when the handler left it unset, never adds
+/// `toolUseID`, and rejects a raw result as it rejects a `dict`.
+/// `input` is the wire `input` Python echoes as `updatedInput` when the handler leaves it unset.
+pub(crate) fn permission_response(
+    id: &ControlRequestId,
+    input: Value,
+    tool_use_id: Option<&ToolUseId>,
+    decision: PermissionDecision,
+    style: crate::ArgvStyle,
+) -> Result<Option<Value>, ProtocolError> {
+    let typescript = style == crate::ArgvStyle::TypeScript;
+    let tool_use_id = tool_use_id.filter(|_| typescript).map(ToolUseId::as_str);
+    let response = match decision {
+        PermissionDecision::Allow {
+            updated_input,
+            updated_permissions,
+            decision_classification,
+        } => runtime_payload::PermissionResponsePayload::Allow {
+            updated_input: if typescript {
+                updated_input.map(Value::Object)
+            } else {
+                Some(updated_input.map_or(input, Value::Object))
+            },
+            updated_permissions: updated_permissions
+                .map(|updates| {
+                    updates
+                        .iter()
+                        .map(|update| {
+                            if typescript {
+                                update.to_wire_json()
+                            } else {
+                                update.to_python_wire_json()
+                            }
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+                .transpose()?,
+            decision_classification: decision_classification.map(crate::PermissionDecisionClassification::as_str),
+            tool_use_id,
+        },
+        PermissionDecision::Deny {
+            message,
+            disposition,
+            decision_classification,
+        } => runtime_payload::PermissionResponsePayload::Deny {
+            message,
+            interrupt: (disposition == DenialDisposition::Interrupt).then_some(true),
+            decision_classification: decision_classification.map(crate::PermissionDecisionClassification::as_str),
+            tool_use_id,
+        },
+        PermissionDecision::AnsweredOutOfBand if typescript => return Ok(None),
+        PermissionDecision::AnsweredOutOfBand => {
+            return callback_error_response(id, &format!("{PYTHON_PERMISSION_RESULT_TYPE_ERROR}{PYTHON_NONE_TYPE}"))
+                .map(Some);
+        }
+        PermissionDecision::Raw(mut result) if typescript => {
+            match tool_use_id {
+                Some(tool_use_id) => {
+                    result.insert(PERMISSION_TOOL_USE_ID_FIELD.to_owned(), Value::from(tool_use_id));
+                }
+                None => {
+                    result.shift_remove(PERMISSION_TOOL_USE_ID_FIELD);
+                }
+            }
+            return success_response(id, result).map(Some);
+        }
+        PermissionDecision::Raw(_) => {
+            return callback_error_response(id, &format!("{PYTHON_PERMISSION_RESULT_TYPE_ERROR}{PYTHON_DICT_TYPE}"))
+                .map(Some);
+        }
+        PermissionDecision::Failed { message } => return callback_error_response(id, &message).map(Some),
+    };
+    success_response(id, response).map(Some)
+}
+
+/// The answer to a `can_use_tool` request when no permission handler is registered.
+pub(crate) fn missing_permission_handler_response(
+    id: &ControlRequestId,
+    style: crate::ArgvStyle,
+) -> Result<Value, ProtocolError> {
+    callback_error_response(
+        id,
+        match style {
+            crate::ArgvStyle::TypeScript => "canUseTool callback is not provided.",
+            crate::ArgvStyle::Python => "canUseTool callback is not provided",
+        },
+    )
+}
+
+/// The `hook_callback` answer for a callback id the initialize request did not register.
+pub(crate) fn unknown_hook_response(id: &ControlRequestId, callback_id: &str) -> Result<Value, ProtocolError> {
+    callback_error_response(id, &format!("No hook callback found for ID: {callback_id}"))
+}
+
+/// The answer to a failed handler. A cancelled TypeScript handler throws its signal's `AbortError`; a cancelled
+/// Python handler raises the cancellation, which writes nothing.
+pub(crate) fn handler_error_response(
+    id: &ControlRequestId,
+    error: &crate::CallbackError,
+    style: crate::ArgvStyle,
+) -> Result<Option<Value>, ProtocolError> {
+    match (error, style) {
+        (crate::CallbackError::Cancelled, crate::ArgvStyle::Python) => Ok(None),
+        (crate::CallbackError::Cancelled, crate::ArgvStyle::TypeScript) => {
+            callback_error_response(id, "This operation was aborted").map(Some)
+        }
+        (crate::CallbackError::Failed(error), _) => callback_error_response(id, &error.to_string()).map(Some),
+    }
+}
+
+/// The answer to a subtype this SDK does not handle, or `None` when the dialect leaves it unanswered.
+///
+/// TypeScript throws its `unsupported_request` error, except for the remote tool subtypes it ignores and the auth
+/// refresh subtypes whose callback is missing. Python raises one plain error for every subtype it does not
+/// handle.
+pub(crate) fn unsupported_response(
+    id: &ControlRequestId,
+    subtype: &str,
+    style: crate::ArgvStyle,
+) -> Option<Result<Value, ProtocolError>> {
+    let message = format!("Unsupported control request subtype: {subtype}");
+    match style {
+        crate::ArgvStyle::Python => Some(callback_error_response(id, &message)),
+        crate::ArgvStyle::TypeScript => match subtype {
+            _ if crate::constants::REMOTE_TOOL_SUBTYPES.contains(&subtype) => None,
+            "oauth_token_refresh" => Some(callback_error_response(id, crate::constants::OAUTH_CALLBACK_MISSING)),
+            "host_auth_token_refresh" => Some(callback_error_response(
+                id,
+                crate::constants::HOST_AUTH_CALLBACK_MISSING,
+            )),
+            "remote_control_work_secret" => Some(callback_error_response(
+                id,
+                "refreshWorkSecret callback is not provided.",
+            )),
+            _ => Some(error_frame(id, &message, Some("unsupported_request"))),
+        },
+    }
+}
+
+pub(crate) fn success_response<T: Serialize>(id: &ControlRequestId, response: T) -> Result<Value, ProtocolError> {
+    serde_json::to_value(runtime_payload::OutboundFrame::Response {
+        response: runtime_payload::CallbackResponse::Success {
+            request_id: id.as_str(),
+            response,
+        },
+    })
+    .map_err(ProtocolError::from)
+}
+
+/// The success frame of a handler that returned `undefined`, which `JSON.stringify` writes without `response`.
+pub(crate) fn success_without_response(id: &ControlRequestId) -> Result<Value, ProtocolError> {
+    let frame: runtime_payload::OutboundFrame<'_, Value> = runtime_payload::OutboundFrame::Response {
+        response: runtime_payload::CallbackResponse::SuccessWithoutResponse {
+            request_id: id.as_str(),
+        },
+    };
+    serde_json::to_value(frame).map_err(ProtocolError::from)
+}
+
+fn error_frame(id: &ControlRequestId, message: &str, error_code: Option<&str>) -> Result<Value, ProtocolError> {
+    let frame: runtime_payload::OutboundFrame<'_, Value> = runtime_payload::OutboundFrame::Response {
+        response: runtime_payload::CallbackResponse::Error {
+            request_id: id.as_str(),
+            error: message,
+            error_code,
+        },
+    };
+    serde_json::to_value(frame).map_err(ProtocolError::from)
+}
+
+pub(crate) fn callback_error_response(id: &ControlRequestId, message: &str) -> Result<Value, ProtocolError> {
+    error_frame(id, message, None)
+}
+
+#[cfg(test)]
+#[path = "wire_tests.rs"]
+mod tests;

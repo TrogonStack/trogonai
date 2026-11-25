@@ -1,0 +1,360 @@
+{
+  "source": "@anthropic-ai/claude-agent-sdk 0.3.323 sdk.mjs o1e/s1e",
+  "cases": [
+    {
+      "name": "",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"\":",
+        "  - Tool name cannot be empty",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "a",
+      "valid": true,
+      "lines": []
+    },
+    {
+      "name": "ok_name",
+      "valid": true,
+      "lines": []
+    },
+    {
+      "name": "Ok.Name-1",
+      "valid": true,
+      "lines": []
+    },
+    {
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "valid": true,
+      "lines": []
+    },
+    {
+      "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\":",
+        "  - Tool name exceeds maximum length of 128 characters (current: 129)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "two words",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"two words\":",
+        "  - Tool name contains spaces, which may cause parsing issues",
+        "  - Tool name contains invalid characters: \" \"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "a,b",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"a,b\":",
+        "  - Tool name contains commas, which may cause parsing issues",
+        "  - Tool name contains invalid characters: \",\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "with space, comma",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"with space, comma\":",
+        "  - Tool name contains spaces, which may cause parsing issues",
+        "  - Tool name contains commas, which may cause parsing issues",
+        "  - Tool name contains invalid characters: \" \", \",\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "-lead",
+      "valid": true,
+      "lines": [
+        "Tool name validation warning for \"-lead\":",
+        "  - Tool name starts or ends with a dash, which may cause parsing issues in some contexts",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "trail-",
+      "valid": true,
+      "lines": [
+        "Tool name validation warning for \"trail-\":",
+        "  - Tool name starts or ends with a dash, which may cause parsing issues in some contexts",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": ".lead",
+      "valid": true,
+      "lines": [
+        "Tool name validation warning for \".lead\":",
+        "  - Tool name starts or ends with a dot, which may cause parsing issues in some contexts",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "trail.",
+      "valid": true,
+      "lines": [
+        "Tool name validation warning for \"trail.\":",
+        "  - Tool name starts or ends with a dot, which may cause parsing issues in some contexts",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "-both.",
+      "valid": true,
+      "lines": [
+        "Tool name validation warning for \"-both.\":",
+        "  - Tool name starts or ends with a dash, which may cause parsing issues in some contexts",
+        "  - Tool name starts or ends with a dot, which may cause parsing issues in some contexts",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": ".",
+      "valid": true,
+      "lines": [
+        "Tool name validation warning for \".\":",
+        "  - Tool name starts or ends with a dot, which may cause parsing issues in some contexts",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "-",
+      "valid": true,
+      "lines": [
+        "Tool name validation warning for \"-\":",
+        "  - Tool name starts or ends with a dash, which may cause parsing issues in some contexts",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "tool/name",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"tool/name\":",
+        "  - Tool name contains invalid characters: \"/\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "quote\"d",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"quote\"d\":",
+        "  - Tool name contains invalid characters: \"\"\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "tab\tname",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"tab\tname\":",
+        "  - Tool name contains invalid characters: \"\t\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "new\nline",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"new\nline\":",
+        "  - Tool name contains invalid characters: \"\n\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "café",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"café\":",
+        "  - Tool name contains invalid characters: \"é\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "a😀b",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"a😀b\":",
+        "  - Tool name contains invalid characters: \"�\", \"�\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "😀😃",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"😀😃\":",
+        "  - Tool name contains invalid characters: \"�\", \"�\", \"�\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\":",
+        "  - Tool name contains invalid characters: \"�\", \"�\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\":",
+        "  - Tool name exceeds maximum length of 128 characters (current: 130)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\":",
+        "  - Tool name contains invalid characters: \"é\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\":",
+        "  - Tool name exceeds maximum length of 128 characters (current: 129)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "dup!!??",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"dup!!??\":",
+        "  - Tool name contains invalid characters: \"!\", \"?\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": " ",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \" \":",
+        "  - Tool name contains spaces, which may cause parsing issues",
+        "  - Tool name contains invalid characters: \" \"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": ",",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \",\":",
+        "  - Tool name contains commas, which may cause parsing issues",
+        "  - Tool name contains invalid characters: \",\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "a b,c-.",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"a b,c-.\":",
+        "  - Tool name contains spaces, which may cause parsing issues",
+        "  - Tool name contains commas, which may cause parsing issues",
+        "  - Tool name starts or ends with a dot, which may cause parsing issues in some contexts",
+        "  - Tool name contains invalid characters: \" \", \",\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    },
+    {
+      "name": "\u0000nul",
+      "valid": false,
+      "lines": [
+        "Tool name validation warning for \"\u0000nul\":",
+        "  - Tool name contains invalid characters: \"\u0000\"",
+        "  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)",
+        "Tool registration will proceed, but this may cause compatibility issues.",
+        "Consider updating the tool name to conform to the MCP tool naming standard.",
+        "See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details."
+      ]
+    }
+  ]
+}

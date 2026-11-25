@@ -64,6 +64,7 @@ const GLOSSARY_SECTION_ORDER = [
   "Protocols and transports",
   "Event sourcing and the decider",
   "Agent execution model",
+  "Third-party connections",
   "Channels and conversations",
   "Messaging and storage infrastructure",
   "WebAssembly execution",
@@ -206,4 +207,46 @@ function readTitle(filePath: string, content: string) {
 
 function parseAdrNumber(number: string) {
   return Number.parseInt(number, 10);
+}
+
+type ProductAreaRecord = {
+  link: string;
+  name: string;
+  order: number;
+};
+
+export async function readProductAreaRecords(rootDir: string): Promise<ProductAreaRecord[]> {
+  const productDir = path.join(rootDir, "product");
+  const entries = await fs.promises.readdir(productDir, { withFileTypes: true });
+  const pages = [
+    ...entries
+      .filter(isFile)
+      .map(toFileName)
+      .filter(isNonIndexMarkdownFile)
+      .map((fileName) => ({ filePath: path.join(productDir, fileName), link: `/product/${path.basename(fileName, ".md")}` })),
+    ...entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({ filePath: path.join(productDir, entry.name, "index.md"), link: `/product/${entry.name}/` }))
+      .filter((page) => fs.existsSync(page.filePath)),
+  ];
+
+  return pages
+    .map(({ filePath, link }) => {
+      const product = matter(fs.readFileSync(filePath, "utf-8")).data.product;
+
+      if (typeof product?.name !== "string" || typeof product?.order !== "number") {
+        throw new Error(`${filePath}\n\nProduct pages must set product.name and product.order in frontmatter.`);
+      }
+
+      return { link, name: product.name, order: product.order };
+    })
+    .sort((left, right) => left.order - right.order);
+}
+
+export function toProductNavItem(record: ProductAreaRecord) {
+  return { text: record.name, link: record.link };
+}
+
+function isNonIndexMarkdownFile(fileName: string) {
+  return path.extname(fileName) === ".md" && fileName !== "index.md";
 }

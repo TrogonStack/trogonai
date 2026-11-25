@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn as_str_returns_expected_values() {
+    assert_eq!(ServiceName::A2aGateway.as_str(), "a2a-gateway");
     assert_eq!(ServiceName::AcpNatsStdio.as_str(), "acp-nats-stdio");
     assert_eq!(ServiceName::AcpNatsServer.as_str(), "acp-nats-server");
     assert_eq!(ServiceName::McpNatsStdio.as_str(), "mcp-nats-stdio");
@@ -15,6 +16,7 @@ fn as_str_returns_expected_values() {
     assert_eq!(ServiceName::TrogonSourceSlack.as_str(), "trogon-source-slack");
     assert_eq!(ServiceName::TrogonSourceTelegram.as_str(), "trogon-source-telegram");
     assert_eq!(ServiceName::ChannelBridgeTelegram.as_str(), "channel-bridge-telegram");
+    assert_eq!(ServiceName::TrogonEgressProxy.as_str(), "trogon-egress-proxy");
 }
 
 #[test]

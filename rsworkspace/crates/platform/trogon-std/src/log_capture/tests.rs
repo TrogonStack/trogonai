@@ -84,3 +84,42 @@ fn debug_renders_the_captured_fields() {
     let rendered = format!("{:?}", events.events());
     assert!(rendered.contains("user_id"), "{rendered}");
 }
+
+fn emit_from_a_fresh_callsite() {
+    tracing::info!(attempt = 1, "first reached on another thread");
+}
+
+#[test]
+fn records_an_event_whose_callsite_was_first_reached_on_a_thread_without_a_subscriber() {
+    let events = CapturedEvents::new();
+    let guard = events.install(LevelFilter::INFO);
+
+    std::thread::spawn(emit_from_a_fresh_callsite).join().unwrap();
+    emit_from_a_fresh_callsite();
+    drop(guard);
+
+    let captured = events.events();
+    let [event] = captured.as_slice() else {
+        panic!("expected exactly one event, got {captured:?}");
+    };
+    assert_eq!(event.field("attempt"), Some("1"));
+}
+
+#[test]
+fn keeps_each_event_level_and_selects_events_at_exactly_one_level() {
+    let events = CapturedEvents::new();
+    let guard = events.install(LevelFilter::INFO);
+
+    tracing::info!(step = 1, "started");
+    tracing::warn!(reason = "slow", "lagging");
+    tracing::error!(reason = "gone", "failed");
+    drop(guard);
+
+    let levels: Vec<Level> = events.events().iter().map(CapturedEvent::level).collect();
+    assert_eq!(levels, [Level::INFO, Level::WARN, Level::ERROR]);
+    let warnings = events.at(Level::WARN);
+    let [warning] = warnings.as_slice() else {
+        panic!("expected exactly one warning, got {warnings:?}");
+    };
+    assert_eq!(warning.field("reason"), Some("slow"));
+}

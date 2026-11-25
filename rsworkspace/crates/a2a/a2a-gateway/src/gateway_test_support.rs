@@ -4,6 +4,7 @@ use a2a_nats::nats::subjects::tasks::TaskEventsSubject;
 use a2a_nats::{A2aPrefix, A2aTaskId};
 use async_nats::jetstream::AckKind;
 use async_nats::subject::ToSubject;
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::jetstream::message::{JsAck, JsAckWith, JsDoubleAck, JsMessageRef};
 use trogon_nats::jetstream::mocks::{AckKindSnapshot, MockJsMessage};
 use trogon_nats::mocks::MockError;
@@ -14,6 +15,7 @@ pub(crate) enum Diagnostics {
     Tracing {
         events: CapturedEvents,
         _guard: tracing::subscriber::DefaultGuard,
+        _interest_peer: tracing::Dispatch,
     },
 }
 
@@ -22,9 +24,16 @@ impl Diagnostics {
         match CapturedLogs::isolated() {
             Some(logs) => Self::Facade(logs),
             None => {
+                // While only one dispatcher is registered, tracing caches a callsite's interest from the
+                // first thread to reach it, so a concurrent test without a subscriber could mute this capture.
+                let interest_peer = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new());
                 let events = CapturedEvents::new();
                 let guard = events.install(LevelFilter::DEBUG);
-                Self::Tracing { events, _guard: guard }
+                Self::Tracing {
+                    events,
+                    _guard: guard,
+                    _interest_peer: interest_peer,
+                }
             }
         }
     }
@@ -100,12 +109,23 @@ impl JsDoubleAck for ObservedMessage {
     }
 }
 
+pub(crate) fn event_caller() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "alice").expect("test caller")
+}
+
 pub(crate) fn event(headers: async_nats::HeaderMap) -> async_nats::Message {
-    let payload = bytes::Bytes::from_static(b"event payload");
     let prefix = A2aPrefix::new("a2a").expect("test prefix");
     let task_id = A2aTaskId::new("task-1").expect("test task");
+    event_on(
+        TaskEventsSubject::new(&prefix, &task_id, &event_caller()).to_subject(),
+        headers,
+    )
+}
+
+pub(crate) fn event_on(subject: async_nats::Subject, headers: async_nats::HeaderMap) -> async_nats::Message {
+    let payload = bytes::Bytes::from_static(b"event payload");
     async_nats::Message {
-        subject: TaskEventsSubject::new(&prefix, &task_id).to_subject(),
+        subject,
         reply: None,
         payload: payload.clone(),
         headers: Some(headers),

@@ -12,14 +12,33 @@
     feature = "gateway",
     feature = "schedules",
     feature = "decider",
-    feature = "grpc-nats-micro"
+    feature = "peers",
+    feature = "grpc-nats-micro",
+    feature = "policy",
+    feature = "model-access",
+    feature = "audit",
+    feature = "secrets-exchange"
 ))]
 mod r#gen;
 
-#[cfg(any(feature = "gateway", feature = "schedules"))]
+#[cfg(any(feature = "gateway", feature = "schedules", feature = "peers"))]
 mod codec;
 
 pub mod constants;
+
+#[cfg(feature = "session-contracts")]
+#[allow(clippy::all)]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    allow(
+        acyclic_modules,
+        reason = "Buffa emits message and view modules that reference each other"
+    )
+)]
+mod session_gen;
+
+#[cfg(feature = "session-contracts")]
+pub mod session_contracts;
 
 #[cfg(feature = "chrono")]
 pub mod convert;
@@ -33,14 +52,49 @@ pub mod scheduler;
 #[cfg(feature = "decider")]
 pub mod decider;
 
+#[cfg(feature = "peers")]
+pub mod peers;
+
 #[cfg(feature = "schedules")]
 pub use crate::r#gen::trogon::content;
 
 #[cfg(feature = "grpc-nats-micro")]
 pub use crate::r#gen::trogon::nats;
 
-#[cfg(any(feature = "schedules", feature = "decider", feature = "grpc-nats-micro"))]
+#[cfg(any(
+    feature = "schedules",
+    feature = "decider",
+    feature = "grpc-nats-micro",
+    feature = "policy"
+))]
 pub mod google;
+
+#[cfg(feature = "policy")]
+pub use crate::r#gen::trogonai::policy;
+
+#[cfg(feature = "model-access")]
+pub use crate::r#gen::trogonai::model_access;
+
+#[cfg(feature = "audit")]
+pub use crate::r#gen::trogonai::platform;
+
+#[cfg(feature = "audit")]
+pub use crate::r#gen::trogonai::session;
+
+#[cfg(feature = "secrets-exchange")]
+pub use crate::r#gen::trogonai::secrets;
+
+#[cfg(feature = "policy")]
+pub use crate::r#gen::trogonai::connections;
+
+#[cfg(feature = "policy")]
+pub use crate::r#gen::trogonai::projects;
+
+#[cfg(any(feature = "policy", feature = "model-access"))]
+pub use crate::r#gen::trogon::hierarchy;
+
+#[cfg(any(feature = "policy", feature = "model-access"))]
+pub use crate::r#gen::trogonai::agents;
 
 #[cfg(feature = "grpc-nats-micro")]
 pub use crate::r#gen::trogonai::grpc_nats_micro;
@@ -95,5 +149,16 @@ pub fn decode_event_to_json(type_url: &str, payload: &[u8]) -> Result<Option<Str
 #[cfg(all(test, feature = "schedules"))]
 mod tests;
 
-#[cfg(all(test, any(feature = "schedules", feature = "decider", feature = "grpc-nats-micro")))]
+#[cfg(all(
+    test,
+    any(
+        feature = "schedules",
+        feature = "decider",
+        feature = "grpc-nats-micro",
+        feature = "policy",
+        feature = "model-access",
+        feature = "audit",
+        feature = "secrets-exchange"
+    )
+))]
 mod codec_conformance_tests;

@@ -1,0 +1,28 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// Provider validity evidence, distinct from the finite local valid_until on
+// a resolved credential. Unknown never means non-expiring. Only a pinned
+// release's documented policy can supply documented or non-expiring evidence.
+message AccessExpiry {
+  oneof evidence {
+    option (buf.validate.oneof).required = true;
+
+    // Derived from the response's lifetime and custody's response receipt time.
+    google.protobuf.Timestamp reported_expires_at = 1 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+    // Derived from the release's documented fallback lifetime and receipt time,
+    // not represented as a lifetime the provider reported in this response.
+    google.protobuf.Timestamp documented_expires_at = 2 [(buf.validate.field).timestamp.gt = {seconds: 0}];
+    // No expiry evidence. Do not invent a timestamp or schedule proactive
+    // refresh by a nonexistent lifetime; refresh can still follow rejection.
+    google.protobuf.Empty unknown = 3;
+    // The pinned release documents that access has no scheduled expiry.
+    // Revocation and local cache bounds still apply.
+    google.protobuf.Empty non_expiring = 4;
+  }
+}

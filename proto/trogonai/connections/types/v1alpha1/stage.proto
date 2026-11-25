@@ -1,0 +1,61 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/secrets/v1alpha1/secret_ref.proto";
+
+// The immutable promotion target recorded on the staged credential stream
+// before activation or reconnect (ADR#0095 Decision 12). The attempt parent is
+// also the target connection's custody parent. This carries no material or
+// authority: dispatch verifies every value against authoritative state.
+message StagePromotionBinding {
+  AuthorizationAttemptRef attempt_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.secrets.v1alpha1.SecretVersionRef staged_bundle_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionId connection_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  uint64 authorization_generation = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+// The receipt of the protection append, verified against the staged stream,
+// never trusted from the payload alone. It has no expiry or lease release.
+message StagePromotionProtection {
+  StagePromotionBinding binding = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stage_stream_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+enum StageDiscardTerminalOutcome {
+  STAGE_DISCARD_TERMINAL_OUTCOME_UNSPECIFIED = 0;
+  STAGE_DISCARD_TERMINAL_OUTCOME_FAILED = 1;
+  STAGE_DISCARD_TERMINAL_OUTCOME_EXPIRED = 2;
+  STAGE_DISCARD_TERMINAL_OUTCOME_CANCELLED = 3;
+}
+
+// An observation of a terminal, unactivated attempt. The handler verifies the
+// exact terminal revision and equality with the attempt attributed by the
+// current staged fold, not another terminal attempt in the same project. It
+// checks that no promotion protection exists in
+// the current staged fold under the same CAS as discard. Terminality alone
+// cannot release a protected stage; a timeout or absent activation read is
+// never discard evidence (ADR#0095 Decision 12).
+message StageDiscardEvidence {
+  AuthorizationAttemptRef attempt_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 terminal_attempt_revision = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  StageDiscardTerminalOutcome terminal_outcome = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}

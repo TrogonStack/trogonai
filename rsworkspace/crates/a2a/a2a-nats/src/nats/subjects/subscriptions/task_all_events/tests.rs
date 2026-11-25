@@ -2,13 +2,13 @@ use super::*;
 use async_nats::subject::ToSubject;
 
 #[test]
-fn formats_global_tasks_events_filter() {
+fn formats_global_tasks_events_filter_over_every_task_and_caller() {
     let s = TaskAllEventsSubject::new(&A2aPrefix::new("a2a").unwrap());
-    assert_eq!(s.to_string(), "a2a.v1.tasks.*.events");
+    assert_eq!(s.to_string(), "a2a.v1.tasks.*.*.*.events");
 }
 
 #[test]
 fn to_subject_round_trips_display_form() {
     let s = TaskAllEventsSubject::new(&A2aPrefix::new("a2a").unwrap());
-    assert_eq!(s.to_subject().as_str(), "a2a.v1.tasks.*.events");
+    assert_eq!(s.to_subject().as_str(), "a2a.v1.tasks.*.*.*.events");
 }

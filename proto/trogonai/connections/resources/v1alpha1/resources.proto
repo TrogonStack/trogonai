@@ -1,0 +1,132 @@
+edition = "2024";
+
+package trogonai.connections.resources.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/account_claims/state/v1alpha1/state.proto";
+import "trogonai/connections/authorization_attempts/state/v1alpha1/state.proto";
+import "trogonai/connections/catalog/state/v1alpha1/state.proto";
+import "trogonai/connections/connections/state/v1alpha1/state.proto";
+import "trogonai/connections/grants/state/v1alpha1/state.proto";
+import "trogonai/connections/provider_apps/state/v1alpha1/state.proto";
+import "trogonai/connections/resources/v1alpha1/names.proto";
+import "trogonai/policy/connection_permissions/state/v1alpha1/state.proto";
+import "trogonai/secrets/credentials/state/v1alpha1/state.proto";
+
+// Parent-authorized metadata views only. Secret material and the erasable
+// provider account profile are never fields of these responses. Read admission
+// authenticates the tenant, exact parent and caller class before retrieving a
+// snapshot; unknown and unauthorized resources share the same failure shape.
+// stream_revision identifies the source fold and is not a permission receipt.
+
+message ConnectorReleaseResource {
+  option (buf.validate.message).cel = {
+    id: "connector_release_resource.identity_matches_state"
+    message: "resource name and folded state must have the same parent and identity"
+    expression: "this.resource.resource_parent == this.state.resource_parent && this.resource.release_id == this.state.release_id"
+  };
+  ConnectorReleaseResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.catalog.state.v1alpha1.ConnectorRelease state = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ProviderAppResource {
+  option (buf.validate.message).cel = {
+    id: "provider_app_resource.identity_matches_state"
+    message: "resource name and folded state must have the same parent and identity"
+    expression: "this.resource.resource_parent == this.state.resource_parent && this.resource.provider_app_id == this.state.provider_app_id"
+  };
+  ProviderAppResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.provider_apps.state.v1alpha1.ProviderApp state = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ConnectionResource {
+  option (buf.validate.message).cel = {
+    id: "connection_resource.identity_matches_state"
+    message: "resource name and folded state must have the same parent and identity"
+    expression: "this.resource.resource_parent == this.state.resource_parent && this.resource.connection_id == this.state.id"
+  };
+  ConnectionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.connections.state.v1alpha1.Connection state = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message AuthorizationAttemptResource {
+  option (buf.validate.message).cel = {
+    id: "authorization_attempt_resource.identity_matches_state"
+    message: "resource name and folded state must have the same parent and identity"
+    expression: "this.resource.resource_parent == this.state.resource_parent && this.resource.attempt_id == this.state.attempt_id"
+  };
+  AuthorizationAttemptResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.authorization_attempts.state.v1alpha1.AuthorizationAttempt state = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ProviderAccountClaimResource {
+  option (buf.validate.message).cel = {
+    id: "provider_account_claim_resource.identity_matches_state"
+    message: "resource name and folded state must have the same parent and identity"
+    expression: "this.resource.resource_parent == this.state.resource_parent && this.resource.claim_id == this.state.claim_id"
+  };
+  ProviderAccountClaimResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.account_claims.state.v1alpha1.ProviderAccountClaim state = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ConnectionGrantResource {
+  option (buf.validate.message).cel = {
+    id: "connection_grant_resource.identity_matches_state"
+    message: "resource name and folded state must have the same parent and identity"
+    expression: "this.resource.resource_parent == this.state.resource_parent && this.resource.grant_id == this.state.grant_id"
+  };
+  ConnectionGrantResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.grants.state.v1alpha1.ConnectionGrant state = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message CredentialResource {
+  option (buf.validate.message).cel = {
+    id: "credential_resource.identity_matches_state"
+    message: "resource name and folded state must have the same parent and identity"
+    expression: "this.resource.resource_parent == this.state.resource_parent && this.resource.secret_ref == this.state.secret_ref"
+  };
+  CredentialResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.secrets.credentials.state.v1alpha1.Credential state = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}
+
+message ConnectionPermissionResource {
+  option (buf.validate.message).cel = {
+    id: "connection_permission_resource.identity_matches_state"
+    message: "resource name and folded state must have the same parent and identity"
+    expression: "this.resource.resource_parent == this.state.resource_parent && this.resource.resource_parent.subject == this.state.subject"
+  };
+  ConnectionPermissionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.policy.connection_permissions.state.v1alpha1.InitializedConnectionPermission state = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 stream_revision = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+}

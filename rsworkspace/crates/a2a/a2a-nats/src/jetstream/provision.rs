@@ -1,5 +1,5 @@
 use tracing::info;
-use trogon_nats::jetstream::JetStreamContext;
+use trogon_nats::jetstream::{JetStreamContext, ProvisionedStreamField};
 
 use super::stream_options::StreamProvisionOptions;
 use super::streams;
@@ -20,7 +20,11 @@ pub async fn provision_streams_with_options<J: JetStreamContext>(
 ) -> Result<(), ProvisionError> {
     for config in streams::all_configs_with_options(prefix, options) {
         let name = config.name.clone();
-        js.get_or_create_stream(config)
+        // Reconciled rather than created-if-absent: the subject filters follow
+        // the subject shapes this crate publishes, so a stream provisioned
+        // under an earlier shape would otherwise stop capturing what is
+        // published to it. Limits and placement stay the operator's.
+        js.create_or_reconcile_stream(config, &[ProvisionedStreamField::Subjects])
             .await
             .map_err(|e| ProvisionError(format!("{name}: {e}")))?;
         info!(stream = %name, "Provisioned JetStream stream");

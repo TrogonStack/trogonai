@@ -1,0 +1,26 @@
+edition = "2024";
+
+package trogonai.connections.control.v1alpha1;
+
+import "trogon/nats/micro/v1alpha1/options.proto";
+import "trogonai/connections/control/v1alpha1/requests.proto";
+
+// Browser exposure still requires the explicit ADR#0018 gateway allowlist.
+// Authentication, sealing and live parent/owner authorization are transport
+// and service obligations, never properties of a caller-supplied payload.
+service ConnectionControlService {
+  option (trogon.nats.micro.v1alpha1.service) = {
+    version: "0.1.0"
+    description: "Controls connector consent and disconnect workflows"
+    content_type: CONTENT_TYPE_PROTOBUF
+  };
+
+  rpc StartConnect(StartConnectRequest) returns (StartConnectResponse);
+  rpc Reconnect(ReconnectRequest) returns (ReconnectResponse);
+  rpc Disconnect(DisconnectRequest) returns (DisconnectResponse);
+  rpc CancelConnect(CancelConnectRequest) returns (CancelConnectResponse);
+  rpc GetAuthorizationStatus(GetAuthorizationStatusRequest) returns (GetAuthorizationStatusResponse);
+  rpc GetConnectionStatus(GetConnectionStatusRequest) returns (GetConnectionStatusResponse);
+  rpc ListConnectionStatuses(ListConnectionStatusesRequest) returns (ListConnectionStatusesResponse);
+  rpc GetControlRequest(GetControlRequestRequest) returns (GetControlRequestResponse);
+}

@@ -1,0 +1,50 @@
+edition = "2024";
+
+package trogonai.connections.grants.v1alpha1;
+
+// The lifecycle ADR#0032 gives model grants, applied to connection grants
+// (ADR#0096 Decision 2): Prepared, Activated, then Revoked or Expired. Revoked
+// and Expired are terminal. Unspecified and unknown values are invalid.
+enum ConnectionGrantLifecycle {
+  CONNECTION_GRANT_LIFECYCLE_UNSPECIFIED = 0;
+  // Recorded by the issuer and not yet usable.
+  CONNECTION_GRANT_LIFECYCLE_PREPARED = 1;
+  // Usable by the audience until expires_at, subject to the live checks of
+  // every call.
+  CONNECTION_GRANT_LIFECYCLE_ACTIVATED = 2;
+  // Ended before expiry.
+  CONNECTION_GRANT_LIFECYCLE_REVOKED = 3;
+  // Ended at expires_at without renewal.
+  CONNECTION_GRANT_LIFECYCLE_EXPIRED = 4;
+}
+
+// Why a grant was revoked. Unspecified and unknown values are invalid.
+enum ConnectionGrantRevocationReason {
+  CONNECTION_GRANT_REVOCATION_REASON_UNSPECIFIED = 0;
+  // The ExecutionAttempt ended, which revokes every grant it holds.
+  CONNECTION_GRANT_REVOCATION_REASON_ATTEMPT_ENDED = 1;
+  // An activation of the same attempt failed, which revokes every grant of the
+  // attempt and fails the attempt.
+  CONNECTION_GRANT_REVOCATION_REASON_ACTIVATION_FAILED = 2;
+  // The connection was revoked. The live checks already deny its use; this
+  // ends the grant as cleanup.
+  CONNECTION_GRANT_REVOCATION_REASON_CONNECTION_REVOKED = 3;
+  // The admitting permit, a delegation included, was removed. The live checks
+  // already deny its use; this ends the grant as cleanup.
+  CONNECTION_GRANT_REVOCATION_REASON_PERMIT_REMOVED = 4;
+  // Reconciliation found the grant still Prepared past its bounded timeout.
+  // Only RevokeOrphanedConnectionGrant records it.
+  CONNECTION_GRANT_REVOCATION_REASON_ORPHANED = 5;
+}
+
+// The trusted role that may present the grant. The issuer has no provider
+// network path and no audience member may mint authority for itself.
+enum ConnectionGrantAudience {
+  reserved 1;
+  reserved CONNECTION_GRANT_AUDIENCE_CONNECTION_EXECUTOR;
+
+  CONNECTION_GRANT_AUDIENCE_UNSPECIFIED = 0;
+  CONNECTION_GRANT_AUDIENCE_HTTP_PROXY = 2;
+  CONNECTION_GRANT_AUDIENCE_MCP_EXECUTOR = 3;
+  CONNECTION_GRANT_AUDIENCE_TRUSTED_ADAPTER = 4;
+}

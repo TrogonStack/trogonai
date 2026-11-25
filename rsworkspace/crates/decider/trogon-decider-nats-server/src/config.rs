@@ -22,10 +22,11 @@ use crate::constants::{
     DEFAULT_QUEUE_GROUP, DEFAULT_SNAPSHOT_BUCKET, DEFAULT_SUBJECT_PREFIX, ENV_DECIDER_ADMISSION_LIMIT,
     ENV_DECIDER_DUPLICATE_WINDOW_SECS, ENV_DECIDER_EVENTS_STREAM, ENV_DECIDER_MODULE_STORE, ENV_DECIDER_MODULES,
     ENV_DECIDER_QUEUE_GROUP, ENV_DECIDER_REPLAY_LIMIT, ENV_DECIDER_SNAPSHOT_BUCKET, ENV_DECIDER_SUBJECT_PREFIX,
-    MODULE_STORE_DIRECTORY_SCHEME, MODULE_STORE_OBJECT_SCHEME,
+    ENV_DECIDER_TENANT_POSITION, MODULE_STORE_DIRECTORY_SCHEME, MODULE_STORE_OBJECT_SCHEME,
 };
 use crate::endpoint::{CommandEndpoint, CommandEndpointError, SubjectPrefix};
 use crate::module_reference::{ModuleReference, ModuleReferenceError};
+use crate::tenant_position::{TenantPosition, TenantPositionError};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "trogon-decider-nats-server")]
@@ -33,6 +34,8 @@ use crate::module_reference::{ModuleReference, ModuleReferenceError};
 pub struct Args {
     #[arg(long = "subject-prefix")]
     pub subject_prefix: Option<String>,
+    #[arg(long = "tenant-position")]
+    pub tenant_position: Option<String>,
     #[arg(long = "queue-group")]
     pub queue_group: Option<String>,
     #[arg(long = "events-stream")]
@@ -87,6 +90,12 @@ fn config_from_args<E: ReadEnv>(args: Args, env: &E) -> Result<(ServerConfig, Na
         .subject_prefix
         .or_else(|| env.var(ENV_DECIDER_SUBJECT_PREFIX).ok())
         .unwrap_or_else(|| DEFAULT_SUBJECT_PREFIX.to_owned());
+    let tenant_position = args
+        .tenant_position
+        .or_else(|| env.var(ENV_DECIDER_TENANT_POSITION).ok())
+        .map(|value| value.parse::<TenantPosition>())
+        .transpose()?
+        .unwrap_or_default();
     let queue_group = args
         .queue_group
         .or_else(|| env.var(ENV_DECIDER_QUEUE_GROUP).ok())
@@ -144,13 +153,13 @@ fn config_from_args<E: ReadEnv>(args: Args, env: &E) -> Result<(ServerConfig, Na
         }
     })?;
 
+    let subject_prefix = SubjectPrefix::new(&subject_prefix).map_err(|source| ConfigError::SubjectPrefix {
+        value: subject_prefix.clone(),
+        source,
+    })?;
+
     let config = ServerConfig {
-        endpoint: CommandEndpoint::new(SubjectPrefix::new(&subject_prefix).map_err(|source| {
-            ConfigError::SubjectPrefix {
-                value: subject_prefix.clone(),
-                source,
-            }
-        })?)?,
+        endpoint: CommandEndpoint::new(subject_prefix, tenant_position)?,
         queue_group,
         events_stream,
         snapshot_bucket,
@@ -248,6 +257,9 @@ pub enum ConfigError {
     /// The configured prefix does not yield a usable endpoint subject.
     #[error(transparent)]
     Endpoint(#[from] CommandEndpointError),
+    /// The configured tenant position is not one a host can subscribe at.
+    #[error(transparent)]
+    TenantPosition(#[from] TenantPositionError),
     /// No module was configured, so the host would answer nothing.
     #[error("no decider module configured; set --module or {ENV_DECIDER_MODULES}")]
     NoModules,

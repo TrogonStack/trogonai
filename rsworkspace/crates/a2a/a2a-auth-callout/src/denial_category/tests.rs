@@ -1,9 +1,69 @@
 use super::*;
+use crate::bridge_mint::BridgeCredentialError;
+use crate::credentials::oidc::{OidcIssuerUrl, OidcIssuerUrlError};
+use crate::tenant_admission::TenantAdmissionError;
+use std::error::Error;
+
+#[test]
+fn rejected_issuer_configuration_keeps_typed_sources_and_an_opaque_wire_category() {
+    for issuer in [
+        "not an issuer URL",
+        "http://issuer.example",
+        "https://issuer.example/#administration",
+    ] {
+        let rejected = OidcIssuerUrl::parse(issuer).unwrap_err();
+        let error = AuthCalloutError::from(rejected);
+        let credential_source = error.source().unwrap().downcast_ref::<CredentialError>().unwrap();
+        let issuer_source = credential_source
+            .source()
+            .unwrap()
+            .downcast_ref::<OidcIssuerUrlError>()
+            .unwrap();
+        match issuer {
+            "not an issuer URL" => {
+                assert!(matches!(issuer_source, OidcIssuerUrlError::InvalidUrl(_)));
+                assert!(issuer_source.source().is_some());
+            }
+            "http://issuer.example" => assert!(matches!(issuer_source, OidcIssuerUrlError::HttpsRequired)),
+            _ => assert!(matches!(issuer_source, OidcIssuerUrlError::UnsupportedComponents)),
+        }
+        let category = DenialCategory::from_auth_callout_error(&error);
+        let reason = crate::DenialReason::new(category).unwrap();
+        assert_eq!(reason.as_str(), "invalid_credentials");
+        assert!(!reason.as_str().contains(issuer));
+    }
+}
+
+#[test]
+fn tenant_membership_denial_is_opaque_and_authority_failure_is_unavailable() {
+    for error in [TenantAdmissionError::NotMember, TenantAdmissionError::AudienceMismatch] {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&error.into()),
+            DenialCategory::InvalidCredentials
+        );
+    }
+    for error in [
+        TenantAdmissionError::Busy,
+        TenantAdmissionError::Timeout,
+        TenantAdmissionError::TooLarge,
+    ] {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&error.into()),
+            DenialCategory::ServiceUnavailable
+        );
+    }
+}
 
 #[test]
 fn each_auth_callout_error_variant_maps_to_category() {
     assert_eq!(
         DenialCategory::from_auth_callout_error(&AuthCalloutError::Connect("x".into())),
+        DenialCategory::ServiceUnavailable
+    );
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::Flush(async_nats::client::FlushError::new(
+            async_nats::client::FlushErrorKind::FlushError,
+        ))),
         DenialCategory::ServiceUnavailable
     );
     assert_eq!(
@@ -66,6 +126,15 @@ fn credential_invalid_credentials_keeps_category_opaque() {
 }
 
 #[test]
+fn certificate_path_failure_keeps_category_opaque() {
+    let err = AuthCalloutError::CredentialVerification(CredentialError::MtlsCertificate(
+        crate::credentials::mtls::CertificateVerificationError::Path(webpki::Error::UnknownIssuer),
+    ));
+    let category = DenialCategory::from_auth_callout_error(&err);
+    assert_eq!(category.as_str(), "invalid_credentials");
+}
+
+#[test]
 fn as_str_covers_every_variant() {
     assert_eq!(DenialCategory::InvalidCredentials.as_str(), "invalid_credentials");
     assert_eq!(DenialCategory::UnknownAccount.as_str(), "unknown_account");
@@ -118,6 +187,16 @@ fn credential_invalid_request_maps_to_invalid_request() {
 }
 
 #[test]
+fn a_refused_bridge_credential_maps_to_invalid_request() {
+    for err in [BridgeCredentialError::NoCalloutXkey, BridgeCredentialError::BlankSecret] {
+        assert_eq!(
+            DenialCategory::from_auth_callout_error(&AuthCalloutError::BridgeCredential(err)),
+            DenialCategory::InvalidRequest
+        );
+    }
+}
+
+#[test]
 fn key_load_variants_map_to_internal_error() {
     assert_eq!(
         DenialCategory::from_auth_callout_error(&AuthCalloutError::MissingEnvVar("SIGNING_KEY")),
@@ -142,5 +221,22 @@ fn key_load_variants_map_to_internal_error() {
     assert_eq!(
         DenialCategory::from_auth_callout_error(&AuthCalloutError::KeyLoadUtf8(utf8_err)),
         DenialCategory::InternalError
+    );
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&AuthCalloutError::AdmissionKeys(
+            crate::admission_keys::AdmissionKeyError::MalformedTenantEntry { position: 1 }
+        )),
+        DenialCategory::InternalError
+    );
+}
+
+#[test]
+fn a_caller_no_subject_can_name_maps_to_invalid_credentials() {
+    let err = AuthCalloutError::CredentialVerification(CredentialError::UnplaceablePrincipal(
+        crate::jwt::JwtError::InvalidCallerId,
+    ));
+    assert_eq!(
+        DenialCategory::from_auth_callout_error(&err),
+        DenialCategory::InvalidCredentials
     );
 }

@@ -1,0 +1,47 @@
+edition = "2024";
+
+package trogonai.connections.audit.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/use_result.proto";
+
+// What one budget decided for one call (ADR#0096 Decision 8). Failure behavior
+// splits by what the limit protects (ADR#0077 Decision 8): a shared platform
+// app budget fails closed when the counter store is unavailable, a budget of
+// one connection or a customer-supplied app fails open. Unspecified and
+// unknown values are invalid.
+enum ConnectionBudgetOutcome {
+  CONNECTION_BUDGET_OUTCOME_UNSPECIFIED = 0;
+  // The counter admitted the call.
+  CONNECTION_BUDGET_OUTCOME_ADMITTED = 1;
+  // The budget is exhausted or paused until its reset; the call was refused
+  // with PROVIDER_RATE_LIMITED.
+  CONNECTION_BUDGET_OUTCOME_EXHAUSTED = 2;
+  // The counter store was unavailable and the call was admitted uncounted.
+  CONNECTION_BUDGET_OUTCOME_FAILED_OPEN = 3;
+  // The counter store was unavailable and the call was refused.
+  CONNECTION_BUDGET_OUTCOME_FAILED_CLOSED = 4;
+}
+
+// One budget decision. A call records one per budget it consulted, in the
+// order consulted; the first non-admitting decision ends the call. ADR#0096
+// Decision 9 names budget decisions without a shape; this is the smallest
+// one that says which budget decided what.
+message ConnectionBudgetDecision {
+  // Which budget: the connection, the tenant's share of a shared platform
+  // app, the provider app, or the provider's own reported limit.
+  trogonai.connections.types.v1alpha1.ConnectionRateLimitSource budget = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ConnectionBudgetOutcome outcome = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}

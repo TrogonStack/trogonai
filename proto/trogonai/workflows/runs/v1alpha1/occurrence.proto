@@ -58,6 +58,19 @@ message OccurrenceEntry {
 }
 
 message LaunchAdmission {
+  // This gate describes dispatcher identity, not worker attestation. Dispatch
+  // resolves the current parent run/plan, verifies the version marker against
+  // admitted bytes, and refuses any unsupported identity-aware plan.
+  option (buf.validate.message).cel = {
+    id: "launch_admission.identity_contract"
+    message: "version 2 dispatch requires workload run admission and version 1 forbids it"
+    expression: "has(this.run_identity_admission) == (has(this.definition_contract_version) && this.definition_contract_version == 2u)"
+  };
+  option (buf.validate.message).cel = {
+    id: "launch_admission.identity_authority"
+    message: "dispatch must preserve the run authority and stay within current identity admission"
+    expression: "!has(this.run_identity_admission) || (this.run_identity_admission.authority == this.authority && this.admitted_at >= this.run_identity_admission.admitted_at && this.valid_until <= this.run_identity_admission.valid_until)"
+  };
   option (buf.validate.message).cel = {
     id: "launch_admission.interval"
     message: "admission validity must end after admission"
@@ -73,6 +86,13 @@ message LaunchAdmission {
   trogonai.workflows.definitions.v1alpha1.Digest execution_plan_digest = 4 [features.field_presence = LEGACY_REQUIRED];
   google.protobuf.Timestamp admitted_at = 5 [features.field_presence = LEGACY_REQUIRED];
   google.protobuf.Timestamp valid_until = 6 [features.field_presence = LEGACY_REQUIRED];
+  uint32 definition_contract_version = 7 [(buf.validate.field).uint32 = {
+    in: [
+      1,
+      2
+    ]
+  }];
+  RunIdentityAdmission run_identity_admission = 8;
 }
 
 // The dispatch fact retains the whole immutable Session command and its

@@ -1,0 +1,330 @@
+edition = "2024";
+
+package trogonai.connections.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/connections/v1alpha1/authorization.proto";
+import "trogonai/connections/connections/v1alpha1/cleanup.proto";
+import "trogonai/connections/connections/v1alpha1/configuration.proto";
+import "trogonai/connections/connections/v1alpha1/health.proto";
+import "trogonai/connections/connections/v1alpha1/lifecycle.proto";
+import "trogonai/connections/connections/v1alpha1/mcp.proto";
+import "trogonai/connections/connections/v1alpha1/upgrade.proto";
+import "trogonai/connections/types/v1alpha1/authority.proto";
+import "trogonai/connections/types/v1alpha1/binding.proto";
+import "trogonai/connections/types/v1alpha1/cleanup.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/health.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/owner.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// Each concrete payload identifies its immutable resource_parent. Dispatch
+// and replay require it to match the addressed stream and stored genesis; it
+// is not caller authorization and never changes with logical ownership.
+
+// A Connection stream's events. Replay rejects unset or unknown events and
+// invalid transitions. The actor and the append time come from the event
+// envelope. Every event records a configuration, authorization or lifecycle
+// fact, never a token, a provider response or personal data (ADR#0092
+// Decisions 8 and 9). The stream is sealed as a sensitive stream (ADR#0092
+// Decision 8, R21).
+message ConnectionEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+    ConnectionReserved reserved = 1;
+    ConnectionActivated activated = 2;
+    ConnectionReconnected reconnected = 3;
+    ConnectionHealthReasonRaised health_reason_raised = 4;
+    ConnectionHealthReasonCleared health_reason_cleared = 5;
+    ConnectionSuspended suspended = 6;
+    ConnectionResumed resumed = 7;
+    ConnectionMetadataUpdated metadata_updated = 8;
+    CredentialBindingsReplaced credential_bindings_replaced = 9;
+    ConnectorUpgraded connector_upgraded = 10;
+    McpResourceMetadataRecorded mcp_resource_metadata_recorded = 11;
+    ProviderRevocationRecorded provider_revocation_recorded = 12;
+    ConnectionRevoked revoked = 13;
+    ProviderRevokeOutcomeRecorded provider_revoke_outcome_recorded = 14;
+    CleanupObligationRecorded cleanup_obligation_recorded = 15;
+    CleanupObligationDischarged cleanup_obligation_discharged = 16;
+    ProviderAccountProfileErased provider_account_profile_erased = 17;
+    ConnectionAborted aborted = 18;
+  }
+}
+
+// Genesis, NoStream. The fold starts the connection Pending with its owner,
+// custody project and pins, and nothing else (ADR#0092 Decision 4).
+message ConnectionReserved {
+  reserved 2;
+  reserved project_id;
+
+  option (buf.validate.message).cel = {
+    id: "connection_reserved.app_parent"
+    message: "a project app must share the connection custody parent"
+    expression: "!has(this.provider_app_ref) || has(this.provider_app_ref.resource_parent.platform) || (has(this.provider_app_ref.resource_parent.project) && this.provider_app_ref.resource_parent.project == this.resource_parent)"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connection_reserved.project_owner_custody"
+    message: "a project-owned connection is in custody of its owner"
+    expression: "!has(this.owner.project) || this.owner.project.project_id == this.resource_parent.project_id"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionOwner owner = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseRef connector_release_ref = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppRef provider_app_ref = 5;
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from Pending. The fold makes the connection Active with the committed
+// configuration and authorization record, holding SCOPES_REDUCED when the
+// record names missing optional scopes (ADR#0092 Decision 4, ADR#0094
+// Decision 12). The configuration's digest is the one every ConnectionRef
+// carries from here on.
+message ConnectionActivated {
+  option (buf.validate.message).cel = {
+    id: "connection_activated.attempt_for_oauth"
+    message: "the OAuth, MCP and app installation methods name their attempt"
+    expression: "(has(this.configuration.configuration.authentication.oauth_authorization_grant) || has(this.configuration.configuration.authentication.mcp_oauth) || has(this.configuration.configuration.authentication.app_installation)) == has(this.authorization.attempt_id)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connectionactivated.stage_promotion_target"
+    message: "authorization protection requires this exact connection and custody parent"
+    expression: "!has(this.authorization.stage_promotion_protection) || (this.authorization.stage_promotion_protection.binding.connection_id == this.connection_id && this.authorization.stage_promotion_protection.binding.attempt_ref.resource_parent == this.resource_parent)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_activated.first_generation"
+    message: "activation records authorization generation 1"
+    expression: "this.authorization.authorization_generation == 1u"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_activated.mcp_resource"
+    message: "the MCP method records its protected resource metadata and egress acknowledgement, and no other does"
+    expression: "has(this.configuration.configuration.authentication.mcp_oauth) == has(this.mcp_protected_resource) && has(this.mcp_protected_resource) == has(this.egress_acknowledgement)"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CommittedConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationRecord authorization = 3 [features.field_presence = LEGACY_REQUIRED];
+  McpProtectedResource mcp_protected_resource = 4;
+  EgressHostAcknowledgement egress_acknowledgement = 5;
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state. The fold replaces the authorization record, clears
+// every held health reason, holds SCOPES_REDUCED again when the record names
+// missing optional scopes, and records the refreshed MCP snapshot when
+// present (ADR#0094 Decision 6). The account fingerprint equals the recorded
+// one and the generation is the recorded one plus one; both were decided, and
+// the first is repeated here so a reader sees it without the prior event.
+message ConnectionReconnected {
+  option (buf.validate.message).cel = {
+    id: "connectionreconnected.stage_promotion_target"
+    message: "authorization protection requires this exact connection and custody parent"
+    expression: "!has(this.authorization.stage_promotion_protection) || (this.authorization.stage_promotion_protection.binding.connection_id == this.connection_id && this.authorization.stage_promotion_protection.binding.attempt_ref.resource_parent == this.resource_parent)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_reconnected.later_generation"
+    message: "a reconnect records a generation after the first"
+    expression: "this.authorization.authorization_generation > 1u"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationRecord authorization = 2 [features.field_presence = LEGACY_REQUIRED];
+  McpProtectedResource mcp_protected_resource = 3;
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state. The fold holds the observation under its reason,
+// replacing an earlier observation of the same reason, and replaces the
+// granted authority when the observation carries one (R7). The lifecycle
+// follows from the held reasons (lifecycle.proto). Raised by
+// ReportConnectionHealth, RecordCustodyHealth and UpgradeConnector.
+message ConnectionHealthReasonRaised {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  HealthObservation observation = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state holding the reason. The fold drops the observation
+// and replaces the granted authority when one is carried.
+message ConnectionHealthReasonCleared {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionHealthReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.GrantedAuthority granted_authority = 3;
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state not holding the reason. The fold adds the reason;
+// the connection is Suspended while any reason is held (R9).
+message ConnectionSuspended {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  SuspensionReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from Suspended holding the reason. The fold drops the reason.
+message ConnectionResumed {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  SuspensionReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state. The fold replaces the metadata whole.
+message ConnectionMetadataUpdated {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionMetadata metadata = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state. The fold replaces the binding set whole; the
+// ConnectionRef and authorization_generation are unchanged (ADR#0092
+// Decision 4).
+message CredentialBindingsReplaced {
+  option (buf.validate.message).cel = {
+    id: "credential_bindings_replaced.roles_unique"
+    message: "one binding per credential role"
+    expression: "this.bindings.map(b, b.role.value).unique()"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.connections.types.v1alpha1.CredentialBinding bindings = 2 [(buf.validate.field).repeated.min_items = 1];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state. The fold replaces the committed configuration, so
+// the ConnectionRef changes while the id, account, bindings and generation
+// stay, and holds SCOPES_BEYOND_GRANT with scopes_beyond_grant when that is
+// non-empty (ADR#0092 Decision 10). The previous digest is repeated so a
+// reader can pair the old and new references without the prior event.
+message ConnectorUpgraded {
+  option (buf.validate.message).cel = {
+    id: "connector_upgraded.new_digest"
+    message: "an upgrade commits a different configuration"
+    expression: "this.previous_configuration_digest.value != this.configuration.configuration_digest.value"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_upgraded.scopes_beyond_grant_unique"
+    message: "scopes beyond the grant must be unique"
+    expression: "this.scopes_beyond_grant.map(s, s.value).unique()"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CommittedConfiguration configuration = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.Digest previous_configuration_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  ConnectorUpgradeAcknowledgement acknowledgement = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The successor's required scopes the recorded granted authority lacks,
+  // decided against state. Empty means the connection stays usable.
+  repeated trogonai.connections.types.v1alpha1.ProviderScope scopes_beyond_grant = 5;
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state of an MCP connection. The fold replaces the
+// protected resource record and, when an acknowledgement is carried, the
+// acknowledged egress hosts (R19).
+message McpResourceMetadataRecorded {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  McpProtectedResource mcp_protected_resource = 2 [features.field_presence = LEGACY_REQUIRED];
+  EgressHostAcknowledgement egress_acknowledgement = 3;
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state. The fold holds PROVIDER_UNINSTALLED, which makes
+// the connection ReconnectRequired on the same id (ADR#0092 Decision 4).
+message ProviderRevocationRecorded {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp observed_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from a live state. The fold makes the connection Revoked, terminally
+// (ADR#0092 Decision 4, ADR#0093 Decision 9). Held suspension and health
+// reasons are kept as history and no longer drive the lifecycle.
+message ConnectionRevoked {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  RevocationTrigger trigger = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from Revoked without a terminal outcome. The fold appends the outcome
+// to the revocation's attempts (ADR#0094 Decision 13, R3).
+message ProviderRevokeOutcomeRecorded {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderRevokeOutcome outcome = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from Revoked or Aborted without an open obligation of the kind. The
+// fold opens the obligation (ADR#0093 Decision 9).
+message CleanupObligationRecorded {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CleanupObligation obligation = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from Revoked or Aborted with an open obligation of the kind. The fold
+// closes it; the obligation stays as history.
+message CleanupObligationDischarged {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.CleanupObligationKind kind = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// From any present state. The fold records the erasure and closes an open
+// PROFILE_UNPURGED obligation when one is held (ADR#0093 Decision 12).
+message ProviderAccountProfileErased {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAccountProfileErasure erasure = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from Pending. The fold makes the connection Aborted, terminally
+// (ADR#0092 Decision 4).
+message ConnectionAborted {
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  AbortReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}

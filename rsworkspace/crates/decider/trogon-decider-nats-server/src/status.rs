@@ -157,15 +157,32 @@ pub fn shed(overloaded: OverloadedError) -> Status {
 /// adds no denial vocabulary of its own, per
 /// [ADR#0026](../../../../../docs/adr/0026-command-authorization-principal.md).
 pub fn denied(unauthorized: &UnauthorizedError) -> Status {
-    let (code, reason) = match unauthorized {
-        UnauthorizedError::MissingPrincipal => (Code::UNAUTHENTICATED, "PRINCIPAL_MISSING"),
-        UnauthorizedError::Denied(_) => (Code::PERMISSION_DENIED, "PRINCIPAL_UNAUTHORIZED"),
-    };
+    match unauthorized {
+        UnauthorizedError::MissingPrincipal => unauthenticated(unauthorized),
+        UnauthorizedError::Denied(_) => status(
+            Code::PERMISSION_DENIED,
+            unauthorized.to_string(),
+            [Some(error_info("PRINCIPAL_UNAUTHORIZED", DECIDER_ERROR_DOMAIN)), None],
+        ),
+    }
+}
 
+/// Builds the `denied` arm's status for a request that names no principal.
+///
+/// The same code and reason as an execution that reaches its authorizer with
+/// no principal, because to a caller both say one thing: nothing it sent named
+/// who it is. A subject whose principal tokens name nobody is refused this way
+/// before its payload is read, per
+/// [ADR#0082](../../../../../docs/adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md),
+/// and why the tokens named nobody rides in `DebugInfo`.
+pub fn unauthenticated(error: &dyn StdError) -> Status {
     status(
-        code,
-        unauthorized.to_string(),
-        [Some(error_info(reason, DECIDER_ERROR_DOMAIN)), None],
+        Code::UNAUTHENTICATED,
+        error.to_string(),
+        [
+            Some(error_info("PRINCIPAL_MISSING", DECIDER_ERROR_DOMAIN)),
+            debug_info(causal_chain(error.source())),
+        ],
     )
 }
 

@@ -1,7 +1,11 @@
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use a2a_auth_callout::{AccountName, KeyVersion, StaticSigningKeySource};
+use a2a_auth_callout::jwt::ExternalSubject;
+use a2a_auth_callout::{
+    AccountName, CallerId, CallerJwtHeaderValue, IssuedPermissions, IssuerPublicKeys, KeyVersion, NkeyPublic,
+    SigningKeySource, StaticSigningKeySource, UserJwtClaims, UserJwtSubject,
+};
 use a2a_nats::A2aAgentId;
 use a2a_nats::catalog::agent_view::AgentViewCheckOutcome;
 use a2a_nats::catalog::import_gate::SpiceDbPrincipal;
@@ -11,22 +15,47 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
+use trogon_audit::{AuditName, AuditWriter, MemorySink, Stamper, WriterConfig, WriterId, WriterIdentity};
+use trogon_identity_types::PrincipalKind;
+use trogon_nats::NatsToken;
 use trogon_nats::test_support::{CoreTestServer, JetStreamTestServer};
 use trogon_std::env::InMemoryEnv;
+use trogon_std::time::SystemClock;
+use trogon_std::uuid::UuidV7Generator;
 
-use crate::aauth::GatewayAAuthIngress;
 use crate::config::{Args, Config, config_from_args};
-use crate::constants::{ENV_GATEWAY_AUDIT_PUBLISH, ENV_GATEWAY_TRUST_CALLER_HEADERS};
+use crate::constants::{
+    AUDIT_COMPONENT, AUDIT_WRITER_ID_PREFIX, ENV_GATEWAY_AUDIT_INSTANCE, ENV_GATEWAY_AUDIT_PROJECT,
+    ENV_GATEWAY_AUDIT_PUBLISH, ENV_GATEWAY_AUDIT_TENANT,
+};
 use crate::gw_ingress_stream::{
     GatewayStreamingIngressConfig, StreamingIngressGate, StreamingMaxAckPending, StreamingMaxInflightPerCaller,
 };
-use crate::jwt_caller_identity::{JwtHeaderCallerIdentitySource, gateway_caller_identity_policy};
-use crate::policy::spicedb_tier1::{
-    NoopSpiceDbTier1Gate, OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple, Tier1SessionKey,
-};
+use crate::ingress_identity::ForwardedCallerJwtVerifier;
 use crate::policy::tier1_declarative::{NoopTier1DeclarativeGate, Tier1DeclarativeGate};
+use crate::policy::tier1_gate::{
+    NoopSpiceDbTier1Gate, OwnerEmitError, OwnerTupleEmitter, SpiceDbTier1Gate, Tier1AuthorizeOutcome, Tier1OwnerTuple,
+    Tier1SessionKey,
+};
 use crate::runtime::dispatch::dispatch_gateway_ingress;
+use crate::runtime::platform_audit::{DecisionAudit, WriterAudit, jetstream_audit_from_env};
 use crate::runtime::policy_stack::GatewayPolicyStack;
+
+pub const AUDIT_PROJECT: &str = "payments";
+const AUDIT_TENANT: &str = "acme";
+const AUDIT_INSTANCE: &str = "test";
+
+pub fn audit_writer_id() -> WriterId {
+    WriterId::new(format!("{AUDIT_WRITER_ID_PREFIX}{AUDIT_INSTANCE}")).expect("writer id")
+}
+
+fn audit_tenant() -> AuditName {
+    AuditName::new(AUDIT_TENANT).expect("tenant")
+}
+
+fn audit_project() -> NatsToken {
+    NatsToken::new(AUDIT_PROJECT).expect("project")
+}
 
 pub type TestResult<T = ()> = Result<T, FixtureError>;
 
@@ -42,6 +71,10 @@ pub enum FixtureError {
     KeyVersion(#[from] a2a_auth_callout::KeyVersionError),
     #[error("signing key source failed: {0}")]
     AuthCallout(#[from] a2a_auth_callout::AuthCalloutError),
+    #[error("issuer public keys failed: {0}")]
+    IssuerKeys(#[from] a2a_auth_callout::IssuerPublicKeysError),
+    #[error("caller JWT minting failed: {0}")]
+    Jwt(#[from] a2a_auth_callout::jwt::JwtError),
     #[error("NATS subscription failed: {0}")]
     NatsSubscribe(#[from] async_nats::SubscribeError),
     #[error("NATS flush failed: {0}")]
@@ -62,18 +95,6 @@ pub enum FixtureError {
     SkillId(#[from] a2a_redaction::SkillIdError),
     #[error("redaction rewrite is invalid: {0}")]
     RedactionRewrite(#[from] crate::policy::tier3_redaction::RedactionRewriteError),
-    #[error("PKCS#8 key encoding failed: {0}")]
-    Pkcs8(#[from] p256::pkcs8::Error),
-    #[error("JWT key decoding failed: {0}")]
-    Jwt(#[from] jsonwebtoken::errors::Error),
-    #[error("resource issuer is invalid: {0}")]
-    ResourceIssuer(#[from] crate::aauth::ResourceIssuerError),
-    #[error("person-server audience is invalid: {0}")]
-    PersonServerAudience(#[from] crate::aauth::PersonServerAudienceError),
-    #[error("challenge key identifier is invalid: {0}")]
-    ChallengeKid(#[from] crate::aauth::ChallengeKidError),
-    #[error("authentication time configuration is invalid: {0}")]
-    NonNegativeSecs(#[from] crate::aauth::NonNegativeSecsError),
     #[error("JetStream stream creation failed: {0}")]
     CreateStream(#[from] async_nats::jetstream::context::CreateStreamError),
     #[error("task identifier is invalid: {0}")]
@@ -96,8 +117,10 @@ pub struct DispatchFixture<S = CoreTestServer> {
     pub owner: Option<Arc<dyn OwnerTupleEmitter>>,
     pub declarative: Arc<dyn Tier1DeclarativeGate>,
     pub policy: GatewayPolicyStack,
-    pub aauth: Option<GatewayAAuthIngress>,
-    identity: JwtHeaderCallerIdentitySource,
+    /// The platform audit path; `None` until a test turns one on.
+    pub platform_audit: Option<Arc<dyn DecisionAudit>>,
+    signing: Arc<StaticSigningKeySource>,
+    caller_jwt: ForwardedCallerJwtVerifier,
     pub shutdown: CancellationToken,
     pub streaming_enabled: bool,
     pub streaming_config: GatewayStreamingIngressConfig,
@@ -133,7 +156,6 @@ impl<S> DispatchFixture<S> {
     async fn with_client(server: S, client: async_nats::Client) -> TestResult<Self> {
         let env = InMemoryEnv::new();
         env.set(ENV_GATEWAY_AUDIT_PUBLISH, "true");
-        env.set(ENV_GATEWAY_TRUST_CALLER_HEADERS, "true");
         let (config, _) = config_from_args(
             Args {
                 nats_url: format!("{}:{}", client.server_info().host, client.server_info().port),
@@ -142,8 +164,13 @@ impl<S> DispatchFixture<S> {
             },
             &env,
         )?;
-        let source = StaticSigningKeySource::new(&nkeys::KeyPair::new_account().seed()?, KeyVersion::new("test")?)?;
-        let identity = JwtHeaderCallerIdentitySource::new(Arc::new(source), AccountName::new("tenant"));
+        let issuer = nkeys::KeyPair::new_account();
+        let signing = Arc::new(StaticSigningKeySource::new(&issuer.seed()?, KeyVersion::new("test")?)?);
+        // The gateway verifies against the public key alone; the seed stays with the minting side.
+        let caller_jwt = ForwardedCallerJwtVerifier::new(
+            Arc::new(IssuerPublicKeys::parse(&issuer.public_key())?),
+            AccountName::new(GATEWAY_AUDIENCE),
+        );
         let agents = client.subscribe("a2a.v1.agents.>").await?;
         let replies = client.subscribe("_INBOX.dispatch").await?;
         let audits = client.subscribe("a2a.v1.audit.>").await?;
@@ -161,13 +188,43 @@ impl<S> DispatchFixture<S> {
             owner: None,
             declarative: Arc::new(NoopTier1DeclarativeGate),
             policy: GatewayPolicyStack::noop(),
-            aauth: None,
-            identity,
+            platform_audit: None,
+            signing,
+            caller_jwt,
             shutdown: CancellationToken::new(),
             streaming_enabled: false,
             streaming_config,
             streaming_gate: StreamingIngressGate::new(streaming_config),
         })
+    }
+
+    /// Routes the platform audit records into memory, where a test can make the
+    /// sink fail and recover, and returns the sink with the writer to drain.
+    pub fn enable_memory_audit(&mut self) -> (MemorySink, AuditWriter<MemorySink>) {
+        let sink = MemorySink::new();
+        let identity = WriterIdentity::new(
+            audit_writer_id(),
+            NatsToken::new(AUDIT_COMPONENT).expect("component"),
+            audit_tenant(),
+            audit_project(),
+        );
+        let stamper = Stamper::new(SystemClock, UuidV7Generator);
+        let writer = AuditWriter::new(sink.clone(), identity, WriterConfig::default(), &stamper);
+        self.platform_audit = Some(Arc::new(WriterAudit::new(
+            writer.clone(),
+            audit_tenant(),
+            audit_project(),
+        )));
+        (sink, writer)
+    }
+
+    /// Builds the platform audit writer the way the gateway does at start, over
+    /// the stream this fixture's connection reaches.
+    pub fn enable_jetstream_audit(&mut self) {
+        self.env.set(ENV_GATEWAY_AUDIT_TENANT, AUDIT_TENANT);
+        self.env.set(ENV_GATEWAY_AUDIT_PROJECT, AUDIT_PROJECT);
+        self.env.set(ENV_GATEWAY_AUDIT_INSTANCE, AUDIT_INSTANCE);
+        self.platform_audit = jetstream_audit_from_env(&self.env, &self.client).expect("platform audit settings");
     }
 
     pub async fn dispatch(&self, message: Message) {
@@ -177,18 +234,40 @@ impl<S> DispatchFixture<S> {
             self.tier1.as_ref(),
             self.owner.as_ref(),
             self.declarative.as_ref(),
-            self.aauth.as_ref(),
             &self.policy,
-            &self.identity,
-            gateway_caller_identity_policy(&self.env),
+            &self.caller_jwt,
             self.streaming_enabled,
             self.streaming_config,
             &self.streaming_gate,
+            self.platform_audit.as_deref(),
             self.shutdown.clone(),
             &self.env,
             message,
         )
         .await;
+    }
+
+    /// A caller JWT minted by the gateway's own issuer for `audience`, as the
+    /// bridge would forward it.
+    pub fn caller_jwt(&self, kind: PrincipalKind, caller: &str, audience: &str) -> TestResult<String> {
+        let caller_id = CallerId::new(caller)?;
+        let claims = UserJwtClaims {
+            kid: KeyVersion::new("test")?,
+            sub: ExternalSubject::new(caller)?,
+            aud: AccountName::new(audience),
+            data: a2a_auth_callout::SpiceDbPrincipal::new(format!("user/{caller}")),
+            nats_permissions: IssuedPermissions::default_for_caller(&caller_id),
+            caller_id,
+            principal_kind: kind,
+        };
+        let subject = UserJwtSubject::from_user_nkey(NkeyPublic::parse(nkeys::KeyPair::new_user().public_key())?);
+        let token = claims.mint(
+            &self.signing.current().minting_material(),
+            &subject,
+            SystemTime::now(),
+            Duration::from_secs(300),
+        )?;
+        Ok(CallerJwtHeaderValue::from_minted(&token).as_str().to_owned())
     }
 
     pub async fn audit(&mut self, outcome: &str) -> TestResult<Value> {
@@ -211,18 +290,18 @@ impl<S> DispatchFixture<S> {
     }
 }
 
+pub const GATEWAY_AUDIENCE: &str = "tenant-acme";
+
 pub fn request(method: &str, params: Value) -> Message {
-    let mut headers = HeaderMap::new();
-    headers.insert(a2a_nats::constants::GATEWAY_CALLER_ID_HEADER, "alice");
     Message {
-        subject: format!("a2a.v1.gateway.bot.{method}").into(),
+        subject: format!("a2a.v1.gateway.bot.person.alice.{method}").into(),
         reply: Some("_INBOX.dispatch".into()),
         payload: serde_json::to_vec(&json!({
             "jsonrpc": "2.0", "id": "request-7", "method": method.replace('.', "/"), "params": params,
         }))
         .expect("JSON value serializes")
         .into(),
-        headers: Some(headers),
+        headers: Some(HeaderMap::new()),
         status: None,
         description: None,
         length: 0,
@@ -299,14 +378,14 @@ impl SpiceDbTier1Gate for RecordingTier1 {
 
 #[derive(Default)]
 pub struct RecordingOwner {
-    pub failure: Option<tonic::Status>,
+    pub failure: Mutex<Option<OwnerEmitError>>,
     pub calls: Mutex<Vec<Tier1OwnerTuple>>,
 }
 
 #[async_trait::async_trait]
 impl OwnerTupleEmitter for RecordingOwner {
-    async fn emit_owner(&self, owner: &Tier1OwnerTuple) -> Result<(), tonic::Status> {
+    async fn emit_owner(&self, owner: &Tier1OwnerTuple) -> Result<(), OwnerEmitError> {
         self.calls.lock().expect("owner calls").push(owner.clone());
-        self.failure.clone().map_or(Ok(()), Err)
+        self.failure.lock().expect("owner failure").take().map_or(Ok(()), Err)
     }
 }

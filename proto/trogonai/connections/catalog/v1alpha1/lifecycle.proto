@@ -1,0 +1,65 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+
+// The standing of one release. Admission, the trusted executor and the trusted
+// MCP executor read it live, never from a copy on a connection, and refuse a
+// projection staler than 330 seconds (ADR#0092 Decision 10). Published to
+// Deprecated, and Published or Deprecated to Blocked, are the only transitions
+// (ADR#0092 Decision 2). Unspecified and unknown values are invalid.
+enum ConnectorReleaseStanding {
+  CONNECTOR_RELEASE_STANDING_UNSPECIFIED = 0;
+  // Selectable for new connections and usable by existing ones.
+  CONNECTOR_RELEASE_STANDING_PUBLISHED = 1;
+  // Denies new selection only; existing connections keep working.
+  CONNECTOR_RELEASE_STANDING_DEPRECATED = 2;
+  // Terminal. Denies live use immediately and never upgrades a connection.
+  CONNECTOR_RELEASE_STANDING_BLOCKED = 3;
+}
+
+// Why catalog maintainers deprecated a release. ADR#0092 Decision 10 names a
+// reason without values; these are the cases it describes. Unspecified and
+// unknown values are invalid.
+enum ConnectorReleaseDeprecationReason {
+  CONNECTOR_RELEASE_DEPRECATION_REASON_UNSPECIFIED = 0;
+  // The provider announced the sunset of an API the release calls.
+  CONNECTOR_RELEASE_DEPRECATION_REASON_PROVIDER_API_SUNSET = 1;
+  // A newer release of the same connector replaces this one.
+  CONNECTOR_RELEASE_DEPRECATION_REASON_SUPERSEDED = 2;
+}
+
+// The reason code a platform operator gives when blocking a release (ADR#0092
+// Decision 10). Admission and invocation report a release-blocked reason; the
+// connection state is unchanged. Unspecified and unknown values are invalid.
+enum ConnectorReleaseBlockReason {
+  CONNECTOR_RELEASE_BLOCK_REASON_UNSPECIFIED = 0;
+  // The announced sunset arrived.
+  CONNECTOR_RELEASE_BLOCK_REASON_SUNSET_REACHED = 1;
+  // A defect makes the release unsafe to use.
+  CONNECTOR_RELEASE_BLOCK_REASON_DEFECT = 2;
+  // The provider withdrew the API or the integration without a sunset.
+  CONNECTOR_RELEASE_BLOCK_REASON_PROVIDER_WITHDRAWN = 3;
+}
+
+// The notice a Deprecated release shows each connection pinned to it, with an
+// optional successor and sunset time (ADR#0092 Decision 10). The platform never
+// moves a connection to the successor; its owner runs UpgradeConnector.
+message DeprecationNotice {
+  ConnectorReleaseDeprecationReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // A release of the same connector, pinned by digest. Its standing is read
+  // live like any other release.
+  trogonai.connections.types.v1alpha1.ConnectorReleaseRef successor = 2;
+  // When the release is expected to be blocked. Blocking still takes an
+  // explicit BlockConnectorRelease; nothing happens at this time by itself.
+  google.protobuf.Timestamp sunset_at = 3;
+}

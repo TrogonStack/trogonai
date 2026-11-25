@@ -38,6 +38,7 @@ tokio = { workspace = true, features = ["time"] }
 tokio-util = { workspace = true }
 tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
+trogon-identity-types = { workspace = true }
 trogon-semconv = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
@@ -45,6 +46,9 @@ url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+# Bazel builds every feature, and crate_universe resolves an optional dependency
+# only when some workspace member turns its feature on.
+a2a-nats = { workspace = true, features = ["spicedb"] }
 base64 = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }

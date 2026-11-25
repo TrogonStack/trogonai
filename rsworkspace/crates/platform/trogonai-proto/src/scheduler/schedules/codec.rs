@@ -1,9 +1,9 @@
 use buffa::Message as _;
-use trogon_decider::{EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType};
+use trogon_decider::{
+    EventData, EventDecode, EventDecodeOutcome, EventEncode, EventPayloadError, EventType, StateSnapshot,
+};
 
-#[cfg(feature = "runtime-snapshot")]
-use super::state_v1;
-use super::{ScheduleEventCase, v1};
+use super::{ScheduleEventCase, state_v1, v1};
 #[cfg(feature = "runtime-snapshot")]
 use crate::codec::snapshot_type as proto_snapshot_type;
 use crate::codec::{decode_event_case, event_type};
@@ -21,6 +21,16 @@ use trogon_decider_runtime::{
 pub struct StateSnapshotPayloadError(#[source] buffa::DecodeError);
 
 pub type ScheduleEventPayloadError = EventPayloadError<buffa::DecodeError>;
+
+impl StateSnapshot for state_v1::State {
+    type Payload = Self;
+}
+
+impl AsRef<Self> for state_v1::State {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
 
 impl EventEncode for v1::ScheduleEvent {
     type Error = ScheduleEventPayloadError;

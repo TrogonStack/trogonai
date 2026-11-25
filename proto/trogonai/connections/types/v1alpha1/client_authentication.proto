@@ -1,0 +1,23 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+// How a client authenticates at the token endpoint, as RFC 7591 names the
+// token_endpoint_auth_method values. A ConnectorRelease declares the methods a
+// provider accepts and a ProviderApp records the one its client uses (ADR#0092
+// Decisions 2 and 3, ADR#0094 Decision 10). The material each method needs is
+// held in custody and named only by a SecretRef. Unspecified and unknown values
+// are invalid.
+enum ClientAuthenticationMethod {
+  CLIENT_AUTHENTICATION_METHOD_UNSPECIFIED = 0;
+  // A public client: no client credential, so PKCE alone binds the exchange.
+  // The default for a Client ID Metadata Document client.
+  CLIENT_AUTHENTICATION_METHOD_NONE = 1;
+  // client_secret_basic: the secret in HTTP Basic authentication.
+  CLIENT_AUTHENTICATION_METHOD_CLIENT_SECRET_BASIC = 2;
+  // client_secret_post: the secret in the request body.
+  CLIENT_AUTHENTICATION_METHOD_CLIENT_SECRET_POST = 3;
+  // private_key_jwt: an assertion the broker signs with SignJwt from the app's
+  // private key (ADR#0095).
+  CLIENT_AUTHENTICATION_METHOD_PRIVATE_KEY_JWT = 4;
+}

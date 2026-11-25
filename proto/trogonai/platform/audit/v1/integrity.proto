@@ -1,0 +1,37 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+import "buf/validate/validate.proto";
+
+// Integrity places a record in its writer's hash chain.
+//
+// Each writer keeps one chain, and the sink fills this message when it accepts
+// the record. A verifier detects an edited, reordered, duplicated or deleted
+// record in the middle of a chain, and a truncated tail at the next signed
+// checkpoint. Chains are independent, so there is no claim of global order
+// across writers.
+message Integrity {
+  // The writer instance: the process that published the record. It is a
+  // statement about the writer and never about who caused the act.
+  string writer_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // The record's position in the writer's chain, with no gap.
+  uint64 sequence = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The hash of the previous record in the chain. Empty for the first record of
+  // a chain.
+  bytes previous_hash = 3 [(buf.validate.field).bytes.max_len = 32];
+  // SHA-256 over the exact encoded bytes of the record with this field absent.
+  //
+  // The writer appends it after those bytes as a second occurrence of the
+  // record's integrity field, which every protobuf decoder merges here. A
+  // verifier strips that trailer and hashes the bytes before it, so the stored
+  // bytes are hashed as they are and never re-serialized.
+  bytes record_hash = 4 [(buf.validate.field).bytes.max_len = 32];
+  // The chain the record belongs to, a UUIDv7. Every process start begins a new
+  // chain under the same writer id, so a chain is named by writer id and chain
+  // id together. It also rides in the Trogon-Audit-Chain header.
+  string chain_id = 5 [(buf.validate.field).string.uuid = true];
+}

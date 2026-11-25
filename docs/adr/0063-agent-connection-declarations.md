@@ -7,6 +7,9 @@ date: 2026-09-11
 
 # ADR#0063: An Agent Declares the Connections It Needs, and the Declaration Carries No Version
 
+> **Proposed connector refinement:** [ADR#0096](./0096-connection-use-by-agents.md) remains a draft. The connector draft supplies the ordinary HTTP relay, per-binding grant and live permission boundary left to downstream design. This note does not change either ADR's status.
+
+
 ## Context
 
 [AgentConfiguration](../glossary/agentconfiguration) owns immutable behavior and

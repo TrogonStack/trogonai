@@ -1,0 +1,77 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/catalog/v1alpha1/definition.proto";
+import "trogonai/connections/catalog/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// Each concrete payload identifies its immutable resource_parent. Dispatch
+// and replay require it to match the addressed stream and stored genesis; it
+// is not caller authorization and never changes with logical ownership.
+
+// Replay rejects unset or unknown events and invalid transitions; skipping one
+// could leave a blocked release in use. Actor identity and occurrence time
+// come from the event envelope. The catalog stream is unsealed and holds no
+// secret (ADR#0092 Decision 8): a definition names endpoints, roles and
+// hosts, never a client identity or a credential.
+message ConnectorReleaseEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    ConnectorReleasePublished published = 1;
+    ConnectorReleaseDeprecated deprecated = 2;
+    ConnectorReleaseBlocked blocked = 3;
+  }
+}
+
+// Genesis, written under NoStream. Fixes the connector, the exact definition
+// bytes and their digest for the life of the release; no later event changes
+// them (ADR#0092 Decision 2). definition is the typed decoding of
+// definition_bytes, kept so readers need not decode; a reader that needs the
+// digest verifies it over definition_bytes and never over a re-encoding.
+message ConnectorReleasePublished {
+  reserved 2;
+  reserved connector_id;
+
+  trogonai.connections.types.v1alpha1.ConnectorReleaseId release_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectorDefinition definition = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.Digest definition_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  bytes definition_bytes = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent resource_parent = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Only from Published. Carries the notice each pinned connection shows; the
+// platform never moves a connection to the successor (ADR#0092 Decision 10).
+message ConnectorReleaseDeprecated {
+  option (buf.validate.message).cel = {
+    id: "connector_release_deprecated.successor_parent"
+    message: "a successor belongs to the same connector catalog parent"
+    expression: "!has(this.notice.successor) || this.notice.successor.resource_parent == this.resource_parent"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectorReleaseId release_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  DeprecationNotice notice = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal. Only from Published or Deprecated. One event; every connection
+// pinned to the release is refused at its next live read and none is written
+// (ADR#0092 Decision 10).
+message ConnectorReleaseBlocked {
+  trogonai.connections.types.v1alpha1.ConnectorReleaseId release_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectorReleaseBlockReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}

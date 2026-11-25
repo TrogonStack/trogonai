@@ -1,0 +1,62 @@
+edition = "2024";
+
+package trogonai.connections.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/types/v1alpha1/authority.proto";
+import "trogonai/connections/types/v1alpha1/health.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+
+// One health fact about a connection: a reason and what the reporter learned
+// with it. Custody and the connections service are the only writers; the
+// trusted executors report through ReportConnectionHealth (ADR#0092
+// Decision 4, R8). The connection holds at most one observation per reason,
+// and a later observation of the same reason replaces it. It carries no
+// provider response, header or error text.
+//
+// ADR-silent shape: the ADRs name the reasons and say the missing scopes and
+// the reduced authority are recorded, without a message. This is the smallest
+// one that records both, with the scopes field meaning what the reason says.
+message HealthObservation {
+  option (buf.validate.message).cel = {
+    id: "health_observation.scopes_by_reason"
+    message: "scopes accompany SCOPES_REDUCED, SCOPE_STEP_UP and SCOPES_BEYOND_GRANT only"
+    expression: "this.scopes.size() == 0 || this.reason in [1, 2, 12]"
+  };
+  option (buf.validate.message).cel = {
+    id: "health_observation.scopes_unique"
+    message: "scopes must be unique"
+    expression: "this.scopes.map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "health_observation.granted_authority_for_reduction"
+    message: "a granted authority accompanies SCOPES_REDUCED only"
+    expression: "!has(this.granted_authority) || this.reason == 1"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionHealthReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // For SCOPES_REDUCED: the requested optional scopes the grant lacks. For
+  // SCOPE_STEP_UP: the scopes the provider's insufficient_scope challenge
+  // named (ADR#0094 Decision 11, R8). For SCOPES_BEYOND_GRANT: the scopes the
+  // upgraded release needs beyond the grant (ADR#0092 Decision 10). Empty for
+  // every other reason.
+  repeated trogonai.connections.types.v1alpha1.ProviderScope scopes = 2;
+  // The narrower authority a refresh reported, which replaces the recorded
+  // granted authority (R7, ADR#0095 Decision 3). Present only when custody
+  // reports SCOPES_REDUCED; the exchange-time reduction is already recorded on
+  // the activation or reconnect.
+  trogonai.connections.types.v1alpha1.GrantedAuthority granted_authority = 3;
+  // When the provider answered, or custody settled the refresh, that led to
+  // this observation. A domain fact, not the append time.
+  google.protobuf.Timestamp observed_at = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+}

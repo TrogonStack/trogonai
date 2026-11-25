@@ -1,0 +1,72 @@
+edition = "2024";
+
+package trogonai.connections.catalog.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/catalog/v1alpha1/definition.proto";
+import "trogonai/connections/catalog/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// One fold per release, not a joined projection. Unknown events and invalid
+// transitions reject replay. Missing is the explicit initial state.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    ConnectorRelease present = 2;
+  }
+}
+
+// The resource parent, definition bytes and digest are copied from genesis
+// and never change; only standing moves, Published to Deprecated and
+// Published or Deprecated to Blocked, and Blocked is terminal (ADR#0092 Decision 2). A
+// deprecation notice is present exactly when the release passed through
+// Deprecated, so a release blocked after deprecation keeps its notice. A block
+// reason is present exactly when the release is Blocked. Retain the exact
+// definition_bytes, never a re-encoding; verify the digest over them.
+message ConnectorRelease {
+  reserved 2;
+  reserved connector_id;
+
+  option (buf.validate.message).cel = {
+    id: "connector_release_state.successor_parent"
+    message: "a successor belongs to the same connector catalog parent"
+    expression: "!has(this.deprecation.successor) || this.deprecation.successor.resource_parent == this.resource_parent"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connector_release_state.deprecation_notice"
+    message: "a deprecation notice is present when Deprecated and absent when Published"
+    expression: "this.standing == 1 ? !has(this.deprecation) : (this.standing == 2 ? has(this.deprecation) : true)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_release_state.block_reason"
+    message: "a block reason is present exactly when the release is Blocked"
+    expression: "(this.standing == 3) == has(this.block_reason)"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectorReleaseId release_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.catalog.v1alpha1.ConnectorDefinition definition = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.Digest definition_digest = 4 [features.field_presence = LEGACY_REQUIRED];
+  bytes definition_bytes = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  trogonai.connections.catalog.v1alpha1.ConnectorReleaseStanding standing = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.catalog.v1alpha1.DeprecationNotice deprecation = 7;
+  trogonai.connections.catalog.v1alpha1.ConnectorReleaseBlockReason block_reason = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseParent resource_parent = 9 [features.field_presence = LEGACY_REQUIRED];
+}

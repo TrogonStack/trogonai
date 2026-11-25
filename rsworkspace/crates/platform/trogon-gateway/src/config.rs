@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
-use crate::secret_store::{StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError};
 use crate::source::datadog::DatadogWebhookToken;
 use crate::source::discord::config::DiscordBotToken;
 use crate::source::github::config::GitHubWebhookSecret;
@@ -31,19 +29,27 @@ use crate::source::telegram::config::{
     TelegramBotToken, TelegramPublicWebhookUrl, TelegramWebhookRegistrationConfig, TelegramWebhookSecret,
 };
 use crate::source::twitter::config::TwitterConsumerSecret;
+use crate::source::whatsapp::{
+    HTTP_BODY_SIZE_MAX as WHATSAPP_BODY_SIZE_MAX, MetaObjectId, WhatsAppConfig, WhatsAppWebhookConfig,
+};
 use crate::source::zoom::config::ZoomConfig as ZoomSourceConfig;
 use crate::source::zoom::zoom_secret_token::ZoomSecretToken;
-use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
+use crate::static_config_secret_store::{
+    StaticConfigSecretInput, StaticConfigSecretStore, StaticConfigSecretStoreError,
+};
 use axum::http::HeaderName;
 use confique::Config;
 use trogon_config_value::{ConfigValue, ConfigValueError};
+use trogon_credential_domain::{
+    CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceIntegrationIdError, SourceKind,
+};
 #[cfg(test)]
 use trogon_nats::NatsAuth;
 use trogon_nats::jetstream::StreamMaxAge;
-use trogon_nats::{NatsToken, SubjectTokenViolationError};
+use trogon_nats::{DottedNatsToken, NatsToken, SubjectTokenViolationError};
 use trogon_service_config::{NatsArgs, NatsArgsError, NatsConfigSection, load_config, resolve_nats};
 use trogon_std::env::{ReadEnv, SystemEnv};
-use trogon_std::{ByteSize, HttpBodySizeMax, NonZeroDuration, ZeroDurationError};
+use trogon_std::{ByteSize, HttpBodySizeMax, NonZeroDuration, SecretString, ZeroDurationError};
 
 use crate::constants::{
     DEFAULT_GITLAB_TIMESTAMP_TOLERANCE_SECS, DEFAULT_INCIDENTIO_TIMESTAMP_TOLERANCE_SECS,
@@ -52,6 +58,7 @@ use crate::constants::{
     SENTRY_MAX_ACK_TIMEOUT_SECS,
 };
 use crate::source_status::SourceStatus;
+use crate::webhooks::WebhookConfig;
 
 #[derive(Debug, thiserror::Error)]
 enum DurationTooLongError {
@@ -90,7 +97,10 @@ impl SecretInput {
         env: &impl ReadEnv,
     ) -> Result<String, SecretInputError> {
         let secret = StaticConfigSecretStore::resolve(scope, kind, self.into(), env)?;
-        let plaintext = secret.into_plaintext()?;
+        Self::decode(secret.into_plaintext()?)
+    }
+
+    fn decode(plaintext: SecretString) -> Result<String, SecretInputError> {
         ConfigValue::parse(plaintext.as_str().to_string())
             .map(ConfigValue::into_string)
             .map_err(SecretInputError::InvalidValue)
@@ -298,6 +308,21 @@ pub enum ConfigValidationError {
         field: &'static str,
         violation: SubjectTokenViolationError,
     },
+    #[error(
+        "{first}: subject_prefix `{first_prefix}` overlaps {second}: subject_prefix `{second_prefix}`; each stream needs its own subjects"
+    )]
+    OverlappingSubjectPrefix {
+        first: String,
+        first_prefix: String,
+        second: String,
+        second_prefix: String,
+    },
+    #[error("{first} and {second} both use stream_name `{stream_name}`")]
+    DuplicateStreamName {
+        first: String,
+        second: String,
+        stream_name: String,
+    },
 }
 
 impl ConfigValidationError {
@@ -432,6 +457,7 @@ struct GatewayConfig {
     nats: NatsConfigSection,
     #[config(nested)]
     sources: SourcesConfig,
+    webhooks: Option<crate::webhooks::WebhookConfigInput>,
 }
 
 #[derive(Config)]
@@ -472,6 +498,26 @@ struct SourcesConfig {
     zoom: ZoomConfig,
     #[config(nested)]
     plaid: PlaidConfig,
+    #[config(nested)]
+    whatsapp: WhatsAppConfigInput,
+}
+
+#[derive(Config)]
+#[config(layer_attr(serde(deny_unknown_fields)))]
+struct WhatsAppConfigInput {
+    status: Option<String>,
+    #[config(default = {})]
+    integrations: BTreeMap<String, SourceIntegrationInput<WhatsAppWebhookInput>>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WhatsAppWebhookInput {
+    waba_id: Option<String>,
+    phone_number_id: Option<String>,
+    verify_token: Option<SecretInput>,
+    app_secret: Option<SecretInput>,
+    max_body_bytes: Option<ByteCountInput>,
 }
 
 #[derive(Config)]
@@ -775,6 +821,8 @@ pub struct ResolvedConfig {
     pub datadog: Vec<SourceIntegration<crate::source::datadog::DatadogConfig>>,
     pub zoom: Vec<SourceIntegration<crate::source::zoom::ZoomConfig>>,
     pub plaid: Vec<SourceIntegration<crate::source::plaid::PlaidConfig>>,
+    pub whatsapp: Vec<SourceIntegration<WhatsAppConfig>>,
+    pub webhooks: Option<WebhookConfig>,
 }
 
 impl ResolvedConfig {
@@ -805,6 +853,8 @@ impl ResolvedConfig {
             .chain(self.datadog.iter().map(|i| i.config.stream_max_age))
             .chain(self.zoom.iter().map(|i| i.config.stream_max_age))
             .chain(self.plaid.iter().map(|i| i.config.stream_max_age))
+            .chain(self.whatsapp.iter().map(|i| i.config.stream_max_age))
+            .chain(self.webhooks.iter().map(|config| config.stream_max_age))
     }
 
     pub fn has_any_source(&self) -> bool {
@@ -823,6 +873,8 @@ impl ResolvedConfig {
             || !self.datadog.is_empty()
             || !self.zoom.is_empty()
             || !self.plaid.is_empty()
+            || !self.whatsapp.is_empty()
+            || self.webhooks.is_some()
     }
 }
 
@@ -835,6 +887,142 @@ fn longest_stream_max_age(ages: impl Iterator<Item = StreamMaxAge>) -> Option<St
         (StreamMaxAge::ExpireAfter(a), StreamMaxAge::ExpireAfter(b)) if b > a => next,
         (StreamMaxAge::ExpireAfter(_), StreamMaxAge::ExpireAfter(_)) => acc,
     })
+}
+
+/// The JetStream stream one source owns: the label it reports under, the
+/// subject prefix its stream captures, and the stream's name.
+struct StreamBinding<'a> {
+    owner: String,
+    subject_prefix: &'a str,
+    stream_name: &'a str,
+}
+
+impl<'a> StreamBinding<'a> {
+    fn new(owner: String, subject_prefix: &'a str, stream_name: &'a str) -> Self {
+        Self {
+            owner,
+            subject_prefix,
+            stream_name,
+        }
+    }
+
+    /// Whether both streams would capture a common subject. A prefix captures
+    /// itself and everything below it, so two prefixes overlap when they are
+    /// equal or one is a token-wise ancestor of the other.
+    fn overlaps(&self, other: &Self) -> bool {
+        let (a, b) = (self.subject_prefix, other.subject_prefix);
+        a == b || is_subject_ancestor(a, b) || is_subject_ancestor(b, a)
+    }
+}
+
+fn is_subject_ancestor(ancestor: &str, subject: &str) -> bool {
+    subject.strip_prefix(ancestor).is_some_and(|rest| rest.starts_with('.'))
+}
+
+fn integration_bindings<'a, T: 'a>(
+    source: &'static str,
+    integrations: &'a [SourceIntegration<T>],
+    stream: impl Fn(&'a T) -> (&'a DottedNatsToken, &'a NatsToken) + 'a,
+) -> impl Iterator<Item = StreamBinding<'a>> + 'a {
+    integrations.iter().map(move |integration| {
+        let (subject_prefix, stream_name) = stream(&integration.config);
+        StreamBinding::new(format!("{source}/{}", integration.id), subject_prefix, stream_name)
+    })
+}
+
+impl ResolvedConfig {
+    fn stream_bindings(&self) -> Vec<StreamBinding<'_>> {
+        let credential = StreamBinding::new(
+            "gateway credentials".to_string(),
+            crate::credential::constants::CREDENTIAL_EVENT_SUBJECT_PREFIX,
+            crate::credential::constants::CREDENTIAL_STREAM,
+        );
+        let discord = self
+            .discord
+            .iter()
+            .map(|c| StreamBinding::new("discord".to_string(), &c.subject_prefix, &c.stream_name));
+        let webhooks = self
+            .webhooks
+            .iter()
+            .map(|config| StreamBinding::new("webhooks".to_string(), &config.subject_prefix, &config.stream_name));
+        std::iter::once(credential)
+            .chain(discord)
+            .chain(webhooks)
+            .chain(integration_bindings("github", &self.github, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("slack", &self.slack, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("telegram", &self.telegram, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("twitter", &self.twitter, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("gitlab", &self.gitlab, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("google_pubsub", &self.google_pubsub, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("incidentio", &self.incidentio, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("linear", &self.linear, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("microsoft_graph", &self.microsoft_graph, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("notion", &self.notion, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("sentry", &self.sentry, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("datadog", &self.datadog, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("zoom", &self.zoom, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("plaid", &self.plaid, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .chain(integration_bindings("whatsapp", &self.whatsapp, |c| {
+                (&c.subject_prefix, &c.stream_name)
+            }))
+            .collect()
+    }
+}
+
+/// JetStream refuses a stream whose subjects overlap an existing stream, and a
+/// stream name can be bound only once, so a clash would otherwise surface as a
+/// provisioning failure at startup instead of a config error.
+fn validate_stream_bindings(config: &ResolvedConfig) -> Vec<ConfigValidationError> {
+    let bindings = config.stream_bindings();
+    let mut errors = Vec::new();
+    for (index, first) in bindings.iter().enumerate() {
+        for second in &bindings[index + 1..] {
+            if first.overlaps(second) {
+                errors.push(ConfigValidationError::OverlappingSubjectPrefix {
+                    first: first.owner.clone(),
+                    first_prefix: first.subject_prefix.to_string(),
+                    second: second.owner.clone(),
+                    second_prefix: second.subject_prefix.to_string(),
+                });
+            }
+            if first.stream_name == second.stream_name {
+                errors.push(ConfigValidationError::DuplicateStreamName {
+                    first: first.owner.clone(),
+                    second: second.owner.clone(),
+                    stream_name: first.stream_name.to_string(),
+                });
+            }
+        }
+    }
+    errors
 }
 
 #[cfg(test)]
@@ -854,6 +1042,14 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
     let nats = resolve_nats(&cfg.nats, nats_overrides, env).map_err(ConfigError::Nats)?;
     let mut errors = Vec::new();
 
+    let webhooks = cfg.webhooks.and_then(|input| match input.resolve() {
+        Ok(config) => config,
+        Err(error) => {
+            errors.push(ConfigValidationError::invalid("webhooks", "configuration", error));
+            None
+        }
+    });
+
     let github = resolve_github_integrations(cfg.sources.github, env, &mut errors);
     let discord = resolve_discord(cfg.sources.discord, env, &mut errors);
     let slack = resolve_slack_integrations(cfg.sources.slack, env, &mut errors);
@@ -869,12 +1065,13 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
     let datadog = resolve_datadog_integrations(cfg.sources.datadog, env, &mut errors);
     let zoom = resolve_zoom_integrations(cfg.sources.zoom, env, &mut errors);
     let plaid = resolve_plaid_integrations(cfg.sources.plaid, env, &mut errors);
+    let whatsapp = resolve_whatsapp_integrations(cfg.sources.whatsapp, env, &mut errors);
 
     if !errors.is_empty() {
         return Err(ConfigError::Validation(AggregateValidationError(errors)));
     }
 
-    Ok(ResolvedConfig {
+    let config = ResolvedConfig {
         http_server: ResolvedHttpServerConfig {
             port: cfg.http_server.port,
         },
@@ -894,7 +1091,16 @@ fn resolve(cfg: GatewayConfig, nats_overrides: &NatsArgs, env: &impl ReadEnv) ->
         datadog,
         zoom,
         plaid,
-    })
+        whatsapp,
+        webhooks,
+    };
+
+    let errors = validate_stream_bindings(&config);
+    if !errors.is_empty() {
+        return Err(ConfigError::Validation(AggregateValidationError(errors)));
+    }
+
+    Ok(config)
 }
 
 fn resolve_github_integrations(
@@ -1026,7 +1232,7 @@ fn resolve_discord(
         crate::source::discord::config::default_intents()
     };
 
-    let subject_prefix = match NatsToken::new(subject_prefix.as_deref().unwrap_or("discord")) {
+    let subject_prefix = match DottedNatsToken::new(subject_prefix.as_deref().unwrap_or("discord")) {
         Ok(t) => t,
         Err(e) => {
             errors.push(ConfigValidationError::invalid_subject_token(
@@ -2561,6 +2767,125 @@ fn resolve_datadog_integrations(
     integrations
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("the verification token and app secret must be distinct")]
+struct WhatsAppCredentialReuseError;
+
+#[derive(Debug, thiserror::Error)]
+#[error("must not exceed Meta's {0} byte payload limit")]
+struct WhatsAppPayloadLimitError(usize);
+
+fn resolve_whatsapp_integrations(
+    section: WhatsAppConfigInput,
+    env: &impl ReadEnv,
+    errors: &mut Vec<ConfigValidationError>,
+) -> Vec<SourceIntegration<WhatsAppConfig>> {
+    const SOURCE: &str = "whatsapp";
+    let mut integrations = Vec::new();
+    if !resolve_source_status(SOURCE, section.status.as_deref(), errors) {
+        return integrations;
+    }
+    for (raw_id, integration) in section.integrations {
+        let Some(id) = resolve_integration_id(SOURCE, raw_id, errors) else {
+            continue;
+        };
+        if !resolve_integration_source_status(SOURCE, &id, integration.status.as_deref(), errors) {
+            continue;
+        }
+        let fields = resolve_common_integration_fields(
+            CommonIntegrationFieldsInput {
+                source: SOURCE,
+                id: &id,
+                subject_source_prefix: SOURCE,
+                stream_source_prefix: "WHATSAPP",
+                subject_prefix: integration.subject_prefix,
+                stream_name: integration.stream_name,
+                stream_max_age_secs: integration.stream_max_age_secs,
+                nats_ack_timeout_secs: integration.nats_ack_timeout_secs,
+                default_nats_ack_timeout_secs: DEFAULT_NATS_ACK_TIMEOUT_SECS,
+            },
+            errors,
+        );
+        let Some((subject_prefix, stream_name, stream_max_age, nats_ack_timeout)) = fields else {
+            continue;
+        };
+        let webhook = match resolve_whatsapp_webhook(&id, integration.webhook, env) {
+            Ok(webhook) => webhook,
+            Err(error) => {
+                errors.push(error);
+                continue;
+            }
+        };
+        integrations.push(SourceIntegration::new(
+            id,
+            WhatsAppConfig {
+                webhook,
+                subject_prefix,
+                stream_name,
+                stream_max_age,
+                nats_ack_timeout,
+            },
+        ));
+    }
+    integrations
+}
+
+fn resolve_whatsapp_webhook(
+    id: &SourceIntegrationId,
+    input: Option<WhatsAppWebhookInput>,
+    env: &impl ReadEnv,
+) -> Result<WhatsAppWebhookConfig, ConfigValidationError> {
+    let webhook = input.ok_or_else(|| ConfigValidationError::missing_integration("whatsapp", id, "webhook"))?;
+    let waba_id = require_whatsapp_field(id, "waba_id", webhook.waba_id, MetaObjectId::new)?;
+    let phone_number_id = require_whatsapp_field(id, "phone_number_id", webhook.phone_number_id, MetaObjectId::new)?;
+    let resolve_secret = |input: SecretInput| -> Result<SecretString, SecretInputError> {
+        let plaintext = StaticConfigSecretInput::from(input).resolve_plaintext(env)?;
+        SecretString::new(SecretInput::decode(plaintext)?)
+            .map_err(|error| StaticConfigSecretStoreError::EmptySecretError(error).into())
+    };
+    let verify_token = require_whatsapp_field(id, "verify_token", webhook.verify_token, resolve_secret)?;
+    let app_secret = require_whatsapp_field(id, "app_secret", webhook.app_secret, resolve_secret)?;
+    if verify_token.as_str() == app_secret.as_str() {
+        return Err(ConfigValidationError::invalid_integration(
+            "whatsapp",
+            id,
+            "app_secret",
+            WhatsAppCredentialReuseError,
+        ));
+    }
+    let max_body_bytes = webhook
+        .max_body_bytes
+        .map(|value| value.resolve(env))
+        .transpose()
+        .map_err(|error| ConfigValidationError::invalid_integration("whatsapp", id, "max_body_bytes", error))?
+        .unwrap_or(WHATSAPP_BODY_SIZE_MAX);
+    if max_body_bytes.as_usize() > WHATSAPP_BODY_SIZE_MAX.as_usize() {
+        return Err(ConfigValidationError::invalid_integration(
+            "whatsapp",
+            id,
+            "max_body_bytes",
+            WhatsAppPayloadLimitError(WHATSAPP_BODY_SIZE_MAX.as_usize()),
+        ));
+    }
+    Ok(WhatsAppWebhookConfig {
+        waba_id,
+        phone_number_id,
+        verify_token,
+        app_secret,
+        max_body_bytes,
+    })
+}
+
+fn require_whatsapp_field<T, U, E: std::error::Error + Send + Sync + 'static>(
+    id: &SourceIntegrationId,
+    field: &'static str,
+    input: Option<T>,
+    resolve: impl FnOnce(T) -> Result<U, E>,
+) -> Result<U, ConfigValidationError> {
+    let input = input.ok_or_else(|| ConfigValidationError::missing_integration("whatsapp", id, field))?;
+    resolve(input).map_err(|error| ConfigValidationError::invalid_integration("whatsapp", id, field, error))
+}
+
 fn resolve_integration_id(
     source: &'static str,
     raw_id: String,
@@ -2627,7 +2952,7 @@ struct CommonIntegrationFieldsInput<'a> {
 fn resolve_common_integration_fields(
     input: CommonIntegrationFieldsInput<'_>,
     errors: &mut Vec<ConfigValidationError>,
-) -> Option<(NatsToken, NatsToken, StreamMaxAge, NonZeroDuration)> {
+) -> Option<(DottedNatsToken, NatsToken, StreamMaxAge, NonZeroDuration)> {
     let CommonIntegrationFieldsInput {
         source,
         id,
@@ -2640,7 +2965,7 @@ fn resolve_common_integration_fields(
         default_nats_ack_timeout_secs,
     } = input;
 
-    let subject_prefix = match NatsToken::new(
+    let subject_prefix = match DottedNatsToken::new(
         subject_prefix.unwrap_or_else(|| default_integration_subject_prefix(subject_source_prefix, id)),
     ) {
         Ok(token) => token,

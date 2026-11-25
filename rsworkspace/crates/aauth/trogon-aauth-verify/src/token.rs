@@ -46,6 +46,14 @@ pub enum TokenError {
     MissingClaim(&'static str),
     #[error("invalid claim: {0}")]
     InvalidClaim(&'static str),
+    #[error("nbf must be an integer Unix timestamp")]
+    InvalidNotBefore,
+    #[error("critical JWT header extensions are not supported")]
+    UnsupportedCriticalHeader,
+    #[error("protected JWT header encoding is invalid")]
+    ProtectedHeaderEncoding(#[source] base64::DecodeError),
+    #[error("protected JWT header JSON is invalid")]
+    ProtectedHeaderJson(#[source] serde_json::Error),
     #[error("cnf.jwk is not a valid public confirmation key: {0}")]
     ConfirmationKeyNotPublic(#[source] CnfError),
 }
@@ -182,6 +190,7 @@ impl fmt::Debug for VerifiedResource {
 }
 
 /// Verifier for AAuth JWTs. Pluggable JWKS resolver + clock; no global state.
+/// Registered dates use signed integer Unix seconds, including optional `nbf`.
 pub struct TokenVerifier<R: JwksResolver, C: TimeSource> {
     jwks: R,
     clock: C,
@@ -197,6 +206,8 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         }
     }
 
+    /// Clock skew allowed for `iat`, optional `nbf`, and exclusive `exp`.
+    /// Values outside signed-second range apply no leeway.
     #[must_use]
     pub fn with_leeway(mut self, leeway_secs: u64) -> Self {
         self.leeway_secs = leeway_secs;
@@ -210,6 +221,7 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         let claims_raw: serde_json::Value = self
             .decode_with_jwks(jwt, alg, header.kid.as_deref(), iss_of(jwt)?, None)
             .await?;
+        let not_before = not_before_of(&claims_raw)?;
         let claims: AgentClaims =
             serde_json::from_value(claims_raw.clone()).map_err(|_| TokenError::MissingClaim("agent claims"))?;
         claims
@@ -224,7 +236,7 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
                 crate::jkt::JktError::Serialize(_) => "cnf.jwk",
             })
         })?;
-        self.assert_freshness(claims.iat, claims.exp)?;
+        self.assert_freshness(claims.iat, claims.exp, not_before)?;
         Ok(VerifiedAgent {
             claims,
             jkt,
@@ -239,9 +251,10 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         let claims_raw: serde_json::Value = self
             .decode_with_jwks(jwt, alg, header.kid.as_deref(), iss_of(jwt)?, Some(expected_aud))
             .await?;
+        let not_before = not_before_of(&claims_raw)?;
         let claims: ResourceClaims =
             serde_json::from_value(claims_raw).map_err(|_| TokenError::MissingClaim("resource claims"))?;
-        self.assert_freshness(claims.iat, claims.exp)?;
+        self.assert_freshness(claims.iat, claims.exp, not_before)?;
         Ok(VerifiedResource {
             claims,
             raw_jwt: jwt.to_string(),
@@ -255,13 +268,14 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         let claims_raw: serde_json::Value = self
             .decode_with_jwks(jwt, alg, header.kid.as_deref(), iss_of(jwt)?, Some(expected_aud))
             .await?;
+        let not_before = not_before_of(&claims_raw)?;
         let claims: AuthClaims =
             serde_json::from_value(claims_raw).map_err(|_| TokenError::MissingClaim("auth claims"))?;
         if let Some(cnf) = claims.cnf.as_ref() {
             cnf.reject_if_not_public()
                 .map_err(TokenError::ConfirmationKeyNotPublic)?;
         }
-        self.assert_freshness(claims.iat, claims.exp)?;
+        self.assert_freshness(claims.iat, claims.exp, not_before)?;
         Ok(VerifiedAuth {
             claims,
             raw_jwt: jwt.to_string(),
@@ -347,13 +361,13 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
         Ok(())
     }
 
-    fn assert_freshness(&self, iat: i64, exp: i64) -> Result<(), TokenError> {
-        let now = self.clock.now();
-        let leeway = i64::try_from(self.leeway_secs).unwrap_or(0);
-        if now + leeway < iat {
+    fn assert_freshness(&self, iat: i64, exp: i64, not_before: Option<i64>) -> Result<(), TokenError> {
+        let now = i128::from(self.clock.now());
+        let leeway = i128::from(i64::try_from(self.leeway_secs).unwrap_or(0));
+        if now + leeway < i128::from(iat) || not_before.is_some_and(|nbf| now + leeway < i128::from(nbf)) {
             return Err(TokenError::NotYetValid);
         }
-        if now - leeway > exp {
+        if now - leeway >= i128::from(exp) {
             return Err(TokenError::Expired);
         }
         Ok(())
@@ -383,11 +397,8 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
                 validation.validate_aud = false;
             }
         }
-        // We do our own iat/exp/nbf checks against the supplied clock;
-        // jsonwebtoken uses the system clock unconditionally for all three,
-        // and leaving validate_nbf on would silently route the nbf check
-        // through SystemTime even though the rest of freshness uses the
-        // injected TimeSource.
+        // The library's time checks use the system clock, so registered dates
+        // are checked together against the injected clock after verification.
         validation.validate_exp = false;
         validation.validate_nbf = false;
         validation.required_spec_claims.remove("exp");
@@ -405,8 +416,28 @@ impl<R: JwksResolver, C: TimeSource> TokenVerifier<R, C> {
                 _ => TokenError::Signature(e),
             }
         })?;
+        reject_critical_headers(jwt)?;
         Ok(data.claims)
     }
+}
+
+fn not_before_of(claims: &serde_json::Value) -> Result<Option<i64>, TokenError> {
+    claims
+        .get("nbf")
+        .map(|value| value.as_i64().ok_or(TokenError::InvalidNotBefore))
+        .transpose()
+}
+
+fn reject_critical_headers(jwt: &str) -> Result<(), TokenError> {
+    type ProtectedHeaderWire = serde_json::Map<String, serde_json::Value>;
+    let encoded = jwt.split('.').next().ok_or(TokenError::BadHeader)?;
+    let protected = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, encoded.as_bytes())
+        .map_err(TokenError::ProtectedHeaderEncoding)?;
+    let protected: ProtectedHeaderWire = serde_json::from_slice(&protected).map_err(TokenError::ProtectedHeaderJson)?;
+    if protected.contains_key("crit") {
+        return Err(TokenError::UnsupportedCriticalHeader);
+    }
+    Ok(())
 }
 
 fn iss_of(jwt: &str) -> Result<String, TokenError> {

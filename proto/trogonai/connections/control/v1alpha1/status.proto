@@ -1,0 +1,174 @@
+edition = "2024";
+
+package trogonai.connections.control.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/lifecycle.proto";
+import "trogonai/connections/connections/v1alpha1/lifecycle.proto";
+import "trogonai/connections/control/v1alpha1/types.proto";
+import "trogonai/connections/resources/v1alpha1/names.proto";
+import "trogonai/connections/types/v1alpha1/cleanup.proto";
+import "trogonai/connections/types/v1alpha1/health.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+message AuthorizationStatus {
+  option (buf.validate.message).cel = {
+    id: "authorization_status.one_parent"
+    message: "the attempt and connection status share the custody parent"
+    expression: "this.resource.resource_parent == this.resource_parent && this.connection.resource_parent == this.resource_parent"
+  };
+  option (buf.validate.message).cel = {
+    id: "authorization_status.failure_phase"
+    message: "a sanitized failure accompanies exactly a Failed attempt"
+    expression: "has(this.failure) == (this.phase == 6)"
+  };
+
+  trogonai.connections.resources.v1alpha1.AuthorizationAttemptResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.resources.v1alpha1.ConnectionResourceName connection = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.authorization_attempts.v1alpha1.AuthorizationAttemptPhase phase = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  google.protobuf.Timestamp expires_at = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  uint64 stream_revision = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp observed_at = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  ControlFailure failure = 7;
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 8 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Metadata projection only. Lifecycle is a folded fact, not current permission
+// or proof that provider cleanup completed. No raw account profile is exposed.
+message ConnectionStatus {
+  option (buf.validate.message).cel = {
+    id: "connection_status.one_parent"
+    message: "status and resource name share the custody parent"
+    expression: "this.resource.resource_parent == this.resource_parent"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_status.unique_reasons"
+    message: "health and cleanup reason lists are unique"
+    expression: "this.health_reasons.unique() && this.cleanup_obligations.unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_status.authorization_generation"
+    message: "established and revoked connections retain their authorization generation"
+    expression: "has(this.authorization_generation) == (this.lifecycle in [2, 3, 4, 5, 6])"
+  };
+
+  trogonai.connections.resources.v1alpha1.ConnectionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.connections.v1alpha1.ConnectionLifecycle lifecycle = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  uint64 authorization_generation = 3 [(buf.validate.field).uint64.gt = 0];
+  repeated trogonai.connections.types.v1alpha1.ConnectionHealthReason health_reasons = 4 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  repeated trogonai.connections.types.v1alpha1.CleanupObligationKind cleanup_obligations = 5 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  uint64 stream_revision = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  google.protobuf.Timestamp observed_at = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 8 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectorId connector_id = 9 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Service-owned idempotency bookkeeping, not an aggregate command or an OAuth
+// capsule. ACCEPTED precedes domain writes; COMMITTED means intent is durable.
+message ControlRequestRecord {
+  option (buf.validate.message).cel = {
+    id: "control_request_record.one_parent"
+    message: "all receipt targets share its custody parent"
+    expression: "this.connection.resource_parent == this.resource_parent && (!has(this.authorization_attempt) || this.authorization_attempt.resource_parent == this.resource_parent)"
+  };
+  option (buf.validate.message).cel = {
+    id: "control_request_record.attempt_action"
+    message: "authorization actions identify their attempt; disconnect does not"
+    expression: "has(this.authorization_attempt) == (this.action in [1, 2, 4])"
+  };
+  option (buf.validate.message).cel = {
+    id: "control_request_record.failure_phase"
+    message: "a sanitized failure accompanies exactly a failed request"
+    expression: "has(this.failure) == (this.phase == 3)"
+  };
+
+  ControlRequestId request_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ControlAction action = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ControlRequestPhase phase = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.resources.v1alpha1.ConnectionResourceName connection = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.resources.v1alpha1.AuthorizationAttemptResourceName authorization_attempt = 5;
+  google.protobuf.Timestamp accepted_at = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+  ControlFailure failure = 7;
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 8 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ConsentStart {
+  option (buf.validate.message).cel = {
+    id: "consent_start.receipt_targets"
+    message: "a committed consent receipt names the returned attempt and connection"
+    expression: "this.receipt.phase == 2 && this.receipt.action in [1, 2] && this.receipt.authorization_attempt == this.status.resource && this.receipt.connection == this.status.connection"
+  };
+  option (buf.validate.message).cel = {
+    id: "consent_start.redirect_phase"
+    message: "a transient redirect exists only while awaiting consent and expires with the attempt"
+    expression: "!has(this.redirect) || (this.status.phase == 1 && this.redirect.expires_at == this.status.expires_at)"
+  };
+
+  ControlRequestRecord receipt = 1 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationStatus status = 2 [features.field_presence = LEGACY_REQUIRED];
+  BrowserAuthorizationRedirect redirect = 3;
+}
+
+message ConnectionStatusFilter {
+  repeated trogonai.connections.connections.v1alpha1.ConnectionLifecycle lifecycles = 1 [(buf.validate.field).repeated = {
+    max_items: 7
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  trogonai.connections.types.v1alpha1.ConnectorId connector_id = 2;
+}

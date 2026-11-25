@@ -6,6 +6,7 @@
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::Serialize;
+use trogon_aauth_verify::TokenError;
 use trogon_identity_types::aauth::{Act, AuthClaims, Cnf, DWK_PERSON, TYP_AUTH};
 
 use crate::error::MintError;
@@ -43,6 +44,14 @@ impl AuthTokenTtl {
     #[must_use]
     pub fn get(self) -> i64 {
         self.0
+    }
+
+    pub(crate) fn bounded_by(self, now: i64, expires_at: i64) -> Result<Self, TokenError> {
+        let remaining = expires_at.saturating_sub(now);
+        if remaining <= 0 {
+            return Err(TokenError::Expired);
+        }
+        Ok(Self(self.0.min(remaining)))
     }
 }
 

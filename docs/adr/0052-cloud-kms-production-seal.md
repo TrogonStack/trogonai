@@ -7,6 +7,11 @@ date: 2026-08-05
 
 # ADR#0052: Cloud KMS Auto-Unseal Is Mandatory for Production OpenBao
 
+> **Related proposal:** The [portable identity and adapter roadmap](../research/workload-identity/adapter-roadmap.md)
+> proposes evaluating independently operated production bootstrap/seal profiles.
+> That requires an explicit amendment or supersession. The mandate and recorded
+> restricted-egress exception in this accepted ADR remain in force.
+
 ## Context
 
 Everything OpenBao persists is encrypted by its barrier keyring, the

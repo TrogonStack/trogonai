@@ -1,0 +1,134 @@
+edition = "2024";
+
+package trogonai.connections.provider_apps.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/provider_apps/v1alpha1/app.proto";
+import "trogonai/connections/provider_apps/v1alpha1/discovery.proto";
+import "trogonai/connections/provider_apps/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/cleanup.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/outcome.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// One fold per app, not a joined projection. Unknown events and invalid
+// transitions reject replay. Missing is the explicit initial state.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    ProviderApp present = 2;
+  }
+}
+
+// Resource parent, origin, connector and issuer are copied from genesis and
+// the kind from activation; a rotation replaces only the SecretRef of its
+// role and never the identity (ADR#0092 Decision 3). The kind is present in every
+// state after Pending except a Revoked app whose registration failed.
+// discovery is the latest snapshot and is present exactly when the kind
+// carries a snapshot digest. A degradation reason is present exactly when
+// Degraded, a revocation reason exactly when Revoked, and cleanup steps only
+// when Revoked, each at most once. Whether a connection under the app is
+// usable is this state joined live with the release standing and the
+// connection's own state (ADR#0092 Decision 10).
+message ProviderApp {
+  reserved 2;
+  reserved scope;
+
+  option (buf.validate.message).cel = {
+    id: "provider_app_state.metadata_document_parent"
+    message: "a platform metadata-document client has a platform parent"
+    expression: "!has(this.kind.client_id_metadata_document) || has(this.resource_parent.platform)"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "provider_app.origin_parent"
+    message: "platform-managed apps use the platform parent; customer and dynamic apps use a project parent"
+    expression: "(this.origin == 1) == has(this.resource_parent.platform)"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "provider_app_state.kind"
+    message: "an Active, Disabled or Degraded app has a kind and a Pending app has none"
+    expression: "this.lifecycle == 1 ? !has(this.kind) : (this.lifecycle == 5 || has(this.kind))"
+  };
+  option (buf.validate.message).cel = {
+    id: "provider_app_state.degradation_reason"
+    message: "a degradation reason is present exactly when the app is Degraded"
+    expression: "(this.lifecycle == 4) == has(this.degradation_reason)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provider_app_state.revocation"
+    message: "a revocation or registration failure reason is present exactly when the app is Revoked, and cleanup only then"
+    expression: "(this.lifecycle == 5) == (has(this.revocation_reason) || has(this.registration_failure_reason)) && !(has(this.revocation_reason) && has(this.registration_failure_reason)) && (this.lifecycle == 5 || this.cleanup.size() == 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provider_app_state.cleanup_steps_unique"
+    message: "each cleanup step is recorded at most once"
+    expression: "this.cleanup.map(c, c.step).unique()"
+  };
+
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.provider_apps.v1alpha1.ProviderAppOrigin origin = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ConnectorId connector_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.Issuer issuer = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.provider_apps.v1alpha1.ProviderAppLifecycle lifecycle = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.provider_apps.v1alpha1.ProviderAppKind kind = 7;
+  trogonai.connections.provider_apps.v1alpha1.AuthorizationServerDiscovery discovery = 8;
+  trogonai.connections.provider_apps.v1alpha1.ProviderAppDegradationReason degradation_reason = 9 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  trogonai.connections.provider_apps.v1alpha1.ProviderAppRevocationReason revocation_reason = 10 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  trogonai.connections.provider_apps.v1alpha1.ProviderAppRegistrationFailureReason registration_failure_reason = 11 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  repeated CleanupRecord cleanup = 12;
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 13 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// One recorded retirement step and its terminal outcome.
+message CleanupRecord {
+  option (buf.validate.message).cel = {
+    id: "cleanup_record.obligation"
+    message: "an obligation is present exactly when the outcome is not confirmed"
+    expression: "(this.outcome != 1) == has(this.obligation)"
+  };
+
+  trogonai.connections.provider_apps.v1alpha1.ProviderAppCleanupStep step = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.EffectOutcome outcome = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.CleanupObligationKind obligation = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}

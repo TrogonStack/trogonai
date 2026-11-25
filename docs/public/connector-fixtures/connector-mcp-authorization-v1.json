@@ -1,0 +1,1191 @@
+{
+  "profile": "trogon/connector-mcp-authorization/v1",
+  "authorization_revision": "2026-07-28",
+  "notice": "Synthetic normative conformance inputs and expected component decisions for future real client tests. All identifiers, callback values and hosts are fixtures. JSON parsing and reference expectation checks do not prove OAuth, callback ordering, HTTP behavior or runtime security.",
+  "rules": {
+    "scope_ceiling_meaning": "effective intersection of current release, ProviderApp, owner authority and product policy",
+    "scope_tokens": "exact, case-sensitive; sorted unique candidates",
+    "callback_prerequisite": "session, initiator and single-use state checks must pass independently",
+    "issuer_decode": "application/x-www-form-urlencoded once, strict UTF-8, no URI normalization",
+    "offline_cases_are_component_decisions": "omitting offline_access alone does not authorize the rest of a product flow",
+    "registration_uncertainty": "no blind retry of an ambiguous registration POST",
+    "revision_scope": "authorization is pinned separately from transport and session behavior",
+    "client_material_issuer": "issuer of any client material proposed for reuse; null means no existing material is proposed",
+    "resource_metadata": "required before MCP authorization for every registration mechanism, including preregistration; a digest pin is not proof of metadata validation"
+  },
+  "sources": [
+    "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization",
+    "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/authorization-server-discovery",
+    "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration",
+    "https://www.rfc-editor.org/rfc/rfc9207.html",
+    "https://openid.net/specs/openid-connect-core-1_0.html#OfflineAccess"
+  ],
+  "cases": [
+    {
+      "id": "scope-optional-requested-but-not-granted",
+      "kind": "step_up_scope_union",
+      "input": {
+        "history_available": true,
+        "previous_requested": {
+          "required": [
+            "issues:read"
+          ],
+          "optional": [
+            "issues:write"
+          ]
+        },
+        "previous_granted": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "comments:write"
+        ],
+        "current_scope_ceiling": [
+          "comments:write",
+          "issues:read",
+          "issues:write"
+        ]
+      },
+      "expected": {
+        "decision": "new_consent_allowed",
+        "candidate_requested_scopes": [
+          "comments:write",
+          "issues:read",
+          "issues:write"
+        ],
+        "outside_ceiling": [],
+        "request_is_grant_evidence": false,
+        "retry_original_mutation": false
+      }
+    },
+    {
+      "id": "scope-current-ceiling-removes-prior-optional-request",
+      "kind": "step_up_scope_union",
+      "input": {
+        "history_available": true,
+        "previous_requested": {
+          "required": [
+            "issues:read"
+          ],
+          "optional": [
+            "issues:write"
+          ]
+        },
+        "previous_granted": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "comments:write"
+        ],
+        "current_scope_ceiling": [
+          "comments:write",
+          "issues:read"
+        ]
+      },
+      "expected": {
+        "decision": "refuse_scope_ceiling",
+        "candidate_requested_scopes": [
+          "comments:write",
+          "issues:read",
+          "issues:write"
+        ],
+        "outside_ceiling": [
+          "issues:write"
+        ],
+        "request_is_grant_evidence": false,
+        "retry_original_mutation": false
+      }
+    },
+    {
+      "id": "scope-challenge-outside-current-ceiling",
+      "kind": "step_up_scope_union",
+      "input": {
+        "history_available": true,
+        "previous_requested": {
+          "required": [
+            "issues:read"
+          ],
+          "optional": [
+            "issues:write"
+          ]
+        },
+        "previous_granted": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "admin:write"
+        ],
+        "current_scope_ceiling": [
+          "comments:write",
+          "issues:read",
+          "issues:write"
+        ]
+      },
+      "expected": {
+        "decision": "refuse_scope_ceiling",
+        "candidate_requested_scopes": [
+          "admin:write",
+          "issues:read",
+          "issues:write"
+        ],
+        "outside_ceiling": [
+          "admin:write"
+        ],
+        "request_is_grant_evidence": false,
+        "retry_original_mutation": false
+      }
+    },
+    {
+      "id": "scope-union-deduplicates-without-dropping-request",
+      "kind": "step_up_scope_union",
+      "input": {
+        "history_available": true,
+        "previous_requested": {
+          "required": [
+            "issues:read"
+          ],
+          "optional": [
+            "issues:write"
+          ]
+        },
+        "previous_granted": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "issues:read",
+          "comments:write",
+          "issues:read"
+        ],
+        "current_scope_ceiling": [
+          "comments:write",
+          "issues:read",
+          "issues:write"
+        ]
+      },
+      "expected": {
+        "decision": "new_consent_allowed",
+        "candidate_requested_scopes": [
+          "comments:write",
+          "issues:read",
+          "issues:write"
+        ],
+        "outside_ceiling": [],
+        "request_is_grant_evidence": false,
+        "retry_original_mutation": false
+      }
+    },
+    {
+      "id": "scope-tokens-are-case-sensitive",
+      "kind": "step_up_scope_union",
+      "input": {
+        "history_available": true,
+        "previous_requested": {
+          "required": [
+            "issues:read"
+          ],
+          "optional": [
+            "issues:write"
+          ]
+        },
+        "previous_granted": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "Issues:read"
+        ],
+        "current_scope_ceiling": [
+          "comments:write",
+          "issues:read",
+          "issues:write"
+        ]
+      },
+      "expected": {
+        "decision": "refuse_scope_ceiling",
+        "candidate_requested_scopes": [
+          "Issues:read",
+          "issues:read",
+          "issues:write"
+        ],
+        "outside_ceiling": [
+          "Issues:read"
+        ],
+        "request_is_grant_evidence": false,
+        "retry_original_mutation": false
+      }
+    },
+    {
+      "id": "scope-missing-history-cannot-fall-back-to-grant",
+      "kind": "step_up_scope_union",
+      "input": {
+        "history_available": false,
+        "previous_requested": null,
+        "previous_granted": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "comments:write"
+        ],
+        "current_scope_ceiling": [
+          "comments:write",
+          "issues:read",
+          "issues:write"
+        ]
+      },
+      "expected": {
+        "decision": "refuse_unavailable_history",
+        "candidate_requested_scopes": null,
+        "outside_ceiling": null,
+        "request_is_grant_evidence": false,
+        "retry_original_mutation": false
+      }
+    },
+    {
+      "id": "issuer-required-exact-success",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "success",
+        "callback_query": "state=synthetic-state&code=synthetic-code&iss=https%3A%2F%2Fissuer.example.invalid%2Ftenant"
+      },
+      "expected": {
+        "decision": "accept_success",
+        "may_exchange_code": true,
+        "may_claim_callback": true,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-required-exact-error",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror&iss=https%3A%2F%2Fissuer.example.invalid%2Ftenant"
+      },
+      "expected": {
+        "decision": "accept_error_for_mapping",
+        "may_exchange_code": false,
+        "may_claim_callback": true,
+        "may_map_provider_error": true,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": true
+      }
+    },
+    {
+      "id": "issuer-advertised-missing-success",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "success",
+        "callback_query": "state=synthetic-state&code=synthetic-code"
+      },
+      "expected": {
+        "decision": "reject_issuer",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-advertised-missing-error",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror"
+      },
+      "expected": {
+        "decision": "reject_issuer",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-nonadvertised-present-exact",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": false,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "success",
+        "callback_query": "state=synthetic-state&code=synthetic-code&iss=https%3A%2F%2Fissuer.example.invalid%2Ftenant"
+      },
+      "expected": {
+        "decision": "accept_success",
+        "may_exchange_code": true,
+        "may_claim_callback": true,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-nonadvertised-present-mismatch-error",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": false,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror&iss=https%3A%2F%2Fother.example.invalid%2Ftenant"
+      },
+      "expected": {
+        "decision": "reject_issuer",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-nonadvertised-absent-success",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": false,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "success",
+        "callback_query": "state=synthetic-state&code=synthetic-code"
+      },
+      "expected": {
+        "decision": "accept_success",
+        "may_exchange_code": true,
+        "may_claim_callback": true,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-nonadvertised-absent-error",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": false,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror"
+      },
+      "expected": {
+        "decision": "accept_error_for_mapping",
+        "may_exchange_code": false,
+        "may_claim_callback": true,
+        "may_map_provider_error": true,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": true
+      }
+    },
+    {
+      "id": "issuer-no-scheme-or-host-case-folding",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror&iss=HTTPS%3A%2F%2FISSUER.example.invalid%2Ftenant"
+      },
+      "expected": {
+        "decision": "reject_issuer",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-no-trailing-slash-removal",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror&iss=https%3A%2F%2Fissuer.example.invalid%2Ftenant%2F"
+      },
+      "expected": {
+        "decision": "reject_issuer",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-no-default-port-elision",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror&iss=https%3A%2F%2Fissuer.example.invalid%3A443%2Ftenant"
+      },
+      "expected": {
+        "decision": "reject_issuer",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-no-uri-percent-normalization",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror&iss=https%3A%2F%2Fissuer.example.invalid%2F%2574enant"
+      },
+      "expected": {
+        "decision": "reject_issuer",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-form-decode-once-preserves-percent-sequence",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/%74enant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "success",
+        "callback_query": "state=synthetic-state&code=synthetic-code&iss=https%3A%2F%2Fissuer.example.invalid%2F%2574enant"
+      },
+      "expected": {
+        "decision": "accept_success",
+        "may_exchange_code": true,
+        "may_claim_callback": true,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-encoded-plus-remains-plus",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant+part",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "success",
+        "callback_query": "state=synthetic-state&code=synthetic-code&iss=https%3A%2F%2Fissuer.example.invalid%2Ftenant%2Bpart"
+      },
+      "expected": {
+        "decision": "accept_success",
+        "may_exchange_code": true,
+        "may_claim_callback": true,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-raw-plus-is-form-space",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant+part",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror&iss=https%3A%2F%2Fissuer.example.invalid%2Ftenant+part"
+      },
+      "expected": {
+        "decision": "reject_issuer",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-duplicate-singular-parameter",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror&iss=https%3A%2F%2Fissuer.example.invalid%2Ftenant&iss=https%3A%2F%2Fissuer.example.invalid%2Ftenant"
+      },
+      "expected": {
+        "decision": "reject_malformed",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "issuer-invalid-utf8",
+      "kind": "callback_issuer",
+      "input": {
+        "expected_issuer": "https://issuer.example.invalid/tenant",
+        "response_issuer_required": true,
+        "all_other_callback_bindings_valid": true,
+        "provider_result": "error",
+        "callback_query": "state=synthetic-state&error=access_denied&error_description=provider-controlled&error_uri=https%3A%2F%2Funtrusted.example.invalid%2Ferror&iss=https%3A%2F%2Fissuer.example.invalid%2F%FF"
+      },
+      "expected": {
+        "decision": "reject_malformed",
+        "may_exchange_code": false,
+        "may_claim_callback": false,
+        "may_map_provider_error": false,
+        "may_display_provider_text": false,
+        "may_follow_error_uri": false,
+        "may_emit_provider_error_event": false
+      }
+    },
+    {
+      "id": "offline-as-capability-and-consent",
+      "kind": "offline_access_selection",
+      "input": {
+        "background_refresh_needed": true,
+        "authorization_server_metadata_validated": true,
+        "authorization_server_scopes_supported": [
+          "issues:read",
+          "offline_access"
+        ],
+        "resource_metadata_scopes_supported": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "issues:read"
+        ],
+        "current_scope_ceiling": [
+          "issues:read",
+          "offline_access"
+        ],
+        "consent_allows_offline_access": true,
+        "oidc": true
+      },
+      "expected": {
+        "request_offline_access": true,
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "oidc_prompt": "consent",
+        "assume_refresh_token_issued": false,
+        "reject_unvalidated_metadata": false
+      }
+    },
+    {
+      "id": "offline-oauth-without-oidc-prompt",
+      "kind": "offline_access_selection",
+      "input": {
+        "background_refresh_needed": true,
+        "authorization_server_metadata_validated": true,
+        "authorization_server_scopes_supported": [
+          "issues:read",
+          "offline_access"
+        ],
+        "resource_metadata_scopes_supported": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "issues:read"
+        ],
+        "current_scope_ceiling": [
+          "issues:read",
+          "offline_access"
+        ],
+        "consent_allows_offline_access": true,
+        "oidc": false
+      },
+      "expected": {
+        "request_offline_access": true,
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "oidc_prompt": null,
+        "assume_refresh_token_issued": false,
+        "reject_unvalidated_metadata": false
+      }
+    },
+    {
+      "id": "offline-resource-and-challenge-do-not-prove-as-capability",
+      "kind": "offline_access_selection",
+      "input": {
+        "background_refresh_needed": true,
+        "authorization_server_metadata_validated": true,
+        "authorization_server_scopes_supported": [
+          "issues:read"
+        ],
+        "resource_metadata_scopes_supported": [
+          "issues:read",
+          "offline_access"
+        ],
+        "challenge_scopes": [
+          "offline_access"
+        ],
+        "current_scope_ceiling": [
+          "issues:read",
+          "offline_access"
+        ],
+        "consent_allows_offline_access": true,
+        "oidc": true
+      },
+      "expected": {
+        "request_offline_access": false,
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "oidc_prompt": null,
+        "assume_refresh_token_issued": false,
+        "reject_unvalidated_metadata": false
+      }
+    },
+    {
+      "id": "offline-omitted-as-scope-metadata",
+      "kind": "offline_access_selection",
+      "input": {
+        "background_refresh_needed": true,
+        "authorization_server_metadata_validated": true,
+        "authorization_server_scopes_supported": null,
+        "resource_metadata_scopes_supported": [
+          "offline_access"
+        ],
+        "challenge_scopes": [
+          "offline_access"
+        ],
+        "current_scope_ceiling": [
+          "issues:read",
+          "offline_access"
+        ],
+        "consent_allows_offline_access": true,
+        "oidc": true
+      },
+      "expected": {
+        "request_offline_access": false,
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "oidc_prompt": null,
+        "assume_refresh_token_issued": false,
+        "reject_unvalidated_metadata": false
+      }
+    },
+    {
+      "id": "offline-not-needed",
+      "kind": "offline_access_selection",
+      "input": {
+        "background_refresh_needed": false,
+        "authorization_server_metadata_validated": true,
+        "authorization_server_scopes_supported": [
+          "issues:read",
+          "offline_access"
+        ],
+        "resource_metadata_scopes_supported": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "issues:read"
+        ],
+        "current_scope_ceiling": [
+          "issues:read",
+          "offline_access"
+        ],
+        "consent_allows_offline_access": true,
+        "oidc": true
+      },
+      "expected": {
+        "request_offline_access": false,
+        "grant_types": [
+          "authorization_code"
+        ],
+        "oidc_prompt": null,
+        "assume_refresh_token_issued": false,
+        "reject_unvalidated_metadata": false
+      }
+    },
+    {
+      "id": "offline-current-ceiling-denies",
+      "kind": "offline_access_selection",
+      "input": {
+        "background_refresh_needed": true,
+        "authorization_server_metadata_validated": true,
+        "authorization_server_scopes_supported": [
+          "issues:read",
+          "offline_access"
+        ],
+        "resource_metadata_scopes_supported": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "issues:read"
+        ],
+        "current_scope_ceiling": [
+          "issues:read"
+        ],
+        "consent_allows_offline_access": true,
+        "oidc": true
+      },
+      "expected": {
+        "request_offline_access": false,
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "oidc_prompt": null,
+        "assume_refresh_token_issued": false,
+        "reject_unvalidated_metadata": false
+      }
+    },
+    {
+      "id": "offline-consent-denies",
+      "kind": "offline_access_selection",
+      "input": {
+        "background_refresh_needed": true,
+        "authorization_server_metadata_validated": true,
+        "authorization_server_scopes_supported": [
+          "issues:read",
+          "offline_access"
+        ],
+        "resource_metadata_scopes_supported": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "issues:read"
+        ],
+        "current_scope_ceiling": [
+          "issues:read",
+          "offline_access"
+        ],
+        "consent_allows_offline_access": false,
+        "oidc": true
+      },
+      "expected": {
+        "request_offline_access": false,
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "oidc_prompt": null,
+        "assume_refresh_token_issued": false,
+        "reject_unvalidated_metadata": false
+      }
+    },
+    {
+      "id": "offline-unvalidated-metadata-is-not-a-capability",
+      "kind": "offline_access_selection",
+      "input": {
+        "background_refresh_needed": true,
+        "authorization_server_metadata_validated": false,
+        "authorization_server_scopes_supported": [
+          "issues:read",
+          "offline_access"
+        ],
+        "resource_metadata_scopes_supported": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "issues:read"
+        ],
+        "current_scope_ceiling": [
+          "issues:read",
+          "offline_access"
+        ],
+        "consent_allows_offline_access": true,
+        "oidc": true
+      },
+      "expected": {
+        "request_offline_access": false,
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "oidc_prompt": null,
+        "assume_refresh_token_issued": false,
+        "reject_unvalidated_metadata": true
+      }
+    },
+    {
+      "id": "offline-scope-name-is-case-sensitive",
+      "kind": "offline_access_selection",
+      "input": {
+        "background_refresh_needed": true,
+        "authorization_server_metadata_validated": true,
+        "authorization_server_scopes_supported": [
+          "issues:read",
+          "OFFLINE_ACCESS"
+        ],
+        "resource_metadata_scopes_supported": [
+          "issues:read"
+        ],
+        "challenge_scopes": [
+          "issues:read"
+        ],
+        "current_scope_ceiling": [
+          "issues:read",
+          "offline_access"
+        ],
+        "consent_allows_offline_access": true,
+        "oidc": true
+      },
+      "expected": {
+        "request_offline_access": false,
+        "grant_types": [
+          "authorization_code",
+          "refresh_token"
+        ],
+        "oidc_prompt": null,
+        "assume_refresh_token_issued": false,
+        "reject_unvalidated_metadata": false
+      }
+    },
+    {
+      "id": "dcr-explicit-web-fallback",
+      "kind": "registration_selection",
+      "input": {
+        "deployment": "production_web",
+        "preregistered_app_available": false,
+        "cimd_supported": false,
+        "registration_endpoint_validated": true,
+        "application_type": "web",
+        "registered_redirect_uris": [
+          "https://console.example.invalid/connections/oauth/callback"
+        ],
+        "expected_redirect_uri": "https://console.example.invalid/connections/oauth/callback",
+        "current_issuer": "https://issuer.example.invalid/tenant",
+        "client_material_issuer": null
+      },
+      "expected": {
+        "decision": "dynamic_registration_allowed",
+        "selected_mechanism": "dynamic_registration",
+        "may_reuse_cross_issuer_client_material": false,
+        "retry_uncertain_registration_post": false
+      }
+    },
+    {
+      "id": "dcr-application-type-must-be-explicit",
+      "kind": "registration_selection",
+      "input": {
+        "deployment": "production_web",
+        "preregistered_app_available": false,
+        "cimd_supported": false,
+        "registration_endpoint_validated": true,
+        "application_type": null,
+        "registered_redirect_uris": [
+          "https://console.example.invalid/connections/oauth/callback"
+        ],
+        "expected_redirect_uri": "https://console.example.invalid/connections/oauth/callback",
+        "current_issuer": "https://issuer.example.invalid/tenant",
+        "client_material_issuer": null
+      },
+      "expected": {
+        "decision": "refuse_registration_metadata",
+        "selected_mechanism": null,
+        "may_reuse_cross_issuer_client_material": false,
+        "retry_uncertain_registration_post": false
+      }
+    },
+    {
+      "id": "dcr-native-cannot-mutate-production-web-app",
+      "kind": "registration_selection",
+      "input": {
+        "deployment": "production_web",
+        "preregistered_app_available": false,
+        "cimd_supported": false,
+        "registration_endpoint_validated": true,
+        "application_type": "native",
+        "registered_redirect_uris": [
+          "https://console.example.invalid/connections/oauth/callback"
+        ],
+        "expected_redirect_uri": "https://console.example.invalid/connections/oauth/callback",
+        "current_issuer": "https://issuer.example.invalid/tenant",
+        "client_material_issuer": null
+      },
+      "expected": {
+        "decision": "refuse_registration_metadata",
+        "selected_mechanism": null,
+        "may_reuse_cross_issuer_client_material": false,
+        "retry_uncertain_registration_post": false
+      }
+    },
+    {
+      "id": "dcr-loopback-cannot-replace-production-callback",
+      "kind": "registration_selection",
+      "input": {
+        "deployment": "production_web",
+        "preregistered_app_available": false,
+        "cimd_supported": false,
+        "registration_endpoint_validated": true,
+        "application_type": "web",
+        "registered_redirect_uris": [
+          "http://127.0.0.1:8123/callback"
+        ],
+        "expected_redirect_uri": "https://console.example.invalid/connections/oauth/callback",
+        "current_issuer": "https://issuer.example.invalid/tenant",
+        "client_material_issuer": null
+      },
+      "expected": {
+        "decision": "refuse_registration_metadata",
+        "selected_mechanism": null,
+        "may_reuse_cross_issuer_client_material": false,
+        "retry_uncertain_registration_post": false
+      }
+    },
+    {
+      "id": "dcr-unknown-registration-endpoint",
+      "kind": "registration_selection",
+      "input": {
+        "deployment": "production_web",
+        "preregistered_app_available": false,
+        "cimd_supported": false,
+        "registration_endpoint_validated": false,
+        "application_type": "web",
+        "registered_redirect_uris": [
+          "https://console.example.invalid/connections/oauth/callback"
+        ],
+        "expected_redirect_uri": "https://console.example.invalid/connections/oauth/callback",
+        "current_issuer": "https://issuer.example.invalid/tenant",
+        "client_material_issuer": null
+      },
+      "expected": {
+        "decision": "refuse_registration_endpoint",
+        "selected_mechanism": null,
+        "may_reuse_cross_issuer_client_material": false,
+        "retry_uncertain_registration_post": false
+      }
+    },
+    {
+      "id": "dcr-cross-issuer-client-material",
+      "kind": "registration_selection",
+      "input": {
+        "deployment": "production_web",
+        "preregistered_app_available": false,
+        "cimd_supported": false,
+        "registration_endpoint_validated": true,
+        "application_type": "web",
+        "registered_redirect_uris": [
+          "https://console.example.invalid/connections/oauth/callback"
+        ],
+        "expected_redirect_uri": "https://console.example.invalid/connections/oauth/callback",
+        "current_issuer": "https://issuer.example.invalid/tenant",
+        "client_material_issuer": "https://other.example.invalid/tenant"
+      },
+      "expected": {
+        "decision": "refuse_issuer_binding",
+        "selected_mechanism": null,
+        "may_reuse_cross_issuer_client_material": false,
+        "retry_uncertain_registration_post": false
+      }
+    },
+    {
+      "id": "registration-prefers-existing-app",
+      "kind": "registration_selection",
+      "input": {
+        "deployment": "production_web",
+        "preregistered_app_available": true,
+        "cimd_supported": true,
+        "registration_endpoint_validated": true,
+        "application_type": "web",
+        "registered_redirect_uris": [
+          "https://console.example.invalid/connections/oauth/callback"
+        ],
+        "expected_redirect_uri": "https://console.example.invalid/connections/oauth/callback",
+        "current_issuer": "https://issuer.example.invalid/tenant",
+        "client_material_issuer": "https://issuer.example.invalid/tenant"
+      },
+      "expected": {
+        "decision": "preferred_mechanism_selected",
+        "selected_mechanism": "preregistered",
+        "may_reuse_cross_issuer_client_material": false,
+        "retry_uncertain_registration_post": false
+      }
+    },
+    {
+      "id": "registration-prefers-cimd-over-deprecated-dcr",
+      "kind": "registration_selection",
+      "input": {
+        "deployment": "production_web",
+        "preregistered_app_available": false,
+        "cimd_supported": true,
+        "registration_endpoint_validated": true,
+        "application_type": "web",
+        "registered_redirect_uris": [
+          "https://console.example.invalid/connections/oauth/callback"
+        ],
+        "expected_redirect_uri": "https://console.example.invalid/connections/oauth/callback",
+        "current_issuer": "https://issuer.example.invalid/tenant",
+        "client_material_issuer": null
+      },
+      "expected": {
+        "decision": "preferred_mechanism_selected",
+        "selected_mechanism": "cimd",
+        "may_reuse_cross_issuer_client_material": false,
+        "retry_uncertain_registration_post": false
+      }
+    },
+    {
+      "id": "authorization-pin-does-not-upgrade-transport",
+      "kind": "revision_pins",
+      "input": {
+        "authorization_revision": "2026-07-28",
+        "configured_transport_revision": "2025-11-25",
+        "configured_session_profile": "explicit-transport-profile",
+        "derive_transport_from_authorization": false
+      },
+      "expected": {
+        "decision": "separate_pins_preserved",
+        "transport_revision_after": "2025-11-25",
+        "session_profile_after": "explicit-transport-profile",
+        "whole_mcp_conformance_claim_allowed": false
+      }
+    },
+    {
+      "id": "authorization-pin-cannot-implicitly-upgrade-transport",
+      "kind": "revision_pins",
+      "input": {
+        "authorization_revision": "2026-07-28",
+        "configured_transport_revision": "2025-11-25",
+        "configured_session_profile": "explicit-transport-profile",
+        "derive_transport_from_authorization": true
+      },
+      "expected": {
+        "decision": "refuse_implicit_transport_upgrade",
+        "transport_revision_after": "2025-11-25",
+        "session_profile_after": "explicit-transport-profile",
+        "whole_mcp_conformance_claim_allowed": false
+      }
+    },
+    {
+      "id": "mcp-preregistered-app-does-not-replace-resource-metadata",
+      "kind": "authorization_request_pins",
+      "input": {
+        "registration_mechanism": "preregistered",
+        "authorization_request": {
+          "authority": {},
+          "resource": {
+            "value": "https://mcp.example.invalid/service"
+          },
+          "redirectUri": {
+            "value": "https://console.example.invalid/connections/oauth/callback"
+          },
+          "expectedIssuer": {
+            "value": "https://issuer.example.invalid/tenant"
+          },
+          "responseIssuerRequired": true,
+          "discovery": {
+            "authorizationServerMetadataDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            }
+          }
+        }
+      },
+      "expected": {
+        "schema_valid": false,
+        "decision": "refuse_missing_protected_resource_metadata",
+        "metadata_validation_proven": false
+      }
+    },
+    {
+      "id": "mcp-preregistered-app-without-discovery-is-refused",
+      "kind": "authorization_request_pins",
+      "input": {
+        "registration_mechanism": "preregistered",
+        "authorization_request": {
+          "authority": {},
+          "resource": {
+            "value": "https://mcp.example.invalid/service"
+          },
+          "redirectUri": {
+            "value": "https://console.example.invalid/connections/oauth/callback"
+          },
+          "expectedIssuer": {
+            "value": "https://issuer.example.invalid/tenant"
+          },
+          "responseIssuerRequired": true
+        }
+      },
+      "expected": {
+        "schema_valid": false,
+        "decision": "refuse_missing_protected_resource_metadata",
+        "metadata_validation_proven": false
+      }
+    },
+    {
+      "id": "mcp-preregistered-app-pins-both-metadata-documents",
+      "kind": "authorization_request_pins",
+      "input": {
+        "registration_mechanism": "preregistered",
+        "authorization_request": {
+          "authority": {},
+          "resource": {
+            "value": "https://mcp.example.invalid/service"
+          },
+          "redirectUri": {
+            "value": "https://console.example.invalid/connections/oauth/callback"
+          },
+          "expectedIssuer": {
+            "value": "https://issuer.example.invalid/tenant"
+          },
+          "responseIssuerRequired": true,
+          "discovery": {
+            "authorizationServerMetadataDigest": {
+              "algorithm": "sha256",
+              "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+            },
+            "protectedResourceMetadataDigest": {
+              "algorithm": "sha256",
+              "value": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+            }
+          }
+        }
+      },
+      "expected": {
+        "schema_valid": true,
+        "decision": "discovery_pins_present",
+        "metadata_validation_proven": false
+      }
+    }
+  ]
+}

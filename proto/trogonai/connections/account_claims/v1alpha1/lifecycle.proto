@@ -1,0 +1,33 @@
+edition = "2024";
+
+package trogonai.connections.account_claims.v1alpha1;
+
+// The claim states of ADR#0092 Decision 6: Held(connection) -> Bound ->
+// Released, and Released -> Held again when the same account connects anew
+// under the same boundary. A claim is never stolen on a timeout. Unspecified
+// and unknown values are invalid.
+enum ProviderAccountClaimLifecycle {
+  PROVIDER_ACCOUNT_CLAIM_LIFECYCLE_UNSPECIFIED = 0;
+  // Entered by HoldProviderAccount, after the identity probe and before
+  // ActivateConnection (ADR#0094 Decision 5). One connection holds it.
+  PROVIDER_ACCOUNT_CLAIM_LIFECYCLE_HELD = 1;
+  // Entered by BindProviderAccount when the holder activates. The holder's
+  // reconnects keep the binding and must probe this same fingerprint.
+  PROVIDER_ACCOUNT_CLAIM_LIFECYCLE_BOUND = 2;
+  // Entered by ReleaseProviderAccount once the holder is terminally Aborted
+  // or Revoked. The account may then be held by another connection.
+  PROVIDER_ACCOUNT_CLAIM_LIFECYCLE_RELEASED = 3;
+}
+
+// Why a claim was released. Only the end of the holding connection releases a
+// claim; neither a timeout nor a failed attempt on its own does (ADR#0092
+// Decision 6). Unspecified and unknown values are invalid.
+enum ProviderAccountReleaseReason {
+  PROVIDER_ACCOUNT_RELEASE_REASON_UNSPECIFIED = 0;
+  // The holding Pending connection was aborted before activation, because its
+  // attempt failed, was cancelled, expired or was offboarded.
+  PROVIDER_ACCOUNT_RELEASE_REASON_HOLDER_ABORTED = 1;
+  // The holding connection was revoked, by a principal or by an offboarding
+  // trigger of ADR#0093 Decision 10.
+  PROVIDER_ACCOUNT_RELEASE_REASON_HOLDER_REVOKED = 2;
+}

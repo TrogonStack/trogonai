@@ -11,4 +11,3 @@ pub(crate) const DEFAULT_BIND: &str = "0.0.0.0:8080";
 pub(crate) const ENV_HTTP_BIND: &str = "A2A_HTTP_BIND";
 pub(crate) const ENV_AGENT_ID: &str = "A2A_AGENT_ID";
 pub(crate) const ENV_USE_GATEWAY: &str = "A2A_USE_GATEWAY";
-pub(crate) const ENV_GATEWAY_CALLER_JWT: &str = "A2A_GATEWAY_CALLER_JWT";

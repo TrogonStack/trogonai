@@ -7,6 +7,9 @@ date: 2026-07-11
 
 # ADR#0023: Secret Management and Key Custody on OpenBao behind a Platform Secrets Service
 
+> **Proposed connector refinement:** [ADR#0095](./0095-connection-credential-custody-and-refresh.md) remains a draft. The connector custody draft specifies token bundles, broker-only operations and attempt-authorized identity fingerprinting behind the same secrets boundary. This note does not change either ADR's status.
+
+
 > **Refined by [ADR#0083](./0083-sealed-content-envelope.md) (2026-10-30).**
 > Under Decision 3, a reply carrying a secret value or a sealing lease is
 > xkey-sealed to the requester's ephemeral xkey, and a submitted value to the

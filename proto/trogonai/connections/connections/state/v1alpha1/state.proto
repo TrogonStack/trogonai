@@ -1,0 +1,178 @@
+edition = "2024";
+
+package trogonai.connections.connections.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/connections/v1alpha1/authorization.proto";
+import "trogonai/connections/connections/v1alpha1/cleanup.proto";
+import "trogonai/connections/connections/v1alpha1/configuration.proto";
+import "trogonai/connections/connections/v1alpha1/health.proto";
+import "trogonai/connections/connections/v1alpha1/lifecycle.proto";
+import "trogonai/connections/connections/v1alpha1/mcp.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/owner.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// One fold per Connection, not a joined projection. Release, provider app and
+// project standing are never in it (ADR#0092 Decision 10, R22). Unknown
+// events and invalid transitions reject replay. Missing is the explicit
+// initial state.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty missing = 1;
+    Connection present = 2;
+  }
+}
+
+// The folded Connection. Pending holds only the reservation; every later
+// state holds exactly one committed configuration and one current
+// authorization record, which a reconnect or an upgrade replaces whole. The
+// resource_parent is the immutable custody project copied from genesis. The
+// lifecycle outside Pending, Revoked and Aborted is derived from the held
+// suspension and health reasons exactly as lifecycle.proto states, and the
+// invariants below hold the fold to that derivation. Retain the exact
+// configuration bytes from the event, never a re-encoding. Nothing here is
+// material or personal data (ADR#0092 Decisions 8 and 9).
+message Connection {
+  option (buf.validate.message).cel = {
+    id: "connection_state.stage_promotion_target"
+    message: "attempt authorization protection matches the connection and custody parent"
+    expression: "!has(this.authorization) || !has(this.authorization.stage_promotion_protection) || (this.authorization.stage_promotion_protection.binding.connection_id == this.id && this.authorization.stage_promotion_protection.binding.attempt_ref.resource_parent == this.resource_parent)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.attempt_for_oauth"
+    message: "OAuth, MCP and app installation configuration require an attempt authorization"
+    expression: "!has(this.configuration) || ((has(this.configuration.configuration.authentication.oauth_authorization_grant) || has(this.configuration.configuration.authentication.mcp_oauth) || has(this.configuration.configuration.authentication.app_installation)) == has(this.authorization.attempt_id))"
+  };
+  reserved 2;
+  reserved project_id;
+
+  option (buf.validate.message).cel = {
+    id: "connection_state.app_parent"
+    message: "a project app must share the connection custody parent"
+    expression: "!has(this.provider_app_ref) || has(this.provider_app_ref.resource_parent.platform) || (has(this.provider_app_ref.resource_parent.project) && this.provider_app_ref.resource_parent.project == this.resource_parent)"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connection_state.project_owner_custody"
+    message: "a project-owned connection is in custody of its owner"
+    expression: "!has(this.owner.project) || this.owner.project.project_id == this.resource_parent.project_id"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "connection_state.pending_bare"
+    message: "a pending or aborted connection holds no configuration or authorization; every other state holds both"
+    expression: "(this.lifecycle in [1, 7]) ? (!has(this.configuration) && !has(this.authorization)) : (has(this.configuration) && has(this.authorization))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.revoked"
+    message: "a revocation is recorded exactly for a revoked connection"
+    expression: "(this.lifecycle == 6) == has(this.revocation)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.aborted"
+    message: "an abort reason is recorded exactly for an aborted connection"
+    expression: "(this.lifecycle == 7) == has(this.abort_reason)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.derived_lifecycle"
+    message: "a live lifecycle follows from the held suspension and health reasons"
+    expression: "!(this.lifecycle in [2, 3, 4, 5]) || (this.lifecycle == 5 ? this.suspension_reasons.size() > 0 : (this.suspension_reasons.size() == 0 && (this.lifecycle == 4 ? this.health.exists(h, h.reason in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) : (!this.health.exists(h, h.reason in [4, 5, 6, 7, 8, 9, 10, 11, 12, 13]) && (this.lifecycle == 3) == this.health.exists(h, h.reason == 3)))))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.suspension_reasons_unique"
+    message: "each suspension reason is held at most once"
+    expression: "this.suspension_reasons.unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.health_reasons_unique"
+    message: "each health reason is held at most once"
+    expression: "this.health.map(h, h.reason).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.release_pin"
+    message: "the committed configuration pins the connection's release and provider app"
+    expression: "!has(this.configuration) || (this.configuration.configuration.connector_release_ref == this.connector_release_ref && has(this.configuration.configuration.provider_app_ref) == has(this.provider_app_ref) && (!has(this.provider_app_ref) || this.configuration.configuration.provider_app_ref == this.provider_app_ref))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.mcp_resource"
+    message: "an MCP connection holds its protected resource metadata and acknowledged hosts, and no other does"
+    expression: "(has(this.configuration) && has(this.configuration.configuration.authentication.mcp_oauth)) == has(this.mcp_protected_resource) && has(this.mcp_protected_resource) == has(this.acknowledged_egress_hosts)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_state.obligations_after_end"
+    message: "cleanup obligations exist only on a revoked or aborted connection, at most one open per kind"
+    expression: "(this.cleanup_obligations.size() == 0 || this.lifecycle in [6, 7]) && this.cleanup_obligations.filter(o, o.open).map(o, o.obligation.kind).unique()"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionId id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionOwner owner = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.connections.v1alpha1.ConnectionLifecycle lifecycle = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The reservation's release pin, moved by ConnectorUpgraded so it always
+  // equals the committed configuration's.
+  trogonai.connections.types.v1alpha1.ConnectorReleaseRef connector_release_ref = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppRef provider_app_ref = 6;
+  trogonai.connections.connections.v1alpha1.CommittedConfiguration configuration = 7;
+  // The current record. Its granted_authority is replaced in place by a
+  // custody-reported reduction or restoration (R7).
+  trogonai.connections.connections.v1alpha1.AuthorizationRecord authorization = 8;
+  trogonai.connections.connections.v1alpha1.McpProtectedResource mcp_protected_resource = 9;
+  // The exact hosts the owner last acknowledged for an MCP connection. An
+  // upgrade's added hosts are recorded on its event and joined with the
+  // release's declared hosts by the readers, not folded here.
+  trogonai.connections.connections.v1alpha1.EgressHostAcknowledgement acknowledged_egress_hosts = 10;
+  // Absent until the owner sets it.
+  trogonai.connections.connections.v1alpha1.ConnectionMetadata metadata = 11;
+  repeated trogonai.connections.connections.v1alpha1.SuspensionReason suspension_reasons = 12 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The held health observations, one per reason.
+  repeated trogonai.connections.connections.v1alpha1.HealthObservation health = 13;
+  Revocation revocation = 14;
+  trogonai.connections.connections.v1alpha1.AbortReason abort_reason = 15 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Every obligation ever opened, discharged ones included, so debt stays
+  // queryable and aged (ADR#0093 Decision 9).
+  repeated CleanupObligationState cleanup_obligations = 16;
+  // The last erasure of the provider account profile, when one happened.
+  trogonai.connections.connections.v1alpha1.ProviderAccountProfileErasure profile_erasure = 17;
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 18 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The recorded end of a revoked connection and the provider revoke attempts
+// that followed. At most one outcome is terminal, and it is the last.
+message Revocation {
+  option (buf.validate.message).cel = {
+    id: "revocation.one_terminal_outcome"
+    message: "at most one provider revoke outcome is terminal, and it is the last"
+    expression: "this.provider_revoke_outcomes.filter(o, o.outcome in [1, 2, 3]).size() <= 1 && (this.provider_revoke_outcomes.size() == 0 || !this.provider_revoke_outcomes.exists(o, o.outcome in [1, 2, 3]) || this.provider_revoke_outcomes[this.provider_revoke_outcomes.size() - 1].outcome in [1, 2, 3])"
+  };
+
+  trogonai.connections.connections.v1alpha1.RevocationTrigger trigger = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  repeated trogonai.connections.connections.v1alpha1.ProviderRevokeOutcome provider_revoke_outcomes = 2;
+}
+
+message CleanupObligationState {
+  trogonai.connections.connections.v1alpha1.CleanupObligation obligation = 1 [features.field_presence = LEGACY_REQUIRED];
+  // True until CleanupObligationDischarged, or ProviderAccountProfileErased
+  // for PROFILE_UNPURGED.
+  bool open = 2 [features.field_presence = LEGACY_REQUIRED];
+}

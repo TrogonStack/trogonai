@@ -5,11 +5,11 @@ use crate::policy::tier1_declarative::bundle::{
     Tier1DeclarativeEffect, Tier1DeclarativeMatch, Tier1DeclarativeRule, Tier1DeclarativeRuleId, Tier1ResourceKind,
 };
 
-fn ctx(method: A2aMethod, agent: &str, caller: Option<&str>, subject: &str) -> Tier1DeclarativeContext {
+fn ctx(method: A2aMethod, agent: &str, caller: &str, subject: &str) -> Tier1DeclarativeContext {
     Tier1DeclarativeContext::new(
         method,
         A2aAgentId::new(agent).expect("agent id"),
-        caller.map(SpiceDbSubject::new),
+        SpiceDbSubject::new(caller),
         subject,
     )
 }
@@ -51,8 +51,8 @@ fn matching_rule_returns_effect() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/alice"),
-        "a2a.v1.gateway.planner.message.send",
+        "user/alice",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
         decision,
@@ -82,8 +82,8 @@ fn partial_match_tries_next_rule() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        None,
-        "a2a.v1.gateway.planner.message.send",
+        "user/alice",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
         decision,
@@ -113,8 +113,8 @@ fn priority_order_is_respected() {
     let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        None,
-        "a2a.v1.gateway.planner.message.send",
+        "user/alice",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(decision, Tier1DeclarativeDecision::Deny { rule: rid("deny-high") });
 }
@@ -125,12 +125,12 @@ fn exact_and_glob_patterns_work() {
     assert!(!pattern_matches("message/send", "message/stream"));
     assert!(pattern_matches("user/*", "user/alice"));
     assert!(pattern_matches(
-        "a2a.v1.gateway.*.message.send",
-        "a2a.v1.gateway.planner.message.send"
+        "a2a.v1.gateway.*.*.*.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send"
     ));
     assert!(!pattern_matches(
-        "a2a.v1.gateway.*.message.send",
-        "a2a.v1.gateway.planner.message.stream"
+        "a2a.v1.gateway.*.*.*.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.stream"
     ));
 }
 
@@ -146,8 +146,8 @@ fn negate_inverts_match() {
     let denied = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/bob"),
-        "a2a.v1.gateway.planner.message.send",
+        "user/bob",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(
         denied,
@@ -159,18 +159,14 @@ fn negate_inverts_match() {
     let allowed = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/alice"),
-        "a2a.v1.gateway.planner.message.send",
+        "user/alice",
+        "a2a.v1.gateway.planner.person.alice.message.send",
     ));
     assert_eq!(allowed, Tier1DeclarativeDecision::Allow { rule: None });
 }
 
 #[test]
-fn caller_subject_wildcard_does_not_match_unauthenticated_request() {
-    // `caller_subject = "*"` must only match when the request actually
-    // carries a caller identity. Without this, `None.unwrap_or_default()`
-    // becomes `""` and the wildcard pattern would silently allow/deny
-    // unauthenticated traffic the rule was meant to scope by caller.
+fn caller_subject_wildcard_matches_every_caller() {
     let gate = RealTier1DeclarativeGate::new(Tier1DeclarativeBundle::new(vec![rule(
         "deny-any-caller",
         100,
@@ -178,24 +174,42 @@ fn caller_subject_wildcard_does_not_match_unauthenticated_request() {
         vec![m(Tier1ResourceKind::CallerSubject, "*", false)],
     )]));
 
-    let unauthenticated = gate.evaluate(&ctx(
-        A2aMethod::MessageSend,
-        "planner",
-        None,
-        "a2a.v1.gateway.planner.message.send",
-    ));
-    assert_eq!(unauthenticated, Tier1DeclarativeDecision::Allow { rule: None });
+    for caller in ["user/alice", "agent/scout", "service/internal-cron"] {
+        let decision = gate.evaluate(&ctx(
+            A2aMethod::MessageSend,
+            "planner",
+            caller,
+            "a2a.v1.gateway.planner.person.alice.message.send",
+        ));
+        assert_eq!(
+            decision,
+            Tier1DeclarativeDecision::Deny {
+                rule: rid("deny-any-caller")
+            },
+            "{caller}"
+        );
+    }
+}
 
-    let authenticated = gate.evaluate(&ctx(
+#[test]
+fn caller_subject_pattern_tells_principal_kinds_apart() {
+    let gate = RealTier1DeclarativeGate::new(Tier1DeclarativeBundle::new(vec![rule(
+        "deny-non-alice",
+        100,
+        Tier1DeclarativeEffect::Deny,
+        vec![m(Tier1ResourceKind::CallerSubject, "user/alice", true)],
+    )]));
+
+    let decision = gate.evaluate(&ctx(
         A2aMethod::MessageSend,
         "planner",
-        Some("user/alice"),
-        "a2a.v1.gateway.planner.message.send",
+        "agent/alice",
+        "a2a.v1.gateway.planner.agent.alice.message.send",
     ));
     assert_eq!(
-        authenticated,
+        decision,
         Tier1DeclarativeDecision::Deny {
-            rule: rid("deny-any-caller")
+            rule: rid("deny-non-alice")
         }
     );
 }
@@ -208,8 +222,8 @@ fn noop_gate_defaults_allow() {
         gate.evaluate(&ctx(
             A2aMethod::MessageSend,
             "planner",
-            None,
-            "a2a.v1.gateway.planner.message.send",
+            "user/alice",
+            "a2a.v1.gateway.planner.person.alice.message.send",
         )),
         Tier1DeclarativeDecision::Allow { rule: None }
     );
@@ -293,6 +307,20 @@ fn from_env_loads_bundle_from_valid_directory() {
 }
 
 #[test]
+fn from_env_missing_bundle_dir_path_is_typed_boot_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let missing = dir.path().join("does-not-exist");
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(ENV_TIER1_DECLARATIVE_ENABLED, "true");
+    env.set(ENV_TIER1_BUNDLE_DIR, missing.to_str().expect("path utf8"));
+    let err = Tier1DeclarativeConfig::from_env(&env).expect_err("missing dir rejected");
+    assert!(matches!(
+        err,
+        Tier1DeclarativeBuildError::Load(Tier1DeclarativeLoadError::BundleDirMissing { ref path }) if *path == missing
+    ));
+}
+
+#[test]
 fn rule_id_display_round_trips_through_string() {
     let id = rid("rule-1");
     assert_eq!(format!("{id}"), "rule-1");
@@ -336,15 +364,15 @@ fn fixed_clock_returns_configured_instant() {
 #[test]
 fn nats_star_matches_exactly_one_token() {
     // NATS semantics: `*` matches one dot-separated token only. Without
-    // this, a generic glob would let `a2a.v1.gateway.*.message.send` also
-    // match `a2a.v1.gateway.tenant.x.message.send` and skew decisions.
+    // this, a generic glob would let `a2a.v1.gateway.*.*.*.message.send` also
+    // match `a2a.v1.gateway.tenant.x.person.alice.message.send` and skew decisions.
     assert!(nats_subject_matches(
-        "a2a.v1.gateway.*.message.send",
-        "a2a.v1.gateway.planner.message.send"
+        "a2a.v1.gateway.*.*.*.message.send",
+        "a2a.v1.gateway.planner.person.alice.message.send"
     ));
     assert!(!nats_subject_matches(
-        "a2a.v1.gateway.*.message.send",
-        "a2a.v1.gateway.tenant.planner.message.send"
+        "a2a.v1.gateway.*.*.*.message.send",
+        "a2a.v1.gateway.tenant.planner.person.alice.message.send"
     ));
     assert!(!nats_subject_matches("a2a.v1.gateway.*", "a2a.v1.gateway"));
 }
@@ -413,4 +441,16 @@ fn from_env_trims_bundle_dir_whitespace_before_load() {
     env.set(ENV_TIER1_BUNDLE_DIR, padded);
     let layer = Tier1DeclarativeConfig::from_env(&env).expect("padded path resolves");
     assert!(layer.gate.is_enabled());
+}
+
+#[test]
+fn layer_debug_says_whether_the_gate_is_enabled() {
+    let layer = Tier1DeclarativeConfig::from_env(&trogon_std::env::InMemoryEnv::new()).expect("noop on missing flag");
+    assert_eq!(format!("{layer:?}"), "GatewayTier1DeclarativeLayer { enabled: false }");
+}
+
+#[test]
+fn system_clock_reads_the_current_time() {
+    let before = std::time::SystemTime::now();
+    assert!(SystemTier1Clock.now() >= before);
 }

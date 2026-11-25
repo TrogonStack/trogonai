@@ -1,0 +1,166 @@
+edition = "2024";
+
+package trogonai.connections.control.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/control/v1alpha1/status.proto";
+import "trogonai/connections/control/v1alpha1/types.proto";
+import "trogonai/connections/resources/v1alpha1/names.proto";
+import "trogonai/connections/resources/v1alpha1/requests.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/owner.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+message StartConnectRequest {
+  option (buf.validate.message).cel = {
+    id: "start_connect.no_expected_revision"
+    message: "a fresh connection has no expected stream revision"
+    expression: "!has(this.mutation.expected_revision)"
+  };
+  option (buf.validate.message).cel = {
+    id: "start_connect.project_owner"
+    message: "a project owner equals the custody parent"
+    expression: "!has(this.owner.project) || this.owner.project.project_id == this.parent.project_id"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ControlMutation mutation = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionOwner owner = 3 [features.field_presence = LEGACY_REQUIRED];
+  ConnectTarget target = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message StartConnectResponse {
+  option (buf.validate.message).cel = {
+    id: "start_connect_response.action"
+    message: "the receipt belongs to start-connect"
+    expression: "this.consent.receipt.action == 1"
+  };
+  ConsentStart consent = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ReconnectRequest {
+  option (buf.validate.message).cel = {
+    id: "reconnect.expected_revision"
+    message: "reconnect requires the observed Connection stream revision"
+    expression: "has(this.mutation.expected_revision)"
+  };
+  option (buf.validate.message).cel = {
+    id: "reconnect.scopes_unique"
+    message: "additional scopes must be unique"
+    expression: "this.additional_scopes.map(s, s.value).unique()"
+  };
+  trogonai.connections.resources.v1alpha1.ConnectionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  ControlMutation mutation = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 expected_authorization_generation = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  repeated trogonai.connections.types.v1alpha1.ProviderScope additional_scopes = 4 [(buf.validate.field).repeated.max_items = 128];
+}
+
+message ReconnectResponse {
+  option (buf.validate.message).cel = {
+    id: "reconnect_response.action"
+    message: "the receipt belongs to reconnect"
+    expression: "this.consent.receipt.action == 2"
+  };
+  ConsentStart consent = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message DisconnectRequest {
+  option (buf.validate.message).cel = {
+    id: "disconnect.expected_revision"
+    message: "disconnect requires the observed Connection stream revision"
+    expression: "has(this.mutation.expected_revision)"
+  };
+  trogonai.connections.resources.v1alpha1.ConnectionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  ControlMutation mutation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message DisconnectResponse {
+  option (buf.validate.message).cel = {
+    id: "disconnect_response.receipt"
+    message: "a committed disconnect receipt matches its terminal Connection status"
+    expression: "this.receipt.action == 3 && this.receipt.phase == 2 && this.receipt.connection == this.status.resource && this.status.lifecycle in [6, 7]"
+  };
+  ControlRequestRecord receipt = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionStatus status = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CancelConnectRequest {
+  option (buf.validate.message).cel = {
+    id: "cancel_connect.expected_revision"
+    message: "cancellation requires the observed AuthorizationAttempt stream revision"
+    expression: "has(this.mutation.expected_revision)"
+  };
+  trogonai.connections.resources.v1alpha1.AuthorizationAttemptResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+  ControlMutation mutation = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message CancelConnectResponse {
+  option (buf.validate.message).cel = {
+    id: "cancel_connect_response.receipt"
+    message: "a committed cancellation receipt names the returned Cancelled attempt"
+    expression: "this.receipt.action == 4 && this.receipt.phase == 2 && this.receipt.authorization_attempt == this.status.resource && this.receipt.connection == this.status.connection && this.status.phase == 8"
+  };
+  ControlRequestRecord receipt = 1 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationStatus status = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetAuthorizationStatusRequest {
+  trogonai.connections.resources.v1alpha1.AuthorizationAttemptResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetAuthorizationStatusResponse {
+  AuthorizationStatus status = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetConnectionStatusRequest {
+  trogonai.connections.resources.v1alpha1.ConnectionResourceName resource = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message GetConnectionStatusResponse {
+  ConnectionStatus status = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ListConnectionStatusesRequest {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionStatusFilter filter = 2;
+  trogonai.connections.resources.v1alpha1.ResourcePageRequest page = 3;
+}
+
+message ListConnectionStatusesResponse {
+  option (buf.validate.message).cel = {
+    id: "list_connection_statuses.one_parent"
+    message: "every status belongs to the requested parent"
+    expression: "this.statuses.all(s, s.resource_parent == this.parent)"
+  };
+  option (buf.validate.message).cel = {
+    id: "list_connection_statuses.filter"
+    message: "every status satisfies the echoed filter"
+    expression: "!has(this.filter) || this.statuses.all(s, (this.filter.lifecycles.size() == 0 || s.lifecycle in this.filter.lifecycles) && (!has(this.filter.connector_id) || s.connector_id == this.filter.connector_id))"
+  };
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated ConnectionStatus statuses = 2 [(buf.validate.field).repeated.max_items = 200];
+  string next_page_token = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+    pattern: "^[A-Za-z0-9_-]+$"
+  }];
+  ConnectionStatusFilter filter = 4;
+}
+
+message GetControlRequestRequest {
+  trogonai.connections.types.v1alpha1.ProjectResourceParent parent = 1 [features.field_presence = LEGACY_REQUIRED];
+  ControlRequestId request_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  ControlAction action = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+message GetControlRequestResponse {
+  ControlRequestRecord receipt = 1 [features.field_presence = LEGACY_REQUIRED];
+}

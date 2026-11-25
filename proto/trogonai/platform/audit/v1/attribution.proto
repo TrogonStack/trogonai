@@ -1,0 +1,51 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/audit/v1/audit_decision.proto";
+import "trogonai/platform/audit/v1/enforcement_mode.proto";
+import "trogonai/policy/subjects/v1alpha1/rule_ref.proto";
+
+// Attribution is why a decision came out the way it did.
+//
+// It is present on decisions and credential records, and absent on changes. It
+// names policy by reference: the PolicyRuleRef list and the projection revision
+// are enough to reconstruct a past decision from the policy streams without
+// copying any policy into the record (ADR#0071).
+message Attribution {
+  option (buf.validate.message).cel = {
+    id: "attribution.would_deny_is_dry_run"
+    message: "only a decision made in DRY_RUN reports a would-be denial"
+    expression: "!this.would_deny || this.enforcement_mode == trogonai.platform.audit.v1.EnforcementMode.ENFORCEMENT_MODE_DRY_RUN"
+  };
+
+  AuditDecision decision = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  EnforcementMode enforcement_mode = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Set when the decision was made in DryRun and would have been a refusal.
+  // DryRun records are the evidence for flipping a default to enforce.
+  bool would_deny = 3 [features.field_presence = LEGACY_REQUIRED];
+  // A closed code owned by the surface. It is never free text: an error message
+  // can echo content, so it is dropped rather than carried.
+  string reason_code = 4 [(buf.validate.field).string.max_len = 64];
+  // The ids of the rules that fired.
+  repeated string rule_ids = 5;
+  // The policy histories, at the revisions, that the decision consulted.
+  repeated trogonai.policy.subjects.v1alpha1.PolicyRuleRef policy_rule_refs = 6;
+  // Where the policy came from, as a closed name owned by the surface.
+  string policy_source = 7;
+  // The revision of the policy projection the decision read.
+  uint64 projection_revision = 8;
+}

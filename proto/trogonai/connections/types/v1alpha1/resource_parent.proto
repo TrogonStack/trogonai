@@ -1,0 +1,45 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// Resource containment is distinct from a hierarchy NodeId placement and from
+// logical ConnectionOwner. The referenced project may move in the hierarchy
+// without changing a child resource's identity or custody (ADR#0046).
+message ProjectResourceParent {
+  trogonai.projects.projects.v1alpha1.ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The platform namespace has no tenant hierarchy node. An explicit value
+// avoids representing it as an empty project id or a fabricated NodeId.
+message PlatformResourceParent {}
+
+// Releases are children of one connector in the platform catalog. No customer
+// project may publish into this namespace (ADR#0092 Decision 2).
+message ConnectorReleaseParent {
+  ConnectorId connector_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ProviderAppParent {
+  oneof scope {
+    option (buf.validate.oneof).required = true;
+
+    PlatformResourceParent platform = 1;
+    ProjectResourceParent project = 2;
+  }
+}
+
+// Platform app material remains platform-scoped. Other credentials reside in
+// the custody project. CredentialSubject is a separate association; it never
+// overrides this immutable storage and authorization boundary.
+message CredentialResourceParent {
+  oneof scope {
+    option (buf.validate.oneof).required = true;
+
+    PlatformResourceParent platform = 1;
+    ProjectResourceParent project = 2;
+  }
+}

@@ -1,0 +1,88 @@
+edition = "2024";
+
+package trogonai.connections.connections.v1alpha1;
+
+// Where a Connection is in its life (ADR#0092 Decision 4). The live states are
+// Active, Degraded, ReconnectRequired and Suspended. Revoked and Aborted are
+// terminal. Release, provider app and project standing are joined live by the
+// readers and never folded into this value (ADR#0092 Decision 10, ADR#0093
+// Decision 10). Unspecified and unknown values are invalid.
+//
+// Outside Pending and the terminal states the value is derived, never set on
+// its own: Suspended while any suspension reason is held; otherwise
+// ReconnectRequired while any dead-credential health reason is held; otherwise
+// Degraded while repeated transient failure is held; otherwise Active.
+enum ConnectionLifecycle {
+  CONNECTION_LIFECYCLE_UNSPECIFIED = 0;
+  // Reserved before consent completes. Unusable, with no configuration,
+  // account, authority or bindings yet.
+  CONNECTION_LIFECYCLE_PENDING = 1;
+  // Usable, subject to live release, app and project standing. May carry the
+  // SCOPES_REDUCED or SCOPE_STEP_UP health reasons.
+  CONNECTION_LIFECYCLE_ACTIVE = 2;
+  // Custody reported repeated transient failure. Unusable until custody
+  // reports recovery.
+  CONNECTION_LIFECYCLE_DEGRADED = 3;
+  // Credentials are dead. Unusable until a reconnect on the same id.
+  CONNECTION_LIFECYCLE_RECONNECT_REQUIRED = 4;
+  // Disabled by its owner or paused by an operator. Admission and the
+  // executors refuse it and refresh pauses (R9). Reversible.
+  CONNECTION_LIFECYCLE_SUSPENDED = 5;
+  // Revoked by intent or by an offboarding trigger. Terminal: reconnecting
+  // means a new connection.
+  CONNECTION_LIFECYCLE_REVOKED = 6;
+  // Abandoned from Pending without activating. Terminal.
+  CONNECTION_LIFECYCLE_ABORTED = 7;
+}
+
+// Why a connection is Suspended (R9). Suspension is a Connection state and
+// not a policy hold, because ADR#0071 holds bind only to a policy subject.
+// Reasons accumulate: an owner cannot lift an operator pause by resuming, so
+// each reason is lifted on its own and the connection stays Suspended while
+// any reason remains. Unspecified and unknown values are invalid.
+enum SuspensionReason {
+  SUSPENSION_REASON_UNSPECIFIED = 0;
+  // The owner disabled this one connection.
+  SUSPENSION_REASON_OWNER_DISABLED = 1;
+  // A platform operator paused it, for example in an emergency on a
+  // customer-supplied app the operator cannot edit (ADR#0092 Decision 10).
+  SUSPENSION_REASON_OPERATOR_PAUSE = 2;
+}
+
+// What ended a connection by revocation. The cascade reactors of ADR#0093
+// Decision 9 name their trigger on the command, and the actor travels in the
+// envelope. ADR-silent shape: the values follow the triggers of ADR#0093
+// Decision 10 and ADR#0092 Decision 10. Unspecified and unknown values are
+// invalid.
+enum RevocationTrigger {
+  REVOCATION_TRIGGER_UNSPECIFIED = 0;
+  // A principal who administers the connection disconnected it.
+  REVOCATION_TRIGGER_DISCONNECT = 1;
+  // The identity plane deactivated the person who owns it.
+  REVOCATION_TRIGGER_PRINCIPAL_DEACTIVATED = 2;
+  // The owning person lost access to the custody project.
+  REVOCATION_TRIGGER_MEMBERSHIP_REMOVED = 3;
+  // The owning workspace was deleted.
+  REVOCATION_TRIGGER_WORKSPACE_DELETED = 4;
+  // Tenant deletion started.
+  REVOCATION_TRIGGER_TENANT_DELETED = 5;
+  // The provider app's client identity was abandoned and the owner's
+  // replacement connection is Active (ADR#0092 Decision 10).
+  REVOCATION_TRIGGER_PROVIDER_APP_ABANDONED = 6;
+  // The custody project stayed archived past the archive window, whose length
+  // ADR#0093 leaves open.
+  REVOCATION_TRIGGER_PROJECT_ARCHIVE_ELAPSED = 7;
+}
+
+// Why a Pending connection was abandoned. ADR-silent shape: ADR#0092 Decision 4
+// names AbortConnection without reasons. Unspecified and unknown values are
+// invalid.
+enum AbortReason {
+  ABORT_REASON_UNSPECIFIED = 0;
+  // The authorization attempt ended without activation: it failed, was
+  // cancelled, expired, or lost the account claim. The attempt records why.
+  ABORT_REASON_AUTHORIZATION_UNCOMPLETED = 1;
+  // An offboarding trigger of ADR#0093 Decision 10 reached the connection
+  // before it activated.
+  ABORT_REASON_OFFBOARDED = 2;
+}

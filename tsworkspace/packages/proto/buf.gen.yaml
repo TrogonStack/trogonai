@@ -6,8 +6,10 @@ inputs:
       - ../../../proto/trogonai/model_access/provider_connections
       - ../../../proto/trogonai/platform/key_custody
       - ../../../proto/trogonai/projects
+      - ../../../proto/trogonai/scheduler/schedules/v1
+      - ../../../proto/trogonai/scheduler/schedules/projections/v1
   - git_repo: https://github.com/TrogonStack/trogonai.git
-    branch: yordis/feat-connector-webhook-contracts
+    ref: d63b15cf16e1b1d2ac942f71644edac0e9ec08de
     depth: 1
     paths:
       - proto/trogonai/secrets

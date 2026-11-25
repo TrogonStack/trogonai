@@ -12,7 +12,12 @@ async fn publish_event_returns_published_on_success() {
         Duration::from_secs(10),
     )
     .await;
-    assert!(result.is_ok());
+    let PublishOutcome::Published(ack) = result else {
+        panic!("expected a published outcome, got {result:?}");
+    };
+    assert_eq!(ack.stream, "mock-stream");
+    assert_eq!(ack.sequence, 1);
+    assert!(!ack.duplicate);
 }
 
 #[tokio::test]

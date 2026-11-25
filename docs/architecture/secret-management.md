@@ -19,6 +19,14 @@ reference-only boundary for provider configuration. The proposed
 [Supplied Credential Material](../reference/supplied-credential-material.md)
 contract keeps secret-bearing inputs separate from persisted metadata.
 
+[Third-Party Connections](./third-party-connections.md) explains the connection
+HTTP proxy boundary proposed in draft [ADR#0096](../adr/0096-connection-use-by-agents.md):
+ordinary provider requests stay HTTP, the trusted proxy injects credentials, and
+custody handles OAuth exchange and refresh. Protobuf contracts describe lifecycle,
+authorization and bindings. The [relay contract](../reference/connection-http-proxy.md)
+now defines that binding, proof and failure profile; runtime extraction and
+enforcement still require implementation.
+
 ## Scope
 
 This page covers only `SecretStore`, the port that stores and resolves
@@ -39,20 +47,17 @@ A `SecretRef` is an opaque handle a caller holds in place of a
 credential. The secrets service resolves it internally to a
 [tenant](../glossary/tenant), a vault, and a key; it is never an OpenBao
 path, and a caller cannot parse or construct one ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 2).
-The concrete identity scheme behind a `SecretRef`, how it is encoded, and
-whether it is issued at store time or derived deterministically, is not
-fixed by the ADR and is an open decision (see
-[Open decisions](#open-decisions)).
+The accepted baseline leaves encoding unspecified. The connector draft selects
+a custody-minted random handle; see [draft resolutions](#accepted-baseline-and-connector-draft-resolutions).
 
 ### Vault
 
 A vault is a user-visible logical grouping of secrets within a company.
 It is enforced by policy, not by cryptographic separation: two vaults in
 the same company are a console-visible organizing boundary, not two
-OpenBao security boundaries ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 5). Whether a vault is a
-first-class entity with its own lifecycle (created, renamed, and deleted
-independently of the secrets inside it) or purely a naming attribute on a
-`SecretRef` is not fixed by the ADR and is an open decision.
+OpenBao security boundaries ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 5). The connector milestone uses a policy grouping, with no independent lifecycle
+aggregate. A future vault resource requires a separate contract; see
+[draft resolutions](#accepted-baseline-and-connector-draft-resolutions).
 
 ### Connection
 
@@ -302,41 +307,31 @@ which means this behavior must be answered before adoption, not assumed.
 - Serve a cached value past its bounded window as a plaintext fallback
   when an invalidation event is missed.
 
-## Open decisions
+## Accepted baseline and connector draft resolutions
 
-- **`SecretRef` identity scheme.** How the opaque handle is constructed
-  and encoded is not fixed by [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md).
-- **Reason value typing.** Whether the reason field recorded on a state
-  change becomes a closed set of typed values, as [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 4's
-  wording suggests, or stays a bounded non-secret string is not settled.
-- **Credential lifecycle state machine.** [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) fixes only the pending
-  and active states of the write saga; whether the aggregate also models
-  explicit write-failure, rotation-in-progress, or revocation states is
-  not fixed.
-- **Vault entity lifecycle.** Whether a vault is a first-class entity
-  with its own lifecycle, or purely a policy grouping attribute, is not
-  fixed by [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Decision 5.
-- **Resolved-secret-value wrapper requirements.** Whether resolved values
-  use a zeroizing wrapper analogous to `KeyManagement`'s `Dek` wrapper,
-  and what that wrapper requires, is not fixed.
-- **Caller-visible resolve failure taxonomy.** Whether resolve failures
-  map to a stable set of categories, comparable to `KeyManagement`'s
-  eight, is not fixed.
-- **Audit-sink failure behavior.** [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) names correct behavior when
-  audit sinks fail as a required adoption proof, without answering what
-  that behavior is ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Consequences).
-- **Grant shape for tool and channel connections.** Draft
-  [ADR#0063](../adr/0063-agent-connection-declarations.md) fixes the Agent-side
-  declaration and explicitly leaves the grant, the non-model connection
-  resource, and the egress mediation point open. Draft
-  [ADR#0032](../adr/0032-model-route-and-credential-binding.md) answers all
-  three for model providers only, and its Decision 3 excludes channel and tool
-  credentials by name.
-- **Anomaly detection scope.** [ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) states that anomaly detection on
-  resolve subjects is structural rather than optional, given that this
-  service is the platform's highest-value compromise target, without
-  defining what counts as anomalous or what response it triggers
-  ([ADR#0023](../adr/0023-secret-management-and-key-custody-direction.md) Consequences).
+The source ADRs retain their recorded statuses. Draft
+[ADR0095](../adr/0095-connection-credential-custody-and-refresh.md) and the
+[connector security profile](../reference/connector-security-profile.md) supply
+concrete connector decisions without claiming their implementation or accepting
+the drafts by implication.
+
+| Concern | Connector draft resolution |
+| --- | --- |
+| SecretRef identity | Custody mints 32 random bytes as 43-character unpadded base64url; opaque, nonauthorizing and unrelated to an OpenBao path |
+| Reason typing | Closed protobuf reason/result enums at domain boundaries; raw provider text never controls classification |
+| Credential lifecycle | Explicit live/staged, refresh, unusable, revoke and destroy states and recovery in ADR0095 and secrets/credentials |
+| Vault | Tenant policy grouping for this milestone, with no separate cryptographic boundary or independent lifecycle aggregate |
+| Resolved values | Direct caller-sealed replies; bounded memory lifetime, zeroizing wrappers, no Debug/serialization/logging or persistent RPC result |
+| Resolve errors | Typed denial, unusable, stale/superseded, unavailable and key-veto outcomes; no credential or provider body in error detail |
+| Audit outage | Durable acceptance before credential use; body-free durable completion outbox; outage/backlog limits refuse new work |
+| Non-model grants/egress | Attempt-scoped grants and explicit authenticated HTTP relay under ADR0096; provider traffic remains HTTP |
+| Anomalies | Typed replay, scope widening, unauthorized custody caller, key/restore mismatch, stale projection and cleanup-debt signals with fail-closed response and bounded metrics |
+
+The detailed lookup material is [resource parents](../reference/connector-resource-parents.md),
+[account identity](../reference/connector-account-identity.md),
+[relay recovery](../reference/connector-relay-recovery.md), and
+[HTTP transport](../reference/connector-http-transport.md).
+Deployment still has to demonstrate these boundaries, not merely generate types.
 
 ## See also
 

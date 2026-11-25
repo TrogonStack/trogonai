@@ -3,6 +3,7 @@ edition = "2024";
 package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
+import "trogonai/session/sessions/v1alpha1/delegation_binding_ref.proto";
 import "trogonai/session/sessions/v1alpha1/digest.proto";
 
 // DispatchExternalDelegation hands work to an agent outside this store,
@@ -30,4 +31,7 @@ message DispatchExternalDelegation {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
+  // Declaration selected from the exact parent plan, independently of the
+  // external destination and its current authorization.
+  DelegationBindingRef delegate_binding = 9 [(buf.validate.field).required = true];
 }

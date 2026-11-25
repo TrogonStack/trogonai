@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::TerminalOutputRequest;
+use agent_client_protocol::v1::schema::TerminalOutputRequest;
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_TERMINAL_OUTPUT;
@@ -61,15 +61,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
                 session_id = %session_id,
                 "Failed to handle terminal/output"
             );
-            rpc_reply::publish_error_reply(
-                nats,
-                reply_to,
-                response_id,
-                e.code,
-                &e.message,
-                "terminal/output error reply",
-            )
-            .await;
+            rpc_reply::publish_agent_error_reply(nats, reply_to, response_id, &e, "terminal/output error reply").await;
         }
     }
 }
@@ -80,12 +72,12 @@ fn parse_request(
     expected_session_id: &str,
 ) -> Result<TerminalOutputRequest, (ErrorCode, String)> {
     let request: TerminalOutputRequest = decode_request_params("terminal/output", headers, payload)
-        .map_err(|e| (ErrorCode::InvalidParams, format!("Invalid request: {e}")))?;
+        .map_err(|e| (ErrorCode::INVALID_PARAMS, format!("Invalid request: {e}")))?;
 
     let params_session_id = request.session_id.to_string();
     if params_session_id != expected_session_id {
         return Err((
-            ErrorCode::InvalidParams,
+            ErrorCode::INVALID_PARAMS,
             format!(
                 "params.sessionId ({}) does not match subject session id ({})",
                 params_session_id, expected_session_id

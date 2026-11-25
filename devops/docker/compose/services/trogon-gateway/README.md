@@ -41,16 +41,45 @@ All commands below run from the compose directory (`devops/docker/compose`):
 ```bash
 cd devops/docker/compose
 cp .env.example .env
-# edit .env for gateway, NATS, source secrets, logging, or ngrok settings
+printf 'TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
+# edit .env for gateway, source secrets, logging, or ngrok settings
 docker compose up --build --remove-orphans
 ```
 
 The compose stack mounts `./services/trogon-gateway/gateway.toml` into the
 gateway container. The default file enables a local GitHub receiver at
 `/sources/github/local/webhook` using `TROGON_GATEWAY_LOCAL_GITHUB_WEBHOOK_SECRET`
-from `.env`.
+from `.env`. It has no default, and every `docker compose` command for this
+stack, `down` included, fails until it is set.
 That variable is only for this local compose config; other environments only
 need the environment variables referenced by their deployed gateway TOML.
+
+NATS runs the way [a deployment must](../../../../nats/README.md): TLS with a
+verified client certificate, operator-mode accounts, and an encrypted
+JetStream store. The first `up` generates the dev CA, the operator, its
+accounts and every client's credentials into the `dev_secrets` volume, and the
+gateway connects to the `PLATFORM` account. `docker compose down -v` discards
+all of it together with the JetStream store, which nothing else can decrypt.
+
+A `nats_data` volume from before this layout still holds the old unencrypted
+store. Discard it once:
+
+```bash
+docker compose down
+docker volume rm trogonai_nats_data
+```
+
+Credential ids became opaque once, in
+[ADR#0074](../../../../../docs/adr/0074-credential-platform-extraction-boundary.md)
+Decision 4, and no migration carries older data across. The gateway keeps
+credentials in the `CREDENTIAL_EVENTS` stream and the `CREDENTIAL_SNAPSHOTS`
+bucket, names no earlier build used, so it never reads an event from before
+that change. A dev environment from before it still resets with the same two
+commands, because the recovery worker's checkpoint counts positions in the
+old `GATEWAY_CREDENTIAL_EVENTS` stream and would skip the start of the new
+one. Credentials created through the management API then need to be created
+again, and their earlier OpenBao entries stay under the old paths until
+`docker compose down -v` discards them. Nothing deployed holds them.
 
 ## Webhook integrations
 
@@ -277,13 +306,24 @@ pulling and returns messages it has not handled to Pub/Sub.
 
 ## Exposing webhooks with ngrok
 
+The `dev` profile publishes the gateway on a public ngrok URL. Anyone who has
+the URL reaches the whole gateway, including the `/-/credentials` API when
+`TROGON_GATEWAY_CREDENTIAL_MANAGEMENT_ADMIN_TOKEN` is set, so run it only while
+a provider needs to call in.
+
 ```bash
 docker compose --profile dev up
 ```
 
-This starts ngrok alongside the gateway. Check `docker compose logs ngrok`
+This starts ngrok alongside the gateway, and ngrok logs a warning that the
+stack is public. Check `docker compose logs ngrok`
 for the public URL. Append the integration path when configuring each platform's
 webhook settings (for example, `https://<ngrok-url>/sources/github/acme-main/webhook`).
+Close the tunnel as soon as you are done:
+
+```bash
+docker compose --profile dev stop ngrok
+```
 
 ## OpenBao local secret store
 
@@ -410,24 +450,49 @@ curl -sS "http://trogon-gateway.trogonai.orb.local:8080/-/credentials/recovery/s
 The create, rotate, and revoke responses return credential refs, lifecycle
 state, and stream position. They must not echo the submitted secret value.
 
-To inspect an API-created value directly in local OpenBao, use the logical
-credential id from the response as the final path segment:
+To inspect an API-created credential in local OpenBao, use its owner id and
+internal UUID in `trogonai/{owner_id}/credentials/{credential_id}`. The
+management response's `credential_ref.id` identifies the public owner/scope/kind
+slot; it is not the storage UUID.
+
+Set `STREAM_POSITION` to the `stream_position` from a successful management
+response. Read that event with the `PLATFORM` NATS identity supplied by
+`nats-box`, then extract the UUID from the final token of its subject:
+
+```bash
+CREDENTIAL_ID="$(
+  docker compose --profile tools run --rm -T nats-box \
+    nats stream get CREDENTIAL_EVENTS "${STREAM_POSITION}" --json |
+    jq -er '.subject | split(".") | last'
+)"
+```
+
+For the `tenant-1` credential in the examples above, inspect its metadata,
+which remains available after revocation and contains no secret value:
 
 ```bash
 docker compose exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
-  bao kv get -format=json -mount=secret \
-  "trogonai/tenant-1/credentials/openbao:tenant-1:github/local:webhook_secret"
+  bao kv metadata get -format=json -mount=secret \
+  "trogonai/tenant-1/credentials/${CREDENTIAL_ID}"
 ```
 
-Do not percent-encode this value for the `bao` CLI. The HTTP adapter URL-encodes
-path segments internally when it calls OpenBao.
+The scope key and credential kind are not path segments.
 
 ## Verify
 
-Subscribe to NATS to see events flowing:
+Subscribe to NATS as the `PLATFORM` developer identity to see events flowing:
 
 ```bash
-nats sub -s nats://nats.trogonai.orb.local:4222 ">"
+docker compose --profile tools run --rm nats-box nats sub '>'
+```
+
+A `nats` CLI on the host connects with the files `.env.example` shows how to
+copy out of the volume:
+
+```bash
+nats --server tls://localhost:4222 --tlsca tmp/nats/ca.pem \
+  --tlscert tmp/nats/client.pem --tlskey tmp/nats/client-key.pem \
+  --creds tmp/nats/nats.creds sub '>'
 ```
 
 ## Environment variables

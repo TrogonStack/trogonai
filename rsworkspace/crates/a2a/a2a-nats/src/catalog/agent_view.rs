@@ -16,6 +16,7 @@
 //!    response shapes from directly.
 
 use crate::agent_id::A2aAgentId;
+use crate::catalog::import_gate::SpiceDbPrincipal;
 
 /// Session key for per-(principal, account) outcome caching. The
 /// pair is intentionally explicit — a SpiceDB principal can act
@@ -134,6 +135,56 @@ pub fn filter_agents_by_view(
             },
         })
         .collect())
+}
+
+/// Build a [`SpiceDbSessionKey`] from a verified principal,
+/// falling back to the supplied account when the principal didn't
+/// carry an explicit `session_account` / `account` / `aud` claim.
+pub fn session_from_principal(principal: &SpiceDbPrincipal, fallback_account: &str) -> Option<SpiceDbSessionKey> {
+    let sub = principal
+        .0
+        .get("sub")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            principal
+                .0
+                .get("spicedb_subject")
+                .and_then(serde_json::Value::as_str)
+                .and_then(parse_subject_id)
+        })?;
+
+    let account = principal
+        .0
+        .get("session_account")
+        .or_else(|| principal.0.get("account"))
+        .or_else(|| principal.0.get("aud"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback_account);
+
+    Some(SpiceDbSessionKey::new(sub, account))
+}
+
+/// Strip the SpiceDB type prefix from a subject reference so the
+/// session key carries just the principal id. Tolerates both
+/// `agent/x` and `agent:x` separator shapes -- different identity
+/// providers emit different forms. A separator present with an
+/// empty right-hand side (e.g. `"user/"`) returns `None` rather
+/// than the malformed raw string, so a session key built from this
+/// value can't carry a placeholder id.
+fn parse_subject_id(raw: &str) -> Option<String> {
+    for sep in ['/', ':'] {
+        if let Some((object_type, object_id)) = raw.split_once(sep) {
+            if object_id.is_empty() {
+                return None;
+            }
+            let _ = object_type;
+            return Some(object_id.to_owned());
+        }
+    }
+    if raw.is_empty() { None } else { Some(raw.to_owned()) }
 }
 
 #[cfg(test)]

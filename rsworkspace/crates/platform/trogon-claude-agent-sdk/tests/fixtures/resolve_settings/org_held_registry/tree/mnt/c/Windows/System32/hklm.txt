@@ -1,0 +1,1 @@
+    Settings    REG_SZ    {"model":"registry","availableModels":["opus"],"allowManagedHooksOnly":true,"permissions":{"allow":["Bash(git:*)"],"deny":["WebFetch"]},"env":{"R":"1"}}

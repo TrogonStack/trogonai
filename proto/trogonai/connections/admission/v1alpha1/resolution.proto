@@ -1,0 +1,149 @@
+edition = "2024";
+
+package trogonai.connections.admission.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/types/v1alpha1/authority.proto";
+import "trogonai/connections/types/v1alpha1/operation.proto";
+import "trogonai/connections/types/v1alpha1/proxy.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/policy/subjects/v1alpha1/rule_ref.proto";
+
+// Why one declaration did not resolve to one usable connection (ADR#0096
+// Decision 1). Selectors resolve first and permissions are checked second, so
+// policy never changes which connection a declaration names (ADR#0071). No
+// failure causes another connection, app or release to be tried. Unspecified
+// and unknown values are invalid.
+enum ConnectionResolutionFailureReason {
+  CONNECTION_RESOLUTION_FAILURE_REASON_UNSPECIFIED = 0;
+  // No connection in scope matches the selector. A required declaration fails
+  // with this reason; an optional one resolves to the absent outcome instead.
+  CONNECTION_RESOLUTION_FAILURE_REASON_NO_CONNECTION = 1;
+  // More than one connection matches. Fails even for an optional declaration
+  // (ADR#0063 Decision 4).
+  CONNECTION_RESOLUTION_FAILURE_REASON_AMBIGUOUS = 2;
+  // The one match needs its owner to reconnect.
+  CONNECTION_RESOLUTION_FAILURE_REASON_RECONNECT_REQUIRED = 3;
+  // The release the one match pins is blocked (ADR#0092 Decision 10).
+  CONNECTION_RESOLUTION_FAILURE_REASON_RELEASE_BLOCKED = 4;
+  // No permit under ADR#0096 Decision 3 admits the Agent's use of the one
+  // match. For a person-owned connection the permit is the owner's delegation
+  // (ADR#0093 Decisions 4 and 5).
+  CONNECTION_RESOLUTION_FAILURE_REASON_NOT_PERMITTED = 5;
+  // The one match is not Active and does not need a reconnect: it is Pending,
+  // Suspended or Aborted, or its custody project is not in good standing.
+  // ADR#0096 Decision 1 admits only an Active connection without naming this
+  // case; this is the smallest reason that keeps it distinct from the others.
+  CONNECTION_RESOLUTION_FAILURE_REASON_CONNECTION_UNAVAILABLE = 6;
+  // The projection admission reads was staler than the configured bound,
+  // measured from the projector's heartbeat, so admission refused rather than
+  // fall back to the last projection it held (ADR#0096 Decision 4). Retry
+  // after recovery.
+  CONNECTION_RESOLUTION_FAILURE_REASON_PROJECTION_STALE = 7;
+}
+
+// The typed failure of one declaration.
+message ConnectionResolutionFailure {
+  ConnectionResolutionFailureReason reason = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The one connection the selector matched, when exactly one did and the
+  // failure is about that connection rather than about the selection. Absent
+  // for NO_CONNECTION, AMBIGUOUS and PROJECTION_STALE. It names a connection
+  // and grants nothing.
+  trogonai.connections.types.v1alpha1.ConnectionRef connection_ref = 2;
+}
+
+// One successful resolution, as the immutable SessionExecutionPlan records it
+// (ADR#0096 Decision 1). It carries references only: no grant, no SecretRef
+// and no copied policy, so the plan can be read, digested and replayed without
+// authority (ADR#0071 Decision 7).
+message ResolvedConnectionUse {
+  reserved 4;
+  reserved operations;
+
+  option (buf.validate.message).cel = {
+    id: "resolved_connection_use.proxy_binding"
+    message: "only HTTP_PROXY resolutions carry a proxy binding"
+    expression: "has(this.proxy_binding) == (this.mode == 3)"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_connection_use.restriction_destination"
+    message: "planned request rules must stay within the proxy binding destination"
+    expression: "!has(this.proxy_binding) || !has(this.authority_ceiling.http_requests) || this.authority_ceiling.http_requests.rules.all(r, r.host == this.proxy_binding.upstream)"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_connection_use.http_ceiling_mode"
+    message: "HTTP request restrictions apply only to HTTP_PROXY"
+    expression: "!has(this.authority_ceiling.http_requests) || this.mode == 3"
+  };
+  option (buf.validate.message).cel = {
+    id: "resolved_connection_use.admitting_permit_is_connection_permission"
+    message: "the admitting permit must be a connection permission rule with a positive stream revision"
+    expression: "this.admitting_permit_ref.kind == 6 && this.admitting_permit_ref.stream_revision > 0"
+  };
+  // The declaration's binding name, as the AgentRevision declares it.
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.connections.types.v1alpha1.ConnectionRef connection_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The connection's authorization_generation at admission. A later
+  // authorization on the same connection makes every grant prepared from this
+  // plan CONNECTION_SUPERSEDED (ADR#0096 Decision 4).
+  uint64 authorization_generation = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  // The actual scope set and release request restrictions admission observed.
+  // This never snapshots a live permit or claims scope-based API parsing.
+  trogonai.connections.types.v1alpha1.AuthorityCeiling authority_ceiling = 5 [features.field_presence = LEGACY_REQUIRED];
+  // HTTP_PROXY is the default. MCP_SESSION and optional TOKEN_ISSUANCE
+  // require explicit permits; none is inferred from an operation catalog.
+  trogonai.connections.types.v1alpha1.ConnectionUseMode mode = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The permit history that admitted the use, at the revision admission read.
+  // For a person-owned connection it is the owner's delegation (ADR#0093
+  // Decision 4). The permit's own ceiling is evaluated live on each call and
+  // is never copied here.
+  trogonai.policy.subjects.v1alpha1.PolicyRuleRef admitting_permit_ref = 7 [features.field_presence = LEGACY_REQUIRED];
+  // Trusted resolution selects an explicit ApiDestinationId of the pinned
+  // release, or its unique default for the active authentication role. No
+  // default or ambiguous selection fails AMBIGUOUS; an unknown, unsupported
+  // or unauthorized selection fails NOT_PERMITTED. Exact upstream, role and
+  // transport profile must equal the selected release entry, not merely an
+  // egress_hosts member. Separate origins require separate admitted bindings
+  // and grants; a request cannot switch hosts or roles within one binding.
+  // A grant copies this binding exactly from the immutable plan.
+  trogonai.connections.types.v1alpha1.ProxyBinding proxy_binding = 8;
+}
+
+// The outcome of one declaration, keyed by its binding name.
+message ConnectionResolution {
+  string binding_name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    // Exactly one Active, permitted connection in scope.
+    ResolvedConnectionUse resolved = 2;
+    // An optional declaration matched no connection. The plan records the
+    // absence and the Session proceeds (ADR#0096 Decision 1).
+    google.protobuf.Empty absent = 3;
+    // The declaration did not resolve. One failed declaration fails the
+    // request; the other entries are still reported so the operator sees
+    // every reason at once.
+    ConnectionResolutionFailure failed = 4;
+  }
+}

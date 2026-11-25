@@ -1,0 +1,18 @@
+edition = "2024";
+
+package trogonai.platform.workload_federation.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/platform/workload_federation/v1alpha1/references.proto";
+import "trogonai/platform/workload_identity/v1alpha1/registration_binding.proto";
+
+// Selects one exact local registration or governed foreign subject. Live
+// registration, trust and operation authorization are still required; neither
+// arm grants enrollment, recipient access, or caller-defined placement.
+message SourceIdentityRequirement {
+  oneof source {
+    option (buf.validate.oneof).required = true;
+    trogonai.platform.workload_identity.v1alpha1.RegistrationBinding local_workload = 1;
+    SubjectBindingRef subject_binding_ref = 2;
+  }
+}

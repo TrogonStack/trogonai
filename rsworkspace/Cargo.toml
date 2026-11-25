@@ -33,6 +33,7 @@ ard-catalog = { path = "crates/ard/ard-catalog" }
 ard-nats = { path = "crates/ard/ard-nats" }
 ard-registry = { path = "crates/ard/ard-registry" }
 a2a-redaction = { path = "crates/a2a/a2a-redaction" }
+trogon-a2ui = { path = "crates/a2ui/trogon-a2ui" }
 acp-nats = { path = "crates/acp/acp-nats" }
 grpc-nats-micro = { path = "crates/platform/grpc-nats-micro" }
 trogon-telemetry = { path = "crates/platform/trogon-telemetry" }
@@ -43,11 +44,13 @@ jsonrpc-nats = { path = "crates/platform/jsonrpc-nats" }
 trogon-nats = { path = "crates/platform/trogon-nats" }
 trogon-aauth-sdk = { path = "crates/aauth/trogon-aauth-sdk" }
 trogon-aauth-verify = { path = "crates/aauth/trogon-aauth-verify" }
+trogon-audit = { path = "crates/platform/trogon-audit" }
 trogon-decider = { path = "crates/decider/trogon-decider" }
 trogon-decider-nats = { path = "crates/decider/trogon-decider-nats" }
 trogon-decider-nats-server = { path = "crates/decider/trogon-decider-nats-server" }
 trogon-decider-wit = { path = "crates/decider/trogon-decider-wit" }
 trogon-config-value = { path = "crates/platform/trogon-config-value" }
+trogon-claude-agent-sdk = { path = "crates/platform/trogon-claude-agent-sdk" }
 trogon-decider-guest-macros = { path = "crates/decider/trogon-decider-guest-macros" }
 trogon-decider-guest-sdk = { path = "crates/decider/trogon-decider-guest-sdk" }
 trogon-decider-sim = { path = "crates/decider/trogon-decider-sim" }
@@ -58,64 +61,77 @@ trogon-identity-types = { path = "crates/platform/trogon-identity-types" }
 trogon-jwks-publisher = { path = "crates/platform/trogon-jwks-publisher" }
 trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
+trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
+trogon-egress-proxy = { path = "crates/platform/trogon-egress-proxy" }
+trogon-workload-identity = { path = "crates/platform/trogon-workload-identity" }
+trogon-webhooks = { path = "crates/platform/trogon-webhooks" }
+trogon-policy-eval = { path = "crates/policy/trogon-policy-eval" }
+trogon-policy-cel = { path = "crates/policy/trogon-policy-cel" }
 trogon-channel = { path = "crates/channel/trogon-channel" }
 channel-bridge-telegram = { path = "crates/channel/channel-bridge-telegram" }
+trogon-credential-aggregate = { path = "crates/credential/trogon-credential-aggregate" }
+trogon-credential-domain = { path = "crates/credential/trogon-credential-domain" }
+trogon-secret-store = { path = "crates/credential/trogon-secret-store" }
+trogon-secrets-client = { path = "crates/credential/trogon-secrets-client" }
+trogon-secrets-service = { path = "crates/credential/trogon-secrets-service" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }
 
 # CEL interpreter for Tier-2 declarative policy rules
 cel-interpreter = "=0.10.0"
+cel-parser = "=0.10.1"
 
 # ACP
 # Any bump must follow the upgrade ritual in docs/architecture/acp-conformance.md.
 # Unstable flags are enabled ahead of stabilization by policy (protocol v2 is watch-only).
-agent-client-protocol = { version = "=2.0.0", features = [
-    "unstable_auth_methods",
-    "unstable_elicitation",
+agent-client-protocol = { version = "=5.0.0", features = [
+    "unstable_auth_status",
     "unstable_end_turn_token_usage",
-    "unstable_mcp_over_acp",
-    "unstable_session_fork",
-] }
-# Direct schema dependency exists solely to enable schema-level unstable flags the
-# SDK facade does not forward (cargo feature unification applies them to the SDK's re-exports).
-# The version must match the SDK's own exact pin, otherwise the graph carries two
-# schema crates and the flags stop reaching the SDK's re-exported types.
-agent-client-protocol-schema = { version = "=1.5.0", features = [
     "unstable_llm_providers",
-    "unstable_nes",
+    "unstable_mcp_over_acp",
     "unstable_plan_operations",
+    "unstable_session_archive",
+    "unstable_session_fork",
+    "unstable_session_set_title",
+    "unstable_session_status",
+    "unstable_session_system_prompt",
+    "unstable_subagents",
 ] }
-# Official HTTP/WebSocket transport from the SDK repository, released in lockstep with
-# the core crate. Server side only: the `client` feature pulls reqwest 0.13 and
-# async-tungstenite, both conflicting with the workspace's exact pins.
-# Enables serde_json/preserve_order graph-wide through feature unification.
-agent-client-protocol-http = { version = "=2.0.0", default-features = false, features = ["server"] }
+# Keep the direct schema pin identical to the SDK's exact requirement so all
+# consumers share one set of protocol types and unified feature flags.
+agent-client-protocol-schema = { version = "=1.15.1", default-features = false }
+# Server side only: the client feature requires reqwest 0.13, which conflicts
+# with the workspace's exact reqwest pin.
+agent-client-protocol-http = { version = "=5.0.0", default-features = false, features = ["server"] }
 
 # MCP
 rmcp = { version = "3.0.0", default-features = false, features = ["client", "server", "transport-io", "transport-async-rw", "transport-streamable-http-server"] }
 
 # Async runtime & networking
 async-compat = "=0.2.6"
-async-nats = { version = "=0.50.0", default-features = false, features = ["aws-lc-rs"] }
+async-nats = { version = "=0.51.0", default-features = false, features = ["aws-lc-rs"] }
 async-trait = "=0.1.92"
 axum = { version = "=0.8.9", features = ["ws"] }
 bytes = "=1.12.1"
 base64 = "=0.23.1"
+bs58 = "=0.5.1"
 buffa = { version = "=0.9.2", features = ["json"] }
 buffa-types = { version = "=0.9.2", features = ["json"] }
+buffa-descriptor = { version = "=0.9.2" }
 futures = "=0.3.34"
 futures-util = "=0.3.34"
-tokio = "=1.53.1"
-tokio-util = "=0.7.19"
+tokio = "=1.54.1"
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs"] }
+tokio-util = "=0.7.20"
 tokio-tungstenite = "=0.29.0"
 tower = "=0.5.3"
 tower-http = { version = "=0.7.1", features = ["trace"] }
 
 # Database
-sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "macros", "migrate", "postgres", "chrono", "json"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "macros", "migrate", "postgres", "chrono", "json"] }
 
 # Telegram
 teloxide = { version = "=0.17.0", default-features = false, features = ["macros", "webhooks-axum", "rustls"] }
@@ -124,18 +140,18 @@ teloxide = { version = "=0.17.0", default-features = false, features = ["macros"
 confique = { version = "=0.4.0", features = ["toml"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 semver = "=1.0.28"
-serde_json = "=1.0.151"
+serde_json = "=1.0.154"
 jsonschema = { version = "=0.49.4", default-features = false }
 
 # CLI
 clap = { version = "=4.6.7", features = ["derive"] }
 
 # Observability
-opentelemetry = "=0.33.0"
-opentelemetry-appender-tracing = "=0.33.0"
+opentelemetry = "=0.33.1"
+opentelemetry-appender-tracing = "=0.33.1"
 opentelemetry-otlp = "=0.33.0"
 opentelemetry-semantic-conventions = { version = "=0.32.1", features = ["semconv_experimental"] }
-opentelemetry_sdk = "=0.33.0"
+opentelemetry_sdk = "=0.33.1"
 tracing = "=0.1.44"
 tracing-opentelemetry = "=0.34.0"
 tracing-subscriber = "=0.3.23"
@@ -154,18 +170,20 @@ thiserror = "=2.0.21"
 
 # SpiceDB / authzed gRPC (feature-gated SpiceDB-backed import gate)
 authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
-tonic = { version = "=0.14.6", default-features = false, features = ["transport", "codegen", "router"] }
+tonic = { version = "=0.14.9", default-features = false, features = ["transport", "codegen", "router"] }
 moka = { version = "=0.12.16", features = ["future"] }
 
 # Misc
+libc = "=0.2.186"
+chrono = "=0.4.45"
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
-toml = "=1.1.6"
+toml = "=1.1.8"
 wasmtime = "=47.0.3"
 http = "=1.5.0"
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rrule = "=0.14.0"
-sha2 = "=0.11.0"
+sha2 = "=0.11.1"
 wiremock = "=0.6.5"
 testcontainers-modules = { version = "=0.15.0", features = ["nats"] }
 tempfile = "=3.27.0"
@@ -176,7 +194,7 @@ uuid = { version = "=1.24.0", features = ["v4", "v7"] }
 prost-reflect = "=0.14.7"
 serde_yaml = "=0.9.34"
 wasmtime-wasi = "=47.0.3"
-wit-bindgen = "=0.62.0"
+wit-bindgen = "=0.63.0"
 
 # Auth callout
 hex = "=0.4.3"
@@ -187,8 +205,9 @@ nkeys = { version = "=0.4.5", features = ["xkeys"] }
 rustls = { version = "=0.23.46", default-features = false, features = ["aws-lc-rs", "std"] }
 rustls-pemfile = "=2.2.0"
 rustls-pki-types = { version = "=1.15.1", default-features = false, features = ["std"] }
-rustls-webpki = { version = "=0.103.15", default-features = false, features = ["std", "alloc", "ring"] }
+rustls-webpki = { version = "=0.103.16", default-features = false, features = ["std", "alloc", "ring"] }
 x509-parser = "=0.18.1"
+spiffe = { version = "=0.19.0", default-features = false }
 
 [profile.release]
 lto = "thin"

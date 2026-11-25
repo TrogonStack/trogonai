@@ -1,0 +1,136 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+
+// RFC 6901 selector into a token endpoint's JSON object. It selects metadata
+// or material only inside custody; the response value is never a field here.
+// Evaluation is exact: no wildcard, recursive search, coercion or fallback to
+// a different path. Missing and wrong-type values are distinct.
+message OAuthResponseField {
+  string pointer = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      pattern: "^(/([^~/]|~[01])*)+$"
+      max_len: 512
+    }
+  ];
+}
+
+// How the pinned response expresses token type. A selected field is required
+// and must be a nonempty string equal to Bearer, case-insensitively. An absent
+// field is never silently treated as Bearer. The documented fallback is only
+// for a reviewed declared-endpoint provider, never generic discovered MCP.
+// That fallback applies only to omission: if /token_type is present it must
+// still be a Bearer string; a conflicting or malformed value is refused.
+message OAuthBearerTypeSource {
+  oneof source {
+    option (buf.validate.oneof).required = true;
+
+    OAuthResponseField response_field = 1;
+    google.protobuf.Empty documented_bearer = 2;
+  }
+}
+
+// The encoding is chosen by the release; the broker never tries both. Values
+// are unsigned integral seconds. Negative, fractional, overflowing, nonfinite
+// or wrong-type values fail the response. Zero is expired, never unknown.
+message OAuthLifetimeField {
+  OAuthResponseField field = 1 [features.field_presence = LEGACY_REQUIRED];
+  LifetimeEncoding encoding = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum LifetimeEncoding {
+  LIFETIME_ENCODING_UNSPECIFIED = 0;
+  LIFETIME_ENCODING_JSON_INTEGER = 1;
+  LIFETIME_ENCODING_DECIMAL_STRING = 2;
+}
+
+// The response delimiter is independent of the authorization request's wire
+// delimiter. String forms split only on the selected ASCII delimiter and
+// reject empty tokens, leading/trailing or repeated delimiters and whitespace
+// trimming/coercion. Array entries must be strings. Each scope is nonempty,
+// contains no ASCII whitespace/control, and is compared using the release's
+// scope_normalization after tokenization. Duplicates after normalization fail.
+message OAuthScopeField {
+  OAuthResponseField field = 1 [features.field_presence = LEGACY_REQUIRED];
+  ScopeEncoding encoding = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+}
+
+enum ScopeEncoding {
+  SCOPE_ENCODING_UNSPECIFIED = 0;
+  // Uses OAuthProfile.scope_separator and scope_normalization.
+  SCOPE_ENCODING_DELIMITED_STRING = 1;
+  SCOPE_ENCODING_STRING_ARRAY = 2;
+  SCOPE_ENCODING_SPACE_DELIMITED_STRING = 3;
+  SCOPE_ENCODING_COMMA_DELIMITED_STRING = 4;
+}
+
+// Overrides the standard RFC 6749 top-level success-field selectors. With no
+// mapping the broker uses /access_token, /token_type, /refresh_token,
+// /expires_in and /scope, with JSON-integer lifetime and space-delimited scope,
+// independently of the authorization request's scope_separator.
+// With a mapping, omitted optional selectors mean that field is not provided
+// by this profile, not that the broker searches another response location.
+//
+// The broker requires nonempty string access and, when present, refresh
+// material; it never stringifies objects or arrays. Missing refresh follows
+// RefreshBehaviour.refresh_optional at initial exchange and
+// RefreshOmissionSemantics at refresh. Missing scope follows ScopeOmission.
+// A refresh response whose actual scope set widens the committed grant is
+// quarantined with AUTHORITY_WIDENED, never recorded as narrower metadata.
+// Error responses remain the sanitized RFC 6749 error taxonomy. Duplicate
+// JSON member names, conflicting selectors, wrong types and missing required
+// fields fail before staging. Unknown members are discarded. A token response
+// is capped at 16 KiB, including any selected provider metadata.
+// A malformed success during refresh can follow rotation: it is an unknown
+// outcome, not permission to retry the old refresh credential.
+message OAuthResponseMapping {
+  option (buf.validate.message).cel = {
+    id: "oauth_response_mapping.distinct_selectors"
+    message: "each response field has only one interpretation"
+    expression: "([this.access_field.pointer] + (has(this.bearer_type.response_field) ? [this.bearer_type.response_field.pointer] : []) + (has(this.refresh_field) ? [this.refresh_field.pointer] : []) + (has(this.access_lifetime) ? [this.access_lifetime.field.pointer] : []) + (has(this.refresh_lifetime) ? [this.refresh_lifetime.field.pointer] : []) + (has(this.scopes) ? [this.scopes.field.pointer] : [])).unique()"
+  };
+
+  OAuthResponseField access_field = 1 [features.field_presence = LEGACY_REQUIRED];
+  OAuthBearerTypeSource bearer_type = 2 [features.field_presence = LEGACY_REQUIRED];
+  OAuthResponseField refresh_field = 3;
+  OAuthLifetimeField access_lifetime = 4;
+  OAuthLifetimeField refresh_lifetime = 5;
+  OAuthScopeField scopes = 6;
+}
+
+// The release's policy when the selected access lifetime field is absent, or
+// the response profile declares none. Null and malformed values are errors,
+// not omissions. Absent policy means unknown expiry. A reported lifetime
+// always takes precedence over this fallback.
+message OmittedAccessExpiry {
+  oneof policy {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty reject = 1;
+    // A documented provider lifetime, added to custody's response receipt
+    // time with checked arithmetic. Only reviewed declared endpoints may
+    // select it. It yields DOCUMENTED evidence, not provider-reported expiry.
+    google.protobuf.Duration documented_lifetime = 2 [(buf.validate.field).duration.gt = {}];
+    google.protobuf.Empty unknown = 3;
+    // Requires explicit provider documentation on a reviewed declared release;
+    // absence of expires_in alone never establishes this property.
+    google.protobuf.Empty non_expiring = 4;
+  }
+}

@@ -1,0 +1,22 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+// The result of a remote effect whose outcome can be uncertain: code exchange,
+// refresh and provider revoke. Recording it keeps saga states out of the
+// aggregates (ADR#0092 Decision 4, ADR#0094 Decision 13). Unspecified and
+// unknown values are invalid.
+enum EffectOutcome {
+  EFFECT_OUTCOME_UNSPECIFIED = 0;
+  // The provider answered success.
+  EFFECT_OUTCOME_CONFIRMED = 1;
+  // The provider offers no such effect, such as no advertised or declared
+  // revocation endpoint. Recorded, never faked.
+  EFFECT_OUTCOME_UNSUPPORTED = 2;
+  // The provider refused the request. A permanent error is not retried.
+  EFFECT_OUTCOME_REJECTED = 3;
+  // The provider failed or was unreachable.
+  EFFECT_OUTCOME_UNAVAILABLE = 4;
+  // The request was sent and no response arrived; the provider may have acted.
+  EFFECT_OUTCOME_UNKNOWN = 5;
+}

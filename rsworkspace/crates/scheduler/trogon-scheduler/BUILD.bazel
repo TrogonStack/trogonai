@@ -1,0 +1,18 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    # The migrations are embedded by sqlx::migrate!, and tests/support is pulled in
+    # by #[path] attributes, both at compile time.
+    compile_data = [
+        "migrations/**",
+        "tests/support/*.rs",
+    ],
+    # These start NATS and Postgres in containers through Docker.
+    integration_tests = {
+        "integration": {"tags": ["requires-network"]},
+        "postgres_projection": {"tags": ["requires-network"]},
+        "postgres_projector_e2e": {"tags": ["requires-network"]},
+    },
+    # Some tests start NATS and Postgres in containers through Docker.
+    unit_test_tags = ["requires-network"],
+)

@@ -8,7 +8,7 @@ fn test_secret() -> String {
 fn incidentio_config_clone_roundtrips() {
     let config = IncidentioConfig {
         signing_secret: IncidentioSigningSecret::new(test_secret()).unwrap(),
-        subject_prefix: NatsToken::new("incidentio").unwrap(),
+        subject_prefix: DottedNatsToken::new("incidentio").unwrap(),
         stream_name: NatsToken::new("INCIDENTIO").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),

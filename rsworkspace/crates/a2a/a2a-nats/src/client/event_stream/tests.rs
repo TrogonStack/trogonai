@@ -31,7 +31,7 @@ fn event_body(id: &str, event: &StreamResponse) -> Vec<u8> {
 
 fn nats_msg_with_reply(payload: Vec<u8>, reply: Option<&str>) -> async_nats::Message {
     async_nats::Message {
-        subject: "a2a.v1.tasks.t1.events".into(),
+        subject: "a2a.v1.tasks.t1.person.alice.events".into(),
         reply: reply.map(|s| s.into()),
         payload: Bytes::from(payload),
         headers: None,

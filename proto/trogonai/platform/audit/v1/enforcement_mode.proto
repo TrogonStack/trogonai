@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+// EnforcementMode is whether the layer that produced a verdict enforced it.
+//
+// DRY_RUN evaluates and records without changing the outcome. Unspecified and
+// unknown values are invalid.
+enum EnforcementMode {
+  ENFORCEMENT_MODE_UNSPECIFIED = 0;
+  ENFORCEMENT_MODE_ENFORCE = 1;
+  ENFORCEMENT_MODE_DRY_RUN = 2;
+}

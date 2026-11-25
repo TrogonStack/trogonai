@@ -1,0 +1,167 @@
+edition = "2024";
+
+package trogonai.connections.catalog.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/catalog/v1alpha1/operation.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/proxy.proto";
+import "trogonai/policy/egress_permissions/v1alpha1/permission_policy.proto";
+
+// Reviewed HTTP forwarding metadata, not a catalog of provider endpoints.
+// Every active authentication method selects exactly one injection by role;
+// Authentication.none selects none. Injected values come only from custody.
+message ProxyProfile {
+  option (buf.validate.message).cel = {
+    id: "proxy_profile.roles_unique"
+    message: "each credential role has one injection rule"
+    expression: "this.credential_injections.map(i, i.role.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "proxy_profile.destination_ids_unique"
+    message: "API destination ids are unique within the release"
+    expression: "this.api_destinations.map(d, d.id.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "proxy_profile.destination_defaults_unique"
+    message: "each credential role or anonymous mode has at most one default API destination"
+    expression: "this.api_destinations.filter(d, d.default_for_authentication).map(d, has(d.credential_role) ? 'role:' + d.credential_role.value : 'anonymous').unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "proxy_profile.destinations_unique"
+    message: "an upstream and authentication role identify one API destination"
+    expression: "this.api_destinations.all(a, this.api_destinations.filter(b, a.upstream == b.upstream && (has(a.anonymous) ? has(b.anonymous) : (has(b.credential_role) && a.credential_role == b.credential_role))).size() == 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "proxy_profile.destination_roles"
+    message: "every credentialed API destination uses a reviewed injection role"
+    expression: "this.api_destinations.all(d, !has(d.credential_role) || this.credential_injections.exists(i, i.role == d.credential_role))"
+  };
+  option (buf.validate.message).cel = {
+    id: "proxy_profile.injections_have_destinations"
+    message: "every injection has at least one explicitly approved API destination"
+    expression: "this.credential_injections.all(i, this.api_destinations.exists(d, has(d.credential_role) && d.credential_role == i.role))"
+  };
+  repeated CredentialInjection credential_injections = 1;
+  trogonai.connections.types.v1alpha1.HttpRequestRestrictions restrictions = 2;
+  ProxyLimits limits = 3;
+  QuotaScope quota_scope = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  repeated RateLimitHeader rate_limit_headers = 5;
+  repeated ApiDestination api_destinations = 6 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 32
+  }];
+  trogonai.connections.types.v1alpha1.HttpTransportProfile transport_profile = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      in: [1]
+    }
+  ];
+  // Exact bytes of a reviewed versioned declarative policy. Missing runtime
+  // support, unknown id or digest mismatch fails admission, never falls back
+  // to generic status/body-text inference or weaker response handling.
+  ResponsePolicyRef response_policy = 8;
+}
+
+message ResponsePolicyId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9_-]{0,127}$"
+  ];
+}
+
+message ResponsePolicyRef {
+  ResponsePolicyId policy_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.Digest policy_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// An API origin eligible for ordinary HTTP relay use. OAuth control endpoints
+// and identity probes do not become API destinations merely by being listed
+// in egress_hosts. The selected active authentication method fixes the role.
+message ApiDestination {
+  trogonai.connections.types.v1alpha1.ApiDestinationId id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.policy.egress_permissions.v1alpha1.EgressHost upstream = 2 [features.field_presence = LEGACY_REQUIRED];
+  oneof authentication {
+    option (buf.validate.oneof).required = true;
+    trogonai.connections.types.v1alpha1.CredentialRoleName credential_role = 3;
+    google.protobuf.Empty anonymous = 4;
+  }
+  // When no destination id was selected, only this entry may be used for its
+  // role/anonymous mode. If no default exists, an explicit selection is needed.
+  bool default_for_authentication = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Places one access credential on a request. Role existence, its selected
+// authentication method and compatible credential kind are checked at publish
+// and at grant preparation. App private keys and refresh tokens never qualify.
+// Caller-supplied values of the selected header are rejected, not combined.
+// Query, cookie and body credential placement are unsupported.
+message CredentialInjection {
+  trogonai.connections.types.v1alpha1.CredentialRoleName role = 1 [features.field_presence = LEGACY_REQUIRED];
+  oneof placement {
+    option (buf.validate.oneof).required = true;
+    // Authorization: Bearer followed by the resolved access credential.
+    google.protobuf.Empty bearer = 2;
+    // Authorization: Basic with the resolved structured username/password.
+    google.protobuf.Empty basic = 3;
+    // A provider-specific header, including a reviewed Authorization scheme.
+    CredentialHeader header = 4;
+  }
+}
+
+// A lower-case HTTP field name and a public constant scheme prefix. Neither
+// field may contain a credential or personal data. The value is prefix plus
+// the resolved credential; CR, LF and invalid field bytes cause refusal.
+message CredentialHeader {
+  option (buf.validate.message).cel = {
+    id: "credential_header.safe_name"
+    message: "credential placement cannot alter routing, framing or relay controls"
+    expression: "!(this.name in ['host', 'cookie', 'content-length', 'transfer-encoding', 'connection', 'te', 'trailer', 'upgrade', 'proxy-authorization', 'proxy-authenticate', 'signature', 'signature-input', 'content-digest', 'accept-encoding', 'content-encoding', 'expect', 'range', 'if-range', 'forwarded', 'via']) && !this.name.startsWith('trogon-connection-') && !this.name.startsWith('x-forwarded-')"
+  };
+  string name = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9-]{0,62}$"
+  ];
+  string prefix = 2 [(buf.validate.field).string = {
+    max_len: 64
+    pattern: "^[\\x20-\\x7e]*$"
+  }];
+}
+
+// Fixed, reviewed, nonsecret identity request. It is not agent-controlled and
+// its response is read only through IdentityProbe.fields. GET has no body.
+message IdentityHttpGet {
+  trogonai.policy.egress_permissions.v1alpha1.EgressHost host = 1 [features.field_presence = LEGACY_REQUIRED];
+  string path = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^/[^?#]*$"
+  ];
+}
+
+// A static GraphQL query for the identity probe only. Publish parses exactly
+// one read-only query, refuses variables/mutations/subscriptions and applies
+// depth/complexity limits. It is sent as a JSON query object by the trusted
+// probe worker; no agent API body is classified by this metadata.
+message IdentityGraphqlQuery {
+  trogonai.policy.egress_permissions.v1alpha1.EgressHost host = 1 [features.field_presence = LEGACY_REQUIRED];
+  string path = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^/[^?#]*$"
+  ];
+  string document = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 16384
+    }
+  ];
+}

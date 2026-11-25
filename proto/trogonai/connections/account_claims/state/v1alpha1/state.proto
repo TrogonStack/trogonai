@@ -1,0 +1,57 @@
+edition = "2024";
+
+package trogonai.connections.account_claims.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/account_claims/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// The present fold retains its immutable resource_parent from genesis. A
+// command or event with another parent is refused before applying a transition;
+// current hierarchy placement and logical ownership do not rewrite this value.
+
+// One fold per claim, not a joined projection. Unknown events and invalid
+// transitions reject replay. Missing is the explicit initial state.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    ProviderAccountClaim present = 2;
+  }
+}
+
+// The fingerprint is fixed at genesis; a later hold must repeat it. The holder
+// is present exactly while the claim is Held or Bound, and the holding attempt
+// exactly while it is Held. A Released claim keeps neither, so the next holder
+// starts clean. The state holds no account id and no personal data (ADR#0092
+// Decision 6).
+message ProviderAccountClaim {
+  option (buf.validate.message).cel = {
+    id: "provider_account_claim_state.holder"
+    message: "a holder is present exactly while the claim is Held or Bound"
+    expression: "(this.lifecycle in [1, 2]) == has(this.holder)"
+  };
+  option (buf.validate.message).cel = {
+    id: "provider_account_claim_state.holding_attempt"
+    message: "a holding attempt is present exactly while the claim is Held"
+    expression: "(this.lifecycle == 1) == has(this.holding_attempt_id)"
+  };
+
+  trogonai.connections.types.v1alpha1.ProviderAccountClaimId claim_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAccountFingerprint fingerprint = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.account_claims.v1alpha1.ProviderAccountClaimLifecycle lifecycle = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ConnectionId holder = 4;
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId holding_attempt_id = 5;
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 6 [features.field_presence = LEGACY_REQUIRED];
+}

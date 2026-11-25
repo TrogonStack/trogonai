@@ -1,0 +1,269 @@
+{
+ "python": "3.12.16",
+ "openssl": "OpenSSL 3.5.9 29 Sep 2026",
+ "claude_agent_sdk": "0.2.181",
+ "response": "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}",
+ "pem": "-----BEGIN CERTIFICATE-----\nMIIBQTCB6KADAgECAgkAx8Anb0U6XlQwCgYIKoZIzj0EAwIwFDESMBAGA1UEAwwJ\nMTI3LjAuMC4xMCAXDTI2MTExMzE5NDg1M1oYDzIxMjYxMDIwMTk0ODUzWjAUMRIw\nEAYDVQQDDAkxMjcuMC4wLjEwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAR3O2BE\nRHAEGScBGpE+edAQ5y6ZShHtf4Nf4EdWJCMOh93lv+6YXYFTZ9cZw8o+/FKuEfUj\nvx/Bdbc4ocgMEWiyoyEwHzAPBgNVHREECDAGhwR/AAABMAwGA1UdEwEB/wQCMAAw\nCgYIKoZIzj0EAwIDSAAwRQIgKwJBa1k+CcPyP5PzfPFSogyO9iLSBsfZOZMmPziI\n33YCIQC+4WBqOP/TX/VJyQ/LNQG6+grlVzygIIzrVKYFuPr7lw==\n-----END CERTIFICATE-----\n",
+ "subject_hash": "88d0bdcb",
+ "default_verify_paths": {
+  "cafile_env": "SSL_CERT_FILE",
+  "capath_env": "SSL_CERT_DIR"
+ },
+ "cases": [
+  {
+   "name": "file_read_at_the_first_urlopen_of_any_scheme",
+   "environment": {
+    "SSL_CERT_FILE": "{FILE}",
+    "SSL_CERT_DIR": "{DIR}"
+   },
+   "initial": "{PEM}",
+   "steps": [
+    [
+     "open",
+     "data:,x"
+    ],
+    [
+     "env",
+     "SSL_CERT_FILE",
+     "{FILE}.missing"
+    ],
+    [
+     "remove",
+     "{FILE}"
+    ],
+    [
+     "open",
+     "https://127.0.0.1:{PORT}/"
+    ]
+   ],
+   "results": [
+    {
+     "url": "data:,x",
+     "body": "x"
+    },
+    {
+     "url": "https://127.0.0.1:{PORT}/",
+     "body": "{}"
+    }
+   ]
+  },
+  {
+   "name": "file_variable_read_at_the_first_urlopen_not_at_import",
+   "environment": {
+    "SSL_CERT_FILE": "{FILE}",
+    "SSL_CERT_DIR": "{DIR}"
+   },
+   "initial": "{PEM}",
+   "steps": [
+    [
+     "env",
+     "SSL_CERT_FILE",
+     "{FILE}.missing"
+    ],
+    [
+     "open",
+     "https://127.0.0.1:{PORT}/"
+    ]
+   ],
+   "results": [
+    {
+     "url": "https://127.0.0.1:{PORT}/",
+     "error": {
+      "class": "URLError",
+      "text": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate (_ssl.c:1011)>"
+     }
+    }
+   ]
+  },
+  {
+   "name": "file_contents_fixed_at_the_first_urlopen",
+   "environment": {
+    "SSL_CERT_FILE": "{FILE}",
+    "SSL_CERT_DIR": "{DIR}"
+   },
+   "initial": "",
+   "steps": [
+    [
+     "open",
+     "data:,x"
+    ],
+    [
+     "write",
+     "{FILE}",
+     "{PEM}"
+    ],
+    [
+     "open",
+     "https://127.0.0.1:{PORT}/"
+    ]
+   ],
+   "results": [
+    {
+     "url": "data:,x",
+     "body": "x"
+    },
+    {
+     "url": "https://127.0.0.1:{PORT}/",
+     "error": {
+      "class": "URLError",
+      "text": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate (_ssl.c:1011)>"
+     }
+    }
+   ]
+  },
+  {
+   "name": "file_written_before_the_first_urlopen",
+   "environment": {
+    "SSL_CERT_FILE": "{FILE}",
+    "SSL_CERT_DIR": "{DIR}"
+   },
+   "initial": "",
+   "steps": [
+    [
+     "write",
+     "{FILE}",
+     "{PEM}"
+    ],
+    [
+     "open",
+     "https://127.0.0.1:{PORT}/"
+    ]
+   ],
+   "results": [
+    {
+     "url": "https://127.0.0.1:{PORT}/",
+     "body": "{}"
+    }
+   ]
+  },
+  {
+   "name": "trust_kept_after_a_first_https_urlopen",
+   "environment": {
+    "SSL_CERT_FILE": "{FILE}",
+    "SSL_CERT_DIR": "{DIR}"
+   },
+   "initial": "{PEM}",
+   "steps": [
+    [
+     "open",
+     "https://127.0.0.1:{PORT}/"
+    ],
+    [
+     "remove",
+     "{FILE}"
+    ],
+    [
+     "open",
+     "https://127.0.0.1:{PORT}/"
+    ]
+   ],
+   "results": [
+    {
+     "url": "https://127.0.0.1:{PORT}/",
+     "body": "{}"
+    },
+    {
+     "url": "https://127.0.0.1:{PORT}/",
+     "body": "{}"
+    }
+   ]
+  },
+  {
+   "name": "directory_read_at_each_handshake",
+   "environment": {
+    "SSL_CERT_FILE": "{FILE}",
+    "SSL_CERT_DIR": "{DIR}"
+   },
+   "initial": "",
+   "steps": [
+    [
+     "open",
+     "data:,x"
+    ],
+    [
+     "write",
+     "{HASHED}",
+     "{PEM}"
+    ],
+    [
+     "open",
+     "https://127.0.0.1:{PORT}/"
+    ]
+   ],
+   "results": [
+    {
+     "url": "data:,x",
+     "body": "x"
+    },
+    {
+     "url": "https://127.0.0.1:{PORT}/",
+     "body": "{}"
+    }
+   ]
+  },
+  {
+   "name": "directory_variable_fixed_at_the_first_urlopen",
+   "environment": {
+    "SSL_CERT_FILE": "{FILE}",
+    "SSL_CERT_DIR": "{DIR}.other"
+   },
+   "initial": "",
+   "steps": [
+    [
+     "open",
+     "data:,x"
+    ],
+    [
+     "env",
+     "SSL_CERT_DIR",
+     "{DIR}"
+    ],
+    [
+     "write",
+     "{HASHED}",
+     "{PEM}"
+    ],
+    [
+     "open",
+     "https://127.0.0.1:{PORT}/"
+    ]
+   ],
+   "results": [
+    {
+     "url": "data:,x",
+     "body": "x"
+    },
+    {
+     "url": "https://127.0.0.1:{PORT}/",
+     "error": {
+      "class": "URLError",
+      "text": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate (_ssl.c:1011)>"
+     }
+    }
+   ]
+  },
+  {
+   "name": "no_trust",
+   "environment": {
+    "SSL_CERT_FILE": "{FILE}",
+    "SSL_CERT_DIR": "{DIR}"
+   },
+   "initial": "",
+   "steps": [
+    [
+     "open",
+     "https://127.0.0.1:{PORT}/"
+    ]
+   ],
+   "results": [
+    {
+     "url": "https://127.0.0.1:{PORT}/",
+     "error": {
+      "class": "URLError",
+      "text": "<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate (_ssl.c:1011)>"
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -6,7 +6,7 @@ use std::time::Duration;
 use buffa::MessageField;
 use trogon_decider_runtime::CommandExecution;
 use trogon_scheduler::{
-    CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PauseSchedule, PostgresSchedulesProjection,
+    CreateSchedule, GetScheduleCommand, ListSchedulesCommand, PauseSchedule, PostgresSchedulesProjection, PostgresUrl,
     RemoveSchedule, ResumeSchedule, ScheduleEventStatus, ScheduleId, SchedulesProjector,
     commands::domain as command_domain, connect_store, projection_queries, projections_v1,
 };

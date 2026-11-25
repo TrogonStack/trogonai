@@ -7,6 +7,9 @@ date: 2026-07-08
 
 # ADR#0018: ConnectRPC Gateway for Browser Product Surfaces
 
+> **Proposed connector refinement:** [ADR#0094](./0094-oauth-authorization-protocol.md) remains a draft. OAuth connection onboarding uses the existing ConnectRPC gateway and a narrowly defined callback route. This note does not change either ADR's status.
+
+
 ## Context
 
 The platform is getting its first product-facing web application, the operator

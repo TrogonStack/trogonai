@@ -17,7 +17,7 @@ use crate::token;
 ///
 /// Rejects empty, non-ASCII, dots, wildcards (`*`, `>`), and whitespace.
 /// Max 128 characters. Wraps an `Arc<str>` so cloning is cheap.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NatsToken(Arc<str>);
 
 impl NatsToken {

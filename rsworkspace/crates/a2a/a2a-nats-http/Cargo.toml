@@ -42,5 +42,6 @@ base64 = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite = { workspace = true }
+trogon-identity-types = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

@@ -12,9 +12,10 @@
 
 use a2a_nats::A2aTaskId;
 use serde_json::Value;
+use trogon_identity_types::SubjectPrincipal;
 
 use crate::gw_ingress_stream::{
-    CallerKey, GatewayStreamingIngressConfig, StreamingIngressGate, StreamingIngressSpawn, spawn_streaming_ingress_pump,
+    GatewayStreamingIngressConfig, StreamingIngressGate, StreamingIngressSpawn, spawn_streaming_ingress_pump,
 };
 use crate::gw_ingress_stream::{StreamingIngressKind, StreamingIngressSpawnError, req_id_from_headers_or_payload};
 use crate::runtime::env::json_rpc_params;
@@ -117,6 +118,9 @@ pub fn last_seq_from_resubscribe_params(params: &Value) -> Option<u64> {
 /// or invalid id returns `NotStreaming` so the request lands on the
 /// unary error path rather than spawning a pump with an unknown
 /// stream cursor.
+///
+/// `caller` is the principal the ingress subject carried, so the pump reads
+/// only the task events published for that principal (ADR#0082).
 #[allow(clippy::too_many_arguments)]
 pub fn maybe_spawn_streaming_ingress_pump(
     client: &async_nats::Client,
@@ -128,20 +132,17 @@ pub fn maybe_spawn_streaming_ingress_pump(
     headers: &async_nats::HeaderMap,
     payload: &[u8],
     reply: async_nats::Subject,
-    caller_key: CallerKey,
+    caller: SubjectPrincipal,
     events_last_seq: Option<u64>,
 ) -> MaybeStreamingSpawn {
     let StreamingSpawnIntent::Spawn(kind) = classify_streaming_spawn(method_dots, headers, payload, events_last_seq)
     else {
         return MaybeStreamingSpawn::NotStreaming;
     };
-    let spawn = StreamingIngressSpawn {
-        kind,
-        reply,
-        caller_key,
-    };
+    let spawn = StreamingIngressSpawn { kind, reply, caller };
     MaybeStreamingSpawn::Spawned(spawn_streaming_ingress_pump(
         client.clone(),
+        async_nats::jetstream::new(client.clone()),
         prefix.clone(),
         streaming_ingress_config,
         gate.clone(),

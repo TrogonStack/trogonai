@@ -5,7 +5,7 @@ use trogon_std::log_capture::{CapturedEvents, CapturedLogs, LevelFilter, LogLeve
 
 use super::{config::BridgeConfig, seed_principals};
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::schema::v1::InitializeResponse;
+use agent_client_protocol::v1::schema::InitializeResponse;
 use futures::{StreamExt, stream};
 use std::time::Duration;
 use teloxide::Bot;

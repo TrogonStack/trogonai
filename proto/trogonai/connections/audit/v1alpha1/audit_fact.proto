@@ -1,0 +1,258 @@
+edition = "2024";
+
+package trogonai.connections.audit.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "trogon/hierarchy/v1alpha1/node.proto";
+import "trogonai/connections/audit/v1alpha1/budget.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/mcp_tool.proto";
+import "trogonai/connections/types/v1alpha1/operation.proto";
+import "trogonai/connections/types/v1alpha1/proxy.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/connections/types/v1alpha1/use_result.proto";
+import "trogonai/policy/subjects/v1alpha1/rule_ref.proto";
+import "trogonai/session/sessions/v1alpha1/session_id.proto";
+
+// Why a completed call records no provider request identifier. The platform
+// never synthesizes one, so its absence is always recorded explicitly.
+// Unspecified and unknown values are invalid.
+enum ProviderRequestAbsence {
+  PROVIDER_REQUEST_ABSENCE_UNSPECIFIED = 0;
+  // The provider answered without returning a request identifier.
+  PROVIDER_REQUEST_ABSENCE_NOT_PROVIDED_BY_PROVIDER = 1;
+  // No provider response arrived, so no identifier could have been returned.
+  PROVIDER_REQUEST_ABSENCE_NO_RESPONSE = 2;
+  // The provider was never called.
+  PROVIDER_REQUEST_ABSENCE_NOT_DISPATCHED = 3;
+  // An identifier was supplied but the reviewed profile does not establish
+  // that it is safe to retain. The provider did answer.
+  PROVIDER_REQUEST_ABSENCE_UNSAFE_TO_RETAIN = 4;
+}
+
+// The Session use a grant authorizes: Session, attempt, plan and grant, all
+// bound together by the grant's terms (ADR#0096 Decision 2).
+message GrantedUse {
+  reserved 4;
+  reserved grant_id;
+  trogonai.session.sessions.v1alpha1.SessionId session_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string execution_attempt_id = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // The digest of the immutable SessionExecutionPlan the grant was prepared
+  // from.
+  trogonai.connections.types.v1alpha1.Digest plan_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Includes the Session's project, which can differ from connection custody.
+  trogonai.connections.types.v1alpha1.ConnectionGrantRef grant_ref = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// The attribution of a delegated call: the owner of a person-owned connection
+// and the delegating permit, so the call is attributed to both the Agent and
+// the person (ADR#0093 Decision 4, ADR#0096 Decision 9). The permit is the
+// same one that admitted the call, because a delegation is a permit (ADR#0093
+// Decision 5).
+message DelegatedUse {
+  // The owning person's principal id. It names a principal and never holds a
+  // name or an address (ADR#0092 Decision 9).
+  trogonai.connections.types.v1alpha1.PrincipalId owner = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.policy.subjects.v1alpha1.PolicyRuleRef delegating_permit_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// One entry on the connection audit stream, a sensitive stream under
+// ADR#0092 Decision 8. Audit facts are distinct from the Connection's own
+// events: the aggregate's events say how the connection changed, these say
+// what was done with it and whether it worked, including the attempts that
+// changed nothing (ADR#0096 Decision 9).
+//
+// Each invocation appends an acceptance fact, with acknowledgement, after the
+// live checks and before any credential is requested, and a completion fact
+// after the call. A call refused before acceptance appends one denial fact. A
+// reconciler records an acceptance without a completion past the call's
+// deadline as PROVIDER_OUTCOME_UNKNOWN. Export sinks read the stream
+// asynchronously and never gate a call.
+//
+// Tenant and principal are domain facts of this stream, not envelope fields:
+// the stream is read by export sinks that do not see the runtime envelope.
+// The independently generated audit correlation id passes into custody's
+// ResolveForTrustedUse, so custody's record and this one join. An invocation
+// identifier correlates facts; a repeat never automatically replays HTTP.
+//
+// Producers retain no token, header value, URL, path, body, content digest,
+// signature, GraphQL field name or provider error text. Typed identifiers are
+// generated or validated by the platform, not populated from arbitrary input.
+message ConnectionAuditFact {
+  reserved 8;
+  reserved operation_ref;
+
+  option (buf.validate.message).cel = {
+    id: "connection_audit_fact.granted_mode"
+    message: "mode and generation are present exactly for grant-authorized use"
+    expression: "has(this.mode) == has(this.granted) && has(this.authorization_generation) == has(this.granted)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_audit_fact.proxy_binding"
+    message: "a proxy binding id is present exactly for HTTP_PROXY grant use"
+    expression: "has(this.proxy_binding_id) == (has(this.granted) && this.mode == 3)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_audit_fact.mcp_tool_mode"
+    message: "MCP tool metadata is only valid for MCP_SESSION"
+    expression: "!has(this.mcp_tool) || (has(this.granted) && this.mode == 4)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_audit_fact.permit_ref_is_connection_permission"
+    message: "the permit must be a connection permission rule"
+    expression: "!has(this.permit_ref) || this.permit_ref.kind == 6"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_audit_fact.delegation_names_the_admitting_permit"
+    message: "a delegated use must name the admitting permit as the delegating permit"
+    expression: "!has(this.delegation) || (has(this.permit_ref) && this.delegation.delegating_permit_ref == this.permit_ref)"
+  };
+  // The envelope every fact carries. The connection is the stream key; the
+  // reference also pins the configuration and release in force.
+  trogonai.connections.types.v1alpha1.ConnectionRef connection_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The tenant node under which the connection's custody project lives.
+  trogon.hierarchy.v1alpha1.NodeId tenant = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The principal the use runs as: the Agent for a grant, the initiating
+  // principal for the identity probe.
+  trogonai.connections.types.v1alpha1.PrincipalId principal = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The ledger id of the use. Shared by the acceptance and completion facts
+  // of one invocation. It is not permission to retry a provider request.
+  trogonai.connections.types.v1alpha1.InvocationId invocation_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp occurred_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  // What authorized the use.
+  oneof authorization {
+    option (buf.validate.oneof).required = true;
+    // A grant prepared for one ExecutionAttempt.
+    GrantedUse granted = 6;
+    // The identity probe of an authorization attempt, run by the trusted
+    // executor under attempt-scoped authorization against the staged bundle
+    // (ADR#0094 Decision 5). No Session, plan or grant exists yet.
+    trogonai.connections.types.v1alpha1.AuthorizationAttemptRef identity_probe = 7;
+  }
+  // Set when the use is one tool call of an MCP session, since the live checks
+  // and the permit's tool allowlist are evaluated per tool call (ADR#0096
+  // Decision 7). ADR#0096 Decision 9 lists no MCP field; the tool name is the
+  // smallest record of what the allowlist admitted.
+  trogonai.connections.types.v1alpha1.McpToolName mcp_tool = 9;
+  // The permit whose ceiling admitted the call, at the revision the live check
+  // read. Absent for the identity probe and for a NOT_PERMITTED denial where
+  // no permit was found.
+  trogonai.policy.subjects.v1alpha1.PolicyRuleRef permit_ref = 10;
+  // Present for a delegated call on a person-owned connection.
+  DelegatedUse delegation = 11;
+  oneof fact {
+    option (buf.validate.oneof).required = true;
+    ConnectionUseAccepted accepted = 12;
+    ConnectionUseCompleted completed = 13;
+    ConnectionUseDenied denied = 14;
+  }
+  // Fixed nonsecret binding identity; no provider URL or credential role value
+  // from a caller is copied into the audit stream.
+  trogonai.connections.types.v1alpha1.ProxyBindingId proxy_binding_id = 15;
+  trogonai.connections.types.v1alpha1.ConnectionUseMode mode = 16 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  uint64 authorization_generation = 17 [(buf.validate.field).uint64.gt = 0];
+}
+
+// The live checks, the request validation and the budgets passed; the executor
+// is about to request the credential. Durable before the credential is
+// released, so with this stream unavailable no resolve and no provider call
+// happens (ADR#0096 Decision 9).
+message ConnectionUseAccepted {
+  reserved 1, 3;
+  reserved input_digest, graphql_root_fields;
+
+  // Exact buffered HTTP content size; no request content or digest is retained.
+  uint64 request_bytes = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Every budget consulted, in order; all admitted.
+  repeated ConnectionBudgetDecision budget_decisions = 4;
+}
+
+// The call ended, with any result. Appended after the call, so its failure
+// cannot undo the call; the executor retries it from a bounded buffer and
+// refuses new calls with AUDIT_UNAVAILABLE when the buffer is full.
+message ConnectionUseCompleted {
+  option (buf.validate.message).cel = {
+    id: "connection_use_completed.status_class_only_when_provider_answered"
+    message: "a provider status class requires a provider response"
+    expression: "has(this.provider_status_class) == has(this.provider_status_code) && has(this.provider_status_code) == (has(this.provider_request_id) || this.provider_request_absence in [1, 4])"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_use_completed.status_class_matches_code"
+    message: "provider status class must match the HTTP status code"
+    expression: "!has(this.provider_status_code) || (this.provider_status_code < 300 && this.provider_status_class == 1) || (this.provider_status_code >= 300 && this.provider_status_code < 400 && this.provider_status_class == 2) || (this.provider_status_code >= 400 && this.provider_status_code < 500 && this.provider_status_class == 3) || (this.provider_status_code >= 500 && this.provider_status_class == 4)"
+  };
+  trogonai.connections.types.v1alpha1.ConnectionUseResult result = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Present whenever the provider answered.
+  trogonai.connections.types.v1alpha1.ProviderStatusClass provider_status_class = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The provider's identifier for this call, or why there is none.
+  oneof provider_request {
+    option (buf.validate.oneof).required = true;
+    trogonai.connections.types.v1alpha1.ProviderRequestId provider_request_id = 3;
+    ProviderRequestAbsence provider_request_absence = 4 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+  // The bytes read from the provider HTTP response. At the cap
+  // when the result is RESPONSE_TOO_LARGE.
+  uint64 response_bytes = 5 [features.field_presence = LEGACY_REQUIRED];
+  // From dispatch of the provider request to its last byte or its failure.
+  // Absent when nothing was dispatched.
+  google.protobuf.Duration provider_duration = 6;
+  // From acceptance to this fact.
+  google.protobuf.Duration total_duration = 7 [features.field_presence = LEGACY_REQUIRED];
+  // What imposed a PROVIDER_RATE_LIMITED result reported by the provider
+  // after dispatch. A budget refusal is a denial fact, not a completion.
+  trogonai.connections.types.v1alpha1.ConnectionRateLimitSource limited_by = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Actual upstream final status, distinct from a proxy refusal or transport
+  // failure. The full provider response stays HTTP rather than in this fact.
+  uint32 provider_status_code = 9 [(buf.validate.field).uint32 = {
+    gte: 200
+    lte: 599
+  }];
+}
+
+// The call was refused before acceptance: a grant, live check, input, budget
+// or staleness refusal. No credential was requested and nothing was
+// dispatched. A denial is its own fact because a refused call is not a state
+// transition of the connection.
+message ConnectionUseDenied {
+  reserved 2;
+  reserved input_digest;
+  option (buf.validate.message).cel = {
+    id: "connection_use_denied.result_is_a_pre_dispatch_refusal"
+    message: "a denial records a refusal made before dispatch"
+    expression: "this.result in [2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 18]"
+  };
+  trogonai.connections.types.v1alpha1.ConnectionUseResult result = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Every budget consulted, in order. The last one is the refusing decision
+  // when the result is PROVIDER_RATE_LIMITED.
+  repeated ConnectionBudgetDecision budget_decisions = 3;
+}

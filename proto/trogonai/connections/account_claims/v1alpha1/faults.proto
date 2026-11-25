@@ -1,0 +1,79 @@
+edition = "2024";
+
+package trogonai.connections.account_claims.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only Decider error templates, never encoded. Holder checks are
+// distinguished from fold lifecycle rejections. No fault names an account id
+// or any other personal data; the fingerprint is the only account reference
+// (ADR#0092 Decisions 6 and 9). The lost NoStream race is a concurrency fault
+// on the Decider channel, which the attempt records as
+// ACCOUNT_ALREADY_CONNECTED.
+message ProviderAccountClaimCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.account_claims"
+    reason: "PROVIDER_ACCOUNT_CLAIM_COMMAND_INVALID"
+    message: "The command violates the provider account claim contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// HoldProviderAccount on a Held or Bound stream. The active duplicate is not
+// touched; the attempt fails with ACCOUNT_ALREADY_CONNECTED (ADR#0094
+// Decision 5).
+message ProviderAccountClaimAlreadyHeldError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.account_claims"
+    reason: "PROVIDER_ACCOUNT_CLAIM_ALREADY_HELD"
+    message: "Another connection holds or is bound to this provider account under the same boundary."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderAccountClaimNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.account_claims"
+    reason: "PROVIDER_ACCOUNT_CLAIM_NOT_FOUND"
+    message: "The provider account must be held before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// BindProviderAccount or ReleaseProviderAccount from a connection other than
+// the holder. A claim moves only by its holder's own end (ADR#0092 Decision 6).
+message ProviderAccountClaimHolderMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.account_claims"
+    reason: "PROVIDER_ACCOUNT_CLAIM_HOLDER_MISMATCH"
+    message: "The command names a connection other than the claim's holder."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// A hold on a Released stream whose fingerprint differs from the one recorded
+// at genesis. The stream name is derived from the fingerprint, so this is a
+// caller defect, never a second account.
+message ProviderAccountClaimFingerprintMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.account_claims"
+    reason: "PROVIDER_ACCOUNT_CLAIM_FINGERPRINT_MISMATCH"
+    message: "The fingerprint differs from the one this claim was created for."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderAccountClaimLifecycleConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.account_claims"
+    reason: "PROVIDER_ACCOUNT_CLAIM_LIFECYCLE_CONFLICT"
+    message: "The claim's lifecycle state does not admit this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

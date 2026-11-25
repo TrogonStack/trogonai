@@ -1,0 +1,115 @@
+edition = "2024";
+
+package trogonai.connections.grants.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/grants/v1alpha1/grant.proto";
+import "trogonai/connections/grants/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// resource_parent is the Session project, verified against the authoritative
+// Session record before dispatch. It may differ from the connection custody
+// parent. Every later command and replayed event must match the genesis parent.
+
+// connections.grants owns one stream per ConnectionGrant. The stream lives with
+// the Session, in the Session's project, never in the custody project of the
+// connection, and it is a sensitive stream under ADR#0092 Decision 8 (ADR#0096
+// Decision 2). Grants are issued by the platform component that validates
+// Ready and has no network path to providers; the trusted proxy or MCP caller that calls
+// providers never writes here. Later commands use StreamUnchanged with a
+// positive observed expected_revision and a stable nonempty Decider
+// command_id; retries preserve both.
+
+// Records a grant for one planned connection use of one ExecutionAttempt.
+// NoStream creation requires a nonempty Decider command_id and no
+// expected_revision, so the first writer wins and a retry sees the receipt.
+// Dispatch admits it only after the attempt is Ready and its confirmation key
+// thumbprint is attested, and verifies that the attempt is the Session's live
+// attempt, that plan_digest is the attempt's plan, and that connection_ref,
+// authorization_generation, mode, proxy_binding, authority_ceiling and
+// admitting_permit_ref equal a ResolvedConnectionUse of that plan. expires_at
+// is at most five minutes after dispatch and never beyond attempt end. A child
+// Session starts with no grants and receives its own; a parent's grant is never
+// forwarded, so delegation never widens connection authority.
+message PrepareConnectionGrant {
+  option (buf.validate.message).cel = {
+    id: "prepareconnectiongrant.terms_parent"
+    message: "the grant and its terms share the Session project parent"
+    expression: "this.terms.resource_parent == this.resource_parent"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionGrantTerms terms = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Prepared only; an Activated grant succeeds without an event, and a terminal
+// one rejects. Dispatch re-verifies that the attempt is still live and Ready and
+// the grant unexpired. The Session is not runnable until every required
+// activation succeeds; any activation failure revokes every grant of the
+// attempt with ACTIVATION_FAILED and fails the attempt.
+message ActivateConnectionGrant {
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Activated only. Written on the supervisor's bounded renewal capability, which
+// can renew and never issue or widen. expires_at must be later than the
+// current one, at most five minutes after dispatch and never beyond attempt
+// end, and dispatch re-checks that the Session, revision, plan and attempt
+// remain authorized. Renewal stops when the attempt ends.
+message RenewConnectionGrant {
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp expires_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Prepared or Activated; a terminal grant succeeds without an event. A
+// conflict re-reads and re-decides, so a revoke is never lost to a concurrent
+// renewal. A connection revoke or a removed permit is denied by the live checks
+// before this lands; the revoke is cleanup and never the enforcement point
+// (ADR#0096 Decision 2). ORPHANED is recorded only by
+// RevokeOrphanedConnectionGrant.
+message RevokeConnectionGrant {
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionGrantRevocationReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [
+        0,
+        5
+      ]
+    }
+  ];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Prepared or Activated whose expires_at is at or before dispatch time; a
+// terminal grant succeeds without an event, and an unexpired one rejects.
+// Expiry takes effect at expires_at whether or not it is recorded: every reader
+// compares expires_at itself, and this fact only closes the stream.
+message ExpireConnectionGrant {
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Orphan reconciliation, as for model grants. Prepared only, and only once the
+// grant has stayed Prepared past the configured reconciliation timeout measured
+// from its genesis append; an Activated grant rejects and a terminal one
+// succeeds without an event. Records ConnectionGrantRevoked with ORPHANED.
+message RevokeOrphanedConnectionGrant {
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}

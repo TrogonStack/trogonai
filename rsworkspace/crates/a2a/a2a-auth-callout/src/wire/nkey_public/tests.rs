@@ -1,7 +1,4 @@
-use serde_json::json;
-
 use super::*;
-use crate::wire::test_encode::signed_auth_request;
 
 fn fresh_account_public() -> String {
     KeyPair::new_account().public_key()
@@ -33,65 +30,4 @@ fn parse_rejects_empty_input() {
 fn parse_rejects_garbage() {
     let e = NkeyPublic::parse("not-an-nkey").unwrap_err();
     assert!(matches!(e, AuthCalloutError::WireFormat(_)));
-}
-
-#[test]
-fn verify_jwt_issuer_accepts_valid_token() {
-    let server = KeyPair::new_account();
-    let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
-    let user = KeyPair::new_user();
-    let token = signed_auth_request(&server, &user, |_| {});
-    let claims = server_pub.verify_jwt_issuer(&token).unwrap();
-    assert_eq!(claims.nats.user_nkey, user.public_key());
-}
-
-#[test]
-fn verify_jwt_issuer_rejects_mismatched_server_issuer() {
-    let server = KeyPair::new_account();
-    let other_pub = NkeyPublic::parse(KeyPair::new_account().public_key()).unwrap();
-    let user = KeyPair::new_user();
-    let token = signed_auth_request(&server, &user, |_| {});
-    let err = other_pub.verify_jwt_issuer(&token).unwrap_err();
-    assert!(matches!(err, AuthCalloutError::WireFormat(_)));
-}
-
-#[test]
-fn verify_jwt_issuer_rejects_invalid_segment_count() {
-    let server = KeyPair::new_account();
-    let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
-    let err = server_pub.verify_jwt_issuer("only-one-segment").unwrap_err();
-    assert!(matches!(err, AuthCalloutError::WireFormat(_)));
-}
-
-#[test]
-fn normalize_fills_the_sections_a_server_may_omit() {
-    let mut payload = json!({ "nats": { "client_info": {}, "client_tls": {} } });
-
-    normalize_auth_request_payload(&mut payload);
-
-    assert_eq!(payload["nats"]["client_info"]["name_tag"], json!(""));
-    assert_eq!(payload["nats"]["client_info"]["nonce"], json!(""));
-    assert_eq!(payload["nats"]["client_tls"]["certs"], json!([]));
-    assert_eq!(payload["nats"]["client_tls"]["verified_chains"], json!([]));
-}
-
-#[test]
-fn normalize_leaves_a_payload_without_the_sections_alone() {
-    let mut payload = json!({ "nats": {} });
-
-    normalize_auth_request_payload(&mut payload);
-
-    assert_eq!(payload, json!({ "nats": {} }));
-}
-
-#[test]
-fn verify_jwt_issuer_rejects_wrong_audience() {
-    let server = KeyPair::new_account();
-    let server_pub = NkeyPublic::parse(server.public_key()).unwrap();
-    let user = KeyPair::new_user();
-    let token = signed_auth_request(&server, &user, |c| {
-        c.aud = Some("wrong-audience".into());
-    });
-    let err = server_pub.verify_jwt_issuer(&token).unwrap_err();
-    assert!(matches!(err, AuthCalloutError::WireFormat(_)));
 }

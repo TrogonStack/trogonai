@@ -1,0 +1,82 @@
+edition = "2024";
+
+package trogonai.connections.grants.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/grants/v1alpha1/grant.proto";
+import "trogonai/connections/grants/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// Each concrete event records immutable resource containment. Replay verifies
+// resource_parent against the stream route and genesis; a parent mismatch is
+// invalid history, never a resource move.
+
+// Replay rejects unset or unknown events and invalid transitions; skipping one
+// could leave a revoked grant usable. Actor identity and occurrence time come
+// from the event envelope. These events record references and digests, never a
+// credential, a SecretRef, a proof or key material.
+message ConnectionGrantEvent {
+  oneof event {
+    option (buf.validate.oneof).required = true;
+
+    ConnectionGrantPrepared prepared = 1;
+    ConnectionGrantActivated activated = 2;
+    ConnectionGrantRenewed renewed = 3;
+    ConnectionGrantRevoked revoked = 4;
+    ConnectionGrantExpired expired = 5;
+  }
+}
+
+// Genesis, written under NoStream. Fixes every term of the grant.
+message ConnectionGrantPrepared {
+  option (buf.validate.message).cel = {
+    id: "connectiongrantprepared.terms_parent"
+    message: "the grant and its terms share the Session project parent"
+    expression: "this.terms.resource_parent == this.resource_parent"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionGrantTerms terms = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+message ConnectionGrantActivated {
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Moves expires_at later and changes no other term.
+message ConnectionGrantRenewed {
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp expires_at = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).timestamp.gt = {seconds: 0}
+  ];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal.
+message ConnectionGrantRevoked {
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionGrantRevocationReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Terminal.
+message ConnectionGrantExpired {
+  trogonai.connections.types.v1alpha1.ConnectionGrantId grant_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}

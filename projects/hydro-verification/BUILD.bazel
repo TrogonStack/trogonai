@@ -1,0 +1,19 @@
+load("@rules_python//python:py_test.bzl", "py_test")
+
+genrule(
+    name = "verify",
+    testonly = True,
+    srcs = [".config/mise/lib/verify"],
+    outs = ["verify-hydro"],
+    cmd = "cp $(location .config/mise/lib/verify) $@ && chmod +x $@",
+    executable = True,
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "launcher_test",
+    srcs = ["tests/test_launcher.py"],
+    data = [".config/mise/lib/verify"],
+    main = "tests/test_launcher.py",
+)

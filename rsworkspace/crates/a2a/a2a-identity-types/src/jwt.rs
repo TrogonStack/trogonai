@@ -1,3 +1,6 @@
+mod minted_claim;
+mod minted_user_jwt_error;
+
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -5,7 +8,12 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use trogon_identity_types::{PrincipalId, PrincipalKind, SubjectPrincipal};
 
+pub use minted_claim::MintedClaim;
+pub use minted_user_jwt_error::MintedUserJwtError;
+
+use crate::caller::CallerId;
 use crate::error::JwtError;
 
 /// Compact JWT string suitable for header transport. Validates shape on
@@ -110,6 +118,41 @@ impl MintedUserJwt {
         }
         Ok(())
     }
+
+    /// Reads the caller id the auth callout wrote into the token.
+    ///
+    /// The signature is not verified, so use this only on tokens received
+    /// from the mint path or from configuration.
+    pub fn caller_id(&self) -> Result<CallerId, MintedUserJwtError> {
+        caller_id_claim(&decode_nats_user_payload(self.as_str())?)
+    }
+
+    /// Reads the principal the auth callout wrote into the token, from its
+    /// `principal_kind` and `caller_id` claims, in the form a subject carries
+    /// it.
+    ///
+    /// The signature is not verified, so use this only on tokens received
+    /// from the mint path or from configuration.
+    pub fn subject_principal(&self) -> Result<SubjectPrincipal, MintedUserJwtError> {
+        let payload = decode_nats_user_payload(self.as_str())?;
+        let caller_id = caller_id_claim(&payload)?;
+        let kind = string_claim(&payload, MintedClaim::PrincipalKind)?
+            .parse::<PrincipalKind>()
+            .map_err(MintedUserJwtError::InvalidPrincipalKind)?;
+        let id = PrincipalId::new(caller_id.as_str()).map_err(MintedUserJwtError::InvalidPrincipalId)?;
+        SubjectPrincipal::from_credential(kind, &id).map_err(MintedUserJwtError::InvalidSubjectPrincipal)
+    }
+}
+
+fn caller_id_claim(payload: &Value) -> Result<CallerId, MintedUserJwtError> {
+    CallerId::new(string_claim(payload, MintedClaim::CallerId)?).map_err(|_| MintedUserJwtError::InvalidCallerId)
+}
+
+fn string_claim(payload: &Value, claim: MintedClaim) -> Result<&str, MintedUserJwtError> {
+    payload
+        .get(claim.as_str())
+        .and_then(Value::as_str)
+        .ok_or(MintedUserJwtError::MissingClaim(claim))
 }
 
 /// Decodes the payload segment of a compact JWT into a serde_json `Value`

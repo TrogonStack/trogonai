@@ -1,0 +1,195 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/callback.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/exchange.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/failure.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/request.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/target.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+import "trogonai/secrets/v1alpha1/secret_ref.proto";
+
+// resource_parent is the immutable custody project and must equal the verified
+// stream route and the target connection parent before dispatch. Later commands
+// and replayed events must equal the genesis parent; payload scope grants nothing.
+// Capsule and staged bundle receipts resolve in this same custody parent;
+// CaptureGrantedAuthority verifies the stage belongs to this attempt and target.
+
+// connections.authorization_attempts owns one stream per consent round trip in
+// the custody project of the target connection (ADR#0094 Decision 1). It is a
+// sensitive stream under ADR#0092 Decision 8. No command or event carries the
+// authorization code, the PKCE verifier, the signed state, the authorize URL, a
+// token response or provider error text.
+//
+// BeginAuthorization uses NoStream, a stable nonempty Decider command_id and no
+// expected_revision; retries preserve the id. Every later command uses
+// StreamUnchanged at the observed revision with a stable command_id. Before
+// this command the connections service reserved the target (a fresh Pending
+// connection, or the existing one for a reconnect) and called
+// OpenTransactionCapsule, which keeps the verifier in custody and returns only
+// the challenge (ADR#0094 Decision 3). The attempt starts AwaitingConsent.
+message BeginAuthorization {
+  option (buf.validate.message).cel = {
+    id: "beginauthorization.target_parent"
+    message: "the attempt and target connection share one custody parent"
+    expression: "this.target.resource_parent == this.resource_parent"
+  };
+
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationTarget target = 2 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationRequest request = 3 [features.field_presence = LEGACY_REQUIRED];
+  CallbackBinding callback = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The transaction capsule holding the PKCE verifier. Capsules are credential
+  // material (ADR#0092 Decision 8), so the reference is a SecretRef, and the
+  // attempt records nothing else about it (ADR#0094 Decision 3).
+  trogonai.secrets.v1alpha1.SecretRef capsule_ref = 5 [features.field_presence = LEGACY_REQUIRED];
+  // Ten minutes after the attempt began. The capsule and the signed state
+  // expire with it (ADR#0094 Decisions 1 to 3).
+  google.protobuf.Timestamp expires_at = 6 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 7 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// AwaitingConsent only, so exactly one claim wins; a replay meets
+// CallbackClaimed and the edge answers it like an unknown state (ADR#0094
+// Decision 2). The callback edge first requires a platform session, then
+// verifies the state signature and expiry; the code and state travel to the
+// connections service separately, sealed, and never enter this command
+// (ADR#0094 Decision 7). An error response is claimed the same way and then
+// failed. Every field below must equal what BeginAuthorization recorded.
+message ClaimOAuthCallback {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // From the verified state.
+  StateNonceId state_nonce_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The signing key version that verified the state.
+  StateSigningKeyVersion state_signing_version = 3 [features.field_presence = LEGACY_REQUIRED];
+  reserved 4;
+  reserved session_principal;
+
+  // Keyed digest of the browser binding cookie the callback request presented.
+  BrowserBindingDigest browser_binding_digest = 5 [features.field_presence = LEGACY_REQUIRED];
+  // The iss response parameter, when present (RFC 9207). It must equal the
+  // expected issuer, and it is required when the request recorded
+  // response_issuer_required.
+  trogonai.connections.types.v1alpha1.Issuer response_issuer = 6;
+  // Trusted dispatch recomputes this from the verified session identity and
+  // the key version pinned by the attempt. Equality with the stored binding,
+  // together with the browser cookie binding, enforces the same initiator.
+  SessionInitiatorBinding initiator_binding = 7 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 8 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// CallbackClaimed only. The write-ahead record: it commits before any byte
+// leaves for the provider. Once it has committed, the connections service sends
+// the code and state to the broker in a sealed ExchangeAuthorizationCode
+// request, and the broker consumes the capsule (ADR#0094 Decision 4).
+message StartCodeExchange {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ExchangeOrigin exchange_origin = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Exchanging only, before capture. The broker, or a reaper over attempts stuck
+// in Exchanging, records that the exchange response was lost, timed out or
+// could not be attributed. The attempt becomes OutcomeUnknown and reconciliation
+// asks custody whether a bundle is staged under this attempt (ADR#0094 Decision
+// 4). Refused after capture, because the outcome is then known.
+message RecordExchangeUnknown {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Exchanging or OutcomeUnknown, at most once, after the broker staged the bundle
+// and the trusted executor's identity probe observed the account through an
+// attempt-scoped staged resolve (ADR#0094 Decision 5). The phase does not
+// change. ADR#0094 Decision 5 makes "granted authority on the attempt" a
+// durable step before the claim is taken, and names no command for it; this is
+// that command. It decides AuthorizationFailed instead when a reconnect
+// observed a fingerprint other than the expected one (ACCOUNT_MISMATCH), or
+// when the grant lacks a required scope (REQUIRED_SCOPE_NOT_GRANTED), in that
+// order, so neither attempt can reach activation.
+message CaptureGrantedAuthority {
+  option (buf.validate.message).cel = {
+    id: "capturegrantedauthority.captured_parent"
+    message: "the captured stage receipt and attempt share one custody parent"
+    expression: "this.captured.resource_parent == this.resource_parent"
+  };
+
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  CapturedAuthority captured = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Exchanging or OutcomeUnknown, after capture. Issued once ActivateConnection has
+// committed (claim Bound, new authorization_generation) and custody has promoted
+// the staged bundle; a reconciler issues it after a crash between those steps
+// (ADR#0094 Decision 5). The generation must be 1 for a fresh target, and the
+// expected generation plus one for a reconnect.
+message CompleteAuthorization {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  uint64 authorization_generation = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Any non-terminal phase, constrained per reason (see AuthorizationFailureReason).
+// REQUIRED_SCOPE_NOT_GRANTED and ACCOUNT_MISMATCH are decided only by
+// CaptureGrantedAuthority. The decider derives the cleanup obligations. A
+// failure requests local discard of an unprotected staged bundle in custody.
+// A protected stage is retained as cleanup debt until promotion or an
+// authoritative abort fence; failure alone never releases it (ADR#0095 Decision 12).
+message FailAuthorization {
+  option (buf.validate.message).cel = {
+    id: "fail_authorization.provider_error"
+    message: "a provider error is supplied exactly for the provider error reasons"
+    expression: "(this.reason == 1 || this.reason == 2) == has(this.provider_error)"
+  };
+  option (buf.validate.message).cel = {
+    id: "fail_authorization.capture_reasons"
+    message: "REQUIRED_SCOPE_NOT_GRANTED and ACCOUNT_MISMATCH are decided by CaptureGrantedAuthority"
+    expression: "this.reason != 6 && this.reason != 7"
+  };
+
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationFailureReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  ProviderOauthError provider_error = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// AwaitingConsent or CallbackClaimed only. Refused once Exchanging, because a
+// sent exchange cannot be un-sent (ADR#0094 Decision 1).
+message CancelAuthorization {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// AwaitingConsent or CallbackClaimed only, issued by the scheduler wakeup at
+// expires_at. Refused once Exchanging, like CancelAuthorization (ADR#0094
+// Decision 1). An unused capsule expires on its own (ADR#0094 Decision 3).
+message ExpireAuthorization {
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}

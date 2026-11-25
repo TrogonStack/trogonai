@@ -1,0 +1,13 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+// ChainResetReason is why a writer began a new chain. Unspecified and unknown
+// values are invalid.
+enum ChainResetReason {
+  CHAIN_RESET_REASON_UNSPECIFIED = 0;
+  // The process started and could not resume its last stored record: a writer
+  // holds publish-only permission on the audit subjects, so it cannot read its
+  // previous chain back.
+  CHAIN_RESET_REASON_PROCESS_START_WITHOUT_RESUME = 1;
+}

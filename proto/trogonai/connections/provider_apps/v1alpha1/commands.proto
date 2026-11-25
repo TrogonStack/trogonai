@@ -1,0 +1,217 @@
+edition = "2024";
+
+package trogonai.connections.provider_apps.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/provider_apps/v1alpha1/app.proto";
+import "trogonai/connections/provider_apps/v1alpha1/discovery.proto";
+import "trogonai/connections/provider_apps/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/cleanup.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/outcome.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+import "trogonai/secrets/v1alpha1/secret_ref.proto";
+
+// Each concrete payload identifies its immutable resource_parent. Dispatch
+// and replay require it to match the addressed stream and stored genesis; it
+// is not caller authorization and never changes with logical ownership.
+
+// connections.provider_apps owns one stream per ProviderApp, at platform
+// scope or in the owning project (ADR#0092 Decision 1). Reservation uses
+// NoStream and a stable nonempty Decider command_id. Every later command uses
+// StreamUnchanged with the observed revision and a stable command_id; retries
+// preserve both. Dispatch authenticates and authorizes every command: a
+// platform operator acts on a platform-managed app, the project admin on a
+// customer-supplied one, and a platform operator never edits a customer app
+// (ADR#0092 Decision 10). ADR#0092 names the app's states and no command;
+// these are the smallest set that reaches every state.
+//
+// NoStream. Reserves the identity before any provider call or custody write,
+// so a dynamic registration is reserved before its HTTP request (ADR#0094
+// Decision 10). The connector and issuer are fixed here and the kind at
+// activation; a different issuer or client_id is a different app (ADR#0092
+// Decision 3).
+message ReserveProviderApp {
+  reserved 2;
+  reserved scope;
+
+  option (buf.validate.message).cel = {
+    id: "reserve_provider_app.origin_parent"
+    message: "platform-managed apps use the platform parent; customer and dynamic apps use a project parent"
+    expression: "(this.origin == 1) == has(this.resource_parent.platform)"
+  };
+
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAppOrigin origin = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The connector this app serves. Resolution matches a connection's release
+  // to apps of its connector and issuer, nearest owner first, and fails on an
+  // ambiguous match (ADR#0092 Decision 3). The ADR is silent on this link; it
+  // is the smallest fact that makes resolution exact.
+  trogonai.connections.types.v1alpha1.ConnectorId connector_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.Issuer issuer = 5 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Pending only. Records the client identity once every secret it names is
+// in custody; for a dynamic registration, after the registration response
+// was written to custody (ADR#0094 Decision 10). The kind's issuer must equal
+// the reserved issuer. discovery is present exactly when the kind carries a
+// snapshot digest, and that digest must equal the snapshot's.
+message ActivateProviderApp {
+  option (buf.validate.message).cel = {
+    id: "activate_provider_app.metadata_document_parent"
+    message: "a platform metadata-document client has a platform parent"
+    expression: "!has(this.kind.client_id_metadata_document) || has(this.resource_parent.platform)"
+  };
+
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAppKind kind = 2 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationServerDiscovery discovery = 3;
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Pending only. Terminal: the reservation moves to Revoked. An unknown
+// registration outcome records a REGISTRATION_RESIDUAL obligation, since a
+// registration may exist at the server that the platform cannot name
+// (ADR#0094 Decision 10).
+message FailProviderAppRegistration {
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAppRegistrationFailureReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Present exactly when the reason is OUTCOME_UNKNOWN.
+  trogonai.connections.types.v1alpha1.CleanupObligationKind obligation = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Active, Disabled or Degraded, and only for a kind that carries a snapshot
+// digest. Records a new authorization server snapshot from the fetcher. The
+// snapshot's issuer must equal the app's; a different issuer is a new app.
+// The fold sets whether the set of endpoint origins changed against the
+// current one (ADR#0094 Decision 10, R19).
+message RecordProviderAppDiscovery {
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  AuthorizationServerDiscovery discovery = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Active only. The owner's reversible pause (ADR#0092 Decision 3).
+message DisableProviderApp {
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Disabled only. Returns the app to Active.
+message EnableProviderApp {
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Active only. Dispatched by custody from broker evidence that the provider
+// rejected the client itself (ADR#0092 Decision 3, ADR#0095 Decision 3).
+// Carries the typed reason only, never a provider error body.
+message DegradeProviderApp {
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAppDegradationReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Degraded only. Dispatched by custody after a provider call that
+// authenticates the client succeeded; a secret rotation clears Degraded
+// through RotateProviderAppCredential instead (ADR#0092 Decision 3).
+message RecoverProviderApp {
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAppRecoveryCause cause = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Active, Disabled or Degraded. Records that the named app secret was rotated
+// at the provider and written through the secrets service; the app keeps its
+// identity and every connection under it is unchanged (ADR#0092 Decisions 3
+// and 10). The role must exist on the kind. A Degraded app returns to Active.
+// The reference is the one in force after rotation; it equals the current
+// one when only the version behind it moved.
+message RotateProviderAppCredential {
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAppCredentialRole role = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.secrets.v1alpha1.SecretRef credential = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Any state but Revoked. Terminal. Commits first so every connection under
+// the app is refused at its next live read; cleanup of the registration and
+// its secrets follows and is recorded by RecordProviderAppCleanup (ADR#0092
+// Decision 10, ADR#0094 Decision 13). Revoking never deletes an app a
+// connection merely borrowed, which is a dispatch check.
+message RevokeProviderApp {
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAppRevocationReason reason = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Revoked only. Records one retirement step's outcome as it is: the RFC 7592
+// delete of a dynamic registration, or the destruction of the app's
+// registration secrets in custody (ADR#0094 Decision 13, ADR#0095 Decision
+// 4). A step that did not confirm records its obligation; a registration
+// whose client URI was never issued records REGISTRATION_RESIDUAL without a
+// call. Each step is recorded at most once with a terminal outcome.
+message RecordProviderAppCleanup {
+  trogonai.connections.types.v1alpha1.ProviderAppId provider_app_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAppCleanupStep step = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.types.v1alpha1.EffectOutcome outcome = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // Present exactly when the outcome is not CONFIRMED.
+  trogonai.connections.types.v1alpha1.CleanupObligationKind obligation = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  trogonai.connections.types.v1alpha1.ProviderAppParent resource_parent = 5 [features.field_presence = LEGACY_REQUIRED];
+}

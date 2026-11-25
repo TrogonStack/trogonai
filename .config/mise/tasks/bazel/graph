@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Export the dependency graph of every Bazel target as Graphviz DOT"
+set -euo pipefail
+
+exec bazel query 'deps(//...)' --output=graph "$@"

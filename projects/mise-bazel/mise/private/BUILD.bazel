@@ -1,0 +1,4 @@
+exports_files([
+    "node.BUILD.bazel.tpl",
+    "rust.BUILD.bazel.tpl",
+])

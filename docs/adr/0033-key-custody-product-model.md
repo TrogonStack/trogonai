@@ -7,6 +7,14 @@ date: 2026-07-20
 
 # ADR#0033: Key Custody Product Model
 
+> **Related research:** The [portable identity and adapter roadmap](../research/workload-identity/adapter-roadmap.md)
+> separates business wrapping, issuer signing, approval/checkpoint custody and
+> production seals. Its proposed profiles require ADR review and preserve the
+> bootstrap exclusions and current decision statuses.
+
+> **Proposed connector refinement:** [ADR#0095](./0095-connection-credential-custody-and-refresh.md) remains a draft. The connector draft applies existing sealing/key-veto rules to token material and proposes named connector sensitive streams. This note does not change either ADR's status.
+
+
 > **Refined by [ADR#0083](./0083-sealed-content-envelope.md) (2026-10-30).**
 > Under Decision 6, the envelope contract also covers, for the sealing purpose,
 > credential records, every claim-check blob, the `PLATFORM` account's own

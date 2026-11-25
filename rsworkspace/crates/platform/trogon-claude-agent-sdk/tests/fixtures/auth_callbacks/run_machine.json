@@ -1,0 +1,431 @@
+{
+  "captured_from": {
+    "typescript": "sdk.mjs 0.3.323",
+    "python": "claude_agent_sdk 0.2.181"
+  },
+  "scenarios": {
+    "m_task_open_at_idle_ts_turn": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "system",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_task_open_at_idle_ts_stream": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "system",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_task_then_notified_ts_turn": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "system",
+        "A",
+        "result",
+        "system",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_task_then_notified_ts_stream": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "system",
+        "A",
+        "result",
+        "system",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_continuation_reported_ts_turn": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "running",
+        "BB",
+        "result",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "running",
+        "BB",
+        "result",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_continuation_reported_ts_stream": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "running",
+        "BB",
+        "result",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "running",
+        "BB",
+        "result",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_running_then_idle_ts_turn": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_running_then_idle_ts_stream": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_ceiling_ts_turn": {
+      "stdin_closed_after": "running",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": true
+    },
+    "m_ceiling_ts_stream": {
+      "stdin_closed_after": "running",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": true
+    },
+    "m_task_open_at_idle_py": {
+      "stdin_closed_after": "never",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "system",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "ended": false
+    },
+    "m_task_then_notified_py": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "system",
+        "A",
+        "result",
+        "system",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_continuation_reported_py": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "running",
+        "BB",
+        "result",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "running",
+        "BB",
+        "result",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_running_then_idle_py": {
+      "stdin_closed_after": "idle",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "idle",
+        "CCC"
+      ],
+      "ended": true
+    },
+    "m_ceiling_py": {
+      "stdin_closed_after": "running",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": true
+    },
+    "m_ceiling_zero_ts_turn": {
+      "stdin_closed_after": "never",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": false
+    },
+    "m_ceiling_zero_ts_stream": {
+      "stdin_closed_after": "never",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": false
+    },
+    "m_ceiling_exponent_ts_turn": {
+      "stdin_closed_after": "running",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": true
+    },
+    "m_ceiling_exponent_ts_stream": {
+      "stdin_closed_after": "running",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": true
+    },
+    "m_ceiling_zero_py": {
+      "stdin_closed_after": "never",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": false
+    },
+    "m_ceiling_exponent_py": {
+      "stdin_closed_after": "never",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": false
+    },
+    "m_empty_stream_py": {
+      "stdin_closed_after": "nothing",
+      "cli_sent": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "yielded": [
+        "running",
+        "A",
+        "result",
+        "running",
+        "requires_action"
+      ],
+      "ended": true
+    }
+  }
+}

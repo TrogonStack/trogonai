@@ -1,0 +1,147 @@
+edition = "2024";
+
+package trogonai.connections.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/discovery.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+
+// OAuth 2.0 authorization code grant with PKCE, run as one AuthorizationAttempt
+// under the pinned provider app (ADR#0094). The release's OAuth profile holds
+// the endpoints and client authentication; nothing here varies per
+// connection.
+message OAuthAuthorizationGrant {}
+
+// A provider-issued API credential the owner submits, placed on requests as the
+// pinned release declares. The value is material and lives only behind a
+// CredentialBinding's SecretRef.
+message ApiCredentialAuthentication {}
+
+// HTTP basic authentication. The user and password pair is material and lives
+// only behind a CredentialBinding's SecretRef.
+message BasicAuthentication {}
+
+// OAuth 2.0 client credentials grant: the client acts as itself, so the
+// provider subject is the client, not a person.
+message ClientCredentialsGrant {}
+
+// A service account authenticates with a signed JWT assertion. Only the broker
+// in custody signs it (R1); the private key is material behind a
+// CredentialBinding's SecretRef.
+message ServiceAccountJwtGrant {}
+
+// Authority comes from an installation of the pinned provider app, such as a
+// GitHub App installation. The installation id is an opaque non-person id in
+// the ProviderAccount, never configuration.
+message AppInstallationAuthentication {}
+
+// MCP authorization under the pinned specification revision (ADR#0092
+// Decision 7, ADR#0094 Decisions 9 to 11). The connection is granted for one
+// canonical resource URI and one issuer, and a different value of either is a
+// different connection. Both are fixed here so they are covered by the
+// configuration digest. The protected resource metadata snapshot is recorded
+// on the activation event, not here, because it can be re-fetched (R19).
+message McpOAuthAuthorization {
+  trogonai.connections.types.v1alpha1.CanonicalResourceUri resource_uri = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.Issuer issuer = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Which of the pinned release's authentication methods this connection uses.
+// The method's mechanics are in the release definition; the arm only selects
+// the kind. ADR-silent shape: a release declares at most one method of each
+// kind, so the arm names the method without a separate method name. Arm names
+// avoid the material words the ADR#0092 Decision 8 contract test flags.
+message Authentication {
+  oneof method {
+    option (buf.validate.oneof).required = true;
+    OAuthAuthorizationGrant oauth_authorization_grant = 1;
+    ApiCredentialAuthentication api_credential = 2;
+    BasicAuthentication basic = 3;
+    ClientCredentialsGrant client_credentials = 4;
+    ServiceAccountJwtGrant service_account_jwt = 5;
+    AppInstallationAuthentication app_installation = 6;
+    McpOAuthAuthorization mcp_oauth = 7;
+    // The release needs no credential. The connection still records the
+    // consented account where the release can probe one.
+    google.protobuf.Empty none = 8;
+  }
+}
+
+// The nonsecret configuration a connection commits at activation and replaces
+// only through UpgradeConnector. It never holds material, a token-bearing URL
+// or personal data (ADR#0092 Decisions 8 and 9).
+//
+// What may change in place is narrow. The pinned release may move to a
+// successor of the same connector, and the requested scopes with it. A
+// different provider app, actor subject kind, authentication method, MCP
+// resource URI or issuer is a new connection (ADR#0092 Decision 4 change
+// table). The owner is fixed at reservation and is not configuration.
+message ConnectionConfiguration {
+  option (buf.validate.message).cel = {
+    id: "connection_configuration.requested_scopes_unique"
+    message: "requested scopes must be unique"
+    expression: "this.requested_scopes.map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_configuration.app_required"
+    message: "OAuth, MCP and app installation methods require a provider app"
+    expression: "!(has(this.authentication.oauth_authorization_grant) || has(this.authentication.mcp_oauth) || has(this.authentication.app_installation)) || has(this.provider_app_ref)"
+  };
+
+  // Version of this exact nonsecret configuration contract, included in the
+  // retained bytes and their digest. Only version 1 is supported.
+  string contract_version = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.const = "1"
+  ];
+  trogonai.connections.types.v1alpha1.ConnectorReleaseRef connector_release_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The client identity presented to the provider. Absent only for methods
+  // that present none, such as an API credential, basic or none.
+  trogonai.connections.types.v1alpha1.ProviderAppRef provider_app_ref = 3;
+  // The kind of provider subject the connection acts as. A different kind is a
+  // different connection.
+  trogonai.connections.types.v1alpha1.ProviderSubjectKind actor_subject_kind = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // What the connection asked for. Requested scopes never prove what was
+  // granted; the granted authority is recorded on activation.
+  repeated trogonai.connections.types.v1alpha1.ProviderScope requested_scopes = 5;
+  Authentication authentication = 6 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A configuration exactly as committed. configuration_bytes is the
+// authoritative binary encoding of configuration: verify configuration_digest
+// over these bytes before decoding, reject unknown fields, require the typed
+// configuration to equal the decoded bytes, and never recreate the digest by
+// re-encoding. The digest is the one ConnectionRef carries.
+message CommittedConfiguration {
+  ConnectionConfiguration configuration = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.Digest configuration_digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  bytes configuration_bytes = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+}
+
+// What the owner edits about a connection through UpdateMetadata. Neither field
+// is captured from the provider. The account's display name is personal data
+// and lives only in the erasable provider account profile (ADR#0092
+// Decision 9, ADR#0093 Decision 11).
+message ConnectionMetadata {
+  // The owner's own free-text label for the connection, bounded. ADR-silent
+  // bound: 128 characters, pending the privacy review ADR#0093 leaves open.
+  string owner_label = 1 [(buf.validate.field).string.max_len = 128];
+  // Labels a ConnectionSelector matches by exact, case-sensitive equality,
+  // after its provider matches the release's ConnectorId (ADR#0063
+  // Decision 3, ADR#0096 Decision 1). ADR-silent shape: the selector's labels
+  // need a counterpart on the connection, and the owner sets it here.
+  map<string, string> labels = 2 [(buf.validate.field).map.keys.string.min_len = 1];
+}

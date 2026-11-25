@@ -1,0 +1,94 @@
+edition = "2024";
+
+package trogonai.policy.connection_permissions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/policy/connection_permissions/v1alpha1/parent.proto";
+import "trogonai/policy/connection_permissions/v1alpha1/permission_policy.proto";
+import "trogonai/policy/subjects/v1alpha1/subject.proto";
+
+// policy.connection_permissions owns one permit history per PolicySubject, the
+// shape ADR#0071 Decision 6 gives policy.delegation_permissions. Every command
+// names the subject; a command for another subject is refused.
+
+// Exists because absence means deny: an Agent provisioned with a REQUIRED
+// connection declaration would fail its first Session unless the provisioning
+// operation could install its permits. It installs the Agent's connection
+// permits, never an empty policy (ADR#0093 Decision 5). It never installs a
+// delegation, because the provisioning actor is not the owning person of a
+// person-owned connection.
+//
+// provisioning_id is valid only for an Agent subject. Dispatch verifies the
+// subject exists, live administration authority over the subject, and
+// owner-side authority for every permit. During PROVISIONING only the owning
+// operation may initialize, and dispatch verifies registry origin rather than
+// trusting caller-supplied provenance; PROVISIONING_CANCELLED and unknown
+// lifecycle reject. NoStream creation requires a nonempty Decider command_id and
+// no expected_revision; retries preserve the id. An already-initialized
+// rejection is not success; recovery verifies the durable genesis receipt's
+// subject, provisioning origin, and exact policy.
+message InitializeConnectionPermission {
+  option (buf.validate.message).cel = {
+    id: "initializeconnectionpermission.subject_parent"
+    message: "the policy resource parent must name its exact subject"
+    expression: "this.resource_parent.subject == this.subject"
+  };
+
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionPermissionPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+  string provisioning_id = 3 [(buf.validate.field).cel = {
+    id: "initialize_connection_permission.provisioning_id_nonblank"
+    message: "a supplied provisioning_id must contain a non-whitespace character"
+    expression: "this.trim() != ''"
+  }];
+
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Replaces an initialized subject's policy, including after a clear. Dispatch
+// requires a nonempty Decider command_id plus the original positive
+// expected_revision (StreamUnchanged at that revision); retries preserve both,
+// and a refreshed revision is a new intent. Equal permits succeed without an
+// event after the concurrency check; reordering permits alone is not a change.
+//
+// Authority is checked per permit against the policy in force: each permit the
+// command adds, widens or removes needs owner-side authority on its target
+// (ConnectionPermissionPolicy), and permits it leaves unchanged need none. A
+// delegation is created or widened only by the owning person's own act and
+// removed by the owner or a tenant administrator (ADR#0093 Decision 4). For an
+// Agent subject, authoritative registry lifecycle must be ACTIVE or ARCHIVED,
+// so requested provisioning setup cannot be replaced before activation. Genesis
+// provisioning origin survives every replacement.
+message SetConnectionPermission {
+  option (buf.validate.message).cel = {
+    id: "setconnectionpermission.subject_parent"
+    message: "the policy resource parent must name its exact subject"
+    expression: "this.resource_parent.subject == this.subject"
+  };
+
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+  ConnectionPermissionPolicy policy = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Clears only this subject's policy, which returns it to deny unless an
+// ancestor node still permits the connection. The initialized identity remains.
+// Removing every permit needs the same per-permit authority as Set. Dispatch
+// requires a nonempty Decider command_id plus the original positive
+// expected_revision (StreamUnchanged at that revision); retries preserve both.
+// An already cleared policy succeeds without an event after that concurrency
+// check. For an Agent subject, authoritative registry lifecycle must be ACTIVE
+// or ARCHIVED, so requested provisioning setup cannot disappear before
+// activation.
+message ClearConnectionPermission {
+  option (buf.validate.message).cel = {
+    id: "clearconnectionpermission.subject_parent"
+    message: "the policy resource parent must name its exact subject"
+    expression: "this.resource_parent.subject == this.subject"
+  };
+
+  trogonai.policy.subjects.v1alpha1.PolicySubject subject = 1 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.policy.connection_permissions.v1alpha1.ConnectionPermissionParent resource_parent = 2 [features.field_presence = LEGACY_REQUIRED];
+}

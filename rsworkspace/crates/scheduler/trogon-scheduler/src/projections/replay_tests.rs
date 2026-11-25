@@ -18,7 +18,7 @@ use crate::constants::{EVENTS_STREAM, EVENTS_SUBJECT_PATTERN, EVENTS_SUBJECT_PRE
 use crate::{SchedulerError, v1};
 
 #[cfg(feature = "postgres")]
-use crate::PostgresSchedulesProjection;
+use crate::{PostgresSchedulesProjection, PostgresUrl};
 
 #[cfg(feature = "postgres")]
 #[path = "../../tests/support/postgres.rs"]

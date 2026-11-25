@@ -1,5 +1,6 @@
 //! Crate-wide constants for a2a-auth-callout.
 
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 /// Header name carrying a serialized [`crate::caller_jwt_header::CallerJwtHeaderValue`] on
@@ -17,7 +18,24 @@ pub(crate) const VERSION_PREVIOUS: &str = "previous";
 /// NATS subject the server uses for auth callout requests.
 pub(crate) const AUTH_CALLOUT_SUBJECT: &str = "$SYS.REQ.USER.AUTH";
 
+/// Subject the bridge sends its mint requests to, and the callout answers on,
+/// unless `AUTH_CALLOUT_MINT_SUBJECT` names another.
+pub const DEFAULT_BRIDGE_MINT_SUBJECT: &str = "a2a.bridge.auth.callout.request";
+
+/// Environment variable that overrides [`DEFAULT_BRIDGE_MINT_SUBJECT`] on both sides.
+pub const BRIDGE_MINT_SUBJECT_VAR: &str = "AUTH_CALLOUT_MINT_SUBJECT";
+
 pub(crate) const DEFAULT_DENIAL_TTL: Duration = Duration::from_secs(60);
+
+pub(crate) const MAX_DOCUMENT_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_REGISTRY_BYTES: usize = 1_048_576;
+pub(crate) const MAX_MEMBERSHIPS: usize = 4096;
+pub(crate) const MAX_CONCURRENT_READS: usize = 16;
+pub(crate) const DEFAULT_MAX_IN_FLIGHT_ADMISSIONS: NonZeroUsize = NonZeroUsize::MIN.saturating_add(15);
+#[cfg(test)]
+pub(crate) const ADMISSION_TEST_WAIT: Duration = Duration::from_secs(5);
+pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(1);
+pub const ENV_TENANT_MEMBERSHIPS: &str = "AUTH_CALLOUT_TENANT_MEMBERSHIPS";
 
 /// JWT `aud` on authorization **request** claims (`nats-server` `AuthRequestSubject`).
 pub const AUTH_REQUEST_AUDIENCE: &str = "nats-authorization-request";
@@ -30,6 +48,16 @@ pub const NATS_JWT_PREFIX: &[u8] = b"eyJ";
 
 /// Default minted user JWT TTL, in seconds, for the `a2a-auth-callout` binary.
 pub const DEFAULT_USER_JWT_TTL_SECS: u64 = 300;
+
+pub const NATS_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+pub(crate) const SIGNING_KEY_SOURCE_VAR: &str = "AUTH_CALLOUT_SIGNING_KEY_SOURCE";
+pub(crate) const AUTH_ACCOUNT_VAR: &str = "AUTH_CALLOUT_AUTH_ACCOUNT";
+pub(crate) const RESPONSE_SIGNING_KEY_VAR: &str = "AUTH_CALLOUT_RESPONSE_SIGNING_KEY";
+pub(crate) const TENANT_SIGNING_KEYS_VAR: &str = "AUTH_CALLOUT_TENANT_SIGNING_KEYS";
+pub(crate) const CALLOUT_XKEY_VAR: &str = "AUTH_CALLOUT_XKEY_SEED";
+
+pub(crate) const FULL_WILDCARD_SUBJECT: &str = ">";
 
 /// Signature algorithms an inbound OIDC ID token may assert.
 ///

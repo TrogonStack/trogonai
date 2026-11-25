@@ -1,0 +1,114 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/reference.proto";
+import "trogonai/policy/egress_permissions/v1alpha1/permission_policy.proto";
+
+// An opaque, nonsecret routing identity fixed in one grant. Possession grants
+// nothing; the supervisor proves every HTTP request under the grant's key.
+message ProxyBindingId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[A-Za-z0-9_-]{1,128}$"
+  ];
+}
+
+// Selects one immutable release entry, never an arbitrary egress host.
+message ApiDestinationId {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[a-z][a-z0-9_-]{0,63}$"
+  ];
+}
+
+enum HttpTransportProfile {
+  HTTP_TRANSPORT_PROFILE_UNSPECIFIED = 0;
+  // Fully buffered finite HTTPS with no content coding, streaming or upgrades.
+  HTTP_TRANSPORT_PROFILE_FINITE_BUFFERED_HTTPS_V1 = 1;
+}
+
+// Immutable routing terms of an authenticated HTTPS relay. The grant pins the
+// connection, generation, caller attempt and confirmation key; this binding
+// pins its relay, provider destination and credential role. Neither origin is
+// caller-selected on a request. Both origins use HTTPS with certificate and
+// hostname verification. The upstream address is validated and pinned before
+// connect under ADR#0094's public-address and DNS-rebinding rules.
+message ProxyBinding {
+  ProxyBindingId binding_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The configured HTTPS relay origin only, without path, userinfo, query or
+  // fragment. The connection proxy control headers never reach upstream.
+  string relay_origin = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^https://[^/?#@]+$"
+  ];
+  trogonai.policy.egress_permissions.v1alpha1.EgressHost upstream = 3 [features.field_presence = LEGACY_REQUIRED];
+  // Exactly one role of the pinned release and active connection. Absent only
+  // for Authentication.none, in which case custody is never contacted.
+  CredentialRoleName credential_role = 4;
+  ApiDestinationId api_destination_id = 5 [features.field_presence = LEGACY_REQUIRED];
+  HttpTransportProfile transport_profile = 6 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      in: [1]
+    }
+  ];
+}
+
+// Identifies the exact binding fixed in the named live grant. The custody
+// project is obtained from the grant's connection, not from this reference.
+message ProxyBindingRef {
+  ConnectionGrantRef grant_ref = 1 [features.field_presence = LEGACY_REQUIRED];
+  ProxyBindingId binding_id = 2 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// HTTP methods the relay forwards. CONNECT, TRACE and extension methods are
+// refused; the relay is not a tunnel and never intercepts workload TLS.
+enum HttpMethod {
+  HTTP_METHOD_UNSPECIFIED = 0;
+  HTTP_METHOD_GET = 1;
+  HTTP_METHOD_HEAD = 2;
+  HTTP_METHOD_POST = 3;
+  HTTP_METHOD_PUT = 4;
+  HTTP_METHOD_PATCH = 5;
+  HTTP_METHOD_DELETE = 6;
+  HTTP_METHOD_OPTIONS = 7;
+}
+
+// One enforceable request predicate. Host equality includes the port. Methods
+// match exactly. A prefix '/' admits every path; '/issues' matches '/issues'
+// and '/issues/...' but not '/issues-old'. Query parameters and request bodies
+// confer no additional authority. No GraphQL or body-sensitive claim follows.
+//
+// Before matching, reject backslashes, invalid percent escapes, encoded slash
+// or backslash, encoded or literal dot segments, repeated slash, userinfo,
+// fragments and absolute-form request targets. Match the same path that is
+// forwarded; no decoding or normalization after authorization may change it.
+message HttpRequestRule {
+  trogonai.policy.egress_permissions.v1alpha1.EgressHost host = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated HttpMethod methods = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  string path_prefix = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^/[^?#]*$"
+  ];
+}
+
+// Rules within one restriction set are alternatives. Every applicable release,
+// grant and live permit restriction set must admit the request, so sets compose
+// by intersection. An omitted set adds no restriction; a present empty set is
+// invalid. All rules must remain within the binding's approved upstream host.
+message HttpRequestRestrictions {
+  repeated HttpRequestRule rules = 1 [(buf.validate.field).repeated.min_items = 1];
+}

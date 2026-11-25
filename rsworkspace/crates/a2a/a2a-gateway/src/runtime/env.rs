@@ -32,9 +32,15 @@ pub fn gateway_tier2_cel_enabled<E: ReadEnv>(env: &E) -> bool {
     parse_bool_flag(env, ENV_GATEWAY_TIER2_CEL_ENABLED)
 }
 
-/// `true` when ingress audit envelope publishing is explicitly
-/// enabled. Defaults to `false` so a deployment doesn't start
-/// publishing to a stream operators haven't provisioned.
+/// `true` when ingress audit publishing is explicitly enabled: the
+/// platform audit records and the legacy envelopes alike. Defaults to
+/// `false` so a deployment doesn't start publishing to a stream operators
+/// haven't provisioned.
+///
+/// [Draft ADR#0086](https://github.com/TrogonStack/trogonai/pull/766)
+/// proposes requiring audit publishing whenever a policy layer enforces.
+/// The default build can enforce configured policies without SpiceDB, so
+/// changing the audit default no longer depends on the `spicedb` feature.
 pub fn gateway_audit_publish_enabled<E: ReadEnv>(env: &E) -> bool {
     parse_bool_flag(env, ENV_GATEWAY_AUDIT_PUBLISH)
 }

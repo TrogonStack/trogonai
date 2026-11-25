@@ -1,0 +1,77 @@
+edition = "2024";
+
+package trogonai.connections.account_claims.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/account_claims/v1alpha1/lifecycle.proto";
+import "trogonai/connections/types/v1alpha1/account.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+
+// resource_parent is the immutable custody project. Dispatch resolves holder
+// connection and attempt within it and verifies their authoritative parent; a
+// released claim cannot be moved or reused under a different resource parent.
+
+// connections.account_claims owns one stream per provider account under one
+// boundary: tenant, custody project, owner, provider, issuer, app boundary,
+// canonical resource, subject kind and exact identity components. Custody
+// derives the ProviderAccountClaimId from the canonical fingerprint. Rotated
+// lookup aliases resolve that same immutable claim before dispatch, so the
+// stream name reveals no account id and concurrent attempts name one stream.
+// It is a sensitive stream under ADR#0092 Decision 8. It holds the fingerprint
+// and holder, never an account id, display name or other personal data; those
+// live in the erasable ProviderAccountProfile (ADR#0093 Decision 11).
+//
+// The connections service is the only writer. Later commands use
+// StreamUnchanged with a positive observed expected_revision and a stable
+// nonempty Decider command_id; retries preserve both.
+
+// Dispatch checks custody's current attempt/stage identity receipt and registry
+// epoch before this command; the payload never supplies alias-index authority.
+// Takes the claim for one connection, after GrantedAuthorityCaptured on its
+// attempt and before ActivateConnection (ADR#0094 Decision 5). NoStream when
+// the account was never claimed under this boundary, with a nonempty Decider
+// command_id and no expected_revision, so the first of two concurrent attempts
+// wins and the other fails with ACCOUNT_ALREADY_CONNECTED. ADR#0092 Decision 6
+// says a released account may be connected again and names no command for it;
+// the smallest shape is this same command At the observed revision of a
+// Released stream, with a fingerprint equal to the one recorded at genesis. A
+// Held or Bound stream refuses it; the active duplicate is never touched. A
+// reconnect sends no hold: the claim stays Bound to the connection, and the
+// attempt checks the probed fingerprint against it (ADR#0094 Decision 6).
+message HoldProviderAccount {
+  trogonai.connections.types.v1alpha1.ProviderAccountClaimId claim_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ProviderAccountFingerprint fingerprint = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The Pending connection that will own the account.
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The attempt whose capture established the fingerprint.
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 4 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Held only, by the holder. Issued with ActivateConnection, whose activation
+// event carries the claim receipt (ADR#0092 Decision 4, ADR#0094 Decision 5).
+message BindProviderAccount {
+  trogonai.connections.types.v1alpha1.ProviderAccountClaimId claim_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 2 [features.field_presence = LEGACY_REQUIRED];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// Held or Bound, by the holder, only once the holding connection is terminally
+// Aborted or Revoked. A claim is never released on a timeout or because an
+// attempt failed while the connection lives (ADR#0092 Decision 6).
+message ReleaseProviderAccount {
+  trogonai.connections.types.v1alpha1.ProviderAccountClaimId claim_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ConnectionId connection_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  ProviderAccountReleaseReason reason = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 4 [features.field_presence = LEGACY_REQUIRED];
+}

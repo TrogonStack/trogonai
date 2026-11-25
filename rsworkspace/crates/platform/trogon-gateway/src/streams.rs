@@ -5,11 +5,9 @@ use crate::config::ResolvedConfig;
 use crate::source_plugin;
 
 pub(crate) async fn provision<C: JetStreamContext>(client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
-    crate::credential::stream::provision(client).await?;
-    info!(
-        stream = crate::credential::constants::CREDENTIAL_STREAM,
-        "credential stream provisioned"
-    );
+    if let Some(config) = &config.webhooks {
+        crate::webhooks::provision(client, config).await?;
+    }
 
     // Discord is gateway-WebSocket, not a webhook source; it doesn't fit `SourcePlugin`.
     if let Some(ref cfg) = config.discord {

@@ -1,0 +1,76 @@
+{
+  "captured_from": {
+    "typescript": "sdk.mjs 0.3.323",
+    "python": "claude_agent_sdk 0.2.181"
+  },
+  "scenarios": {
+    "close_while_iterating": {
+      "before_close": [
+        "A"
+      ],
+      "after_close": [
+        "BB",
+        "CCC"
+      ],
+      "ended": "done",
+      "next_after_end": "done",
+      "pending": "Error: Query closed before response received",
+      "cli_saw": [
+        "initialize",
+        "user",
+        "interrupt",
+        "eof"
+      ]
+    },
+    "for_await_break": {
+      "yielded": [
+        "A"
+      ],
+      "next_after_break": "done",
+      "cli_saw_when_break_returned": [
+        "initialize",
+        "user",
+        "eof"
+      ]
+    },
+    "return_discards_queued": {
+      "yielded": [
+        "A"
+      ],
+      "return_result": "done",
+      "next_after_return": "done",
+      "cli_saw_when_return_resolved": [
+        "initialize",
+        "user",
+        "eof"
+      ]
+    },
+    "receive_response_stops_after_the_result": {
+      "receive_response": [
+        "A",
+        "done1"
+      ],
+      "receive_response_ended": "done",
+      "receive_messages": [
+        "BB",
+        "done2"
+      ],
+      "receive_messages_ended": "done"
+    },
+    "receive_response_ends_with_the_stream": {
+      "receive_response": [
+        "A"
+      ],
+      "receive_response_ended": "done",
+      "receive_messages": [],
+      "receive_messages_ended": "done"
+    },
+    "query_ends_with_the_stream": {
+      "yielded": [
+        "A"
+      ],
+      "ended": "done",
+      "next_after_end": "done"
+    }
+  }
+}

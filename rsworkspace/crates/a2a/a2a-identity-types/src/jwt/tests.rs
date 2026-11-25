@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use trogon_identity_types::{PrincipalIdError, PrincipalKindError, SubjectPrincipalError, SubjectPrincipalIdError};
 
 fn encode_segment(value: &Value) -> String {
     URL_SAFE_NO_PAD.encode(serde_json::to_vec(value).unwrap())
@@ -149,4 +150,144 @@ fn debug_does_not_leak_bearer_credentials() {
     let header_dbg = format!("{header:?}");
     assert!(!header_dbg.contains("ppp"), "{header_dbg}");
     assert!(header_dbg.contains("<redacted>"), "{header_dbg}");
+}
+
+fn minted(payload: Value) -> MintedUserJwt {
+    MintedUserJwt::new(build_token(payload)).expect("compact token")
+}
+
+fn subject_principal(kind: PrincipalKind, id: &str) -> SubjectPrincipal {
+    SubjectPrincipal::from_principal(kind, &PrincipalId::new(id).expect("principal id"))
+}
+
+#[test]
+fn caller_id_reads_the_claim_the_callout_wrote() {
+    let jwt = minted(json!({ "caller_id": "c0ffee", "principal_kind": "service" }));
+
+    assert_eq!(jwt.caller_id().unwrap(), CallerId::new("c0ffee").unwrap());
+}
+
+#[test]
+fn subject_principal_places_the_minted_kind_and_caller_at_the_principal_position() {
+    for (kind, wire) in [
+        (PrincipalKind::Agent, "agent"),
+        (PrincipalKind::Person, "person"),
+        (PrincipalKind::Service, "service"),
+    ] {
+        let jwt = minted(json!({ "caller_id": "c0ffee", "principal_kind": wire }));
+
+        let principal = jwt.subject_principal().unwrap();
+
+        assert_eq!(principal, subject_principal(kind, "c0ffee"));
+        assert_eq!(principal.to_string(), format!("{wire}.c0ffee"));
+    }
+}
+
+#[test]
+fn subject_principal_maps_a_caller_id_that_is_not_a_safe_token() {
+    let jwt = minted(json!({ "caller_id": "josé", "principal_kind": "person" }));
+
+    let principal = jwt.subject_principal().unwrap();
+
+    assert!(principal.id().is_hashed());
+    assert_eq!(principal, subject_principal(PrincipalKind::Person, "josé"));
+}
+
+#[test]
+fn subject_principal_never_defaults_a_missing_or_non_string_kind() {
+    for payload in [
+        json!({ "caller_id": "c0ffee" }),
+        json!({ "caller_id": "c0ffee", "principal_kind": null }),
+        json!({ "caller_id": "c0ffee", "principal_kind": 1 }),
+    ] {
+        let err = minted(payload).subject_principal().unwrap_err();
+
+        assert!(matches!(
+            err,
+            MintedUserJwtError::MissingClaim(MintedClaim::PrincipalKind)
+        ));
+    }
+}
+
+#[test]
+fn subject_principal_rejects_a_kind_outside_the_closed_set() {
+    for (wire, expected) in [
+        ("user", PrincipalKindError::Unknown),
+        ("Person", PrincipalKindError::Unknown),
+        ("", PrincipalKindError::Empty),
+    ] {
+        let err = minted(json!({ "caller_id": "c0ffee", "principal_kind": wire }))
+            .subject_principal()
+            .unwrap_err();
+
+        assert!(
+            matches!(err, MintedUserJwtError::InvalidPrincipalKind(kind) if kind == expected),
+            "{wire:?} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn a_missing_caller_id_names_no_caller_and_no_principal() {
+    let jwt = minted(json!({ "principal_kind": "person" }));
+
+    assert!(matches!(
+        jwt.caller_id().unwrap_err(),
+        MintedUserJwtError::MissingClaim(MintedClaim::CallerId)
+    ));
+    assert!(matches!(
+        jwt.subject_principal().unwrap_err(),
+        MintedUserJwtError::MissingClaim(MintedClaim::CallerId)
+    ));
+}
+
+#[test]
+fn a_caller_id_that_would_widen_a_subject_names_no_caller_and_no_principal() {
+    for caller_id in ["a.b", "*", ">", "a b", ""] {
+        let jwt = minted(json!({ "caller_id": caller_id, "principal_kind": "person" }));
+
+        assert!(matches!(
+            jwt.caller_id().unwrap_err(),
+            MintedUserJwtError::InvalidCallerId
+        ));
+        assert!(matches!(
+            jwt.subject_principal().unwrap_err(),
+            MintedUserJwtError::InvalidCallerId
+        ));
+    }
+}
+
+#[test]
+fn a_caller_id_with_a_control_character_names_no_principal() {
+    let jwt = minted(json!({ "caller_id": "a\u{80}b", "principal_kind": "person" }));
+
+    assert!(matches!(
+        jwt.subject_principal().unwrap_err(),
+        MintedUserJwtError::InvalidPrincipalId(PrincipalIdError::ContainsControlCharacter)
+    ));
+}
+
+#[test]
+fn a_caller_id_already_in_hashed_form_cannot_claim_the_position_it_names() {
+    let hashed = subject_principal(PrincipalKind::Person, "alice.smith").id().to_string();
+    let jwt = minted(json!({ "caller_id": hashed, "principal_kind": "person" }));
+
+    assert!(matches!(
+        jwt.subject_principal().unwrap_err(),
+        MintedUserJwtError::InvalidSubjectPrincipal(SubjectPrincipalError::Id(SubjectPrincipalIdError::AlreadyHashed))
+    ));
+}
+
+#[test]
+fn an_unreadable_payload_names_no_caller_and_no_principal() {
+    let jwt = MintedUserJwt::new("header.!!!.sig").unwrap();
+
+    assert!(matches!(
+        jwt.caller_id().unwrap_err(),
+        MintedUserJwtError::Unreadable(_)
+    ));
+    assert!(matches!(
+        jwt.subject_principal().unwrap_err(),
+        MintedUserJwtError::Unreadable(_)
+    ));
 }

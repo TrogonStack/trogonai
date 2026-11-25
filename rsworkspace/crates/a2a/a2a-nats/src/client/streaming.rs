@@ -8,6 +8,7 @@ use trogon_nats::RequestClient;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use a2a_identity_types::MintedUserJwt;
+use trogon_identity_types::SubjectPrincipal;
 
 use crate::a2a_prefix::A2aPrefix;
 use crate::jetstream::consumers::stream_events_consumer;
@@ -29,6 +30,7 @@ pub struct StreamingRequest<'a, N, J> {
     pub method: &'static str,
     pub req_id: &'a ReqId,
     pub prefix: &'a A2aPrefix,
+    pub caller: &'a SubjectPrincipal,
     pub op_timeout: std::time::Duration,
     pub gateway_caller_jwt: Option<&'a MintedUserJwt>,
 }
@@ -74,6 +76,7 @@ where
         method,
         req_id,
         prefix,
+        caller,
         op_timeout,
         gateway_caller_jwt,
     } = ctx;
@@ -105,16 +108,16 @@ where
         };
 
     // The consumer is opened after the reply, not before it: task event subjects
-    // are scoped to the task (ADR#0055), and the bootstrap reply is where the task
-    // id comes from. Nothing is missed in the gap, because `A2A_EVENTS` retains by
-    // limits and the consumer delivers from sequence 0. The subject no longer names
-    // the request, so the pump filters on `Trogon-Req-Id` to keep another caller's
-    // subscription to the same task out of this stream.
+    // are scoped to the task and its caller (ADR#0055, ADR#0082), and the bootstrap
+    // reply is where the task id comes from. Nothing is missed in the gap, because
+    // `A2A_EVENTS` retains by limits and the consumer delivers from sequence 0. The
+    // subject does not name the request, so the pump filters on `Trogon-Req-Id` to
+    // keep another subscription to the same task out of this stream.
     let event_stream = match &result {
         SendMessageResponse::Task(task) => {
             let task_id = A2aTaskId::new(task.id.clone())
                 .map_err(|e| ClientError::ConsumerSetup(format!("agent returned an invalid task id: {e}")))?;
-            open_task_stream(js, prefix, &task_id, req_id).await?
+            open_task_stream(js, prefix, &task_id, caller, req_id).await?
         }
         SendMessageResponse::Message(_) => empty_event_stream(),
     };
@@ -126,6 +129,7 @@ pub async fn open_task_stream<J>(
     js: &J,
     prefix: &A2aPrefix,
     task_id: &A2aTaskId,
+    caller: &SubjectPrincipal,
     req_id: &ReqId,
 ) -> Result<TypedEventStream, ClientError>
 where
@@ -143,7 +147,7 @@ where
         .await
         .map_err(|e| ClientError::ConsumerSetup(format!("get stream '{stream_name}': {e}")))?;
 
-    let consumer_config = stream_events_consumer(prefix, task_id);
+    let consumer_config = stream_events_consumer(prefix, task_id, caller);
 
     let last_seq = Arc::new(Mutex::new(0u64));
 

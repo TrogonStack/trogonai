@@ -1,6 +1,9 @@
 //! Env-parsing entry point for the a2a-nats-stdio binary.
 
+use a2a_identity_types::{JwtError, MintedUserJwt, MintedUserJwtError};
+use a2a_nats::constants::ENV_A2A_CALLER_JWT;
 use a2a_nats::{A2aAgentId, A2aPrefix, A2aPrefixError, AgentIdError, DEFAULT_A2A_PREFIX, ENV_A2A_PREFIX};
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::connect::ConnectError;
 use trogon_std::env::ReadEnv;
 
@@ -22,6 +25,12 @@ pub enum RuntimeError {
     InvalidPrefix(#[source] A2aPrefixError),
     #[error("invalid agent id")]
     InvalidAgentId(#[source] AgentIdError),
+    #[error("{} environment variable is required", ENV_A2A_CALLER_JWT)]
+    MissingCallerJwt,
+    #[error("invalid caller JWT")]
+    InvalidCallerJwt(#[source] JwtError),
+    #[error("caller JWT names no caller principal")]
+    InvalidCallerPrincipal(#[source] MintedUserJwtError),
     #[error("NATS connection failed")]
     NatsConnect(#[source] ConnectError),
     #[error("stdio loop failed")]
@@ -49,6 +58,7 @@ impl From<ConnectError> for RuntimeError {
 pub struct ValidatedStdioConfig {
     pub prefix: A2aPrefix,
     pub agent_id: A2aAgentId,
+    pub caller: SubjectPrincipal,
 }
 
 pub fn parse_env<E: ReadEnv>(env: &E) -> Result<ValidatedStdioConfig, RuntimeError> {
@@ -58,7 +68,19 @@ pub fn parse_env<E: ReadEnv>(env: &E) -> Result<ValidatedStdioConfig, RuntimeErr
     let prefix = A2aPrefix::new(raw_prefix)?;
     let agent_id_str = env.var(ENV_A2A_AGENT_ID).map_err(|_| RuntimeError::MissingAgentId)?;
     let agent_id = A2aAgentId::new(agent_id_str)?;
-    Ok(ValidatedStdioConfig { prefix, agent_id })
+    let raw_jwt = env
+        .var(ENV_A2A_CALLER_JWT)
+        .map_err(|_| RuntimeError::MissingCallerJwt)?;
+    let caller_jwt = MintedUserJwt::new(raw_jwt).map_err(RuntimeError::InvalidCallerJwt)?;
+    caller_jwt.ensure_fresh().map_err(RuntimeError::InvalidCallerJwt)?;
+    let caller = caller_jwt
+        .subject_principal()
+        .map_err(RuntimeError::InvalidCallerPrincipal)?;
+    Ok(ValidatedStdioConfig {
+        prefix,
+        agent_id,
+        caller,
+    })
 }
 
 /// Backwards-compatible entry point used by integration tests / external
@@ -79,8 +101,14 @@ pub async fn run() -> Result<(), RuntimeError> {
     // builder, so operators saw the env knob silently no-op.
     let config = apply_timeout_overrides(Config::new(validated.prefix.clone(), nats_config), &env);
 
-    let client = A2aClient::new(validated.prefix, validated.agent_id, nats_client, js_client)
-        .with_operation_timeout(config.operation_timeout());
+    let client = A2aClient::new(
+        validated.prefix,
+        validated.agent_id,
+        validated.caller,
+        nats_client,
+        js_client,
+    )
+    .with_operation_timeout(config.operation_timeout());
 
     run_io_loop(client, tokio::io::stdin(), tokio::io::stdout(), shutdown_signal())
         .await

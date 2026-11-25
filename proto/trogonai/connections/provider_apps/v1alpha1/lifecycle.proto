@@ -1,0 +1,105 @@
+edition = "2024";
+
+package trogonai.connections.provider_apps.v1alpha1;
+
+// Pending to Active, Active to and from Disabled, Active to and from
+// Degraded, and any state to Revoked, which is terminal (ADR#0092 Decision 3).
+// Admission and the executors read it live and refuse a projection staler
+// than 330 seconds; a connection is usable only when its app is neither
+// Revoked nor Disabled (ADR#0092 Decisions 4 and 10). Unspecified and unknown
+// values are invalid.
+enum ProviderAppLifecycle {
+  PROVIDER_APP_LIFECYCLE_UNSPECIFIED = 0;
+  // Reserved before its client details exist or before its secrets are in
+  // custody. No connection may use it.
+  PROVIDER_APP_LIFECYCLE_PENDING = 1;
+  PROVIDER_APP_LIFECYCLE_ACTIVE = 2;
+  // The owner's reversible pause. Connections under it are refused and
+  // refresh pauses.
+  PROVIDER_APP_LIFECYCLE_DISABLED = 3;
+  // A recorded health fact from broker evidence that the provider rejected
+  // the client's authentication. Refresh pauses and connections wait without
+  // being revoked (ADR#0092 Decision 10, ADR#0095 Decision 3).
+  PROVIDER_APP_LIFECYCLE_DEGRADED = 4;
+  // Terminal. Old connections are unusable and owners reconnect as new
+  // connections under a new app.
+  PROVIDER_APP_LIFECYCLE_REVOKED = 5;
+}
+
+// Why an app is Degraded. Each value is a fact about the app, not about one
+// connection, which is why it is recorded here (ADR#0092 Decision 3).
+// Unspecified and unknown values are invalid.
+enum ProviderAppDegradationReason {
+  PROVIDER_APP_DEGRADATION_REASON_UNSPECIFIED = 0;
+  // The token, revocation or registration endpoint answered invalid_client
+  // or otherwise rejected the client's own authentication.
+  PROVIDER_APP_DEGRADATION_REASON_CLIENT_AUTHENTICATION_REJECTED = 1;
+  // The authorization server rejected the registered redirect URI, so no
+  // consent under this app can complete.
+  PROVIDER_APP_DEGRADATION_REASON_REDIRECT_URI_REJECTED = 2;
+}
+
+// What cleared a Degraded app (ADR#0092 Decision 3). Unspecified and unknown
+// values are invalid.
+enum ProviderAppRecoveryCause {
+  PROVIDER_APP_RECOVERY_CAUSE_UNSPECIFIED = 0;
+  // A provider call that authenticates the client succeeded.
+  PROVIDER_APP_RECOVERY_CAUSE_PROVIDER_CALL_SUCCEEDED = 1;
+}
+
+// Which app secret a rotation replaced. Unspecified and unknown values are
+// invalid.
+enum ProviderAppCredentialRole {
+  PROVIDER_APP_CREDENTIAL_ROLE_UNSPECIFIED = 0;
+  PROVIDER_APP_CREDENTIAL_ROLE_CLIENT_SECRET = 1;
+  // The private_key_jwt signing key of an OAuth or metadata document client.
+  PROVIDER_APP_CREDENTIAL_ROLE_SIGNING_KEY = 2;
+  // The private key of a KeyedApp.
+  PROVIDER_APP_CREDENTIAL_ROLE_PRIVATE_KEY = 3;
+}
+
+// Why a Pending app never became Active (ADR#0094 Decision 10). Unspecified
+// and unknown values are invalid.
+enum ProviderAppRegistrationFailureReason {
+  PROVIDER_APP_REGISTRATION_FAILURE_REASON_UNSPECIFIED = 0;
+  // The authorization server refused the registration request.
+  PROVIDER_APP_REGISTRATION_FAILURE_REASON_REJECTED = 1;
+  // The server failed or was unreachable within the bounded retry window.
+  PROVIDER_APP_REGISTRATION_FAILURE_REASON_UNAVAILABLE = 2;
+  // The request was sent and the response was lost or ambiguous; a
+  // registration may exist at the server as a residual.
+  PROVIDER_APP_REGISTRATION_FAILURE_REASON_OUTCOME_UNKNOWN = 3;
+  // The secrets could not be written to custody, so nothing was recorded.
+  PROVIDER_APP_REGISTRATION_FAILURE_REASON_CUSTODY_WRITE_FAILED = 4;
+  // The principal or the connecting attempt gave up before completion.
+  PROVIDER_APP_REGISTRATION_FAILURE_REASON_ABANDONED = 5;
+}
+
+// Why an app was revoked. The ADR names abandoning the client identity and
+// deleting an unused dynamic registration; the rest are the smallest set the
+// cleanup and offboarding paths need (ADR#0092 Decision 10, ADR#0093,
+// ADR#0094 Decision 13). Unspecified and unknown values are invalid.
+enum ProviderAppRevocationReason {
+  PROVIDER_APP_REVOCATION_REASON_UNSPECIFIED = 0;
+  // A platform operator or project admin abandoned the client identity, for
+  // example after a suspected secret leak the provider could not contain by
+  // rotation.
+  PROVIDER_APP_REVOCATION_REASON_IDENTITY_ABANDONED = 1;
+  // No connection uses the dynamically registered app any longer.
+  PROVIDER_APP_REVOCATION_REASON_UNUSED = 2;
+  // The provider deleted or withdrew the client on its side.
+  PROVIDER_APP_REVOCATION_REASON_PROVIDER_WITHDRAWN = 3;
+  // The owning project was offboarded.
+  PROVIDER_APP_REVOCATION_REASON_OWNER_OFFBOARDED = 4;
+}
+
+// One retirement step whose remote or custody outcome is recorded as it is
+// (ADR#0094 Decision 13, ADR#0095 Decision 4). Unspecified and unknown
+// values are invalid.
+enum ProviderAppCleanupStep {
+  PROVIDER_APP_CLEANUP_STEP_UNSPECIFIED = 0;
+  // The RFC 7592 delete of a dynamic registration, from custody.
+  PROVIDER_APP_CLEANUP_STEP_REGISTRATION_DELETED = 1;
+  // Destruction of the app's registration secrets in custody.
+  PROVIDER_APP_CLEANUP_STEP_CREDENTIALS_DESTROYED = 2;
+}

@@ -1,0 +1,44 @@
+edition = "2024";
+
+package trogonai.connections.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/connections/v1alpha1/mcp.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+
+// What the owner acknowledged when moving the connection to a successor
+// release: the egress hosts the successor adds and the scope changes between
+// the two releases (ADR#0092 Decision 10). Both lists are computed by the
+// connections service from the two definitions and shown to the owner; the
+// decider records what was acknowledged and does not re-derive it, because
+// it never reads the catalog. Hosts the successor drops need no
+// acknowledgement.
+//
+// ADR-silent shape: the ADR says "acknowledging added hosts and scopes"
+// without a message. This is the smallest record of exactly that.
+message ConnectorUpgradeAcknowledgement {
+  option (buf.validate.message).cel = {
+    id: "connector_upgrade_acknowledgement.added_scopes_unique"
+    message: "added scopes must be unique"
+    expression: "this.added_scopes.map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_upgrade_acknowledgement.removed_scopes_unique"
+    message: "removed scopes must be unique"
+    expression: "this.removed_scopes.map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connector_upgrade_acknowledgement.scopes_disjoint"
+    message: "a scope is added or removed, never both"
+    expression: "!this.added_scopes.exists(a, this.removed_scopes.exists(r, r.value == a.value))"
+  };
+
+  // Absent when the successor adds no egress host.
+  EgressHostAcknowledgement added_egress_hosts = 1;
+  // Scopes the successor requests that the previous release did not.
+  repeated trogonai.connections.types.v1alpha1.ProviderScope added_scopes = 2;
+  // Scopes the previous release requested that the successor does not. The
+  // grant keeps them until a reconnect; the executor's ceiling drops them
+  // because the successor's operations never need them.
+  repeated trogonai.connections.types.v1alpha1.ProviderScope removed_scopes = 3;
+}

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE dir="tsworkspace"
+
+pnpm fmt:check && pnpm lint && pnpm typecheck "$@"

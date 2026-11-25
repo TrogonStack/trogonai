@@ -8,11 +8,11 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use tracing::field::{Field, Visit};
-use tracing::subscriber::DefaultGuard;
-use tracing::{Event, Subscriber};
+use tracing::subscriber::{DefaultGuard, NoSubscriber};
+use tracing::{Dispatch, Event, Level, Subscriber};
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
@@ -26,6 +26,7 @@ pub use facade::{CapturedLog, CapturedLogs, LogLevel};
 /// text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturedEvent {
+    level: Level,
     fields: BTreeMap<String, String>,
 }
 
@@ -43,6 +44,11 @@ impl CapturedEvent {
     /// The event's message.
     pub fn message(&self) -> Option<&str> {
         self.field(Self::MESSAGE_FIELD)
+    }
+
+    /// The level the event was emitted at.
+    pub fn level(&self) -> Level {
+        self.level
     }
 }
 
@@ -63,6 +69,7 @@ impl CapturedEvents {
     /// listening at that level, so the level has to reach the callsite under
     /// test or nothing is captured.
     pub fn install(&self, max_level: LevelFilter) -> DefaultGuard {
+        ask_every_dispatcher_for_interest();
         tracing_subscriber::registry()
             .with(max_level)
             .with(self.clone())
@@ -73,6 +80,25 @@ impl CapturedEvents {
     pub fn events(&self) -> Vec<CapturedEvent> {
         self.0.lock().expect("captured events are not poisoned").clone()
     }
+
+    /// The events recorded so far at exactly `level`, in order.
+    pub fn at(&self, level: Level) -> Vec<CapturedEvent> {
+        self.events().into_iter().filter(|event| event.level == level).collect()
+    }
+}
+
+/// While a single dispatcher is registered, `tracing` caches a callsite's
+/// interest from whatever is the default on the thread that reaches it first.
+/// A callsite first reached on a test thread with no subscriber is then cached
+/// as never, and a capture installed on another thread misses its events. A
+/// second dispatcher that lives for the whole process makes `tracing` ask every
+/// registered dispatcher instead.
+///
+/// [`CapturedEvents::install`] already calls this. A test that builds its own
+/// capturing [`Dispatch`] calls it before building one.
+pub fn ask_every_dispatcher_for_interest() {
+    static NEVER_INTERESTED: OnceLock<Dispatch> = OnceLock::new();
+    NEVER_INTERESTED.get_or_init(|| Dispatch::new(NoSubscriber::default()));
 }
 
 impl<S: Subscriber> Layer<S> for CapturedEvents {
@@ -82,7 +108,10 @@ impl<S: Subscriber> Layer<S> for CapturedEvents {
         self.0
             .lock()
             .expect("captured events are not poisoned")
-            .push(CapturedEvent { fields: fields.0 });
+            .push(CapturedEvent {
+                level: *event.metadata().level(),
+                fields: fields.0,
+            });
     }
 }
 

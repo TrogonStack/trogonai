@@ -1,0 +1,44 @@
+edition = "2024";
+
+package trogonai.connections.connections.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/discovery.proto";
+import "trogonai/policy/egress_permissions/v1alpha1/permission_policy.proto";
+
+// The MCP protected resource metadata (RFC 9728) recorded on the connection,
+// because it is per resource; the authorization server metadata lives on the
+// ProviderApp (R19). The snapshot is the exact bytes fetched, so the pinned
+// endpoints are what consent and every later exchange read (ADR#0094
+// Decision 10). Nothing in it is secret.
+message McpProtectedResource {
+  option (buf.validate.message).cel = {
+    id: "mcp_protected_resource.origins_unique"
+    message: "endpoint origins must be unique"
+    expression: "this.endpoint_origins.map(o, o.host + ':' + string(o.port)).unique()"
+  };
+
+  trogonai.connections.types.v1alpha1.DiscoverySnapshot snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
+  // The exact origins of every endpoint the snapshot names, derived by the
+  // connections service from the metadata bytes. A change in this set needs a
+  // new acknowledgement; a digest change with the same set does not (ADR#0092
+  // Decision 10, R19). ADR-silent shape: the ADR compares "the set of endpoint
+  // origins" and the exact EgressHost identity of ADR#0072 Decision 3 is the
+  // same host and port pair, so the set is carried as those.
+  repeated trogonai.policy.egress_permissions.v1alpha1.EgressHost endpoint_origins = 2;
+}
+
+// The exact egress hosts a person acknowledged for a connection: at connect
+// time for a generic MCP release, whose hosts are the endpoint origins of the
+// pinned metadata, and on UpgradeConnector for the hosts the successor release
+// adds (ADR#0092 Decision 10). The platform never acknowledges on an owner's
+// behalf. Hosts outside the acknowledged and declared sets are denied.
+message EgressHostAcknowledgement {
+  option (buf.validate.message).cel = {
+    id: "egress_host_acknowledgement.hosts_unique"
+    message: "acknowledged hosts must be unique"
+    expression: "this.hosts.map(h, h.host + ':' + string(h.port)).unique()"
+  };
+
+  repeated trogonai.policy.egress_permissions.v1alpha1.EgressHost hosts = 1 [(buf.validate.field).repeated.min_items = 1];
+}

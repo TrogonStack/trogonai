@@ -166,20 +166,17 @@ impl ApiKeyVerifier for HmacApiKeyVerifier {
             }
             .into());
         }
-        let caller_id = derive_caller_id(
-            CallerNamespace::ApiKey,
-            entry.external_subject.as_str(),
-            &entry.audience,
-        )
-        .map_err(ApiKeyError::CallerIdDerivation)?;
-        let nats_permissions = crate::permissions::IssuedPermissions::default_for_caller(&caller_id);
+        let namespace = CallerNamespace::ApiKey;
+        let caller_id = derive_caller_id(namespace, entry.external_subject.as_str(), &entry.audience)
+            .map_err(ApiKeyError::CallerIdDerivation)?;
         Ok(UserJwtClaims {
             kid: crate::signing_key_source::unminted_placeholder(),
             sub: entry.external_subject.clone(),
             aud: requested_audience.clone(),
             data: entry.spicedb_principal.clone(),
             caller_id,
-            nats_permissions,
+            principal_kind: namespace.principal_kind(),
+            nats_permissions: crate::permissions::IssuedPermissions::none(),
         })
     }
 }

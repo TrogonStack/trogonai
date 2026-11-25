@@ -1,0 +1,96 @@
+edition = "2024";
+
+package trogonai.connections.provider_apps.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only Decider error templates, never encoded. Client ids, SecretRefs,
+// snapshots and provider responses are never copied into public error
+// detail. Concurrency faults use the Decider channel.
+message ProviderAppCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.provider_apps"
+    reason: "PROVIDER_APP_COMMAND_INVALID"
+    message: "The command violates the provider app contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderAppAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.provider_apps"
+    reason: "PROVIDER_APP_ALREADY_EXISTS"
+    message: "The provider app identity has already been reserved."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderAppNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.provider_apps"
+    reason: "PROVIDER_APP_NOT_FOUND"
+    message: "The provider app must be reserved before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ProviderAppLifecycleConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.provider_apps"
+    reason: "PROVIDER_APP_LIFECYCLE_CONFLICT"
+    message: "The provider app's lifecycle state does not admit this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The kind's issuer differs from the reserved one, a snapshot's issuer
+// differs from the app's, or the kind does not fit the reserved origin.
+message ProviderAppIdentityMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.provider_apps"
+    reason: "PROVIDER_APP_IDENTITY_MISMATCH"
+    message: "A different issuer or client identity is a new provider app."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// A discovery is present without a snapshot digest on the kind, absent with
+// one, or its digest does not equal the kind's; or discovery is recorded for
+// a kind that has none.
+message ProviderAppDiscoveryMismatchError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.provider_apps"
+    reason: "PROVIDER_APP_DISCOVERY_MISMATCH"
+    message: "The discovery snapshot does not match the provider app's kind."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The rotated role does not exist on the app's kind.
+message ProviderAppCredentialRoleUnknownError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.provider_apps"
+    reason: "PROVIDER_APP_CREDENTIAL_ROLE_UNKNOWN"
+    message: "The provider app's kind has no such credential role."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// A cleanup step recorded twice, or a registration step for an app that is
+// not dynamically registered.
+message ProviderAppCleanupConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.provider_apps"
+    reason: "PROVIDER_APP_CLEANUP_CONFLICT"
+    message: "The cleanup step was already recorded or does not apply to this provider app."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

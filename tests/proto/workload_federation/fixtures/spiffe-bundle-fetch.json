@@ -1,0 +1,653 @@
+{
+  "templates": {
+    "changed": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SpiffeBundleFetchEvidence",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          }
+        },
+        "trustDomain": {
+          "value": "example.test"
+        },
+        "effectiveRefreshInterval": "30s",
+        "httpsSpiffe": {
+          "endpoint": {
+            "url": "https://federation.example.test/bundle"
+          },
+          "authenticatedSpiffeId": "spiffe://federation.example.test/spire/server"
+        },
+        "outcome": "SPIFFE_BUNDLE_FETCH_OUTCOME_CHANGED",
+        "spiffeSequence": "8",
+        "spiffeRefreshHint": "60s",
+        "bundleSha256": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+        "acceptedSpiffeSequence": "7",
+        "changes": {
+          "x509AuthoritiesAddedSha256": [
+            "AgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICE="
+          ],
+          "x509AuthoritiesRemovedSha256": [
+            "AwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISI="
+          ],
+          "jwtAuthoritiesAddedSha256": [
+            "BAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiM="
+          ]
+        }
+      }
+    },
+    "unchanged": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SpiffeBundleFetchEvidence",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          }
+        },
+        "trustDomain": {
+          "value": "example.test"
+        },
+        "effectiveRefreshInterval": "30s",
+        "httpsWeb": {
+          "endpoint": {
+            "url": "https://federation.example.test/bundle"
+          }
+        },
+        "outcome": "SPIFFE_BUNDLE_FETCH_OUTCOME_UNCHANGED",
+        "spiffeSequence": "8",
+        "bundleSha256": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+        "acceptedSpiffeSequence": "8"
+      }
+    },
+    "refused": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SpiffeBundleFetchEvidence",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          }
+        },
+        "trustDomain": {
+          "value": "example.test"
+        },
+        "effectiveRefreshInterval": "30s",
+        "httpsSpiffe": {
+          "endpoint": {
+            "url": "https://federation.example.test/bundle"
+          }
+        },
+        "outcome": "SPIFFE_BUNDLE_FETCH_OUTCOME_REFUSED",
+        "reason": "SPIFFE_BUNDLE_FETCH_REASON_TLS_IDENTITY_MISMATCH"
+      }
+    },
+    "regression": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SpiffeBundleFetchEvidence",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          }
+        },
+        "trustDomain": {
+          "value": "example.test"
+        },
+        "effectiveRefreshInterval": "30s",
+        "httpsWeb": {
+          "endpoint": {
+            "url": "https://federation.example.test/bundle"
+          }
+        },
+        "outcome": "SPIFFE_BUNDLE_FETCH_OUTCOME_REFUSED",
+        "reason": "SPIFFE_BUNDLE_FETCH_REASON_SEQUENCE_REGRESSION",
+        "spiffeSequence": "5",
+        "acceptedSpiffeSequence": "7"
+      }
+    },
+    "failed": {
+      "type": "trogonai.platform.workload_federation.v1alpha1.SpiffeBundleFetchEvidence",
+      "payload": {
+        "trustRegistrationRef": {
+          "scope": {
+            "tenant": "tenant_1",
+            "project": "project_1"
+          },
+          "version": {
+            "id": "trust_1",
+            "revision": "1",
+            "recoveryFence": "1",
+            "configurationSha256": "YRigGFlXCPaSLvC57olLmS0XxzHXB0m+9waBj+o9LdI="
+          }
+        },
+        "trustDomain": {
+          "value": "example.test"
+        },
+        "effectiveRefreshInterval": "30s",
+        "httpsWeb": {
+          "endpoint": {
+            "url": "https://federation.example.test/bundle"
+          }
+        },
+        "outcome": "SPIFFE_BUNDLE_FETCH_OUTCOME_FAILED",
+        "reason": "SPIFFE_BUNDLE_FETCH_REASON_TIMEOUT"
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "bundle fetch/changed positive",
+      "template": "changed"
+    },
+    {
+      "name": "bundle fetch/unchanged positive",
+      "template": "unchanged"
+    },
+    {
+      "name": "bundle fetch/refused positive",
+      "template": "refused"
+    },
+    {
+      "name": "bundle fetch/regression positive",
+      "template": "regression"
+    },
+    {
+      "name": "bundle fetch/failed positive",
+      "template": "failed"
+    },
+    {
+      "name": "bundle fetch/refusal reasons cover redirect",
+      "template": "refused",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reason",
+          "value": "SPIFFE_BUNDLE_FETCH_REASON_REDIRECT_REFUSED"
+        }
+      ]
+    },
+    {
+      "name": "bundle fetch/failure reason unavailable",
+      "template": "failed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reason",
+          "value": "SPIFFE_BUNDLE_FETCH_REASON_UNAVAILABLE"
+        }
+      ]
+    },
+    {
+      "name": "bundle fetch/effective interval honors a faster hint",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/effectiveRefreshInterval",
+          "value": "60s"
+        }
+      ]
+    },
+    {
+      "name": "bundle fetch/authenticated endpoint id absent after tls refusal",
+      "template": "refused",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/reason",
+          "value": "SPIFFE_BUNDLE_FETCH_REASON_MALFORMED_BUNDLE"
+        }
+      ]
+    },
+    {
+      "name": "bundle fetch/accepted fetch cannot carry a reason",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/reason",
+          "value": "SPIFFE_BUNDLE_FETCH_REASON_TIMEOUT"
+        }
+      ],
+      "violations": [
+        "an accepted fetch carries a bundle digest and sequence and no reason"
+      ]
+    },
+    {
+      "name": "bundle fetch/accepted fetch requires a digest",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/bundleSha256"
+        }
+      ],
+      "violations": [
+        "an accepted fetch carries a bundle digest and sequence and no reason"
+      ]
+    },
+    {
+      "name": "bundle fetch/accepted fetch requires a sequence",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/spiffeSequence"
+        },
+        {
+          "op": "remove",
+          "path": "/acceptedSpiffeSequence"
+        }
+      ],
+      "violations": [
+        "an accepted fetch carries a bundle digest and sequence and no reason"
+      ]
+    },
+    {
+      "name": "bundle fetch/refusal requires a reason",
+      "template": "refused",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/reason"
+        }
+      ],
+      "violations": [
+        "a refused or failed fetch carries a reason and no bundle digest"
+      ]
+    },
+    {
+      "name": "bundle fetch/refusal cannot carry a bundle digest",
+      "template": "refused",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/bundleSha256",
+          "value": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
+        }
+      ],
+      "violations": [
+        "a refused or failed fetch carries a reason and no bundle digest"
+      ]
+    },
+    {
+      "name": "bundle fetch/failure cannot carry a bundle digest",
+      "template": "failed",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/bundleSha256",
+          "value": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
+        }
+      ],
+      "violations": [
+        "a refused or failed fetch carries a reason and no bundle digest"
+      ]
+    },
+    {
+      "name": "bundle fetch/refusal cannot use a transport reason",
+      "template": "refused",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reason",
+          "value": "SPIFFE_BUNDLE_FETCH_REASON_TIMEOUT"
+        }
+      ],
+      "violations": [
+        "a refusal carries a policy reason and a failure carries a transport reason"
+      ]
+    },
+    {
+      "name": "bundle fetch/failure cannot use a policy reason",
+      "template": "failed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/reason",
+          "value": "SPIFFE_BUNDLE_FETCH_REASON_OVERSIZE"
+        }
+      ],
+      "violations": [
+        "a refusal carries a policy reason and a failure carries a transport reason"
+      ]
+    },
+    {
+      "name": "bundle fetch/changed bundle requires authority changes",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/changes"
+        }
+      ],
+      "violations": [
+        "only a changed bundle carries authority changes"
+      ]
+    },
+    {
+      "name": "bundle fetch/unchanged bundle cannot carry authority changes",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/changes",
+          "value": {
+            "x509AuthoritiesAddedSha256": [
+              "AgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICE="
+            ]
+          }
+        }
+      ],
+      "violations": [
+        "only a changed bundle carries authority changes"
+      ]
+    },
+    {
+      "name": "bundle fetch/authority changes cannot be empty",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/changes",
+          "value": {}
+        }
+      ],
+      "violations": [
+        "an accepted bundle change must add or remove at least one authority"
+      ]
+    },
+    {
+      "name": "bundle fetch/authority digest has fixed length",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/changes/x509AuthoritiesAddedSha256/0",
+          "value": "AAEC"
+        }
+      ],
+      "violations": [
+        "must be 32 bytes"
+      ]
+    },
+    {
+      "name": "bundle fetch/authority digests are unique",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/changes/x509AuthoritiesAddedSha256",
+          "value": [
+            "AgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICE=",
+            "AgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICE="
+          ]
+        }
+      ],
+      "violations": [
+        "repeated value must contain unique items"
+      ]
+    },
+    {
+      "name": "bundle fetch/https_spiffe fetch requires the authenticated id",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/httpsSpiffe/authenticatedSpiffeId"
+        }
+      ],
+      "violations": [
+        "an accepted fetch over https_spiffe carries the authenticated endpoint identity"
+      ]
+    },
+    {
+      "name": "bundle fetch/authenticated id uses the shared spiffe id pattern",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/httpsSpiffe/authenticatedSpiffeId",
+          "value": "spiffe://federation.example.test/a/../b"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "bundle fetch/authenticated id refuses a trust domain alone",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/httpsSpiffe/authenticatedSpiffeId",
+          "value": "spiffe://federation.example.test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "bundle fetch/endpoint refuses a plain http url",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/httpsWeb/endpoint/url",
+          "value": "http://federation.example.test/bundle"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "bundle fetch/endpoint profile is required",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/httpsWeb"
+        }
+      ],
+      "violations": [
+        "exactly one field is required in oneof"
+      ]
+    },
+    {
+      "name": "bundle fetch/sequence regression requires a lower sequence",
+      "template": "regression",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/spiffeSequence",
+          "value": "7"
+        }
+      ],
+      "violations": [
+        "a sequence regression names a received sequence below the accepted one"
+      ]
+    },
+    {
+      "name": "bundle fetch/sequence regression requires the accepted sequence",
+      "template": "regression",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/acceptedSpiffeSequence"
+        }
+      ],
+      "violations": [
+        "a sequence regression names a received sequence below the accepted one"
+      ]
+    },
+    {
+      "name": "bundle fetch/accepted sequence cannot go backwards",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/spiffeSequence",
+          "value": "7"
+        }
+      ],
+      "violations": [
+        "an accepted bundle sequence cannot be below the accepted one"
+      ]
+    },
+    {
+      "name": "bundle fetch/effective interval cannot exceed 300 seconds",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/effectiveRefreshInterval",
+          "value": "301s"
+        }
+      ],
+      "violations": [
+        "must be greater than 0s and less than or equal to 300s"
+      ]
+    },
+    {
+      "name": "bundle fetch/effective interval must be positive",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/effectiveRefreshInterval",
+          "value": "0s"
+        }
+      ],
+      "violations": [
+        "must be greater than 0s and less than or equal to 300s"
+      ]
+    },
+    {
+      "name": "bundle fetch/effective interval cannot exceed the bundle hint",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/effectiveRefreshInterval",
+          "value": "120s"
+        }
+      ],
+      "violations": [
+        "the applied refresh interval cannot exceed the bundle refresh hint"
+      ]
+    },
+    {
+      "name": "bundle fetch/refresh hint must be positive",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/spiffeRefreshHint",
+          "value": "0s"
+        }
+      ],
+      "violations": [
+        "must be greater than 0s and less than or equal to 31536000s"
+      ]
+    },
+    {
+      "name": "bundle fetch/bundle digest has fixed length",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/bundleSha256",
+          "value": "AAEC"
+        }
+      ],
+      "violations": [
+        "must be 32 bytes"
+      ]
+    },
+    {
+      "name": "bundle fetch/outcome is required",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/outcome",
+          "value": "SPIFFE_BUNDLE_FETCH_OUTCOME_UNSPECIFIED"
+        }
+      ],
+      "violations": [
+        "must not be in list [0]"
+      ]
+    },
+    {
+      "name": "bundle fetch/trust domain refuses upper case",
+      "template": "unchanged",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/trustDomain/value",
+          "value": "Example.Test"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "bundle fetch/authenticated id refuses a port",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/httpsSpiffe/authenticatedSpiffeId",
+          "value": "spiffe://federation.example.test:8443/spire/server"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    },
+    {
+      "name": "bundle fetch/authenticated id refuses userinfo",
+      "template": "changed",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/httpsSpiffe/authenticatedSpiffeId",
+          "value": "spiffe://user@federation.example.test/spire/server"
+        }
+      ],
+      "violations": [
+        "does not match regex pattern"
+      ]
+    }
+  ]
+}

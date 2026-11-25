@@ -1,0 +1,219 @@
+edition = "2024";
+
+package trogonai.connections.provider_apps.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/client_authentication.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/secrets/v1alpha1/secret_ref.proto";
+
+// How an app came to exist (ADR#0092 Decision 3). Registration is how an app
+// came to exist, not an authentication method of a connection, so a Client ID
+// Metadata Document app is PLATFORM_MANAGED: one platform-hosted document per
+// environment, no per-tenant registration (ADR#0094 Decision 10). Unspecified
+// and unknown values are invalid.
+enum ProviderAppOrigin {
+  PROVIDER_APP_ORIGIN_UNSPECIFIED = 0;
+  // Registered by the platform; shared by tenants. Its stream is unsealed.
+  PROVIDER_APP_ORIGIN_PLATFORM_MANAGED = 1;
+  // Registered by a customer; owned by a project. Its stream is sensitive
+  // (ADR#0092 Decision 8).
+  PROVIDER_APP_ORIGIN_CUSTOMER_SUPPLIED = 2;
+  // Created at connect time by RFC 7591 registration.
+  PROVIDER_APP_ORIGIN_DYNAMICALLY_REGISTERED = 3;
+}
+
+// The client the platform presents to the provider. The kind fixes the
+// client identity; a rotation of the client secret, signing key or private
+// key keeps it, and a change of client_id or issuer is a new app (ADR#0092
+// Decision 3). Every secret is a SecretRef into custody and nothing here is
+// material (ADR#0092 Decision 8).
+message ProviderAppKind {
+  oneof kind {
+    option (buf.validate.oneof).required = true;
+    OAuthClientApp oauth_client = 1;
+    ClientIdMetadataDocumentApp client_id_metadata_document = 2;
+    KeyedApp installation_app = 3;
+    DynamicClient dynamic_client = 4;
+  }
+}
+
+// A preregistered OAuth client (ADR#0092 Decision 3). The client secret is
+// absent for a public client and present for a confidential one; the
+// authentication method must be one the release's OAuthProfile lists.
+message OAuthClientApp {
+  option (buf.validate.message).cel = {
+    id: "oauth_client_app.client_secret"
+    message: "a client secret is present exactly for client_secret_basic or client_secret_post"
+    expression: "(this.client_authentication_method == 2 || this.client_authentication_method == 3) == has(this.client_secret)"
+  };
+  option (buf.validate.message).cel = {
+    id: "oauth_client_app.signing_key"
+    message: "a signing key is present exactly for private_key_jwt"
+    expression: "(this.client_authentication_method == 4) == has(this.signing_key)"
+  };
+  option (buf.validate.message).cel = {
+    id: "oauth_client_app.redirect_uris_unique"
+    message: "redirect URIs must be unique"
+    expression: "this.redirect_uris.unique()"
+  };
+
+  string client_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.connections.types.v1alpha1.ClientAuthenticationMethod client_authentication_method = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.secrets.v1alpha1.SecretRef client_secret = 3;
+  // The private key that signs private_key_jwt assertions through SignJwt.
+  trogonai.secrets.v1alpha1.SecretRef signing_key = 4;
+  // Exact HTTPS callback URIs registered at the provider, one per
+  // environment on that environment's console host; a loopback HTTP URI only
+  // for a local development app (ADR#0094 Decision 7). No wildcard and no
+  // path parameter.
+  repeated string redirect_uris = 5 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {
+      string: {pattern: "^(https://[^/?#@*]+(/[^?#*]*)?|http://(127\\.0\\.0\\.1|\\[::1\\]|localhost)(:[0-9]{1,5})?(/[^?#*]*)?)$"}
+    }
+  }];
+  // The most a connection under this app may request. Empty means the
+  // release's scopes bound the request alone.
+  repeated trogonai.connections.types.v1alpha1.ProviderScope scope_ceiling = 6;
+  // Compared whole with the release's declared issuer or the discovered one
+  // (ADR#0092 Decision 3, R19).
+  trogonai.connections.types.v1alpha1.Issuer issuer = 7 [features.field_presence = LEGACY_REQUIRED];
+  // The authorization server metadata snapshot this client was registered
+  // against, recorded on this stream. Present exactly when the release
+  // discovers its endpoints; absent for declared endpoints (R19).
+  trogonai.connections.types.v1alpha1.Digest discovery_snapshot_digest = 8;
+}
+
+// The Client ID Metadata Document form of OAuthClientApp (ADR#0092 Decision
+// 3, ADR#0094 Decision 10, R19). The client_id is the document URL exactly,
+// the document is platform-hosted and generated from configuration, and the
+// client is public by default or private_key_jwt where a server requires it.
+// It carries the same issuer and snapshot digest as OAuthClientApp, and one
+// app exists per issuer at platform scope.
+message ClientIdMetadataDocumentApp {
+  option (buf.validate.message).cel = {
+    id: "client_id_metadata_document_app.method"
+    message: "a metadata document client is public or uses private_key_jwt, and a signing key is present exactly for private_key_jwt"
+    expression: "(this.client_authentication_method == 1 || this.client_authentication_method == 4) && ((this.client_authentication_method == 4) == has(this.signing_key))"
+  };
+
+  // The document URL, and so the client_id: a stable HTTPS URL with a path.
+  string document_url = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^https://[^/?#@*]+/[^?#*]+$"
+  ];
+  trogonai.connections.types.v1alpha1.ClientAuthenticationMethod client_authentication_method = 2 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.secrets.v1alpha1.SecretRef signing_key = 3;
+  trogonai.connections.types.v1alpha1.Issuer issuer = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The authorization server metadata that advertised
+  // client_id_metadata_document_supported, recorded on this stream.
+  trogonai.connections.types.v1alpha1.Digest discovery_snapshot_digest = 5 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A GitHub App or similar keyed app, which is not an OAuth client (ADR#0092
+// Decision 3). Connections under it authenticate as app installations.
+message KeyedApp {
+  // The provider's id of the app.
+  string app_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.secrets.v1alpha1.SecretRef private_key = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The provider origin the app is registered at, in the issuer position of
+  // the app identity, since a keyed app has no OAuth issuer. The ADR is
+  // silent on this; it keeps the identity rule of ADR#0092 Decision 3 uniform
+  // across kinds.
+  trogonai.connections.types.v1alpha1.Issuer issuer = 3 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// A client created by RFC 7591 dynamic registration (ADR#0092 Decision 3,
+// ADR#0094 Decision 10). The client secret and the registration access token
+// are registration secrets bound to this app, not to a connection, sealed for
+// every tenant and destroyed when the app retires (ADR#0092 Decision 7,
+// ADR#0095 Decision 4, R21).
+message DynamicClient {
+  option (buf.validate.message).cel = {
+    id: "dynamic_client.client_secret"
+    message: "a client secret is present exactly for client_secret_basic or client_secret_post"
+    expression: "(this.client_authentication_method == 2 || this.client_authentication_method == 3) == has(this.client_secret)"
+  };
+  option (buf.validate.message).cel = {
+    id: "dynamic_client.signing_key"
+    message: "a signing key is present exactly for private_key_jwt"
+    expression: "(this.client_authentication_method == 4) == has(this.signing_key)"
+  };
+  option (buf.validate.message).cel = {
+    id: "dynamic_client.management_receipt"
+    message: "a registration access token is present exactly when the registration client URI is held in custody"
+    expression: "(this.registration_client_uri == 2) == has(this.registration_access_token)"
+  };
+
+  // Assigned by the authorization server in the registration response.
+  string client_id = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  trogonai.connections.types.v1alpha1.Issuer issuer = 2 [features.field_presence = LEGACY_REQUIRED];
+  // The authorization server metadata whose registration_endpoint was used,
+  // recorded on this stream.
+  trogonai.connections.types.v1alpha1.Digest discovery_snapshot_digest = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.types.v1alpha1.ClientAuthenticationMethod client_authentication_method = 4 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.secrets.v1alpha1.SecretRef client_secret = 5;
+  trogonai.secrets.v1alpha1.SecretRef signing_key = 6;
+  // The RFC 7592 registration access token; absent when the server issued
+  // none.
+  trogonai.secrets.v1alpha1.SecretRef registration_access_token = 7;
+  // The registration_client_uri is capability-bearing and protected
+  // (ADR#0094 Decision 10), so the stream records only how it is held.
+  RegistrationClientUriHandling registration_client_uri = 8 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  // The environment's callback URI as registered.
+  repeated string redirect_uris = 9 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {pattern: "^https://[^/?#@*]+(/[^?#*]*)?$"}
+    }
+  }];
+}
+
+// Whether the platform can manage or delete the registration with RFC 7592.
+// Unspecified and unknown values are invalid.
+enum RegistrationClientUriHandling {
+  REGISTRATION_CLIENT_URI_HANDLING_UNSPECIFIED = 0;
+  // The server returned no registration_client_uri. Deletion is impossible
+  // and retirement records a REGISTRATION_RESIDUAL obligation (ADR#0094
+  // Decision 13).
+  REGISTRATION_CLIENT_URI_HANDLING_NOT_ISSUED = 1;
+  // Held in custody with the registration access token as one ownership
+  // receipt; only such a registration is deleted at retirement.
+  REGISTRATION_CLIENT_URI_HANDLING_HELD_IN_CUSTODY = 2;
+}

@@ -18,6 +18,10 @@ fn test_req_id() -> ReqId {
     ReqId::from_test("req-stream-1")
 }
 
+fn test_caller() -> SubjectPrincipal {
+    SubjectPrincipal::from_tokens("person", "alice").unwrap()
+}
+
 fn test_task_id() -> A2aTaskId {
     A2aTaskId::new("task-abc").expect("test task id")
 }
@@ -78,15 +82,17 @@ fn make_ctx<'a>(
     js: &'a MockJetStreamConsumerFactory,
     req_id: &'a ReqId,
     prefix: &'a A2aPrefix,
+    caller: &'a SubjectPrincipal,
     timeout: std::time::Duration,
 ) -> StreamingRequest<'a, AdvancedMockNatsClient, MockJetStreamConsumerFactory> {
     StreamingRequest {
         nats,
         js,
-        subject: "a2a.v1.agents.bot.message.stream",
+        subject: "a2a.v1.agents.bot.person.alice.message.stream",
         method: "message/stream",
         req_id,
         prefix,
+        caller,
         op_timeout: timeout,
         gateway_caller_jwt: None,
     }
@@ -96,7 +102,7 @@ fn make_ctx<'a>(
 async fn bootstrap_success_returns_task_and_stream() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_success("task-abc");
-    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -104,8 +110,9 @@ async fn bootstrap_success_returns_task_and_stream() {
 
     let req_id = test_req_id();
     let prefix = test_prefix();
+    let caller = test_caller();
     let (envelope, _stream) = send_streaming(
-        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        make_ctx(&nats, &js, &req_id, &prefix, &caller, std::time::Duration::from_secs(5)),
         &TestParams { dummy: "hi".into() },
     )
     .await
@@ -118,7 +125,7 @@ async fn bootstrap_success_returns_task_and_stream() {
 async fn bootstrap_task_id_that_is_not_a_nats_token_is_rejected() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_success("task abc.*");
-    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -126,8 +133,9 @@ async fn bootstrap_task_id_that_is_not_a_nats_token_is_rejected() {
 
     let req_id = test_req_id();
     let prefix = test_prefix();
+    let caller = test_caller();
     let result = send_streaming(
-        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        make_ctx(&nats, &js, &req_id, &prefix, &caller, std::time::Duration::from_secs(5)),
         &TestParams { dummy: "hi".into() },
     )
     .await;
@@ -139,7 +147,7 @@ async fn bootstrap_task_id_that_is_not_a_nats_token_is_rejected() {
 async fn bootstrap_error_propagates_as_client_error() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_error(-32001, "not found");
-    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -147,8 +155,9 @@ async fn bootstrap_error_propagates_as_client_error() {
 
     let req_id = test_req_id();
     let prefix = test_prefix();
+    let caller = test_caller();
     let result = send_streaming(
-        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        make_ctx(&nats, &js, &req_id, &prefix, &caller, std::time::Duration::from_secs(5)),
         &TestParams { dummy: "hi".into() },
     )
     .await;
@@ -167,8 +176,9 @@ async fn nats_transport_failure_returns_transport_error() {
 
     let req_id = test_req_id();
     let prefix = test_prefix();
+    let caller = test_caller();
     let result = send_streaming(
-        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        make_ctx(&nats, &js, &req_id, &prefix, &caller, std::time::Duration::from_secs(5)),
         &TestParams { dummy: "hi".into() },
     )
     .await;
@@ -180,15 +190,16 @@ async fn nats_transport_failure_returns_transport_error() {
 async fn get_stream_failure_returns_consumer_setup_error() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_success("t1");
-    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     js.fail_get_stream_at(1);
 
     let req_id = test_req_id();
     let prefix = test_prefix();
+    let caller = test_caller();
     let result = send_streaming(
-        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        make_ctx(&nats, &js, &req_id, &prefix, &caller, std::time::Duration::from_secs(5)),
         &TestParams { dummy: "hi".into() },
     )
     .await;
@@ -202,7 +213,14 @@ async fn open_task_stream_returns_typed_event_stream() {
     let (consumer, _tx) = MockJetStreamConsumer::new();
     js.add_consumer(consumer);
 
-    let stream = open_task_stream(&js, &test_prefix(), &test_task_id(), &ReqId::from_test("req-1")).await;
+    let stream = open_task_stream(
+        &js,
+        &test_prefix(),
+        &test_task_id(),
+        &test_caller(),
+        &ReqId::from_test("req-1"),
+    )
+    .await;
     assert!(stream.is_ok());
 }
 
@@ -211,7 +229,14 @@ async fn open_task_stream_get_stream_failure_returns_error() {
     let js = MockJetStreamConsumerFactory::new();
     js.fail_get_stream_at(1);
 
-    let result = open_task_stream(&js, &test_prefix(), &test_task_id(), &ReqId::from_test("req-1")).await;
+    let result = open_task_stream(
+        &js,
+        &test_prefix(),
+        &test_task_id(),
+        &test_caller(),
+        &ReqId::from_test("req-1"),
+    )
+    .await;
     assert!(matches!(result, Err(ClientError::ConsumerSetup(_))));
 }
 
@@ -226,8 +251,16 @@ async fn hang_returns_timeout_error() {
 
     let req_id = test_req_id();
     let prefix = test_prefix();
+    let caller = test_caller();
     let result = send_streaming(
-        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_millis(10)),
+        make_ctx(
+            &nats,
+            &js,
+            &req_id,
+            &prefix,
+            &caller,
+            std::time::Duration::from_millis(10),
+        ),
         &TestParams { dummy: "hi".into() },
     )
     .await;
@@ -239,7 +272,7 @@ async fn hang_returns_timeout_error() {
 async fn gateway_jwt_attaches_caller_jwt_to_bootstrap() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_success("task-gw");
-    nats.set_response_wire("a2a.v1.gateway.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.gateway.bot.person.alice.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let (consumer, _tx) = MockJetStreamConsumer::new();
@@ -248,13 +281,15 @@ async fn gateway_jwt_attaches_caller_jwt_to_bootstrap() {
     let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
     let req_id = test_req_id();
     let prefix = test_prefix();
+    let caller = test_caller();
     let ctx = StreamingRequest {
         nats: &nats,
         js: &js,
-        subject: "a2a.v1.gateway.bot.message.stream",
+        subject: "a2a.v1.gateway.bot.person.alice.message.stream",
         method: "message/stream",
         req_id: &req_id,
         prefix: &prefix,
+        caller: &caller,
         op_timeout: std::time::Duration::from_secs(5),
         gateway_caller_jwt: Some(&jwt),
     };
@@ -276,13 +311,14 @@ async fn bare_message_reply_yields_an_already_finished_stream() {
     // the caller gets a stream that ends rather than a consumer nobody feeds.
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = bootstrap_bare_message();
-    nats.set_response_wire("a2a.v1.agents.bot.message.stream", headers, body);
+    nats.set_response_wire("a2a.v1.agents.bot.person.alice.message.stream", headers, body);
 
     let js = MockJetStreamConsumerFactory::new();
     let req_id = test_req_id();
     let prefix = test_prefix();
+    let caller = test_caller();
     let (envelope, mut stream) = send_streaming(
-        make_ctx(&nats, &js, &req_id, &prefix, std::time::Duration::from_secs(5)),
+        make_ctx(&nats, &js, &req_id, &prefix, &caller, std::time::Duration::from_secs(5)),
         &TestParams { dummy: "hi".into() },
     )
     .await

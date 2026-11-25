@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::admission_keys::AdmissionKeyError;
+use crate::bridge_mint::BridgeCredentialError;
 use crate::jwt::JwtError;
 
 /// Typed reason a credential verifier rejected a caller. Replaces the
@@ -8,6 +10,20 @@ use crate::jwt::JwtError;
 /// substring-matching the error message.
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
+    #[error("OIDC issuer configuration is invalid")]
+    OidcIssuer(#[source] crate::credentials::oidc::OidcIssuerUrlError),
+    #[error("OIDC discovery failed")]
+    OidcDiscovery(#[source] crate::credentials::oidc::OidcDiscoveryError),
+    #[error("OIDC critical protected headers are unsupported")]
+    UnsupportedCriticalHeader,
+    #[error("OIDC protected header encoding is invalid")]
+    ProtectedHeaderEncoding(#[source] base64::DecodeError),
+    #[error("OIDC protected header JSON is invalid")]
+    ProtectedHeaderJson(#[source] serde_json::Error),
+    #[error("OIDC not-before claim must be an integer timestamp")]
+    InvalidNotBefore,
+    #[error("credential validity does not permit broker admission")]
+    Validity(#[source] crate::CredentialExpiryError),
     /// The caller requested an account that isn't in the allowlist (or
     /// otherwise doesn't resolve).
     #[error("requested account {0:?} not allowlisted")]
@@ -22,12 +38,18 @@ pub enum CredentialError {
     /// The verifier ran and refused the credential material itself.
     #[error("credential verification failed: {0}")]
     InvalidCredentials(String),
+    #[error("client certificate verification failed")]
+    MtlsCertificate(#[source] crate::credentials::mtls::CertificateVerificationError),
     /// The caller verified, but the principal document minted for them could
     /// not be encoded. Kept apart from [`Self::InvalidCredentials`] because the
     /// credential was good: the failure is this side's, and it carries the
     /// serde error rather than a rendering of it.
     #[error("principal serialization failed")]
     PrincipalSerialization(#[source] serde_json::Error),
+    /// The caller verified, but its id cannot stand at the principal position
+    /// of a subject, so no grant could name it.
+    #[error("credential principal cannot be placed in a subject")]
+    UnplaceablePrincipal(#[source] JwtError),
     /// The token nominated an `alg` outside the verifier's allowlist. Kept
     /// apart from [`Self::InvalidCredentials`] because an algorithm-confusion
     /// attempt is a different signal from a merely bad signature, and a
@@ -61,6 +83,8 @@ pub enum AuthCalloutError {
     /// async_nats subscribe error so the source chain isn't lost.
     #[error("subscribe to auth callout subject failed")]
     Subscribe(#[source] async_nats::SubscribeError),
+    #[error("auth callout subscription never reached a NATS server")]
+    Flush(#[source] async_nats::client::FlushError),
     #[error("failed to deserialize auth callout request")]
     Deserialize(#[source] serde_json::Error),
     #[error("failed to serialize auth callout response")]
@@ -105,6 +129,12 @@ pub enum AuthCalloutError {
     /// A signing-key file's bytes weren't valid UTF-8.
     #[error("signing key file must be UTF-8 NKey seed")]
     KeyLoadUtf8(#[source] std::str::Utf8Error),
+    #[error(transparent)]
+    AdmissionKeys(#[from] AdmissionKeyError),
+    #[error(transparent)]
+    TenantAdmission(#[from] crate::tenant_admission::TenantAdmissionError),
+    #[error(transparent)]
+    BridgeCredential(#[from] BridgeCredentialError),
 }
 
 #[cfg(test)]

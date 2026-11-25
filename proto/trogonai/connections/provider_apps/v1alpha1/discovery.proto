@@ -1,0 +1,28 @@
+edition = "2024";
+
+package trogonai.connections.provider_apps.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/discovery.proto";
+import "trogonai/policy/egress_permissions/v1alpha1/permission_policy.proto";
+
+// The authorization server metadata an app was registered against, as the
+// snapshot and the exact set of endpoint origins the broker may reach through
+// it: the issuer, authorization, token, revocation and registration origins
+// (ADR#0094 Decision 10). The owner acknowledges the origins on the
+// Connection, not here; this stream records what there is to acknowledge. A
+// new discovery with a different set of origins needs a new acknowledgement
+// on each connection, and a digest change with the same set is recorded
+// without one (ADR#0092 Decision 7, R19).
+message AuthorizationServerDiscovery {
+  option (buf.validate.message).cel = {
+    id: "authorization_server_discovery.origins_unique"
+    message: "endpoint origins must be unique"
+    expression: "this.endpoint_origins.map(o, o.host + ':' + string(o.port)).unique()"
+  };
+
+  trogonai.connections.types.v1alpha1.DiscoverySnapshot snapshot = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Exact host and port identities derived from the snapshot's endpoints by
+  // the fetcher; never patterns (ADR#0072 Decision 3).
+  repeated trogonai.policy.egress_permissions.v1alpha1.EgressHost endpoint_origins = 2 [(buf.validate.field).repeated.min_items = 1];
+}

@@ -58,6 +58,9 @@ mod replay_tests;
 pub mod postgres;
 
 #[cfg(feature = "postgres")]
-pub use postgres::{PostgresSchedulesProjection, SchedulesProjector};
+pub use postgres::{
+    PostgresRootCert, PostgresSchedulesProjection, PostgresTls, PostgresTlsError, PostgresUrl, PostgresUrlError,
+    SchedulesProjector, UnverifiedSslMode,
+};
 pub(crate) use schedules::storage;
 pub(crate) use schedules::{catch_up_schedules_read_model, project_appended_events};

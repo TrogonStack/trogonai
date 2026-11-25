@@ -1,0 +1,98 @@
+edition = "2024";
+
+package trogonai.connections.authorization_attempts.state.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/callback.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/exchange.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/failure.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/lifecycle.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/request.proto";
+import "trogonai/connections/authorization_attempts/v1alpha1/target.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/resource_parent.proto";
+import "trogonai/secrets/v1alpha1/secret_ref.proto";
+
+// The present fold retains its immutable resource_parent from genesis. A
+// command or event with another parent is refused before applying a transition;
+// current hierarchy placement and logical ownership do not rewrite this value.
+
+// One fold per attempt, not a joined projection. Unknown events and invalid
+// transitions reject replay. Missing is the explicit initial state.
+message State {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+
+    google.protobuf.Empty missing = 1;
+    AuthorizationAttempt present = 2;
+  }
+}
+
+// The target, request, callback binding, capsule reference and expiry are fixed
+// at genesis and never change (ADR#0094 Decision 1). The exchange origin is
+// recorded exactly once, by the write-ahead CodeExchangeStarted, so it is
+// present in Exchanging, OutcomeUnknown and Completed, and in Failed only when
+// the exchange was sent. The captured authority is present after
+// GrantedAuthorityCaptured, which only Exchanging or OutcomeUnknown admits, so
+// it never appears in a Cancelled or Expired attempt. The generation is present
+// exactly when Completed, and equals 1 for a fresh target or the expected
+// generation plus one for a reconnect (ADR#0094 Decision 6). The failure is
+// present exactly when Failed. Nothing here is material: the code, the
+// verifier, the signed state, the authorize URL and the token response never
+// enter the stream, and the staged bundle is named by a SecretVersionRef only.
+message AuthorizationAttempt {
+  option (buf.validate.message).cel = {
+    id: "authorizationattempt.captured_parent"
+    message: "the captured stage receipt and attempt share one custody parent"
+    expression: "!has(this.captured) || (this.captured.resource_parent == this.resource_parent)"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "authorization_attempt_state.target_parent"
+    message: "the stored attempt and target share one custody parent"
+    expression: "this.target.resource_parent == this.resource_parent"
+  };
+
+  option (buf.validate.message).cel = {
+    id: "authorization_attempt_state.exchange_origin"
+    message: "the exchange origin is present from Exchanging on, and only then"
+    expression: "has(this.exchange_origin) ? this.phase in [3, 4, 5, 6] : !(this.phase in [3, 4, 5])"
+  };
+  option (buf.validate.message).cel = {
+    id: "authorization_attempt_state.captured"
+    message: "a captured authority exists only after an exchange was sent, and always once Completed"
+    expression: "has(this.captured) ? has(this.exchange_origin) : this.phase != 5"
+  };
+  option (buf.validate.message).cel = {
+    id: "authorization_attempt_state.authorization_generation"
+    message: "the authorization generation is present exactly when Completed and matches the target"
+    expression: "has(this.authorization_generation) ? (this.phase == 5 && this.authorization_generation == (has(this.target.reconnect) ? this.target.reconnect.expected_authorization_generation + 1u : 1u)) : this.phase != 5"
+  };
+  option (buf.validate.message).cel = {
+    id: "authorization_attempt_state.failure"
+    message: "a failure is present exactly when the attempt is Failed"
+    expression: "(this.phase == 6) == has(this.failure)"
+  };
+
+  trogonai.connections.types.v1alpha1.AuthorizationAttemptId attempt_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.authorization_attempts.v1alpha1.AuthorizationTarget target = 2 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.authorization_attempts.v1alpha1.AuthorizationRequest request = 3 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.authorization_attempts.v1alpha1.CallbackBinding callback = 4 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.secrets.v1alpha1.SecretRef capsule_ref = 5 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp expires_at = 6 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.connections.authorization_attempts.v1alpha1.AuthorizationAttemptPhase phase = 7 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
+  trogonai.connections.authorization_attempts.v1alpha1.ExchangeOrigin exchange_origin = 8;
+  trogonai.connections.authorization_attempts.v1alpha1.CapturedAuthority captured = 9;
+  uint64 authorization_generation = 10 [(buf.validate.field).uint64.gt = 0];
+  trogonai.connections.authorization_attempts.v1alpha1.AuthorizationFailure failure = 11;
+
+  trogonai.connections.types.v1alpha1.ProjectResourceParent resource_parent = 12 [features.field_presence = LEGACY_REQUIRED];
+}

@@ -1,13 +1,14 @@
 import { FaultAlert } from '@/components/fault-alert';
 import { PageHeader } from '@/components/page-header';
 import { CustodyExplainer } from '@/features/custody/components/custody-explainer';
+import { CreateWebhookButton } from '@/features/gateway-sources/components/generic-webhooks';
 import { SourcesStats, SourcesStatsSkeleton } from '@/features/gateway-sources/components/sources-stats';
 import { SourcesTable, SourcesTableSkeleton } from '@/features/gateway-sources/components/sources-table';
 import { PreviewBadge } from '@/features/gateway-sources/components/status-badges';
-import { useSourcesQuery } from '@/features/gateway-sources/queries';
+import { useSourceList } from '@/features/gateway-sources/source-list-query';
 
 export function SourcesScreen() {
-  const sources = useSourcesQuery();
+  const sources = useSourceList();
 
   return (
     <div className="flex flex-col gap-6">
@@ -15,7 +16,8 @@ export function SourcesScreen() {
         eyebrow="Gateway"
         title="Sources"
         badge={<PreviewBadge />}
-        description="The webhook integrations the gateway receives from, the credentials that verify them and who holds the keys behind those credentials."
+        description="Receive events through a generic webhook or a provider integration, and manage the credentials that verify each delivery."
+        actions={<CreateWebhookButton />}
       />
       {sources.error ? <FaultAlert error={sources.error} title="Could not load sources" /> : null}
       {sources.data ? (

@@ -1,0 +1,164 @@
+edition = "2024";
+
+package trogonai.policy.connection_permissions.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/connections/types/v1alpha1/mcp_tool.proto";
+import "trogonai/connections/types/v1alpha1/operation.proto";
+import "trogonai/connections/types/v1alpha1/proxy.proto";
+import "trogonai/projects/projects/v1alpha1/identity.proto";
+
+// Every connection whose custody project is this project. It matches
+// project-owned connections, and workspace-owned connections whose integration
+// project this is. It never matches a person-owned connection: custody confers
+// no use on one (ADR#0093 Decisions 4 and 5).
+message ConnectionsUnder {
+  trogonai.projects.projects.v1alpha1.ProjectId project_id = 1 [features.field_presence = LEGACY_REQUIRED];
+}
+
+// What a permit reaches: one exact connection of any owner kind, or the
+// connections under one custody project. Both are identities, never selectors,
+// so a relabel cannot widen a permit.
+message ConnectionTarget {
+  oneof target {
+    option (buf.validate.oneof).required = true;
+
+    trogonai.connections.types.v1alpha1.ConnectionId connection_id = 1;
+    ConnectionsUnder under = 2;
+  }
+}
+
+// Narrows this permit only, never a separate ancestor permit. A ceiling
+// names one connector; another connector never matches. Applicable restrictions
+// are intersected with the release, planned authority and every live check.
+//
+// scopes is an allowlist of credential scopes: the actual credential scope set
+// must be a subset before use. It never maps an arbitrary HTTP request to a
+// provider action or attenuates a token. A narrower allowlist therefore denies
+// a broadly scoped credential rather than pretending to make it read-only.
+// http_requests bounds HTTP_PROXY only. mcp_tools bounds MCP_SESSION only,
+// including tools/list filtering. A mode with no applicable restriction in a
+// present ceiling is denied. Unsupported restrictions are refused, not ignored.
+// The live permit is never copied into a plan or grant.
+message ConnectionCeiling {
+  reserved 2;
+  reserved operations;
+
+  option (buf.validate.message).cel = {
+    id: "connection_ceiling.narrows"
+    message: "a ceiling needs a scope allowlist, HTTP restriction or MCP tool allowlist"
+    expression: "this.scopes.size() > 0 || has(this.http_requests) || this.mcp_tools.size() > 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_ceiling.scopes_unique"
+    message: "ceiling scopes must be unique"
+    expression: "this.scopes.map(s, s.value).unique()"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_ceiling.mcp_tools_unique"
+    message: "ceiling tools must be unique"
+    expression: "this.mcp_tools.map(t, t.value).unique()"
+  };
+
+  trogonai.connections.types.v1alpha1.ConnectorId connector_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.connections.types.v1alpha1.ProviderScope scopes = 3;
+  repeated trogonai.connections.types.v1alpha1.McpToolName mcp_tools = 4;
+  trogonai.connections.types.v1alpha1.HttpRequestRestrictions http_requests = 5;
+}
+
+// One grant of use. A permit matches a use when its target reaches the
+// resolved connection, its modes include the requested mode, and its ceiling,
+// if present, admits the use.
+//
+// modes empty means HTTP_PROXY only. MCP_SESSION must be named explicitly. TOKEN_ISSUANCE must be named,
+// arrives in Phase 4 (ADR#0096 Decision 10), and never matches a person-owned
+// connection, because a token handed out outlives the delegation.
+//
+// A delegation is a permit, with no separate delegation record (ADR#0093
+// Decision 4). It is the permit whose target is the exact connection_id of a
+// person-owned connection. The owner kind is a fact of the Connection, not of
+// the permit, so dispatch reads it from the connection directory and enforces
+// the delegation rules there:
+//   - only the owning person's own authenticated act creates or widens one
+//     (the envelope actor is the owner); the owner, or a tenant administrator,
+//     ends one by removing it, and a tenant administrator never creates one;
+//   - it binds only to an exact AgentId subject, never a NodeId, so a node
+//     administrator cannot reach a personal connection through a subtree;
+//   - it admits HTTP_PROXY or explicitly named MCP_SESSION, narrowed by its ceiling;
+//   - it is live only while the owner can still access the custody project,
+//     which every evaluation re-checks.
+// Evaluation applies the same rules again, so a permit on a node subject or a
+// TOKEN_ISSUANCE mode never matches a person-owned connection even if one were
+// written.
+message ConnectionPermit {
+  option (buf.validate.message).cel = {
+    id: "connection_permit.no_unenforceable_token_ceiling"
+    message: "token issuance cannot enforce HTTP or MCP request restrictions"
+    expression: "!has(this.ceiling) || !this.modes.exists(m, m == 2) || (!has(this.ceiling.http_requests) && this.ceiling.mcp_tools.size() == 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_permit.restrictions_have_a_mode"
+    message: "request restrictions need their corresponding permitted mode"
+    expression: "!has(this.ceiling) || ((!has(this.ceiling.http_requests) || this.modes.size() == 0 || this.modes.exists(m, m == 3)) && (this.ceiling.mcp_tools.size() == 0 || this.modes.exists(m, m == 4)))"
+  };
+  option (buf.validate.message).cel = {
+    id: "connection_permit.ceiling_applies_to_modes"
+    message: "each permitted mode needs an applicable restriction in a present ceiling"
+    expression: "!has(this.ceiling) || (this.modes.size() == 0 ? (this.ceiling.scopes.size() > 0 || has(this.ceiling.http_requests)) : this.modes.all(m, this.ceiling.scopes.size() > 0 || (m == 3 && has(this.ceiling.http_requests)) || (m == 4 && this.ceiling.mcp_tools.size() > 0)))"
+  };
+  ConnectionTarget target = 1 [features.field_presence = LEGACY_REQUIRED];
+  repeated trogonai.connections.types.v1alpha1.ConnectionUseMode modes = 2 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  ConnectionCeiling ceiling = 3;
+}
+
+// A policy widens; it lets a Session of the subject use a connection. Absence
+// is deny: an Agent with no permit on itself or any ancestor node uses no
+// connection, and a ConnectionDeclaration in its configuration grants nothing
+// (ADR#0093 Decision 5, ADR#0096 Decision 3).
+//
+// Permits accumulate downward: the effective set for an Agent is the union of
+// its own policy and every ancestor node's, and a use is admitted when any
+// permit in that set matches it. Permits do not follow the delegation lineage:
+// a child Session is checked against its own Agent's chain (ADR#0071
+// Decisions 2 and 3). The PolicyRuleRef recorded as the admitting permit names
+// the nearest history on the chain whose policy admitted the use.
+//
+// The selector resolves first and the permission is checked second, on the
+// single resolved connection. Policy may refuse a resolution but never changes
+// which connection it resolves to.
+//
+// A permit is written against the owner side: for a project or workspace owner
+// the actor must administer that owner in the policy plane, and for a person
+// owner the actor must be that person. The actor must also be able to bind
+// policy to the subject (ADR#0071 Decision 1). Dispatch refuses a permit whose
+// target lies in another tenant than the subject (ADR#0093 Decision 7). Phase 1
+// enables project-owned targets only (ADR#0093 Decision 8).
+//
+// Evaluation is bounded-live. Admission, the authorized HTTP proxy and the trusted
+// MCP executor read permits, standing and connection state from a projection
+// whose staleness is measured from the projector heartbeat. Each refuses new
+// work once that staleness passes a configured bound of at most 330 seconds,
+// the ADR#0049 cache TTL plus jitter, and never falls back to the last
+// projection it held. This matches the bounded-live rule proposed for ADR#0071
+// in PR #751.
+//
+// One permit per target and ceiling connector. An empty policy is invalid;
+// clear the permission to withdraw it.
+message ConnectionPermissionPolicy {
+  option (buf.validate.message).cel = {
+    id: "connection_permission_policy.permits_unique"
+    message: "each target may appear at most once per ceiling connector"
+    expression: "this.permitted.map(p, (has(p.target.connection_id) ? 'connection:' + p.target.connection_id.value : 'under:' + p.target.under.project_id.value) + (has(p.ceiling) ? '|ceiling:' + p.ceiling.connector_id.value : '|unbounded')).unique()"
+  };
+
+  repeated ConnectionPermit permitted = 1 [(buf.validate.field).repeated.min_items = 1];
+}

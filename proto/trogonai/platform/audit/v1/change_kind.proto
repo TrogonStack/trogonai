@@ -1,0 +1,11 @@
+edition = "2024";
+
+package trogonai.platform.audit.v1;
+
+// ChangeKind is which kind of aggregate the pointed-at event belongs to.
+// Unspecified and unknown values are invalid.
+enum ChangeKind {
+  CHANGE_KIND_UNSPECIFIED = 0;
+  CHANGE_KIND_POLICY = 1;
+  CHANGE_KIND_CREDENTIAL = 2;
+}

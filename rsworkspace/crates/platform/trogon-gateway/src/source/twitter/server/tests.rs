@@ -10,17 +10,19 @@ use std::future::{Future, IntoFuture};
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, JetStreamPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
 use trogon_nats::mocks::MockError;
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
-use crate::source_integration_id::SourceIntegrationId;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -41,7 +43,7 @@ fn wrap_publisher(publisher: MockJetStreamPublisher) -> ClaimCheckPublisher<Mock
 fn test_config() -> TwitterConfig {
     TwitterConfig {
         consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("twitter").unwrap(),
+        subject_prefix: DottedNatsToken::new("twitter").unwrap(),
         stream_name: NatsToken::new("TWITTER").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
@@ -61,12 +63,14 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router 
     let store = MockOpenBaoSecretStore::default();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Twitter,
-                integration_id.clone(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Twitter,
+                    integration_id.clone(),
+                ),
+                CredentialKind::ConsumerSecret,
             ),
-            CredentialKind::ConsumerSecret,
             trogon_std::SecretString::new(secret).unwrap(),
         )
         .await
@@ -74,7 +78,7 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router 
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
 
     runtime_router(
@@ -459,7 +463,7 @@ async fn publish_ack_failure_returns_internal_server_error() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("twitter").unwrap(),
+        subject_prefix: DottedNatsToken::new("twitter").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
     };
 
@@ -491,7 +495,7 @@ async fn unroutable_publish_ack_failure_returns_internal_server_error() {
             MaxPayload::from_server_limit(usize::MAX),
         ),
         consumer_secret: TwitterConsumerSecret::new(TEST_SECRET).unwrap(),
-        subject_prefix: NatsToken::new("twitter").unwrap(),
+        subject_prefix: DottedNatsToken::new("twitter").unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
     };
 

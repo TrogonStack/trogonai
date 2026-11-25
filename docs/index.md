@@ -11,7 +11,10 @@ hero:
   actions:
     - theme: brand
       text: Get started
-      link: /get-started/
+      link: /product/
+    - theme: alt
+      text: View releases
+      link: /releases/
 
 features:
   - title: Durable coordination

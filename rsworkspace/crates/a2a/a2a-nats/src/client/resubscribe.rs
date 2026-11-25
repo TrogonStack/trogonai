@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use trogon_identity_types::SubjectPrincipal;
 use trogon_nats::jetstream::{JetStreamCreateConsumer, JetStreamGetStream, JsAck, JsMessageOf, JsMessageRef};
 
 use crate::a2a_prefix::A2aPrefix;
@@ -14,6 +15,7 @@ pub async fn open_resubscribe_stream<J>(
     js: &J,
     prefix: &A2aPrefix,
     task_id: &A2aTaskId,
+    caller: &SubjectPrincipal,
     last_seq: u64,
 ) -> Result<TypedEventStream, ClientError>
 where
@@ -31,7 +33,7 @@ where
         .await
         .map_err(|e| ClientError::ConsumerSetup(format!("get stream '{stream_name}': {e}")))?;
 
-    let consumer_config = resubscribe_consumer(prefix, task_id, last_seq);
+    let consumer_config = resubscribe_consumer(prefix, task_id, caller, last_seq);
 
     let consumer = stream
         .create_consumer(consumer_config)

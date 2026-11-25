@@ -1,0 +1,16 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+
+// One tool an MCP server lists, as the server names it, matched by exact,
+// case-sensitive equality. A permit's ceiling may narrow an MCP connection to
+// a tool allowlist, and the trusted MCP executor filters tool listing and
+// rejects calls outside it on every call (ADR#0096 Decision 7).
+message McpToolName {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+}

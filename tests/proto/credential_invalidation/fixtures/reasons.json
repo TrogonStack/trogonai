@@ -1,0 +1,398 @@
+[
+  {
+    "name": "InvalidateCredential accepts REFRESH_OUTCOME_LOST",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 5,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialInvalidated accepts REFRESH_OUTCOME_LOST",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 5,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "InvalidateCredential accepts CUSTODY_RESTORED",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 8,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialInvalidated accepts CUSTODY_RESTORED",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 8,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "InvalidateCredential accepts CUSTODY_KEY_DESTROYED",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 9,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialInvalidated accepts CUSTODY_KEY_DESTROYED",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 9,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "InvalidateCredential accepts CUSTODY_KEY_LOST",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 10,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialInvalidated accepts CUSTODY_KEY_LOST",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 10,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "InvalidateCredential accepts REFRESH_TOKEN_LAPSED",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 11,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialInvalidated accepts REFRESH_TOKEN_LAPSED",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 11,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "InvalidateCredential accepts AUTHORITY_WIDENED",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 13,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "CredentialInvalidated accepts AUTHORITY_WIDENED",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 13,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "InvalidateCredential rejects non-custody reason 0",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 0,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "InvalidateCredential rejects non-custody reason 2",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 2,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "InvalidateCredential rejects non-custody reason 12",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 12,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "InvalidateCredential rejects non-custody reason 14",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 14,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "CredentialInvalidated rejects non-custody reason 0",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 0,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "CredentialInvalidated rejects non-custody reason 2",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 2,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "CredentialInvalidated rejects non-custody reason 12",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 12,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "CredentialInvalidated rejects non-custody reason 14",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 14,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "INVALID_GRANT is decided through RejectRefresh",
+    "type": "trogonai.secrets.credentials.v1alpha1.InvalidateCredential",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 4,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "INVALID_GRANT invalidation remains replayable",
+    "type": "trogonai.secrets.credentials.v1alpha1.CredentialInvalidated",
+    "message": {
+      "secretRef": {
+        "id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "reason": 4,
+      "resourceParent": {
+        "project": {
+          "projectId": {
+            "value": "credential-test"
+          }
+        }
+      }
+    },
+    "valid": true
+  }
+]

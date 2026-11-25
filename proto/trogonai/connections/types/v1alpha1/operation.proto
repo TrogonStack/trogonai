@@ -1,0 +1,20 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+// How a permit authorizes use of a connection (ADR#0096 Decision 3).
+// Empty permit modes mean HTTP_PROXY only. Unknown values and the retired
+// typed-operation mode are refused, never interpreted as proxy authority.
+enum ConnectionUseMode {
+  reserved 1;
+  reserved CONNECTION_USE_MODE_INVOKE_OPERATION;
+
+  CONNECTION_USE_MODE_UNSPECIFIED = 0;
+  // Optional future issuance to a registered trusted adapter, never agent code
+  // or a consumer of a person-owned connection.
+  CONNECTION_USE_MODE_TOKEN_ISSUANCE = 2;
+  // Ordinary HTTP forwarding by the authorized connection proxy.
+  CONNECTION_USE_MODE_HTTP_PROXY = 3;
+  // Protocol-aware MCP sessions and tool allowlists; must be named explicitly.
+  CONNECTION_USE_MODE_MCP_SESSION = 4;
+}

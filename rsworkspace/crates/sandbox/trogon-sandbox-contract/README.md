@@ -1,0 +1,274 @@
+# Sandbox contract
+
+`trogon-sandbox-contract` provides validated worker, dispatch-attempt, and operation
+identifiers, lease identifiers and policies, artifact metadata, image and snapshot
+references, drive contracts, operation kinds, and the operation state transition
+rules.
+
+`WorkerId`, `DispatchAttemptId`, and `OperationId` serialize as JSON strings. Each
+accepts 1 to 128 bytes containing only ASCII letters, digits, `_`, or `-`.
+Construction, parsing, and deserialization enforce the same grammar and return
+typed validation errors.
+
+`Digest` serializes as a JSON string containing `sha256:` followed by exactly 64
+lowercase ASCII hexadecimal characters. Construction, parsing, and deserialization
+enforce this grammar. `DigestError` distinguishes a missing prefix from an invalid
+hash. Validation checks the identifier's form; it does not hash or verify artifact
+content.
+
+`ArtifactType` preserves the JSON names and media types below. These describe
+artifact metadata; they do not establish provider or runtime support.
+
+| JSON name | Media type |
+| --- | --- |
+| `sandbox_rootfs_v1` | `application/vnd.trogon.sandbox.rootfs.v1+tar` |
+| `hyperlight_snapshot_v1` | `application/vnd.trogon.hyperlight.snapshot.v1` |
+| `firecracker_snapshot_v1` | `application/vnd.trogon.firecracker.snapshot.v1` |
+| `kubevirt_disk_v1` | `application/vnd.trogon.kubevirt.disk.v1+qcow2` |
+| `sbom_v1` | `application/vnd.trogon.sbom.v1` |
+| `scan_report_v1` | `application/vnd.trogon.scan-report.v1` |
+
+`ProviderKind` preserves the provider identity used by sandbox wire messages.
+Its JSON names are `k8s_micro_vm`, `subprocess`, `local_docker`, `daytona`,
+`modal`, `hyperlight`, `v8_wasm`, `kube_virt`, `azure_container_apps`,
+`substrate`, `firecracker`, `proxmox`, `fly`, `e2b`, `vercel`, `space`, and
+`mock`. The enum records identity only; it does not select, start, or authorize
+a provider.
+
+`IsolationTier` names the isolation strength requested by a lease. Its JSON names
+are `container`, `bwrap`, `user_space_kernel`, `micro_vm`, `full_vm`, and
+`wasm_micro_vm`. The contract preserves the ordered provider mappings for each
+tier and the inverse provider capabilities; it does not select or authorize a
+provider.
+
+Capability metadata uses `VolumeMode` values `read_only`, `read_write`, and
+`copy_on_write`; `EgressEnforcementLevel` values `none`, `best_effort`, and
+`mandatory`; and `ResourceLimitMechanism` values `none`, `rlimit`, `cgroup_v2`,
+`job_object`, and `runtime`. `SnapshotCapability`, `VolumeCapability`, and
+`EgressCapability` describe provider support and preserve their defaulted JSON
+fields. Each support flag is a `CapabilitySupport` value, `Supported` or
+`Unsupported`, serialized as a JSON boolean so existing peers keep parsing it;
+an omitted flag reads as `Unsupported`. These values report capabilities; they
+do not authorize or select a provider.
+
+`ProviderCapabilityProfile` is the full profile a provider's worker declares:
+snapshot, volume, isolation, lifecycle, and performance axes, plus resource
+ranges, placement, and ingress limits that default when an older peer omits
+them. `ResourceRange` rejects a minimum above its maximum. `CapabilityProfile` is the flattened tenant view derived from it, and
+`ListCapabilitiesRequest` and `ListCapabilitiesResponse` carry those views.
+`sdk_features` lists the `SdkFeature` values a profile vouches for, in a fixed
+order, leaving out any feature without a backing flag. `WorkerCapabilities`
+serializes as a `u32` bit set and rejects unknown bits. `DormancyCapability`
+resolves a `SuspendRequestLevel` only to a suspend level the provider offers,
+and `EnvDigest` reuses the `Digest` grammar. These profiles report capabilities;
+they do not select, place, or authorize a provider.
+
+`CapabilityRequirements` is what a lease asks of a worker: `needs_*` flags, minimum
+tiers and levels, and optional limits such as region and lifetime. Each flag is a
+`CapabilityNeed`, `Required` or `NotRequired`, serialized as a JSON boolean; an
+omitted flag reads as `NotRequired`. The contract carries the request only. Matching
+it against a profile is not part of the contract. `LeaseError` and `DriveError` are
+tagged by `kind`, and `LeaseError::NoWorkerSatisfiesCapabilities` carries the
+requirements that found no worker.
+
+`LeaseId` and `CorrelationId` serialize as JSON strings and accept any string.
+`TenantId` also serializes as a JSON string, but holds 1 to 128 bytes with no
+control characters; construction, parsing, and deserialization all enforce it.
+`EmptyObject` serializes as `{}` for enum variants that carry no fields, and
+deserializes only from an empty JSON object.
+
+`SandboxTags` serializes as a JSON object of string values and rejects more than
+five tags on construction and deserialization. `contains_all` matches a tag
+filter, and an empty filter matches every lease.
+
+`IdlePolicy` lists `IdleStage` values, each applying an `IdleAction` (`pause`,
+`suspend`, or `release`) once a lease has been quiet for more than a nonzero
+`after_seconds`. A policy holds at least one stage, strictly increasing stage
+times, and strictly more severe actions; construction and deserialization both
+enforce it. `fits_within` reports whether every stage fires within an
+operator's ceiling on idle time.
+
+`SnapshotPolicy` names the `ArtifactType` and target repository for a lease's
+snapshots, plus an optional `RetentionPolicy`, `PrewarmSpec`, and tag name that
+are omitted from JSON when absent. A `RetentionPolicy` keeps `max_tags` as a
+`RetentionTagLimit` between 1 and 10; construction and deserialization both
+enforce the bounds. `delete_evicted` is an `EvictedArtifactAction`, `Delete`
+or `Keep`, serialized as a JSON boolean; an omitted value reads as `Keep`, which
+leaves the evicted artifact in the registry. These policies describe intent;
+they do not schedule idle handling, take snapshots, or prune a registry.
+
+`OciImageRef` splits an image into `registry`, `repository`, and an optional
+`tag` and `digest`, which are omitted from JSON when absent.
+`OciImageRef::parse_unqualified` treats the first path component as the registry
+only when it contains `.` or `:`, or is `localhost`, and splits off an `@` suffix
+as the digest only when it is a valid `Digest`; an invalid suffix stays in the
+reference. `pattern_matches_legacy` matches an
+allowlist pattern exactly or by a single trailing `*`; an empty pattern matches
+nothing. `pattern_matches_oci_image_ref` also compares a pattern part by part, so an
+empty registry, an absent tag, or a `*` tag matches any value, and a pinned digest
+matches only the same digest. `OciArtifactRef`
+pins an `ArtifactType` by digest in a registry.
+
+`NativeSnapshotRef` names a snapshot a provider keeps itself, scoped to its
+`ProviderKind`, with an optional `expires_at` in Unix seconds. Its
+`NativeSnapshotId` holds 1 to 128 bytes of ASCII letters, digits, `-`, `_`, or
+`.`; construction, parsing, and deserialization all enforce it.
+`NativeSnapshotReceipt` carries the reference and an optional size.
+`PullSecretId` and `ServiceAccountId` serialize as JSON strings and accept any
+string; a `PullSecretId` names a secret, it never carries one.
+
+`SnapshotTag` scopes a `SnapshotTagName` to a `TenantId`. A `SnapshotTagName`
+holds 1 to 64 bytes of ASCII letters, digits, `.`, `_`, or `-`; construction,
+parsing, and deserialization all enforce it. `SnapshotTagRecord` and
+`SnapshotTagAuditEvent` (tagged by `event` as `set` or `cleared`) record who moved
+a tag and when, using serde's `SystemTime` encoding of `secs_since_epoch` and
+`nanos_since_epoch`.
+
+`DriveId` scopes a `DriveName` to a `TenantId`; a `DriveName` holds 1 to 64
+bytes without `/`, `\`, or `..`. `DriveMount` mounts a drive at a `MountPath` in a
+`DriveMountMode`, `read_write` by default or `read_only`. A `MountPath` is
+absolute, does not resolve to `/`, such as `/.` or `//`, and has no `..`
+component. Construction, parsing, and deserialization enforce both rules.
+`DriveStorage` is untagged: an S3 bucket or a `ProviderVolumeRef`, whose `ProviderVolumeId` rejects an empty
+value, more than 256 bytes, whitespace, or control characters. `DriveRecord`
+flattens its storage into the record, and `DriveRecord::DEFAULT_SIZE_GIB` (100)
+and `DriveRecord::MAX_SIZE_GIB` (1024) bound a requested size. `DriveError` is
+tagged by `kind`. `SandboxUserName` and `SandboxGroupName` accept only
+`^[a-z_][a-z0-9_-]*$` within 32 bytes, on construction, parsing, and
+deserialization. These contracts describe drives and accounts; they do not
+provision storage, mount volumes, or create users.
+
+`WorkerHeartbeat` is the periodic report a worker publishes: its `WorkerId`,
+`ProviderKind`, full `ProviderCapabilityProfile`, `WorkerCapacity`, cached and
+warm-pool image digests, and the `NativeVolumeBinding` values it holds.
+`WorkerDispatchProtocol` names the dispatch format the worker accepts, `legacy` by
+default or `targeted_v1`, and `supports_lease_epoch` is a `CapabilitySupport`
+flag. Fields added after the first heartbeat default when an older worker omits
+them, and empty volume bindings and warm-pool counts are left out of the JSON. A
+heartbeat reports state; it does not register a worker or route a lease.
+
+`LeaseStatus` uses the JSON strings `pending`, `running`, `paused`, `suspending`,
+`suspended`, `waking`, `cancelling`, `released`, and `failed`. `LeaseUsage`
+reports one lease's command and file counters, its running, paused, and suspended
+seconds, and optional `ResourceGauges`; `TenantUsage` sums the same counters
+across a tenant's leases. `LeaseCounters` holds the totals a lease accrues
+while it runs; `add` saturates at `u64::MAX` and leaves the pause and suspend
+bookkeeping untouched. `AccountLimits` pairs a
+tenant's usage with its caps, and `TagLimits` adds an optional cap on active
+leases per tag value. `ResourceUsageRequest`, `GetLeaseUsageRequest`,
+`GetTenantUsageRequest`, and `GetAccountLimitsRequest` carry the identifiers for
+those reads. These types report usage; they do not meter, bill, or enforce a
+quota.
+
+The lease lifecycle messages cover stop, cancel, pause, resume, rollback, suspend,
+and wake. Each client request (`StopLeaseRequest`, `PauseLeaseRequest`,
+`ResumeLeaseRequest`, `RollbackLeaseRequest`, `SuspendLeaseRequest`,
+`WakeLeaseRequest`) names a tenant and a lease, and most take an optional
+`OperationId`. Each reply is tagged by `outcome` and carries `Denied` with a
+`LeaseError`; pause, resume, rollback, and the worker replies also have
+`unsupported`. `CancelIntent` is `release` or `purge`. The worker messages
+(`SandboxFreezeRequest`, `SandboxRollbackRequest`, `SandboxSuspendRequest`,
+`SandboxWakeRequest` and their responses) are broadcast per provider. A suspend
+keeps a `DormancyRecord`, whose `DormancyArtifact` is `local` to a worker or
+`remote` in a registry. These types only describe the wire. Clamping budgets,
+choosing a suspend level, and routing are left to the broker.
+
+`SnapshotPublished` and `SnapshotDeleted` announce a snapshot entering or leaving
+the registry, and `LiveSnapshotEntry` is one the tenant is charged for. Each may
+carry a `SnapshotGeneration`, a canonical ULID of 26 uppercase Crockford base32
+characters starting with `0` through `7`; construction, parsing, and
+deserialization all enforce it. `SnapshotPublishedTag` names the
+`SnapshotTagName` a builder moves to the snapshot and the `set_at` time tag moves
+are ordered by. `SnapshotAccountingResponse` is tagged by `outcome`: `committed`
+with a `SnapshotAccountingDisposition` of `live`, `superseded`, or `deleted`, or
+`refused` with a `SnapshotAccountingRefusal`. `SnapshotCaptureStatus` is tagged
+by `kind` as `created` or `failed`, and `SnapshotRestoreResult` carries the
+digest a worker restored. `LeaseFailed` reports a `LeaseFailedReason`, tagged by
+`kind`; its `digest_mismatch` holds a `DigestMismatch` whose `expected` and
+`actual` digests differ, which construction and deserialization both enforce.
+These events describe snapshots; they do not push, delete, or charge for
+artifacts.
+
+`WorkspaceSource` is keyed by its variant name: `clone` checks out a Git `sha`
+with `CloneAuth`, `host_mount` mounts a host directory, `s3_volume` mounts an S3
+prefix in a `VolumeMode` with an optional seed snapshot, and `empty` starts from
+nothing. A host mount's `HostMountAccess` serializes as the JSON boolean
+`readonly`, and an omitted value reads as `ReadWrite`. `CloneAuth` is `none`,
+`bearer_token`, or `basic`, and each secret is a `SecretRef`, either a NATS
+key-value entry or a literal. `Debug` and `Display` never show a literal value,
+but serialization carries it to the worker. These types describe where a
+workspace comes from; they do not clone, mount, or fetch secrets.
+
+`CommandReadinessRequest` asks a worker whether a lease's sandbox can run
+commands through the sealed supervisor. It binds the probe to a tenant, a lease,
+a `ProviderKind`, a `CommandReadinessTarget`, and a `SandboxId` of 1 to 512
+bytes with no control characters. The target's `LeaseEpoch` is required and is
+never zero, and the lease id must be 1 to 1024 bytes of dot-separated tokens
+with no whitespace, control characters, `*`, or `>`. Construction and
+deserialization both enforce these rules and reject unknown fields.
+`CommandReadinessResponse` is tagged by `outcome`: `ready` with a
+`CommandReadinessRuntime`, whose `sha256` is the bare hex hash of the
+supervisor, `unsupported` or `unavailable` with the binding and a reason, or
+`denied` with a reason. These types describe the probe; they do not run it.
+
+`RunCommandRequest` asks a worker to run a command in a lease's sandbox, and its
+`RunCommandResponse` is tagged by `outcome` as `completed`, `started`, or
+`denied`. Options only a detached command may use, namely interactive stdin, a
+lease deadline, and a `ProcessSpec`, live in `CommandExecution::Detached`, and
+deserialization rejects them on an attached command. A `CommandEnv` cannot set
+the reserved execution id variable, and `RedactValues` holds at most 64 values
+of at most 8192 bytes each. A `LaunchKey` is 1 to 128
+characters of `[A-Za-z0-9_-]`, a `ProcessName` is 1 to 64 characters of
+`[A-Za-z0-9._-]`, a `ReadinessNeedle` is 1 to 4096 bytes, and `ReadyPorts` holds
+at most 16 distinct nonzero ports. Each rule is enforced on construction and on
+deserialization. A `RedactValue` never shows its value in `Debug` and has no
+`Display`, but serialization carries it. Every wire boolean, such as
+`detached`, `stream_output`, `timed_out`, and `eof`, is a two-variant enum that
+still serializes as a JSON boolean. `UnixSignal` is a closed set of signal
+names, so a free-form string never reaches a worker. A `WriteStdinRequest`
+carries a `StdinChunk` of at most 64 KiB and must hold data or end the input.
+The stop, restart, kill, cancel launch, poll, wait for readiness, list
+processes, and read logs requests each have a tagged response. The file types
+`WriteFilesRequest` and `ReadFileRequest` write and read files as an optional
+`SandboxUserName`. These types describe the messages; they do not run commands,
+trim output, or move bytes.
+
+`DispatchTarget` names the worker and attempt a lease is dispatched to, with an
+optional `LeaseEpoch` for workers that support epochs.
+
+The credential broker contracts cover issuing, revoking, and rotating
+credentials. `CredentialIssueRequest` asks for a token with a
+`CredentialScope`, tagged by `kind`, and a nonzero `ttl_seconds`. It may carry a
+`PolicyFence` naming the committed policy revision it was built from.
+`CredentialIssueOutcome` and `CredentialAckOutcome` are tagged by `outcome` as
+`ok` or `err`, and every `CredentialError` is tagged by `kind`. A
+`CredentialAck` always serializes with `ok: true`, and deserialization rejects
+`ok: false`. `ShortLivedToken` and `OidcToken` never show their value in
+`Debug` and have no `Display`, but serialization carries it.
+`CredentialAuditEvent` is tagged by `event` as `issued`, `revoked`, or
+`rotated`, and `CredentialProvider` parses its wire names. These types describe
+the broker's messages; they do not store, mint, or verify credentials.
+
+`OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
+`pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
+presence in the contract does not establish runtime support for that operation.
+
+`OperationState` uses the JSON strings below. Transitions are allowed only to the
+listed destinations:
+
+| State | Allowed destinations |
+| --- | --- |
+| `queued` | `running`, `canceled`, `expired` |
+| `running` | `running`, `queued`, `succeeded`, `failed`, `canceled` |
+| `succeeded` | None |
+| `failed` | None |
+| `canceled` | None |
+| `expired` | None |
+
+The `running` self-transition permits takeover of a stale claim, while returning
+to `queued` permits retry after a transient failure. Terminal states are immutable,
+including self-transitions.
+
+This package defines values and allowed transitions. It does not execute
+operations, persist state, authorize transitions, enforce claim ownership, or
+provide worker, provider, transport, or lease-generation behavior.

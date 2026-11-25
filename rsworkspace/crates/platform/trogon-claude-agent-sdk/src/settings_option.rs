@@ -1,0 +1,389 @@
+//! The `settings`, `sandbox` and `managedSettings` options: how each upstream SDK folds them into the
+//! command line and the `initialize` request.
+//!
+//! TypeScript merges the sandbox into the settings document (`_8`/`h8` in `sdk.mjs`) and never reads a
+//! file. Python replaces the settings' `sandbox` key and reads a settings file relative to the working
+//! directory (`_build_settings_value` in `subprocess_cli.py`).
+
+use std::{
+    ffi::OsString,
+    io,
+    path::{Component, Path, PathBuf},
+};
+
+use indexmap::IndexMap;
+use serde_json::{Map, Value};
+
+use crate::{
+    ClaudeAgentOptions, Error, ManagedSettingsDelivery, OptionError, SandboxSettings, SettingsInput,
+    SettingsLoadCauseError, SettingsLoadError,
+    adapters::ReadFile,
+    constants::{
+        SANDBOX_FORBIDDEN_KEYS, SANDBOX_MERGED_LISTS, SANDBOX_PROXY_PORTS, SANDBOX_REPLACED_OBJECTS,
+        SETTINGS_PATH_WITH_SANDBOX_ERROR,
+    },
+    process_options::ArgvStyle,
+    python_c_stack::PythonCStack,
+    python_json_error::PythonJsonError,
+    python_json_load::{drop_python_deep, loads_text},
+    python_json_value::{PythonJsonValue, PythonNumber, python_json_dumps},
+    python_text,
+    python_text_file::read_text_utf8_sig,
+    settings_json::{js_normalize, js_stringify, python_dumps},
+    settings_numbers::same_value_zero,
+};
+
+/// TypeScript's `managedSettingsViaInitialize`.
+pub(crate) fn managed_via_initialize(options: &ClaudeAgentOptions) -> bool {
+    options.argv_style == ArgvStyle::TypeScript
+        && options.managed_settings_delivery == ManagedSettingsDelivery::Initialize
+        && options.managed_settings.is_some()
+}
+
+/// The `managedSettings` member of the TypeScript `initialize` request.
+pub(crate) fn initialize_managed_settings(options: &ClaudeAgentOptions) -> Result<Option<Value>, Error> {
+    if !managed_via_initialize(options) {
+        return Ok(None);
+    }
+    options
+        .managed_settings
+        .as_ref()
+        .map(|settings| {
+            settings
+                .to_value()
+                .map(|value| js_normalize(&value))
+                .map_err(|error| crate::ProtocolError::from(error).into())
+        })
+        .transpose()
+}
+
+/// The `--managed-settings` argument pair, `None` when delivery is by `initialize`.
+pub(crate) fn managed_settings_json(options: &ClaudeAgentOptions) -> Result<Option<String>, Error> {
+    if managed_via_initialize(options) {
+        return Ok(None);
+    }
+    options
+        .managed_settings
+        .as_ref()
+        .map(|settings| {
+            settings
+                .to_value()
+                .map(|value| js_stringify(&value))
+                .map_err(|error| crate::ProtocolError::from(error).into())
+        })
+        .transpose()
+}
+
+/// The `--settings` text of an input as TypeScript writes it: strings as they are, an object through
+/// `JSON.stringify`.
+fn typescript_wire(input: &SettingsInput) -> Result<OsString, Error> {
+    match input {
+        SettingsInput::Path(path) => Ok(path.clone().into_os_string()),
+        SettingsInput::Json(text) => Ok(OsString::from(text)),
+        SettingsInput::Inline(settings) => settings
+            .to_value()
+            .map(|value| OsString::from(js_stringify(&value)))
+            .map_err(|error| crate::ProtocolError::from(error).into()),
+    }
+}
+
+/// The `--settings` text of an input as a Python caller would build it with `json.dumps`.
+fn python_wire(input: &SettingsInput) -> Result<String, Error> {
+    match input {
+        SettingsInput::Path(path) => Ok(path.to_string_lossy().into_owned()),
+        SettingsInput::Json(text) => Ok(text.clone()),
+        SettingsInput::Inline(settings) => settings
+            .to_value()
+            .map(|value| python_dumps(&value))
+            .map_err(|error| crate::ProtocolError::from(error).into()),
+    }
+}
+
+fn plain_object(value: Option<&Value>) -> Option<&Map<String, Value>> {
+    value.and_then(Value::as_object)
+}
+
+/// JavaScript `[...new Set(items)]`: primitives are de-duplicated, objects and arrays never are.
+fn unique(items: Vec<Value>) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::with_capacity(items.len());
+    for item in items {
+        let primitive = !matches!(item, Value::Array(_) | Value::Object(_));
+        if primitive && out.iter().any(|seen| same_value_zero(seen, &item)) {
+            continue;
+        }
+        out.push(item);
+    }
+    out
+}
+
+/// `h8`: merges `patch` over `base`, concatenating the listed arrays and recursing into objects.
+fn merge(base: Option<&Value>, patch: &Map<String, Value>, path: &str) -> Map<String, Value> {
+    let mut merged = plain_object(base).cloned().unwrap_or_default();
+    for (key, incoming) in patch {
+        if SANDBOX_FORBIDDEN_KEYS.contains(&key.as_str()) {
+            continue;
+        }
+        let here = if path.is_empty() {
+            key.clone()
+        } else {
+            format!("{path}.{key}")
+        };
+        let existing = merged.get(key);
+        let next = match (existing, incoming) {
+            (Some(Value::Array(old)), Value::Array(new)) if SANDBOX_MERGED_LISTS.contains(&here.as_str()) => {
+                Value::Array(unique(old.iter().chain(new).cloned().collect()))
+            }
+            (Some(old @ Value::Object(_)), Value::Object(new))
+                if !SANDBOX_REPLACED_OBJECTS.contains(&here.as_str()) =>
+            {
+                Value::Object(merge(Some(old), new, &here))
+            }
+            _ => incoming.clone(),
+        };
+        merged.insert(key.clone(), next);
+    }
+    merged
+}
+
+/// Whether settings text, once trimmed the way the dialect trims it, is braced like a JSON object.
+fn looks_like_json(trimmed: &str) -> bool {
+    trimmed.starts_with('{') && trimmed.ends_with('}')
+}
+
+/// The sandbox option with every finite number that holds an infinity marker's value kept as the equal integer, so
+/// the merge does not read it as an infinity.
+fn unmark_numbers(value: &mut Value) {
+    match value {
+        Value::Number(number) if number.is_f64() => {
+            if let Some(float) = number
+                .as_f64()
+                .filter(|float| crate::settings_numbers::is_marker_value(*float))
+            {
+                *value = crate::settings_numbers::finite_number(float);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(unmark_numbers),
+        Value::Object(entries) => entries.values_mut().for_each(unmark_numbers),
+        _ => {}
+    }
+}
+
+fn domain_rules_set(network: Option<&Value>) -> bool {
+    let Some(network) = plain_object(network) else {
+        return false;
+    };
+    let denied = match network.get("deniedDomains") {
+        Some(Value::Array(items)) => items.len(),
+        Some(Value::String(text)) => text.encode_utf16().count(),
+        _ => 0,
+    };
+    network.contains_key("allowedDomains") || denied > 0 || network.get("strictAllowlist") == Some(&Value::Bool(true))
+}
+
+/// `_8`: the settings document with `sandbox` merged in. The text is trimmed as `String.prototype.trim` trims and
+/// read as `JSON.parse` reads it, so a number past the double range is `Infinity` and prints as `null`.
+fn merge_sandbox(settings: Option<&OsString>, mut sandbox: Map<String, Value>) -> Result<String, Error> {
+    sandbox.values_mut().for_each(unmark_numbers);
+    let sandbox = &sandbox;
+    let text = settings.map(|value| value.to_string_lossy().into_owned());
+    let text = text.filter(|text| !text.is_empty());
+    if let Some(text) = &text
+        && !looks_like_json(crate::session_prompt::js_trim(text))
+    {
+        return Err(OptionError::new(SETTINGS_PATH_WITH_SANDBOX_ERROR).into());
+    }
+    let mut document = text
+        .and_then(|text| crate::settings_parse::parse_json(&text).ok())
+        .and_then(|value| match value {
+            Value::Object(map) => Some(map),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let mut merged = merge(document.get("sandbox"), sandbox, "");
+
+    let filesystem = sandbox.get("filesystem");
+    let denies_credentials = plain_object(sandbox.get("credentials"))
+        .and_then(|credentials| credentials.get("files"))
+        .and_then(Value::as_array)
+        .is_some_and(|files| {
+            files.iter().any(|file| {
+                plain_object(Some(file)).is_some_and(|file| file.get("mode") == Some(&Value::String("deny".into())))
+            })
+        });
+    let filesystem_disabled_unset =
+        plain_object(filesystem).is_none_or(|filesystem| !filesystem.contains_key("disabled"));
+    if (filesystem.is_some() || denies_credentials)
+        && filesystem_disabled_unset
+        && let Some(Value::Object(target)) = merged.get_mut("filesystem")
+        && target.get("disabled") == Some(&Value::Bool(true))
+    {
+        target.shift_remove("disabled");
+    }
+
+    let network = sandbox.get("network");
+    if domain_rules_set(network)
+        && let Some(Value::Object(target)) = merged.get_mut("network")
+    {
+        for port in SANDBOX_PROXY_PORTS {
+            let given = plain_object(network).is_some_and(|network| network.contains_key(port));
+            if !given && target.contains_key(port) {
+                target.shift_remove(port);
+            }
+        }
+    }
+
+    if sandbox.get("enabled") == Some(&Value::Bool(true)) && !merged.contains_key("failIfUnavailable") {
+        merged.insert("failIfUnavailable".into(), Value::Bool(true));
+    }
+    document.insert("sandbox".into(), Value::Object(merged));
+    let mut document = Value::Object(document);
+    crate::settings_numbers::infinities_to_null(&mut document);
+    Ok(js_stringify(&document))
+}
+
+fn sandbox_object(sandbox: &SandboxSettings) -> Result<Map<String, Value>, Error> {
+    match crate::deep_json::encode(sandbox).map_err(crate::ProtocolError::from)? {
+        Value::Object(map) => Ok(map),
+        _ => Ok(Map::new()),
+    }
+}
+
+/// One `extraArgs` entry after the settings option has been folded in.
+pub(crate) type ExtraEntry = (String, Option<OsString>);
+
+/// TypeScript's `extraArgs` after `settings` is added and `_8` merges the sandbox, in emission order.
+pub(crate) fn typescript_extra_entries(options: &ClaudeAgentOptions) -> Result<Vec<ExtraEntry>, Error> {
+    // The upstream spread `{...extraArgs}` keeps a repeated key at its first position with its last value.
+    let mut entries: Vec<ExtraEntry> = Vec::new();
+    for extra in &options.extra_args {
+        let value = extra.value.as_deref().map(OsString::from);
+        match entries.iter_mut().find(|(flag, _)| *flag == extra.flag) {
+            Some(entry) => entry.1 = value,
+            None => entries.push((extra.flag.clone(), value)),
+        }
+    }
+    // `extraArgs` is `{...extraArgs, workload}`: it exists before the settings merge, so settings see it last.
+    if let Some(workload) = options.workload.as_deref().filter(|workload| !workload.is_empty()) {
+        match entries.iter_mut().find(|(flag, _)| flag == "workload") {
+            Some(entry) => entry.1 = Some(OsString::from(workload)),
+            None => entries.push(("workload".into(), Some(OsString::from(workload)))),
+        }
+    }
+    let set = |entries: &mut Vec<ExtraEntry>, value: OsString| match entries
+        .iter_mut()
+        .find(|(flag, _)| flag == "settings")
+    {
+        Some(entry) => entry.1 = Some(value),
+        None => entries.push(("settings".into(), Some(value))),
+    };
+    if let Some(input) = &options.settings {
+        let wire = typescript_wire(input)?;
+        if !wire.is_empty() {
+            set(&mut entries, wire);
+        }
+    }
+    if let Some(sandbox) = &options.sandbox {
+        let current = entries
+            .iter()
+            .find(|(flag, _)| flag == "settings")
+            .and_then(|(_, value)| value.as_ref());
+        let merged = merge_sandbox(current, sandbox_object(sandbox)?)?;
+        set(&mut entries, OsString::from(merged));
+    }
+    Ok(entries)
+}
+
+fn python_os_error(error: &io::Error, path: &Path) -> String {
+    let text = error.to_string();
+    match error.raw_os_error() {
+        Some(code) => {
+            let reason = text
+                .rsplit_once(" (os error")
+                .map_or(text.as_str(), |(reason, _)| reason);
+            format!(
+                "[Errno {code}] {reason}: {}",
+                python_text::repr(&python_text::from_os_str(path.as_os_str()))
+            )
+        }
+        None => text,
+    }
+}
+
+fn python_type_error(value: &PythonJsonValue) -> &'static str {
+    match value {
+        PythonJsonValue::Array(_) => "list indices must be integers or slices, not str",
+        PythonJsonValue::String(_) => "'str' object does not support item assignment",
+        PythonJsonValue::Bool(_) => "'bool' object does not support item assignment",
+        PythonJsonValue::Number(PythonNumber::Float(_)) => "'float' object does not support item assignment",
+        PythonJsonValue::Number(PythonNumber::Int(_)) => "'int' object does not support item assignment",
+        _ => "'NoneType' object does not support item assignment",
+    }
+}
+
+/// `pathlib.Path(cwd or "") / settings`: normalised the way `PurePath` does.
+fn python_join(cwd: Option<&Path>, settings: &str) -> PathBuf {
+    let joined = cwd.unwrap_or_else(|| Path::new("")).join(settings);
+    let normalised: PathBuf = joined
+        .components()
+        .filter(|component| !matches!(component, Component::CurDir))
+        .collect();
+    if normalised.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalised
+    }
+}
+
+/// Python `_build_settings_value`: the `--settings` value, `None` when none is passed. `stack` is where Python
+/// calls it, which sets how deeply the settings text may nest before `json.loads` raises `RecursionError`. That
+/// error is not one of the `OSError`, `ValueError` and `TypeError` the function turns into the
+/// [`SettingsLoadError`] it raises, so it keeps its own message.
+pub(crate) fn python_settings_value<R>(
+    options: &ClaudeAgentOptions,
+    files: &R,
+    stack: PythonCStack,
+) -> Result<Option<String>, Error>
+where
+    R: ReadFile<Error = io::Error>,
+{
+    let settings = options.settings.as_ref().map(python_wire).transpose()?;
+    let Some(sandbox) = &options.sandbox else {
+        return Ok(settings.filter(|text| !text.is_empty()));
+    };
+    let failed = |cause: SettingsLoadCauseError| -> Error { SettingsLoadError::new(cause).into() };
+    let sandbox = PythonJsonValue::from(&Value::Object(sandbox_object(sandbox)?));
+    let mut document = PythonJsonValue::Object(IndexMap::new());
+    if let Some(settings) = settings {
+        let trimmed = crate::session_mutations::py_strip(&settings).to_owned();
+        let text = if looks_like_json(&trimmed) {
+            trimmed
+        } else {
+            let path = python_join(options.cwd.as_deref(), &trimmed);
+            let bytes = files
+                .read_file(&path)
+                .map_err(|error| failed(SettingsLoadCauseError::Os(python_os_error(&error, &path))))?;
+            read_text_utf8_sig(&bytes).map_err(|error| failed(SettingsLoadCauseError::UnicodeDecode(error)))?
+        };
+        document = loads_text(&text, stack.json_depth()).map_err(|error| match error {
+            PythonJsonError::Recursion(_) => OptionError::new(error.to_string()).into(),
+            PythonJsonError::Decode(error) => failed(SettingsLoadCauseError::JsonDecode(error)),
+            PythonJsonError::Integer(error) => failed(SettingsLoadCauseError::Integer(error)),
+        })?;
+    }
+    let mut map = match &mut document {
+        PythonJsonValue::Object(map) => std::mem::take(map),
+        other => {
+            return Err(failed(SettingsLoadCauseError::Type(
+                python_type_error(other).to_owned(),
+            )));
+        }
+    };
+    map.insert("sandbox".into(), sandbox);
+    let document = PythonJsonValue::Object(map);
+    let text = python_json_dumps(&document);
+    drop_python_deep(document);
+    Ok(Some(text))
+}
+
+#[cfg(test)]
+mod tests;

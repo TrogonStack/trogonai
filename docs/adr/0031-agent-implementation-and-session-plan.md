@@ -236,6 +236,27 @@ Before a Session becomes runnable, create one SessionExecutionPlan:
       session-plan contract version
       resolved-model-route contract version
 
+The concrete version 1 content schema is
+`trogonai.session.plans.v1alpha1.SessionExecutionPlan`, separate from the
+Session store's opaque `StoredSessionExecutionPlan`. A protected registered
+contract selects its exact descriptor and semantic interpreter before decoding
+the retained original bytes; the contract tuple inside those bytes is a
+consistency check. Native settings and their effective projection retain their
+existing exact contract/bytes/digest envelopes. Complete typed dependency
+declarations accompany resolved references, including all `ResolvedConnectionUse`
+fields, and model and compaction capabilities are explicit profiles. Work input
+references keep their own contract, and checkout-relative working-directory
+interpretation remains bound to its registered filesystem contract.
+
+The descriptor bounds required fields, collections, identifiers, native payloads
+and local joins. The executable verifier separately checks total encoded size,
+recursive variable limits and schema agreement, original artifact hashes,
+registered interpretation, actual dependency closure and current authority.
+Representation does not supply an implementation owner: unsupported capability
+paths are refused until the real registered adapter and authoritative resources
+provide their required behavior. This concrete schema does not change this ADR's
+draft status or establish runtime admission by itself.
+
 The implementation and settings are bound to the pinned AgentConfiguration.
 When platform-managed model access is required, admission runs the pinned
 adapter against those settings and records its verified ModelSelection
@@ -584,6 +605,24 @@ same id and bytes observes the pending operation or its recorded result.
 Reusing the id with different bytes is a typed conflict. Tool dispatch identity
 and child Session or external delegation identity are durable before external
 dispatch.
+
+Each delegation also retains a `DelegationBindingRef`: the case-sensitive
+declaration binding name and the exact parent Session plan digest. The
+coordinator checks that digest against the parent's admitted plan and resolves
+the name there. A target Agent or external destination is not a substitute for
+this identity: distinct declarations may resolve to the same target. The
+reference supplies no current authorization, and replay never resolves it from
+the Agent's latest configuration.
+
+Before a child dispatch is acknowledged, its `ChildSessionCreation` retains the
+exact canonical child plan bytes and digest, checkout reference, and optional
+candidate reference. Repair copies these inputs instead of resolving them
+again. Work contracts and input references stay in that plan; this adds no
+parallel work-input schema or use of `variables_schema`. The child still needs
+current target lifecycle and policy admission before execution. The
+[child-session saga](./0035-session-store-decider-aggregate.md)
+defines comparison with an already-existing child and refusal on conflicting
+or unverifiable creation evidence.
 
 Exactly-once external tool execution is never assumed. A tool must honor the
 stable dispatch identity or support outcome reconciliation. If a crash leaves

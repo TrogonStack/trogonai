@@ -1,4 +1,10 @@
-//! Fire-and-forget audit envelope publishing.
+//! Fire-and-forget audit envelope publishing, the legacy best-effort path.
+//!
+//! Decisions are also written through the platform audit writer (see
+//! `platform_audit`), which is where a record can be awaited and where a lost
+//! must-audit record refuses the request. This envelope keeps publishing beside
+//! it, best effort, as the source for `{prefix}.v1.audit.{agent}.{outcome}`
+//! readers during the migration; it never blocks or fails a request.
 //!
 //! The dispatch path calls this once per ingress request, after the
 //! outcome (allow / deny / forward) is decided. Publishing is async

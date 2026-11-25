@@ -49,8 +49,8 @@ fn error_response(code: i32, msg: &str) -> (async_nats::HeaderMap, Bytes) {
 async fn tasks_get_targets_agent_subject_by_default() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("t-1");
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.get", headers, body);
-    let client = A2aClient::new(prefix(), agent_id(), nats, ());
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.tasks.get", headers, body);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, ());
     let task = client.tasks_get(&get_task_request("t-1")).await.unwrap();
     assert_eq!(task.id, "t-1");
 }
@@ -59,9 +59,9 @@ async fn tasks_get_targets_agent_subject_by_default() {
 async fn tasks_get_targets_gateway_subject_under_gateway_routing() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = task_response("t-gw");
-    nats.set_response_wire("a2a.v1.gateway.test-agent.tasks.get", headers, body);
+    nats.set_response_wire("a2a.v1.gateway.test-agent.person.alice.tasks.get", headers, body);
     let jwt = MintedUserJwt::new("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjk5OTk5OTk5OTl9.signature").unwrap();
-    let client = A2aClient::new(prefix(), agent_id(), nats, ()).routing_via_gateway_ingress(jwt);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, ()).routing_via_gateway_ingress(jwt);
     let task = client.tasks_get(&get_task_request("t-gw")).await.unwrap();
     assert_eq!(task.id, "t-gw");
 }
@@ -70,8 +70,8 @@ async fn tasks_get_targets_gateway_subject_under_gateway_routing() {
 async fn tasks_get_propagates_task_not_found() {
     let nats = AdvancedMockNatsClient::new();
     let (headers, body) = error_response(-32001, "missing");
-    nats.set_response_wire("a2a.v1.agents.test-agent.tasks.get", headers, body);
-    let client = A2aClient::new(prefix(), agent_id(), nats, ());
+    nats.set_response_wire("a2a.v1.agents.test-agent.person.alice.tasks.get", headers, body);
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, ());
     assert!(matches!(
         client.tasks_get(&get_task_request("nope")).await,
         Err(ClientError::TaskNotFound)
@@ -82,7 +82,7 @@ async fn tasks_get_propagates_task_not_found() {
 async fn tasks_get_propagates_transport_errors() {
     let nats = AdvancedMockNatsClient::new();
     nats.fail_next_request();
-    let client = A2aClient::new(prefix(), agent_id(), nats, ());
+    let client = A2aClient::new(prefix(), agent_id(), caller(), nats, ());
     assert!(matches!(
         client.tasks_get(&get_task_request("x")).await,
         Err(ClientError::Transport(_))

@@ -5,7 +5,9 @@ use futures::StreamExt as _;
 use tracing::{error, info, warn};
 use trogon_std::env::ReadEnv;
 
+use crate::admission_budget::AdmissionBudget;
 use crate::constants::{AUTH_CALLOUT_SUBJECT, DEFAULT_DENIAL_TTL};
+use crate::denial_category::DenialCategory;
 use crate::denial_claims::CalloutIssuer;
 use crate::dispatcher::AuthDispatcher;
 use crate::error::AuthCalloutError;
@@ -29,12 +31,19 @@ impl DenialPublisherConfig {
     }
 }
 
+/// The queue group every callout replica joins, operator-overridable and
+/// shared by the server callout and the bridge mint subscriptions.
+pub(crate) fn queue_group(env: &impl ReadEnv) -> String {
+    ReadEnv::var(env, "AUTH_CALLOUT_QUEUE_GROUP").unwrap_or_else(|_| "a2a-auth-callout".to_string())
+}
+
 /// Subscriber loop that listens on `$SYS.REQ.USER.AUTH` and delegates each
 /// request to the injected `AuthDispatcher`.
 pub struct Subscriber<D> {
     client: async_nats::Client,
     dispatcher: Arc<D>,
     wire: Arc<AuthCalloutWireCodec>,
+    admission_budget: AdmissionBudget,
 }
 
 impl<D: AuthDispatcher> Subscriber<D> {
@@ -43,7 +52,13 @@ impl<D: AuthDispatcher> Subscriber<D> {
             client,
             dispatcher: Arc::new(dispatcher),
             wire: Arc::new(wire),
+            admission_budget: AdmissionBudget::default(),
         }
+    }
+
+    pub fn with_admission_budget(mut self, budget: AdmissionBudget) -> Self {
+        self.admission_budget = budget;
+        self
     }
 
     pub async fn run(self, env: &impl ReadEnv) -> Result<(), AuthCalloutError> {
@@ -54,12 +69,15 @@ impl<D: AuthDispatcher> Subscriber<D> {
         // server request and producing unpredictable client connect outcomes.
         // The queue name is operator-overridable but defaults to a constant
         // so two callout deployments at the same scope share it.
-        let queue = ReadEnv::var(env, "AUTH_CALLOUT_QUEUE_GROUP").unwrap_or_else(|_| "a2a-auth-callout".to_string());
+        let queue = queue_group(env);
         let mut sub = self
             .client
             .queue_subscribe(AUTH_CALLOUT_SUBJECT, queue)
             .await
             .map_err(AuthCalloutError::Subscribe)?;
+        // A flush only waits for queued commands to leave the client's socket.
+        // It does not acknowledge that the broker processed the subscription.
+        self.client.flush().await.map_err(AuthCalloutError::Flush)?;
 
         info!(subject = AUTH_CALLOUT_SUBJECT, "auth callout subscriber started");
 
@@ -97,11 +115,24 @@ impl<D: AuthDispatcher> Subscriber<D> {
                 }
             };
 
+            let Some(permit) = self.admission_budget.try_acquire() else {
+                let result = publish_denial(
+                    &self.client,
+                    &reply,
+                    &self.wire,
+                    &request,
+                    DenialCategory::ServiceUnavailable.as_str().to_owned(),
+                )
+                .await;
+                finish_reply(&self.client, &reply, result).await;
+                continue;
+            };
             let dispatcher = Arc::clone(&self.dispatcher);
             let client = self.client.clone();
             let wire = Arc::clone(&self.wire);
 
             tokio::spawn(async move {
+                let _admission_permit = permit;
                 let publish_result = match dispatcher.dispatch(request.clone()).await {
                     Ok(user_jwt) => publish_success(&client, &reply, &wire, &request, user_jwt).await,
                     Err(e) => {
@@ -127,21 +158,21 @@ impl<D: AuthDispatcher> Subscriber<D> {
                         publish_denial(&client, &reply, &wire, &request, reason.as_str().to_owned()).await
                     }
                 };
-                if let Err(pub_err) = publish_result {
-                    error!(error = %pub_err, "failed to publish auth callout reply; sending empty fallback so the connect fails fast");
-                    // Same rationale as the decode-failure path — without a
-                    // reply on the inbox the NATS server hangs the connect
-                    // until timeout. An empty payload is treated as
-                    // malformed and denies the connect immediately.
-                    if let Err(e) = client.publish(reply, Vec::new().into()).await {
-                        error!(error = %e, "failed to publish empty fallback reply");
-                    }
-                }
+                finish_reply(&client, &reply, publish_result).await;
             });
         }
 
         warn!("auth callout NATS subscription closed");
         Ok(())
+    }
+}
+
+async fn finish_reply(client: &async_nats::Client, reply: &str, result: Result<(), AuthCalloutError>) {
+    if let Err(error) = result {
+        error!(error = %error, "failed to publish auth callout reply; sending empty fallback so the connect fails fast");
+        if let Err(error) = client.publish(reply.to_owned(), Vec::new().into()).await {
+            error!(error = %error, "failed to publish empty fallback reply");
+        }
     }
 }
 

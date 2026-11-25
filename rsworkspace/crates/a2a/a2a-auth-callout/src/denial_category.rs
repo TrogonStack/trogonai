@@ -25,9 +25,9 @@ impl DenialCategory {
 
     pub fn from_auth_callout_error(error: &AuthCalloutError) -> Self {
         match error {
-            AuthCalloutError::Connect(_) => Self::ServiceUnavailable,
+            AuthCalloutError::Connect(_) | AuthCalloutError::Flush(_) => Self::ServiceUnavailable,
             AuthCalloutError::Subscribe(_) => Self::InternalError,
-            AuthCalloutError::Deserialize(_) => Self::InvalidRequest,
+            AuthCalloutError::Deserialize(_) | AuthCalloutError::BridgeCredential(_) => Self::InvalidRequest,
             AuthCalloutError::Serialize(_) => Self::InternalError,
             AuthCalloutError::Reply(_) => Self::InternalError,
             AuthCalloutError::Jwt(_) => Self::InternalError,
@@ -37,13 +37,23 @@ impl DenialCategory {
             | AuthCalloutError::UnknownSigningKeySource(_)
             | AuthCalloutError::VaultNotConfigured
             | AuthCalloutError::KeyLoadIo { .. }
-            | AuthCalloutError::KeyLoadUtf8(_) => Self::InternalError,
+            | AuthCalloutError::KeyLoadUtf8(_)
+            | AuthCalloutError::AdmissionKeys(_) => Self::InternalError,
             AuthCalloutError::CredentialVerification(e) => Self::from_credential_error(e),
+            AuthCalloutError::TenantAdmission(
+                crate::tenant_admission::TenantAdmissionError::NotMember
+                | crate::tenant_admission::TenantAdmissionError::AudienceMismatch,
+            ) => Self::InvalidCredentials,
+            AuthCalloutError::TenantAdmission(_) => Self::ServiceUnavailable,
         }
     }
 
     fn from_credential_error(e: &CredentialError) -> Self {
         match e {
+            CredentialError::Validity(
+                crate::CredentialExpiryError::Expired | crate::CredentialExpiryError::InvalidTimestamp,
+            ) => Self::InvalidCredentials,
+            CredentialError::Validity(_) => Self::InternalError,
             CredentialError::UnknownAccount(_) => Self::UnknownAccount,
             CredentialError::VerifierUnavailable { .. } => Self::VerifierUnavailable,
             CredentialError::InvalidRequest(_) => Self::InvalidRequest,
@@ -53,8 +63,16 @@ impl DenialCategory {
             // exist so this side can count them apart, not so a caller can
             // learn which check refused it.
             CredentialError::InvalidCredentials(_)
+            | CredentialError::OidcIssuer(_)
+            | CredentialError::OidcDiscovery(_)
+            | CredentialError::UnsupportedCriticalHeader
+            | CredentialError::ProtectedHeaderEncoding(_)
+            | CredentialError::ProtectedHeaderJson(_)
+            | CredentialError::InvalidNotBefore
+            | CredentialError::MtlsCertificate(_)
             | CredentialError::UnsupportedTokenAlgorithm { .. }
-            | CredentialError::JwkNotPublishedForVerification { .. } => Self::InvalidCredentials,
+            | CredentialError::JwkNotPublishedForVerification { .. }
+            | CredentialError::UnplaceablePrincipal(_) => Self::InvalidCredentials,
         }
     }
 }

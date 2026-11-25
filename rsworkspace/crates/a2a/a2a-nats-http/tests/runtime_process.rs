@@ -1,4 +1,5 @@
 use std::io;
+use std::net::SocketAddr;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -6,6 +7,8 @@ use base64::Engine;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use trogon_nats::test_support::CoreTestServer;
 use trogon_std::env::{EnumerateEnv, SystemEnv};
+
+const STARTUP_OUTPUT_LIMIT: u64 = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 enum FixtureError {
@@ -15,8 +18,30 @@ enum FixtureError {
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error(transparent)]
     SystemTime(#[from] std::time::SystemTimeError),
-    #[error("HTTP runtime exited during startup: {0}")]
-    ProcessExited(ExitStatus),
+    #[error("invalid startup configuration unexpectedly served HTTP")]
+    UnexpectedHttpReady,
+    #[error("HTTP runtime ({mode}) exited during startup: {status}; stdout: {stdout:?}; stderr: {stderr:?}")]
+    ProcessExited {
+        mode: RuntimeMode,
+        status: ExitStatus,
+        stdout: io::Result<String>,
+        stderr: io::Result<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeMode {
+    Direct,
+    Gateway,
+}
+
+impl std::fmt::Display for RuntimeMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Direct => "direct",
+            Self::Gateway => "gateway",
+        })
+    }
 }
 
 struct RuntimeProcess(Child);
@@ -37,6 +62,30 @@ impl RuntimeProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         command.spawn().map(Self)
+    }
+
+    async fn wait_for_http(
+        &mut self,
+        address: SocketAddr,
+        mode: RuntimeMode,
+    ) -> Result<tokio::net::TcpStream, FixtureError> {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                if let Ok(socket) = tokio::net::TcpStream::connect(address).await {
+                    return Ok(socket);
+                }
+                if let Some(status) = self.0.try_wait()? {
+                    return Err(FixtureError::ProcessExited {
+                        mode,
+                        status,
+                        stdout: capture_startup_output(self.0.stdout.take()),
+                        stderr: capture_startup_output(self.0.stderr.take()),
+                    });
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await?
     }
 
     async fn wait(&mut self) -> Result<ExitStatus, FixtureError> {
@@ -77,6 +126,14 @@ impl RuntimeProcess {
     }
 }
 
+fn capture_startup_output(pipe: Option<impl io::Read>) -> io::Result<String> {
+    let mut output = Vec::new();
+    if let Some(pipe) = pipe {
+        io::Read::read_to_end(&mut io::Read::take(pipe, STARTUP_OUTPUT_LIMIT), &mut output)?;
+    }
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
 impl Drop for RuntimeProcess {
     fn drop(&mut self) {
         if !matches!(self.0.try_wait(), Ok(Some(_))) {
@@ -87,7 +144,53 @@ impl Drop for RuntimeProcess {
 }
 
 #[tokio::test]
+async fn early_startup_exit_retains_mode_status_and_output() -> Result<(), FixtureError> {
+    let address = SocketAddr::from(([127, 0, 0, 1], 0));
+    for mode in [RuntimeMode::Direct, RuntimeMode::Gateway] {
+        let gateway = match mode {
+            RuntimeMode::Direct => "false",
+            RuntimeMode::Gateway => "true",
+        };
+        let mut process = RuntimeProcess::start(&[
+            ("A2A_AGENT_ID", "worker"),
+            ("A2A_CALLER_JWT", "malformed"),
+            ("A2A_USE_GATEWAY", gateway),
+            ("NATS_URL", "invalid://server"),
+        ])?;
+        let error = process
+            .wait_for_http(address, mode)
+            .await
+            .err()
+            .ok_or(FixtureError::UnexpectedHttpReady)?;
+        let FixtureError::ProcessExited {
+            mode: actual_mode,
+            status,
+            ref stdout,
+            ref stderr,
+        } = error
+        else {
+            return Err(error);
+        };
+        assert_eq!(actual_mode, mode);
+        assert_eq!(status.code(), Some(1));
+        assert!(
+            stdout
+                .as_ref()
+                .is_ok_and(|output| output.contains("invalid caller JWT")),
+            "{error}"
+        );
+        assert!(stderr.as_ref().is_ok_and(String::is_empty), "{error}");
+        assert_eq!(
+            format!("{error}"),
+            format!("HTTP runtime ({mode}) exited during startup: {status}; stdout: {stdout:?}; stderr: {stderr:?}")
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn startup_reports_invalid_configuration_before_serving() -> Result<(), FixtureError> {
+    let caller = caller_jwt(fresh_expiration()?);
     for (settings, expected) in [
         (vec![], "A2A_AGENT_ID environment variable is required"),
         (vec![("A2A_PREFIX", "bad prefix")], "invalid A2A prefix"),
@@ -97,7 +200,11 @@ async fn startup_reports_invalid_configuration_before_serving() -> Result<(), Fi
             "invalid bind address",
         ),
         (
-            vec![("A2A_AGENT_ID", "worker"), ("NATS_URL", "invalid://server")],
+            vec![
+                ("A2A_AGENT_ID", "worker"),
+                ("A2A_CALLER_JWT", caller.as_str()),
+                ("NATS_URL", "invalid://server"),
+            ],
             "NATS connection failed",
         ),
     ] {
@@ -106,36 +213,60 @@ async fn startup_reports_invalid_configuration_before_serving() -> Result<(), Fi
     Ok(())
 }
 
-fn caller_jwt(expiration: u64) -> String {
+fn jwt(claims: &str) -> String {
     let encode = &base64::engine::general_purpose::URL_SAFE_NO_PAD;
     format!(
         "{}.{}.{}",
         encode.encode(br#"{"alg":"HS256","typ":"JWT"}"#),
-        encode.encode(format!(r#"{{"exp":{expiration}}}"#)),
+        encode.encode(claims),
         encode.encode(b"test-signature")
     )
 }
 
+fn caller_jwt(expiration: u64) -> String {
+    jwt(&format!(
+        r#"{{"exp":{expiration},"caller_id":"worker-caller","principal_kind":"service"}}"#
+    ))
+}
+
+fn fresh_expiration() -> Result<u64, FixtureError> {
+    Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600)
+}
+
 #[tokio::test]
-async fn gateway_routing_requires_a_well_formed_unexpired_caller() -> Result<(), FixtureError> {
+async fn startup_requires_a_fresh_caller_naming_a_principal_in_every_mode() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
-    for caller in [None, Some("malformed".to_owned()), Some(caller_jwt(1))] {
-        let mut settings = vec![
-            ("A2A_AGENT_ID", "worker"),
-            ("NATS_URL", server.address()),
-            ("NATS_TLS_DISABLED", "true"),
-            ("A2A_USE_GATEWAY", " On "),
-        ];
-        if let Some(caller) = caller.as_deref() {
-            settings.push(("A2A_GATEWAY_CALLER_JWT", caller));
+    let expiration = fresh_expiration()?;
+    let cases = [
+        (None, "A2A_CALLER_JWT environment variable is required"),
+        (Some("malformed".to_owned()), "invalid caller JWT"),
+        (Some(caller_jwt(1)), "invalid caller JWT"),
+        (
+            Some(jwt(&format!(r#"{{"exp":{expiration},"caller_id":"worker-caller"}}"#))),
+            "caller JWT names no caller principal",
+        ),
+        (
+            Some(jwt(&format!(
+                r#"{{"exp":{expiration},"caller_id":"worker-caller","principal_kind":"robot"}}"#
+            ))),
+            "caller JWT names no caller principal",
+        ),
+    ];
+    for gateway in [false, true] {
+        for (caller, expected) in &cases {
+            let mut settings = vec![
+                ("A2A_AGENT_ID", "worker"),
+                ("NATS_URL", server.address()),
+                ("NATS_TLS_DISABLED", "true"),
+            ];
+            if gateway {
+                settings.push(("A2A_USE_GATEWAY", " On "));
+            }
+            if let Some(caller) = caller.as_deref() {
+                settings.push(("A2A_CALLER_JWT", caller));
+            }
+            RuntimeProcess::start(&settings)?.failure(expected).await?;
         }
-        RuntimeProcess::start(&settings)?
-            .failure(if caller.is_none() {
-                "A2A_GATEWAY_CALLER_JWT is required"
-            } else {
-                "invalid gateway caller JWT"
-            })
-            .await?;
     }
     Ok(())
 }
@@ -143,10 +274,12 @@ async fn gateway_routing_requires_a_well_formed_unexpired_caller() -> Result<(),
 #[tokio::test]
 async fn startup_reports_an_occupied_http_listener() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
+    let caller = caller_jwt(fresh_expiration()?);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?.to_string();
     RuntimeProcess::start(&[
         ("A2A_AGENT_ID", "worker"),
+        ("A2A_CALLER_JWT", &caller),
         ("NATS_URL", server.address()),
         ("NATS_TLS_DISABLED", "true"),
         ("A2A_HTTP_BIND", &address),
@@ -158,8 +291,7 @@ async fn startup_reports_an_occupied_http_listener() -> Result<(), FixtureError>
 #[tokio::test]
 async fn serves_http_and_gracefully_stops_in_direct_and_gateway_modes() -> Result<(), FixtureError> {
     let server = CoreTestServer::start().await;
-    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600;
-    let caller = caller_jwt(expiration);
+    let caller = caller_jwt(fresh_expiration()?);
     for gateway in [false, true] {
         let reservation = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = reservation.local_addr()?;
@@ -167,26 +299,21 @@ async fn serves_http_and_gracefully_stops_in_direct_and_gateway_modes() -> Resul
         drop(reservation);
         let mut settings = vec![
             ("A2A_AGENT_ID", "worker"),
+            ("A2A_CALLER_JWT", &caller),
             ("NATS_URL", server.address()),
             ("NATS_TLS_DISABLED", "true"),
             ("A2A_HTTP_BIND", &bind),
         ];
         if gateway {
-            settings.extend([("A2A_USE_GATEWAY", "true"), ("A2A_GATEWAY_CALLER_JWT", &caller)]);
+            settings.push(("A2A_USE_GATEWAY", "true"));
         }
         let mut process = RuntimeProcess::start(&settings)?;
-        let mut socket = tokio::time::timeout(Duration::from_secs(15), async {
-            loop {
-                if let Ok(socket) = tokio::net::TcpStream::connect(address).await {
-                    return Ok::<_, FixtureError>(socket);
-                }
-                if let Some(status) = process.0.try_wait()? {
-                    return Err(FixtureError::ProcessExited(status));
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await??;
+        let mode = if gateway {
+            RuntimeMode::Gateway
+        } else {
+            RuntimeMode::Direct
+        };
+        let mut socket = process.wait_for_http(address, mode).await?;
         socket
             .write_all(b"GET /missing HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
             .await?;

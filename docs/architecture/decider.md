@@ -7,7 +7,7 @@ shared testing/observability tooling so both paths stay provably in sync. This i
 to read first; it links out to the ADRs and per-crate READMEs for anything it only
 summarizes.
 
-## The `decide`/`evolve`/`initial_state` cycle
+## State replay and command decisions
 
 Every decider is a plain Rust type implementing `trogon_decider::Decider`
 (`crates/decider/trogon-decider/src/lib.rs`):
@@ -15,25 +15,44 @@ Every decider is a plain Rust type implementing `trogon_decider::Decider`
 ```rust
 pub trait Decider: Sized {
     type StreamId: ?Sized;
-    type State;
+    type State: DeciderState<Self::Event>;
     type Event;
     type DecideError: std::error::Error;
-    type EvolveError: std::error::Error;
 
-    const WRITE_PRECONDITION: Option<WritePrecondition> = None;
+    const WRITE_PRECONDITION: WritePrecondition;
+    const SNAPSHOT_CADENCE: SnapshotCadence = SnapshotCadence::Never;
 
     fn stream_id(&self) -> &Self::StreamId;
-    fn initial_state() -> Self::State;
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError>;
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError>;
 }
+
+pub trait Evolve<Event>: Sized {
+    type Error: std::error::Error;
+    fn evolve(self, event: &Event) -> Result<Self, Self::Error>;
+}
+
+pub trait DeciderState<Event>: Default + Evolve<Event> {}
+
+impl<T, Event> DeciderState<Event> for T where T: Default + Evolve<Event> {}
 ```
 
-`initial_state` seeds state with no events applied. `evolve` folds one stored event into
+`DeciderState<Event>` names the shared state contract. Its blanket implementation means state
+types only implement `Default` and `Evolve<Event>`.
+
+The state's `Default` seeds state with no events applied. Its `Evolve<Event>` folds one stored event into
 state and is the only place state changes. `decide` evaluates a command against the current
 state and returns a `Decision`, never mutating anything itself. When a rejection crosses the
 WASM boundary, the bridge surfaces it with the constant `"rejected"` code on the WIT
 `domain-error` and carries the typed error's causal chain in its `details` pairs.
+
+A generated protobuf message's `Default` may differ from the state before any events are
+applied. For example, `CredentialStateSnapshot::default()` has `state: None`, while credential
+replay starts with `CredentialMissingState`. A local `#[repr(transparent)]` wrapper can supply
+that semantic `Default` and implement `Evolve` in the domain crate, as permitted by
+[ADR#0045](../adr/0045-event-sourced-service-module-layout.md). It contains only the generated
+message. `StateSnapshot::Payload` names that message for snapshot storage, with `From` and
+`AsRef` providing the consuming and borrowed conversions. Loading an existing snapshot
+preserves its fields; only replay without a snapshot starts from `Default`.
 
 `WRITE_PRECONDITION` (`crates/decider/trogon-decider/src/write_precondition.rs`) is the
 concurrency guard applied when the decided events are appended. It is a total enum with no
@@ -41,15 +60,15 @@ concurrency guard applied when the decided events are appended. It is a total en
 
 ```rust
 pub enum WritePrecondition {
-    StreamUnchanged,  // the default: append only if the stream is still as replay observed it
+    StreamUnchanged,  // append only if the stream is still as replay observed it
     NoStream,         // append only if the stream is empty (first writer wins)
     StreamExists,     // append only if the stream already has events
     Any,              // append regardless of current stream state
 }
 ```
 
-`StreamUnchanged` is the `Decider` trait's default associated const, which is why real
-optimistic concurrency ships without anyone opting in. It names an intent rather than a
+`StreamUnchanged` is the common optimistic-concurrency choice that commands declare explicitly.
+It names an intent rather than a
 revision because a compile-time `const` cannot carry one: the storage layer's
 `StreamWritePrecondition`
 (`crates/decider/trogon-decider-runtime/src/stream/append_stream.rs`) has a fourth variant
@@ -148,7 +167,7 @@ public because it appears in `execute`'s signature, but it is sealed, so the two
 states are the only implementations. The phases are:
 
 - **Load.** If the effective write precondition is `NoStream`, neither the snapshot store nor
-  the stream is read and the command is decided straight against `C::initial_state()`: any
+  the stream is read and the command is decided straight against `C::State::default()`: any
   history at all would already violate the guard the append is about to use. Otherwise
   `WithoutSnapshots` reads the stream from the beginning (`ReadFrom::Beginning`), while
   `Snapshots` reads a snapshot first and then reads only the stream events *after* the
@@ -302,9 +321,29 @@ nothing else, never the target stream or its replayed state. That is deliberate:
 must read stream state to decide is expressing a domain rule, and a domain rule belongs in
 `decide`.
 
-Only the seam ships. The ingress half of [ADR#0026](../adr/0026-command-authorization-principal.md), which would map a verified AAuth credential
-onto a `CommandPrincipal`, does not exist yet, so nothing in this crate family populates a
-principal on its own.
+The runtime ships only the seam; the NATS host is where a principal comes from. Per
+[ADR#0082](../adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md),
+`trogon-decider-nats-server` subscribes on `{prefix}.*.*.DeciderService.Decide` and
+reads the principal from the `{kind}.{id}` tokens of the subject the server delivered, before it
+decodes the request. A pair of tokens that names no principal is refused with `UNAUTHENTICATED`
+and `PRINCIPAL_MISSING`, and a subject without those tokens matches no subscription at all, so
+no header or payload field can stand in for them. The derived principal carries no claims and no
+directed principal, because the subject has no position for either. A client acting for a
+principal configures a `PrincipalPrefix`, the host's prefix followed by that principal's tokens.
+An id that cannot be one subject token travels in the hashed form every edge maps it to, and that
+hashed token is the id the host derives and an authorizer sees.
+
+A host serves one tenant account until decider state is scoped by tenant. The derived principal
+carries no tenant, and every command a host runs shares its one events stream and snapshot
+bucket, so a host serving several tenants would let one tenant's commands replay and append to
+another tenant's streams. `DeciderHost::start` therefore refuses `DECIDER_TENANT_POSITION=wildcard`
+before it fetches or provisions anything, and nothing overrides that refusal.
+
+Every execution the host runs is built with `with_principal` and `with_authorizer`. A host given
+no policy of its own authorizes with `AdmitAnyPrincipal`, which admits any derived principal and,
+through the trait's default, refuses an execution that has none; `DeciderHost::with_authorizer`
+replaces it, and a denial answers `PERMISSION_DENIED` with `PRINCIPAL_UNAUTHORIZED`. Execution
+paths the host does not serve still populate no principal on their own.
 
 ### Snapshot policy and failure recovery
 
@@ -756,9 +795,10 @@ Accepted and reflected in the platform as built:
 - [ADR#0013: Origin Stream Sequence Header](../adr/0013-origin-stream-sequence-header.md):
   the `Trogon-Origin-Stream-Sequence` header described under Headers above.
 - [ADR#0026: Command Authorization Principal](../adr/0026-command-authorization-principal.md):
-  the `CommandAuthorizer` seam described under Authorization above. Only the seam is built. The
-  ingress half, which would derive a principal from a verified credential, is not, so no
-  principal reaches an execution unless a caller puts one there.
+  the `CommandAuthorizer` seam described under Authorization above. The NATS host derives the
+  principal from the subject, per
+  [ADR#0082](../adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md) below; on
+  every other execution path no principal reaches an execution unless a caller puts one there.
 - [ADR#0028: Decider Admission Control and Backpressure](../adr/0028-decider-admission-control-and-backpressure.md):
   the `CommandAdmission` seam described under Admission control above. The shared crates own
   the seam and one implementation; no bound is chosen anywhere in the decider stack, so a host
@@ -767,6 +807,11 @@ Accepted and reflected in the platform as built:
   the read-only watermark described under Retention watermarks above. The purge that would
   consume it is an explicit Non-Goal there and does not exist; no code in this crate family
   truncates anything.
+- [ADR#0082: Inside the Bus the Principal Is Derived from the Subject, and Proof of Possession Is Enforced Only at the External Edge](../adr/0082-bus-principal-from-subject-and-edge-proof-of-possession.md):
+  the decider host's half, described under Authorization above. The host reads the principal
+  from the subject and authorizes every execution it runs. The edge that verifies proof of
+  possession and the grants that confine a caller to its own principal tokens live outside this
+  crate family.
 
 Draft, **not yet implemented**; do not treat these as current behavior:
 

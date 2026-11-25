@@ -1,0 +1,56 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "trogonai/connections/types/v1alpha1/digest.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+
+// The canonical MCP resource URI: the server URI with a lowercase scheme and
+// host and no query or fragment. A semantically significant trailing slash
+// remains part of the identity and is never stripped. It is sent as the RFC
+// 8707 resource; a different value is a different Connection (ADR#0094 D11).
+message CanonicalResourceUri {
+  option (buf.validate.message).cel = {
+    id: "canonical_resource_uri.shape"
+    message: "this resource profile supports no query or fragment"
+    expression: "!this.value.contains('?') && !this.value.contains('#')"
+  };
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.uri = true
+  ];
+}
+
+// A pinned MCP authorization specification revision, such as 2026-07-28.
+// This does not negotiate an MCP transport or session protocol version.
+message McpSpecificationRevision {
+  string value = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.pattern = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+  ];
+}
+
+// Validated discovery metadata kept as exact bytes. Exchange, refresh, revoke
+// and delete read endpoints from it and never from a fresh fetch, and a new
+// discovery is a new snapshot (ADR#0094 Decision 10). Authorization server
+// metadata is recorded on the ProviderApp and protected resource metadata on
+// the Connection. Neither is secret (ADR#0092 Decision 7).
+message DiscoverySnapshot {
+  // The validated document bytes as fetched, never re-encoded.
+  bytes metadata = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).bytes.min_len = 1
+  ];
+  // Digest of metadata. A digest change with the same set of endpoint origins
+  // is recorded without a new acknowledgement.
+  Digest digest = 2 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp fetched_at = 3 [features.field_presence = LEGACY_REQUIRED];
+  // The specification revision the document was validated under.
+  McpSpecificationRevision specification_revision = 4 [features.field_presence = LEGACY_REQUIRED];
+  // The issuer chosen from this document: the metadata issuer for
+  // authorization server metadata, or the authorization server selected from
+  // protected resource metadata.
+  Issuer issuer = 5 [features.field_presence = LEGACY_REQUIRED];
+}

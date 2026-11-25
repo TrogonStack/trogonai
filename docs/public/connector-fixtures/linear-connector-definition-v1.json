@@ -1,0 +1,180 @@
+{
+  "authenticationMethods": [
+    1
+  ],
+  "oauth": {
+    "declared": {
+      "issuer": {
+        "value": "https://linear.app"
+      },
+      "authorizationUrl": "https://linear.app/oauth/authorize",
+      "exchangeUrl": "https://api.linear.app/oauth/token",
+      "revocationUrl": "https://api.linear.app/oauth/revoke"
+    },
+    "pkce": 1,
+    "clientAuthenticationMethods": [
+      3
+    ],
+    "scopeSeparator": 2,
+    "scopeNormalization": 1,
+    "requiredScopes": [
+      {
+        "value": "read"
+      }
+    ],
+    "scopeOmission": 1,
+    "refresh": {
+      "rotatesOnRefresh": true,
+      "refreshOptional": false,
+      "omissionSemantics": 2
+    },
+    "exchangeConcurrencyLimit": 2,
+    "omittedAccessExpiry": {
+      "reject": {}
+    },
+    "responseMapping": {
+      "accessField": {
+        "pointer": "/access_token"
+      },
+      "bearerType": {
+        "responseField": {
+          "pointer": "/token_type"
+        }
+      },
+      "refreshField": {
+        "pointer": "/refresh_token"
+      },
+      "accessLifetime": {
+        "field": {
+          "pointer": "/expires_in"
+        },
+        "encoding": 1
+      },
+      "scopes": {
+        "field": {
+          "pointer": "/scope"
+        },
+        "encoding": 3
+      }
+    },
+    "requestParameters": {
+      "authorization": [
+        {
+          "key": "actor",
+          "value": "app"
+        }
+      ]
+    }
+  },
+  "credentialRoles": [
+    {
+      "role": {
+        "value": "access"
+      },
+      "kind": 1,
+      "authenticationMethod": 1
+    }
+  ],
+  "egressHosts": [
+    {
+      "host": "linear.app",
+      "port": 443
+    },
+    {
+      "host": "api.linear.app",
+      "port": 443
+    }
+  ],
+  "identityProbe": {
+    "subjectKind": 2,
+    "fields": [
+      {
+        "responseField": "/data/viewer/id",
+        "attribute": 1
+      },
+      {
+        "responseField": "/data/viewer/organization/id",
+        "attribute": 3
+      }
+    ],
+    "graphqlQuery": {
+      "host": {
+        "host": "api.linear.app",
+        "port": 443
+      },
+      "path": "/graphql",
+      "document": "query ConnectorIdentity { viewer { id organization { id } } }"
+    }
+  },
+  "revocation": 2,
+  "uninstall": 3,
+  "webhookCapable": true,
+  "proxy": {
+    "credentialInjections": [
+      {
+        "role": {
+          "value": "access"
+        },
+        "bearer": {}
+      }
+    ],
+    "restrictions": {
+      "rules": [
+        {
+          "host": {
+            "host": "api.linear.app",
+            "port": 443
+          },
+          "methods": [
+            3
+          ],
+          "pathPrefix": "/graphql"
+        }
+      ]
+    },
+    "quotaScope": 2,
+    "rateLimitHeaders": [
+      {
+        "header": "x-ratelimit-requests-limit",
+        "signal": 1
+      },
+      {
+        "header": "x-ratelimit-requests-remaining",
+        "signal": 2
+      },
+      {
+        "header": "x-ratelimit-requests-reset",
+        "signal": 6
+      },
+      {
+        "header": "retry-after",
+        "signal": 5
+      }
+    ],
+    "apiDestinations": [
+      {
+        "id": {
+          "value": "api"
+        },
+        "upstream": {
+          "host": "api.linear.app",
+          "port": 443
+        },
+        "credentialRole": {
+          "value": "access"
+        },
+        "defaultForAuthentication": true
+      }
+    ],
+    "transportProfile": 1,
+    "responsePolicy": {
+      "policyId": {
+        "value": "linear-graphql-json-v1"
+      },
+      "policyDigest": {
+        "algorithm": "sha256",
+        "value": "3HjLE/VZR9V0Oue3Dm5U3wqEWK7OTSuMBYb9SaUQ3R0="
+      }
+    }
+  }
+}

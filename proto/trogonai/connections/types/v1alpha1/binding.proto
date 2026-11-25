@@ -1,0 +1,27 @@
+edition = "2024";
+
+package trogonai.connections.types.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/connections/types/v1alpha1/identity.proto";
+import "trogonai/secrets/v1alpha1/secret_ref.proto";
+
+// Binds one credential role of the pinned release to one stable SecretRef, one
+// binding per declared role. It holds no material, authorizes nothing by
+// itself, and is not the model-plane binding of ADR#0032 (ADR#0092 Decision 5).
+// An OAuth connection binds one role whose secret is the whole token set
+// (ADR#0095 Decision 1).
+message CredentialBinding {
+  CredentialRoleName role = 1 [features.field_presence = LEGACY_REQUIRED];
+  trogonai.secrets.v1alpha1.SecretRef secret_ref = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Increases only when the secret behind the role is replaced by a different
+  // one; new versions behind the same SecretRef leave it unchanged.
+  uint64 binding_generation = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).uint64.gt = 0
+  ];
+  // True when the Connection adopted an existing secret it does not own, such
+  // as a legacy gateway credential. Connection cleanup never destroys a
+  // borrowed secret (ADR#0092 Decision 11).
+  bool borrowed = 4 [features.field_presence = LEGACY_REQUIRED];
+}

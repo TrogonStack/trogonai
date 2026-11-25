@@ -1,0 +1,91 @@
+edition = "2024";
+
+package trogonai.connections.grants.v1alpha1;
+
+import "trogon/error/v1alpha1/options.proto";
+
+// Schema-only Decider error templates, never encoded. Issuance checks that
+// dispatch makes against the attempt and the plan are distinguished from fold
+// lifecycle rejections. Proofs, keys and credentials are never copied into
+// public error detail. Concurrency faults use the Decider channel.
+message ConnectionGrantCommandInvalidError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.grants"
+    reason: "CONNECTION_GRANT_COMMAND_INVALID"
+    message: "The command violates the connection grant contract."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+// The attempt is not Ready, not the Session's live attempt, or the terms do not
+// equal a planned connection use of that attempt's plan.
+message ConnectionGrantIssuanceRefusedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.grants"
+    reason: "CONNECTION_GRANT_ISSUANCE_REFUSED"
+    message: "The grant does not match a Ready attempt and its planned connection use."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionGrantAlreadyExistsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.grants"
+    reason: "CONNECTION_GRANT_ALREADY_EXISTS"
+    message: "The grant identity has already been prepared."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionGrantNotFoundError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.grants"
+    reason: "CONNECTION_GRANT_NOT_FOUND"
+    message: "The grant must be prepared before this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionGrantLifecycleConflictError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.grants"
+    reason: "CONNECTION_GRANT_LIFECYCLE_CONFLICT"
+    message: "The grant's lifecycle state does not admit this command."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionGrantRenewalOutOfBoundsError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.grants"
+    reason: "CONNECTION_GRANT_RENEWAL_OUT_OF_BOUNDS"
+    message: "The renewed expiry must be later than the current one, at most five minutes out and within the attempt."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionGrantNotYetExpiredError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.grants"
+    reason: "CONNECTION_GRANT_NOT_YET_EXPIRED"
+    message: "The grant has not reached its expiry."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}
+
+message ConnectionGrantNotOrphanedError {
+  option (trogon.error.v1alpha1.message).template = {
+    domain: "connections.grants"
+    reason: "CONNECTION_GRANT_NOT_ORPHANED"
+    message: "The grant has not stayed prepared past the reconciliation timeout."
+    code: FAILED_PRECONDITION
+    visibility: VISIBILITY_PUBLIC
+  };
+}

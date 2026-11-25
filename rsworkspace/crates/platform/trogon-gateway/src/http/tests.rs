@@ -1,10 +1,8 @@
 use super::*;
 use crate::config::load;
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use crate::credential_runtime_projection::{
     RuntimeCredentialRegistry, RuntimeCredentialResolver, RuntimeIntegrationProjection,
 };
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 use crate::source::datadog::constants as datadog_constants;
 use crate::source::github::constants::{HEADER_DELIVERY, HEADER_EVENT, HEADER_SIGNATURE};
 use crate::source::gitlab::GitLabSigningToken;
@@ -18,17 +16,98 @@ use crate::source::slack::constants as slack_constants;
 use crate::source::telegram::constants as telegram_constants;
 use crate::source::twitter::constants as twitter_constants;
 use crate::source::zoom::constants as zoom_constants;
-use crate::source_integration_id::SourceIntegrationId;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use buffa::Message as _;
 use hmac::{KeyInit, Mac};
 use std::io::Write;
 use tower::ServiceExt;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
 use trogon_nats::AdvancedMockNatsClient;
+use trogon_nats::jetstream::MockJetStreamKvStore;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{ClaimCheckPublisher, MaxPayload, MockJetStreamPublisher, MockObjectStore};
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
+use trogon_webhooks::{
+    AuthenticationMode, EndpointId, EndpointRegistration, EndpointStatus, NatsEndpointRegistry, ProjectId,
+    SecretWebhookVerifier, TimestampTolerance, WebhookBodySize,
+};
+
+mod whatsapp_tests;
+
+#[tokio::test]
+async fn generic_webhooks_mount_with_provider_routes_and_runtime_credentials() {
+    let endpoint_id = "3cc8a622-fcdd-42c2-b4ad-88d638053814";
+    let registration = EndpointRegistration::new(
+        EndpointId::new(endpoint_id).unwrap(),
+        ProjectId::new("tenant-1").unwrap(),
+        EndpointStatus::Enabled,
+        AuthenticationMode::Bearer,
+        WebhookBodySize::new(4096).unwrap(),
+        TimestampTolerance::new(60).unwrap(),
+    );
+    let registry = MockJetStreamKvStore::new();
+    registry.enqueue_entry(
+        registration.encode().into(),
+        17,
+        async_nats::jetstream::kv::Operation::Put,
+    );
+    let resolver = runtime_credentials(
+        SourceKind::Webhook,
+        CredentialKind::WebhookSecret,
+        &SourceIntegrationId::new(endpoint_id).unwrap(),
+        "test-fixture",
+    )
+    .await;
+    let file = write_toml("[webhooks]\n");
+    let mut config = load(Some(file.path())).unwrap();
+    let webhook_config = config.webhooks.take().unwrap();
+    let published = MockJetStreamPublisher::new();
+    let publisher = wrap_publisher(published.clone());
+    let app = mount_sources(config, publisher.clone(), &AdvancedMockNatsClient::new());
+    let app = mount_generic_webhooks(
+        app,
+        webhook_config,
+        NatsEndpointRegistry::new(registry),
+        SecretWebhookVerifier::new(crate::webhooks::RuntimeWebhookSecrets::new(resolver)),
+        publisher,
+    );
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/webhooks/{endpoint_id}"))
+                .header("authorization", "Bearer test-fixture")
+                .header("webhook-id", "delivery-one")
+                .body(Body::from(" {\"value\": 1} "))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        app.oneshot(Request::builder().uri("/-/liveness").body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let messages = published.published_messages();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].subject, format!("webhooks.tenant-1.{endpoint_id}.received"));
+    let event =
+        trogonai_proto::gateway::webhooks::v1::WebhookReceived::decode_from_slice(&messages[0].payload).unwrap();
+    assert_eq!(event.endpoint_id, endpoint_id);
+    assert_eq!(event.project_id, "tenant-1");
+    assert_eq!(event.configuration_revision, 17);
+    assert_eq!(event.body.as_slice(), b" {\"value\": 1} ");
+    assert!(messages[0].headers.get("authorization").is_none());
+}
 
 type HmacSha256 = hmac::Hmac<sha2::Sha256>;
 
@@ -464,12 +543,14 @@ async fn runtime_credentials(
     let store = MockOpenBaoSecretStore::default();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                source,
-                integration_id.clone(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    source,
+                    integration_id.clone(),
+                ),
+                kind,
             ),
-            kind,
             trogon_std::SecretString::new(secret).unwrap(),
         )
         .await
@@ -477,7 +558,7 @@ async fn runtime_credentials(
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
     registry.resolver(store)
 }

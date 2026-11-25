@@ -5,10 +5,14 @@ use crate::task_id::A2aTaskId;
 use std::sync::Arc;
 use trogon_std::env::InMemoryEnv;
 
+fn caller() -> trogon_identity_types::SubjectPrincipal {
+    trogon_identity_types::SubjectPrincipal::from_tokens("person", "alice").unwrap()
+}
+
 fn dlq_key(task: &str, transition: &str, url: &str) -> PushIdempotencyKey {
     let task_id = A2aTaskId::new(task).unwrap();
     let transition_id = StatusTransitionId::new(transition);
-    PushIdempotencyKey::derive_dlq(&task_id, &transition_id, url)
+    PushIdempotencyKey::derive_dlq(&caller(), &task_id, &transition_id, url)
 }
 
 #[test]
@@ -27,11 +31,13 @@ fn different_transition_ids_both_acquire() {
     let url = "https://example.com/hook";
 
     let failed = PushIdempotencyKey::derive_dlq(
+        &caller(),
         &task_id,
         &StatusTransitionId::from_terminal(TerminalPushTaskState::Failed),
         url,
     );
     let completed = PushIdempotencyKey::derive_dlq(
+        &caller(),
         &task_id,
         &StatusTransitionId::from_terminal(TerminalPushTaskState::Completed),
         url,

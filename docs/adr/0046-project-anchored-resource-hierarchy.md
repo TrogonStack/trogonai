@@ -7,6 +7,9 @@ date: 2026-08-05
 
 # ADR#0046: Project-Anchored Resource Hierarchy for the Credential Platform
 
+> **Proposed connector refinement:** [ADR#0092](./0092-third-party-connection-model.md) remains a draft. Typed resource containment and parent-scoped management names preserve ProjectId independently of hierarchy placement. This note does not change either ADR's status.
+
+
 ## Context
 
 The credential vault and API key platform needs one canonical owner boundary.
