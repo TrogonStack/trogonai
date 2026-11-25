@@ -32,6 +32,13 @@ impl DomainName {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Reports whether this name is a label sequence below `suffix`, never `suffix` itself.
+    pub(crate) fn is_strict_subdomain_of(&self, suffix: &Self) -> bool {
+        self.0
+            .strip_suffix(suffix.as_str())
+            .is_some_and(|rest| rest.len() > 1 && rest.ends_with('.'))
+    }
 }
 
 impl fmt::Display for DomainName {

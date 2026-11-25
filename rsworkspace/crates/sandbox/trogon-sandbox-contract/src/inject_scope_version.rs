@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::InjectScopeVersionError;
+use crate::{InjectScopeVersionError, Port};
 
 /// Which meaning an inject host without a port has.
 ///
@@ -16,6 +16,14 @@ pub enum InjectScopeVersion {
 }
 
 impl InjectScopeVersion {
+    /// The port a host pattern without one stands for, or `None` when it spans every port.
+    pub(crate) fn omitted_port(self) -> Option<Port> {
+        match self {
+            Self::V1 => None,
+            Self::V2 => Some(Port::HTTPS),
+        }
+    }
+
     /// Reports whether this is the default version.
     pub fn is_default(&self) -> bool {
         *self == Self::default()

@@ -24,6 +24,11 @@ impl DeniedDomain {
         self.0.target()
     }
 
+    /// The entry as a [`DomainPattern`], for comparing it against other patterns.
+    pub(crate) fn as_pattern(&self) -> &DomainPattern {
+        &self.0
+    }
+
     /// The port the entry is limited to, or `None` for every port.
     pub fn port(&self) -> Option<Port> {
         self.0.port()
