@@ -4,10 +4,12 @@ use std::time::Duration;
 use futures::StreamExt;
 use rcgen::{CustomExtension, ExtendedKeyUsagePurpose};
 use tokio_util::sync::CancellationToken;
+use tracing::Level;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
 use super::*;
 use crate::constants::TEST_TIMEOUT;
+use crate::tests::jwt_bundle_source_tests::{capture_debug, drive_for, reasons};
 use crate::tests::{LOCAL_ID, PEER_ID, Recorder, local, material, registration, revision, until};
 use crate::{IdentityConfig, IdentityStore, MaterialError};
 
@@ -270,9 +272,6 @@ async fn the_jwt_bundles_stream_ends_when_the_fixture_stops_publishing() {
 
 #[tokio::test(start_paused = true)]
 async fn a_jwt_bundle_driver_reconnects_when_the_stream_ends() {
-    use crate::tests::jwt_bundle_source_tests::{capture_debug, drive_for, reasons};
-    use tracing::Level;
-
     let fixture = WorkloadApiFixture::start(Vec::new()).await;
     let endpoint = fixture.endpoint();
     let WorkloadApiFixture {
