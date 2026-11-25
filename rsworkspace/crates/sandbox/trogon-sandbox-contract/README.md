@@ -135,7 +135,11 @@ flattens its storage into the record, and `DriveRecord::DEFAULT_SIZE_GIB` (100)
 and `DriveRecord::MAX_SIZE_GIB` (1024) bound a requested size. `DriveError` is
 tagged by `kind`. `SandboxUserName` and `SandboxGroupName` accept only
 `^[a-z_][a-z0-9_-]*$` within 32 bytes, on construction, parsing, and
-deserialization. These contracts describe drives and accounts; they do not
+deserialization. `CreateSandboxUserRequest`, `CreateSandboxGroupRequest`, and
+`ModifyGroupMembershipRequest` name a lease and those validated names, and their
+responses are tagged by `outcome` as `created`, `already_exists`,
+`missing_dependency`, `applied`, or `denied`. `GroupMembershipAction` is `add` or
+`remove`. These contracts describe drives and accounts; they do not
 provision storage, mount volumes, or create users.
 
 `WorkerHeartbeat` is the periodic report a worker publishes: its `WorkerId`,
@@ -157,7 +161,10 @@ bookkeeping untouched. `AccountLimits` pairs a
 tenant's usage with its caps, and `TagLimits` adds an optional cap on active
 leases per tag value. `ResourceUsageRequest`, `GetLeaseUsageRequest`,
 `GetTenantUsageRequest`, and `GetAccountLimitsRequest` carry the identifiers for
-those reads. These types report usage; they do not meter, bill, or enforce a
+those reads. `ResourceUsageResponse`, `GetLeaseUsageResponse`,
+`GetTenantUsageResponse`, and `GetAccountLimitsResponse` answer them, tagged by
+`outcome` as `gauges`, `unsupported`, `usage`, `limits`, or `denied` with a
+`LeaseError`. These types report usage; they do not meter, bill, or enforce a
 quota.
 
 The lease lifecycle messages cover stop, cancel, pause, resume, rollback, suspend,
@@ -310,3 +317,10 @@ including self-transitions.
 This package defines values and allowed transitions. It does not execute
 operations, persist state, authorize transitions, enforce claim ownership, or
 provide worker, provider, transport, or lease-generation behavior.
+
+`SubstrateSizeClass` pairs a non-empty label with non-zero memory in MiB, and
+serializes as `{"label", "memory_mib"}`. `SubstrateSizeClasses` is a non-empty
+ladder sorted by memory with no two classes sharing a size; it serializes as an
+array and parses from `small=2048,medium=8192,large=32768`. Construction,
+parsing, and deserialization enforce both rules and fail with
+`SubstrateSizeClassError`. The types do not select a class or schedule work.
