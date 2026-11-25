@@ -232,3 +232,21 @@ fn context_diagnostics_retain_size_without_exposing_untrusted_content_or_provena
         assert!(!diagnostic.contains(private_value));
     }
 }
+
+#[test]
+fn context_debug_exposes_only_size_without_message_content_or_provenance() {
+    let rendered = PeerContext::render(&batch(&["message_1"]), &[message("message_1", "confidential message")])
+        .expect("bounded assignment");
+    assert_eq!(
+        format!("{rendered:?}"),
+        format!("PeerContext {{ utf8_bytes: {}, .. }}", rendered.as_str().len())
+    );
+    for value in [
+        "confidential message",
+        "message_1",
+        "collaboration_a",
+        &sender_peer_id(),
+    ] {
+        assert!(!format!("{rendered:?}").contains(value));
+    }
+}
