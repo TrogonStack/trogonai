@@ -1,6 +1,6 @@
 use super::Fixture;
+use crate::{ContentBinding, ContentSeal, MessageText, PeerAccess, PeerPortError, PeerService};
 use chrono::Duration;
-use trogon_peer_service::{ContentBinding, ContentSeal, MessageText, PeerAccess, PeerPortError, PeerService};
 use trogonai_proto::peers::v1alpha1::HeartbeatRequest;
 
 pub struct AdvancingSeal<'a> {
