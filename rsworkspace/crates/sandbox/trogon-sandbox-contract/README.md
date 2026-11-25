@@ -189,6 +189,28 @@ digest a worker restored. `LeaseFailed` reports a `LeaseFailedReason`, tagged by
 These events describe snapshots; they do not push, delete, or charge for
 artifacts.
 
+The snapshot API carries the client-facing requests and responses for snapshots.
+Lookup, lineage, tag, and delete requests name a tenant and a `Digest` or a
+`SnapshotTagName`. Each response is tagged by `outcome`, and a refusal arrives as
+`denied` with a `LeaseError`, so it is never mistaken for `not_found`.
+`SnapshotTreeResponse` and `SnapshotTagHistoryResponse` carry an optional `denied`
+field that older brokers never send. `SnapshotLeaseRequest` captures a running
+lease. Its `accept_native` flag is a `NativeSnapshotAcceptance`, a JSON boolean
+that reads as `Declined` when omitted. `SnapshotLeaseResponse` returns an OCI
+`LeaseSnapshotReceipt` or a `NativeSnapshotReceipt`. `SnapshotPushTarget`,
+`SnapshotExportRequest`, `CheckpointRunningRequest`, and `SnapshotExportError`
+carry the worker-side export. These types describe the exchange; they do not
+export, delete, or authorize anything.
+
+The lease operations carry the other lease and drive requests. They cover fork,
+extend, tag update, list, delete by lease or by name, owned cleanup, and drive
+create, list, and delete. Each response is tagged by `outcome`. `ReapLeasesRequest`
+releases leases that match its filters, and its `dry_run` field is a `ReapMode`,
+a JSON boolean that reads as `Release` when omitted. A reap needs at least one of `tags`,
+`older_than_seconds`, or `idle_for_seconds`; construction and deserialization
+both enforce it with a `ReapLeasesRequestError`. The tag filters are `SandboxTags`. Page size, drive size, and lease lifetime limits
+are broker policy and are not part of these types.
+
 `WorkspaceSource` is keyed by its variant name: `clone` checks out a Git `sha`
 with `CloneAuth`, `host_mount` mounts a host directory, `s3_volume` mounts an S3
 prefix in a `VolumeMode` with an optional seed snapshot, and `empty` starts from
