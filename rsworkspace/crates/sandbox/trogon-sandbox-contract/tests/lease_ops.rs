@@ -9,10 +9,11 @@ use trogon_sandbox_contract::{
     CancelOwnedLeaseRequest, CancelOwnedLeaseResponse, CreateDriveRequest, CreateDriveResponse, DeleteDriveRequest,
     DeleteDriveResponse, DeleteLeaseRequest, DeleteLeaseResponse, DeleteNamedSandboxRequest,
     DeleteNamedSandboxResponse, DriveError, DriveId, DriveName, DriveRecord, DriveStorage, ExtendLeaseTimeoutRequest,
-    ExtendLeaseTimeoutResponse, LeaseError, LeaseForkRequest, LeaseId, LeaseStatus, LeaseSummary, ListDrivesRequest,
-    ListDrivesResponse, ListLeasesRequest, ListLeasesResponse, NetworkPolicyUpdateResponse, OperationId, ProviderKind,
-    PurgeNamedRequest, PurgeNamedResponse, ReapFailure, ReapLeasesRequest, ReapLeasesRequestError, ReapLeasesResponse,
-    ReapMode, SandboxId, SandboxTags, TenantId, UpdateLeaseTagsRequest, UpdateLeaseTagsResponse,
+    ExtendLeaseTimeoutResponse, LeaseError, LeaseForkRequest, LeaseId, LeaseName, LeaseNameError, LeaseStatus,
+    LeaseSummary, ListDrivesRequest, ListDrivesResponse, ListLeasesRequest, ListLeasesResponse,
+    NetworkPolicyUpdateResponse, OperationId, ProviderKind, PurgeNamedRequest, PurgeNamedResponse, ReapFailure,
+    ReapLeasesRequest, ReapLeasesRequestError, ReapLeasesResponse, ReapMode, SandboxId, SandboxTags, TenantId,
+    UpdateLeaseTagsRequest, UpdateLeaseTagsResponse,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -538,14 +539,14 @@ fn named_sandbox_messages_round_trip() -> TestResult {
     check(
         DeleteNamedSandboxRequest {
             tenant: tenant()?,
-            name: "build".to_owned(),
+            name: "build".parse()?,
         },
         json!({ "tenant": "acme", "name": "build" }),
     )?;
     check(
         PurgeNamedRequest {
             tenant: tenant()?,
-            name: "build".to_owned(),
+            name: "build".parse()?,
         },
         json!({ "tenant": "acme", "name": "build" }),
     )?;
@@ -568,4 +569,32 @@ fn named_sandbox_messages_round_trip() -> TestResult {
     rejects::<DeleteNamedSandboxResponse>(json!({ "outcome": "denied", "kind": "unknown" }))?;
     rejects::<PurgeNamedResponse>(json!({ "outcome": "missing" }))?;
     rejects::<PurgeNamedResponse>(json!({ "outcome": "failed" }))
+}
+
+#[test]
+fn lease_names_enforce_their_byte_bounds() -> TestResult {
+    let longest = "x".repeat(LeaseName::MAX_LEN);
+    assert_eq!(LeaseName::new(longest.clone())?.as_str(), longest);
+    assert_eq!("my sandbox/1".parse::<LeaseName>()?.to_string(), "my sandbox/1");
+    assert_eq!(String::from(LeaseName::try_from("build".to_owned())?), "build");
+
+    let empty = LeaseName::new("").err().ok_or("an empty name should be rejected")?;
+    assert_eq!(empty, LeaseNameError::Empty);
+    assert_eq!(empty.to_string(), "lease name must not be empty");
+
+    let long = "x".repeat(LeaseName::MAX_LEN + 1);
+    let too_long = long
+        .parse::<LeaseName>()
+        .err()
+        .ok_or("a long name should be rejected")?;
+    assert_eq!(too_long, LeaseNameError::TooLong { max: 128 });
+    assert_eq!(too_long.to_string(), "lease name must be at most 128 bytes");
+    Ok(())
+}
+
+#[test]
+fn lease_name_fields_reject_bad_names_on_the_wire() -> TestResult {
+    rejects::<DeleteNamedSandboxRequest>(json!({ "tenant": "acme", "name": "" }))?;
+    rejects::<PurgeNamedRequest>(json!({ "tenant": "acme", "name": "x".repeat(129) }))?;
+    rejects::<DeleteNamedSandboxRequest>(json!({ "tenant": "acme", "name": 7 }))
 }

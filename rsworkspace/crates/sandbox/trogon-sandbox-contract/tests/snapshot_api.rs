@@ -168,7 +168,7 @@ fn lease_list_rows_omit_absent_names_and_empty_tags() -> TestResult {
         }),
     )?;
     let named = LeaseListRow {
-        name: Some("build".to_owned()),
+        name: Some("build".parse()?),
         tags: serde_json::from_value(json!({ "env": "prod" }))?,
         ..bare
     };
@@ -247,7 +247,7 @@ fn lease_by_name_requests_and_snapshot_requests_round_trip() -> TestResult {
     check(
         GetLeaseByNameRequest {
             tenant: tenant()?,
-            name: "build".to_owned(),
+            name: "build".parse()?,
         },
         json!({ "tenant": "acme", "name": "build" }),
     )?;
@@ -302,7 +302,7 @@ fn lease_by_name_responses_are_tagged_by_outcome() -> TestResult {
         status: LeaseStatus::Paused,
         created_at: at(1),
         deadline: at(2),
-        name: Some("build".to_owned()),
+        name: Some("build".parse()?),
         tags: SandboxTags::default(),
     };
     check(

@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{LeaseId, LeaseStatus, ProviderKind, SandboxTags, TenantId};
+use crate::{LeaseId, LeaseName, LeaseStatus, ProviderKind, SandboxTags, TenantId};
 
 /// Row projection of a lease for by-name lookup responses, such as
 /// [`GetLeaseByNameResponse`](crate::GetLeaseByNameResponse).
@@ -19,7 +19,7 @@ pub struct LeaseListRow {
     pub created_at: SystemTime,
     pub deadline: SystemTime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub name: Option<LeaseName>,
     #[serde(default, skip_serializing_if = "SandboxTags::is_empty")]
     pub tags: SandboxTags,
 }

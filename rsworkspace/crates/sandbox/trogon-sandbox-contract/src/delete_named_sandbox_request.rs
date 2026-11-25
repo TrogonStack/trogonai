@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::TenantId;
+use crate::{LeaseName, TenantId};
 
 /// Client-facing request to permanently delete a sandbox by its tenant-scoped `name`, even when it has no active lease.
 ///
@@ -11,5 +11,5 @@ use crate::TenantId;
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DeleteNamedSandboxRequest {
     pub tenant: TenantId,
-    pub name: String,
+    pub name: LeaseName,
 }

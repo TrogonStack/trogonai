@@ -204,7 +204,7 @@ export, delete, or authorize anything.
 
 The lease operations carry the other lease and drive requests. They cover fork,
 extend, tag update, list, delete by lease or by name, owned cleanup, and drive
-create, list, and delete. Each response is tagged by `outcome`. `ReapLeasesRequest`
+create, list, and delete. Lease names in by-name requests, lease rows, and name conflicts are a `LeaseName`, 1 to 128 bytes of text, enforced on construction, parsing, and deserialization. Each response is tagged by `outcome`. `ReapLeasesRequest`
 releases leases that match its filters, and its `dry_run` field is a `ReapMode`,
 a JSON boolean that reads as `Release` when omitted. A reap needs at least one of `tags`,
 `older_than_seconds`, or `idle_for_seconds`; construction and deserialization

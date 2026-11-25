@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::TenantId;
+use crate::{LeaseName, TenantId};
 
 /// Provider-facing request to purge a named sandbox's suspended actor by tenant and name.
 ///
@@ -9,5 +9,5 @@ use crate::TenantId;
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PurgeNamedRequest {
     pub tenant: TenantId,
-    pub name: String,
+    pub name: LeaseName,
 }

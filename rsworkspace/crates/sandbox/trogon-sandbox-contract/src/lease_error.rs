@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CapabilityRequirements, Digest, LeaseId, OperationId, ProviderKind, SnapshotTag, SuspendRequestLevel, TenantId,
+    CapabilityRequirements, Digest, LeaseId, LeaseName, OperationId, ProviderKind, SnapshotTag, SuspendRequestLevel,
+    TenantId,
 };
 
 /// Why a lease request or lease operation was refused, tagged by `kind`.
@@ -92,7 +93,7 @@ pub enum LeaseError {
     /// name cannot be resolved yet. The caller retries with the same
     /// idempotency key.
     #[error("named lease '{name}' is being created by another request; retry")]
-    NameConflict { name: String },
+    NameConflict { name: LeaseName },
     /// The tenant policy does not allow vendor passthrough (`native`).
     #[error("vendor passthrough is not permitted for tenant {tenant}")]
     NativePassthroughNotPermitted { tenant: TenantId },
