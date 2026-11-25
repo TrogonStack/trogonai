@@ -5,6 +5,7 @@ workspace_crate(
         "attachment": {},
         "claim_check_validation": {},
         "content_purposes": {},
+        "content_retention": {},
         "creation_precondition": {},
         "detach": {},
         "enrollment": {},
