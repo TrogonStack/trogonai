@@ -160,6 +160,19 @@ leases per tag value. `ResourceUsageRequest`, `GetLeaseUsageRequest`,
 those reads. These types report usage; they do not meter, bill, or enforce a
 quota.
 
+The lease lifecycle messages cover stop, cancel, pause, resume, rollback, suspend,
+and wake. Each client request (`StopLeaseRequest`, `PauseLeaseRequest`,
+`ResumeLeaseRequest`, `RollbackLeaseRequest`, `SuspendLeaseRequest`,
+`WakeLeaseRequest`) names a tenant and a lease, and most take an optional
+`OperationId`. Each reply is tagged by `outcome` and carries `Denied` with a
+`LeaseError`; pause, resume, rollback, and the worker replies also have
+`unsupported`. `CancelIntent` is `release` or `purge`. The worker messages
+(`SandboxFreezeRequest`, `SandboxRollbackRequest`, `SandboxSuspendRequest`,
+`SandboxWakeRequest` and their responses) are broadcast per provider. A suspend
+keeps a `DormancyRecord`, whose `DormancyArtifact` is `local` to a worker or
+`remote` in a registry. These types only describe the wire. Clamping budgets,
+choosing a suspend level, and routing are left to the broker.
+
 `SnapshotPublished` and `SnapshotDeleted` announce a snapshot entering or leaving
 the registry, and `LiveSnapshotEntry` is one the tenant is charged for. Each may
 carry a `SnapshotGeneration`, a canonical ULID of 26 uppercase Crockford base32
