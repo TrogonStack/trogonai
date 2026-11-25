@@ -50,3 +50,6 @@ pub use trusted_batch_plan::TrustedBatchPlan;
 
 mod content_semantic_fingerprint;
 pub use content_semantic_fingerprint::ContentSemanticFingerprint;
+
+mod enrollment_facts;
+pub use enrollment_facts::EnrollmentFacts;
