@@ -17,7 +17,7 @@ use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 use super::*;
 use crate::jwt_algorithm::JwtSvidAlgorithm as Alg;
-use crate::jwt_authority::AuthorityKind;
+use crate::jwt_authority::{AuthorityKey, AuthorityKind, JwtAuthority};
 
 pub(crate) const NOW: u64 = 1_700_000_000;
 pub(crate) const SUB: &str = "spiffe://example.test/service/api";
@@ -1096,4 +1096,52 @@ async fn a_verified_token_records_a_unix_socket_hop() {
     let verified = verifier_for(&[&key]).verify(&ec_token(&key, &claims()), &hop).unwrap();
     assert_eq!(verified.hop(), HopKind::UnixSocket);
     assert_eq!(verified.hop().as_str(), "unix_socket");
+}
+
+#[test]
+fn a_mutual_tls_hop_has_no_unix_peer() {
+    assert!(hop().unix_peer().is_none());
+}
+
+#[test]
+fn the_p256_and_p384_builder_refuses_a_kind_it_does_not_build() {
+    for kind in [AuthorityKind::Rsa, AuthorityKind::EcP521] {
+        assert!(AuthorityKey::p256_or_p384(kind, &[0x04], "AA", "AA").is_none());
+    }
+}
+
+fn jose_key(key: &TestKey) -> AuthorityKey {
+    let jwks = json!({ "keys": [key.jwk.clone()] }).to_string();
+    let bundle = JwtBundle::from_jwks(TrustDomain::new("example.test").unwrap(), &jwks).unwrap();
+    bundle.authorities()[0].key.clone()
+}
+
+fn p521_authority(key: &P521Key) -> JwtAuthority {
+    JwtAuthority {
+        key_id: key.kid.to_owned(),
+        kind: AuthorityKind::EcP521,
+        key: AuthorityKey::p521(key.pair.public_key().as_ref()).unwrap(),
+    }
+}
+
+#[test]
+fn a_p521_key_refuses_a_signature_that_is_not_base64url() {
+    let authority = p521_authority(&p521_key("p521-1"));
+    assert!(!authority.verifies(Alg::Es512, "header.claims", "not base64url!"));
+}
+
+#[test]
+fn a_key_whose_backend_does_not_match_the_algorithm_never_verifies() {
+    let ec = ec_key("ec-1");
+    let jose_for_es512 = JwtAuthority {
+        key_id: "ec-1".to_owned(),
+        kind: AuthorityKind::EcP521,
+        key: jose_key(&ec),
+    };
+    assert!(!jose_for_es512.verifies(Alg::Es512, "header.claims", "AAAA"));
+    let p521_for_es256 = JwtAuthority {
+        kind: AuthorityKind::EcP256,
+        ..p521_authority(&p521_key("p521-1"))
+    };
+    assert!(!p521_for_es256.verifies(Alg::Es256, "header.claims", "AAAA"));
 }

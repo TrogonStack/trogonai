@@ -21,7 +21,7 @@ pub(crate) const PEER_ID: &str = "spiffe://example.org/runtime/workload-1";
 mod boundary_tests;
 mod bundle_snapshot_tests;
 mod crl_tests;
-mod jwt_bundle_source_tests;
+pub(crate) mod jwt_bundle_source_tests;
 pub(crate) mod jwt_svid_tests;
 mod lifecycle_tests;
 mod spiffe_id_bounds_tests;

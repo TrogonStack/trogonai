@@ -26,3 +26,9 @@ async fn a_stopped_driver_lets_the_set_age_out() {
     tokio::time::advance(JWT_BUNDLE_MAX_STALENESS + Duration::from_millis(1)).await;
     assert_eq!(source.current().unwrap_err(), JwtBundleSourceError::Stale);
 }
+
+#[test]
+fn the_debug_output_of_a_source_is_redacted() {
+    let source = JwtBundleSource::static_for_tests(set()).unwrap();
+    assert_eq!(format!("{source:?}"), "JwtBundleSource { <redacted> }");
+}

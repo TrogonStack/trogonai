@@ -4,8 +4,10 @@ use serde_json::json;
 
 use super::jwt_svid_tests::{AUD, FixedClock, NOW, TestKey, claims, ec_key, ec_token, hop};
 use super::*;
-use crate::constants::JWT_BUNDLE_MAX_STALENESS;
+use crate::constants::{CONNECT_TIMEOUT, JWT_BUNDLE_MAX_STALENESS, MAX_CONTEXT_BYTES};
 use crate::jwt_bundles_wire::JwtBundlesWire;
+use tracing::Level;
+use trogon_std::log_capture::{CapturedEvents, LevelFilter};
 
 fn jwks(keys: &[&TestKey]) -> String {
     json!({ "keys": keys.iter().map(|key| key.jwk.clone()).collect::<Vec<_>>() }).to_string()
@@ -191,4 +193,69 @@ fn an_update_is_refused_whole_when_any_entry_is_invalid() {
         JwtBundleSet::from_wire(wire(&many)).unwrap_err(),
         JwtBundleError::TooManyBundles
     );
+}
+
+#[test]
+fn an_update_larger_than_the_context_bound_is_refused_as_too_large() {
+    let huge = wire(&[("example.test", "x".repeat(MAX_CONTEXT_BYTES))]);
+    assert_eq!(JwtBundleSet::from_wire(huge).unwrap_err(), JwtBundleError::TooLarge);
+}
+
+pub(crate) fn capture_debug() -> (CapturedEvents, tracing::subscriber::DefaultGuard) {
+    let captured = CapturedEvents::new();
+    let guard = captured.install(LevelFilter::DEBUG);
+    (captured, guard)
+}
+
+pub(crate) fn reasons(captured: &CapturedEvents, level: Level) -> Vec<String> {
+    captured
+        .at(level)
+        .iter()
+        .filter_map(|event| event.field("reason").map(str::to_owned))
+        .collect()
+}
+
+/// Runs a driver against `endpoint` for `duration` of paused time, then stops it.
+pub(crate) async fn drive_for(endpoint: UnixEndpoint, duration: Duration) {
+    let (_source, driver) = JwtBundleSource::new(endpoint);
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(driver.run(shutdown.clone()));
+    tokio::time::sleep(duration).await;
+    shutdown.cancel();
+    task.await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_driver_reports_a_failed_connect_once_at_warn_and_then_at_debug() {
+    let (captured, _guard) = capture_debug();
+    drive_for(
+        UnixEndpoint::new("unix:///nonexistent/workload.sock").unwrap(),
+        Duration::from_secs(1),
+    )
+    .await;
+    assert_eq!(reasons(&captured, Level::WARN), ["connect_failed"]);
+    assert!(reasons(&captured, Level::DEBUG).contains(&"connect_failed".to_owned()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_driver_gives_up_on_a_connect_that_never_completes() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workload.sock");
+    let _listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let (captured, _guard) = capture_debug();
+    drive_for(
+        UnixEndpoint::new(&format!("unix://{}", path.display())).unwrap(),
+        CONNECT_TIMEOUT + Duration::from_secs(1),
+    )
+    .await;
+    assert_eq!(reasons(&captured, Level::WARN), ["connect_timed_out"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_driver_gives_up_on_a_stream_that_sends_nothing() {
+    let fixture = WorkloadApiFixture::start(Vec::new()).await;
+    let (captured, _guard) = capture_debug();
+    drive_for(fixture.endpoint(), CONNECT_TIMEOUT + Duration::from_secs(1)).await;
+    assert_eq!(reasons(&captured, Level::WARN), ["first_response_timed_out"]);
+    fixture.stop().await;
 }
