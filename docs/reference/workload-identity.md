@@ -325,7 +325,7 @@ peer that pins the old one.
   trailing slash, query or fragment, within 2048 bytes. The wire rule also accepts the
   upper-case path characters that the specification allows, because foreign IDs are not
   ours to constrain.
-- **Static egress alias.** The egress proxy's `/agent/<agent-id>` alias (ADR#0085) is a
+- **Static egress alias.** The egress proxy's `/agent/<agent-id>` alias is a
   separate legacy profile that does not follow this convention. It is the static
   compatibility slice, not the workload identity profile. It still is a SPIFFE ID: the
   proxy refuses to render or accept an alias whose agent segment holds anything outside

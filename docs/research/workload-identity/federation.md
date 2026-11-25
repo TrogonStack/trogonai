@@ -135,7 +135,7 @@ and falls back to five minutes when the bundle has no hint. The configured
 SPIFFE trust profile caps it at 300 seconds. A new signing key must be published in the bundle at least
 three refresh intervals before its first signing use, so every relying party has fetched it;
 `rotation_overlap` is therefore at least three and at most five times `refresh_interval`. Each bundle endpoint
-fetch is audited (see ADR#0098) as `SpiffeBundleFetchEvidence`, whether it changed the bundle,
+fetch is audited (see [ADR#0098](../../adr/0098-attested-workload-identity.md)) as `SpiffeBundleFetchEvidence`, whether it changed the bundle,
 left it unchanged, was refused or failed. Creation, revision, activation, withdrawal and
 retirement of the relationship are the existing `TrustRegistrationEvent` records, which
 alerting on federation relationship changes can consume.
