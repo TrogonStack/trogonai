@@ -2,14 +2,13 @@
 
 use buffa::MessageField;
 use chrono::{TimeZone, Utc};
-use trogon_decider::{Decider, testing::TestCase};
+use trogon_decider::{Decider, evaluate_decision, testing::TestCase};
 use trogon_peer::{
-    CallerId, CollaborationRef, ConnectorId, Enroll, EnrollmentIdentity, InstallationId, NativeSessionId,
-    PeerDisplayName, TenantId, TrustedPeerOwner,
+    CallerId, CollaborationRef, ConnectorId, Enroll, EnrollError, EnrollmentIdentity, EvolveError, InstallationId,
+    NativeSessionId, PeerDisplayName, TenantId, TrustedPeerOwner,
 };
 use trogonai_proto::convert::timestamp_from_datetime;
-use trogonai_proto::peers::state_v1alpha1 as state;
-use trogonai_proto::peers::v1alpha1 as proto;
+use trogonai_proto::peers::{state_v1alpha1 as state, v1alpha1 as proto};
 
 #[test]
 fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
@@ -126,4 +125,37 @@ fn fresh_enrollment_records_trusted_owner_and_a_ten_second_attachment() {
         trogon_decider::Evolve::evolve(restored, &proto::PeerEvent::default()),
         Err(trogon_peer::EvolveError::MissingEvent)
     ));
+}
+
+#[test]
+fn an_enrolled_identity_cannot_be_created_twice_by_command_or_replayed_fact() {
+    let identity = EnrollmentIdentity::new(
+        TrustedPeerOwner::new(TenantId::new("tenant").unwrap(), CallerId::new("caller").unwrap()),
+        InstallationId::new("installation").unwrap(),
+        NativeSessionId::new("session").unwrap(),
+    );
+    let command = Enroll::new(
+        identity,
+        ConnectorId::new("connector").unwrap(),
+        CollaborationRef::new("collaboration").unwrap(),
+        PeerDisplayName::new("Peer").unwrap(),
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+    );
+    let (state, _) = evaluate_decision(trogon_peer::commands::state::initial_state(), &command).unwrap();
+    TestCase::<Enroll>::new()
+        .given_state(state.clone())
+        .when(command)
+        .then_error(EnrollError::AlreadyEnrolled);
+    let duplicate = proto::PeerEvent {
+        event: Some(
+            proto::PeerEnrolled {
+                enrollment: state.enrollment.clone(),
+            }
+            .into(),
+        ),
+    };
+    assert_eq!(
+        trogon_peer::commands::state::evolve(state, &duplicate),
+        Err(EvolveError::AlreadyEnrolled)
+    );
 }
