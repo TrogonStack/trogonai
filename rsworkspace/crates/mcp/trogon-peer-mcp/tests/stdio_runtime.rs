@@ -45,6 +45,11 @@ impl StdioPeer {
         let mut command = Command::new(env!("CARGO_BIN_EXE_trogon-peer-mcp"));
         command
             .env_clear()
+            .envs(
+                SystemEnv
+                    .var_os("LLVM_PROFILE_FILE")
+                    .map(|profile| ("LLVM_PROFILE_FILE", profile)),
+            )
             .kill_on_drop(true)
             .env("RUST_LOG", "trace")
             .env("NATS_URL", address)
@@ -64,9 +69,6 @@ impl StdioPeer {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(profile) = SystemEnv.var_os("LLVM_PROFILE_FILE") {
-            command.env("LLVM_PROFILE_FILE", profile);
-        }
         let mut child = command.spawn()?;
         let output = child.stdout.take().ok_or("missing stdout")?;
         let input = child.stdin.take().ok_or("missing stdin")?;
