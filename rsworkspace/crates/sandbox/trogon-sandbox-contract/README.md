@@ -393,6 +393,8 @@ This package defines values and allowed transitions. It does not execute
 operations, persist state, authorize transitions, enforce claim ownership, or
 provide worker, provider, transport, or lease-generation behavior.
 
+`TerminalId` serializes as a JSON string of 1 to 64 ASCII letters, digits, `-`, or `_`, and `TerminalDimension` serializes as a JSON number from 1 to 1000. Both are enforced by construction and deserialization. `TerminalRequest` carries `lease_id` and `terminal_id` with a flattened `TerminalOp` tagged by `op` (`open`, `input`, `resize`, `close`). `TerminalResponse` is tagged by `outcome` (`opened`, `done`, `failed`, `unsupported`, `denied`) and wraps `TerminalError`, tagged by `kind`, or `LeaseError`. `TerminalOutput` frames are tagged by `type` (`data`, `exit`, `resync`). `TerminalInput` wraps `Base64Data` and caps the decoded write at 65536 bytes, refusing longer encoded text before decoding. `TerminalArgument` rejects NUL, and `open` carries a list of them as `cmd`. Output frames carry `Base64Data`. The contract does not buffer output or open terminals.
+
 `SubstrateSizeClass` pairs a non-empty label with non-zero memory in MiB, and
 serializes as `{"label", "memory_mib"}`. A label cannot contain `,` or `=` or
 carry surrounding whitespace, so every ladder renders to text that parses back
