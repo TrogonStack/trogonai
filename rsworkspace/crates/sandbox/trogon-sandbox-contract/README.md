@@ -354,6 +354,18 @@ serialized as a JSON boolean. A `MachServiceName` allows only a single trailing
 `ExtraCapability` is an upper case name that is never on the forbidden list.
 A `MandatoryDenySearchDepth` is from 1 to 10.
 
+`FileOpRequest` carries a `LeaseId`, an optional `SandboxUserName`, and one `FileOp`, a
+structured file operation tagged by `op` as `list`, `stat`, `read`, `write`, `edit`,
+`search`, `remove`, `mkdir`, `rename`, `archive_get`, `archive_put`, `checkpoint`,
+`changes`, `watch_start`, `watch_poll`, `watch_stop`, or `checksum`. A worker answers
+with a `FileOpResponse` tagged by `outcome`, whose failures carry a `FileOpErrorKind`.
+Payload bytes are a `Base64Data` string, and a checksum is a
+`FileSha256`, 64 lowercase hexadecimal characters. Every boolean option or result
+flag, such as `recursive`, `truncated`, or `existed`, is a two-variant enum that still
+serializes as a JSON boolean and keeps the same default when omitted. These types
+describe the messages only; they do not read, write, search, or watch files, and the
+size limits on `FileOp` are constants a worker enforces.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
