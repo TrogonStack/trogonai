@@ -26,6 +26,11 @@ The result is one MCP text item containing native hook JSON with
 `hookSpecificOutput.additionalContext`. The adapter returns the backend's same
 unacknowledged assignment on retry and records no acknowledgment of its own.
 
+Prompt hook backends must yield: the two-second budget is cooperative, so a
+`PreparePeerBatch` or `EnrollPeer` future that blocks the executor cannot be
+interrupted. A reply that completes only after the deadline is reported as a
+deadline, never as a delivery.
+
 Tool failures become MCP application error results with bounded static messages
 and a stable per-variant `structuredContent.code` from `PeerMcpError::code()`,
 so callers can distinguish failures without matching diagnostic text. Typed
