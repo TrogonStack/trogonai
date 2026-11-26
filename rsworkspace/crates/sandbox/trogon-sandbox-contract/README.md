@@ -366,6 +366,15 @@ serializes as a JSON boolean and keeps the same default when omitted. These type
 describe the messages only; they do not read, write, search, or watch files, and the
 size limits on `FileOp` are constants a worker enforces.
 
+`NetworkOptions` gathers the optional egress proxy settings as public fields with everything off by default.
+Its on/off flags are two-variant enums such as `LoopbackNames`, serialized as JSON booleans. `DenyReason`,
+`TunnelCap`, `UnlistedDestinations`, `DeniedDomainReasons` (an object keyed by deny list entry, dropping keys that
+are no entry), `MitmUnixSocket`, `UpstreamCaCertificates`, and `ResponseHeaderStrip` carry a JSON shape. The remaining
+configuration types, among them `ParentProxy`, `ParentProxyUrl`, `NoProxy`, `CaFiles`, `TlsExclusions`,
+`ExternalProxy`, and `RequestBodyCap`, are parsed on construction and have no JSON form. `ParentProxyUrl` keeps
+URL userinfo as a `Basic` authorization value that `Debug` prints as `[REDACTED]`, and it has no `Display`. These
+types do not match a host, resolve a proxy, or read the environment.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
