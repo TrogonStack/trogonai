@@ -4,16 +4,11 @@ mod guest_init_error;
 mod linux;
 
 #[cfg(target_os = "linux")]
-fn main() {
-    if let Err(error) = linux::run() {
-        eprintln!("guest init: {error}");
-        if std::process::id() == 1 {
-            loop {
-                std::thread::park();
-            }
-        }
-        std::process::exit(1);
-    }
+fn main() -> std::process::ExitCode {
+    let Err(error) = linux::run();
+    eprintln!("guest init: {error}");
+    linux::linger_as_init(std::process::id(), linux::park_once);
+    std::process::ExitCode::FAILURE
 }
 
 #[cfg(not(target_os = "linux"))]
