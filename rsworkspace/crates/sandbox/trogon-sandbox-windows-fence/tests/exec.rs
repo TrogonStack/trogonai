@@ -196,3 +196,15 @@ fn a_program_launch_passes_its_argv_without_a_command_string() -> TestResult {
 fn a_program_launch_needs_an_absolute_program() {
     assert!(ExecRequest::program("agent.exe", vec![]).is_err());
 }
+
+#[test]
+fn bin_shell_rooted_paths_without_a_drive_are_absolute() -> TestResult {
+    let sh = BinShell::parse(Some("/usr/bin/sh"), ROOT)?;
+    assert_eq!(sh.exe, "/usr/bin/sh");
+    let explicit = BinShell::explicit("\\\\srv\\share\\bash.exe", vec!["-c".to_string()])?;
+    assert_eq!(explicit.args, ["-c"]);
+    let ps = BinShell::parse(Some("D:\\ps\\powershell.exe"), ROOT)?;
+    assert_eq!(ps.exe, "D:\\ps\\powershell.exe");
+    assert_eq!(ps.args, ["-NoProfile", "-Command"]);
+    Ok(())
+}

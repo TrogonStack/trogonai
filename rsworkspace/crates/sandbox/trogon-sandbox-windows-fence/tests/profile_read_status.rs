@@ -1,6 +1,6 @@
 use trogon_sandbox_windows_fence::{
-    GrantEntry, ProfileGrantCounts, ProfileGrantPath, ProfileGrantPathKind, ProfileReadState, ProfileReadVar,
-    WindowsSandboxErrorCode, parse_profile_read_status,
+    CallerReads, GrantEntry, ProfileGrantCounts, ProfileGrantPath, ProfileGrantPathKind, ProfileReadState,
+    ProfileReadVar, WindowsSandboxErrorCode, parse_profile_read_status,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -144,6 +144,24 @@ fn every_path_kind_is_read() -> TestResult {
             ProfileGrantPathKind::Container,
             ProfileGrantPathKind::File,
             ProfileGrantPathKind::Denied
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_skipped_path_says_whether_the_caller_reads_it() -> TestResult {
+    let status = parse_profile_read_status(
+        r#"{"state":"none","not_granted":[{"path":"C:\\a","caller_reads":true},{"path":"C:\\b","caller_reads":false},{"path":"C:\\c","caller_reads":"unknown"},{"path":"C:\\d","caller_reads":3}]}"#,
+    )?;
+    let reads: Vec<_> = status.not_granted.iter().map(|item| item.caller_reads).collect();
+    assert_eq!(
+        reads,
+        [
+            Some(CallerReads::Yes),
+            Some(CallerReads::No),
+            Some(CallerReads::Unknown),
+            None
         ]
     );
     Ok(())

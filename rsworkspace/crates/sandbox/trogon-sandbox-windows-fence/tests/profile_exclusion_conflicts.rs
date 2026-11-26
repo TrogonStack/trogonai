@@ -242,3 +242,56 @@ fn a_wildcard_parent_that_is_not_a_plain_directory_is_not_matched() -> TestResul
     assert!(found[0].unexamined.is_some());
     Ok(())
 }
+
+fn custom(exclusions: &[&str]) -> ProfileExclusions {
+    ProfileExclusions {
+        exclusions: exclusions.iter().map(|e| e.to_string()).collect(),
+        ungranted_only: Vec::new(),
+    }
+}
+
+fn conflicts_with(paths: &[&str], grant: &ProfileExclusions, fake: &Fake) -> Vec<ExclusionConflict> {
+    let paths: Vec<String> = paths.iter().map(|p| p.to_string()).collect();
+    profile_exclusion_conflicts(&paths, grant, Access::Read, &[], fake)
+}
+
+#[test]
+fn no_paths_and_no_exclusions_conflict_with_nothing() -> TestResult {
+    let none: [String; 0] = [];
+    assert!(profile_exclusion_conflicts(&none, &grant(), Access::Read, &[], &Fake::default()).is_empty());
+    assert!(conflicts_with(&[r"C:\a"], &custom(&[]), &Fake::default()).is_empty());
+    Ok(())
+}
+
+#[test]
+fn extended_prefixes_and_dot_dot_components_are_normalized() -> TestResult {
+    let grant = custom(&[r"\\srv\share\secret", r"C:\Users\me\.ssh"]);
+    for path in [
+        r"\\?\UNC\srv\share\secret\a",
+        r"\\.\UNC\srv\share\secret",
+        r"C:\Users\me\x\..\.ssh",
+    ] {
+        assert_eq!(conflicts_with(&[path], &grant, &Fake::default()).len(), 1, "{path}");
+    }
+    assert_eq!(
+        conflicts_with(&[r"\\?\C:\Users\me\.ssh"], &grant, &Fake::default()).len(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn a_component_ending_in_a_wildcard_matches_by_prefix() -> TestResult {
+    let grant = custom(&[r"C:\a\Mo*\secret"]);
+    let inside = conflicts_with(&[r"C:\a\Mozilla\secret"], &grant, &Fake::default());
+    assert_eq!(inside[0].relation, Relation::Equal);
+    let fake = Fake::default()
+        .dir(r"C:\a", &["other", "Mozilla"])
+        .dir(r"C:\a\Mozilla", &["secret"]);
+    let above = conflicts_with(&[r"C:\a"], &grant, &fake);
+    assert_eq!(above[0].relation, Relation::Above);
+    assert!(above[0].unexamined.is_none());
+    let elsewhere = Fake::default().dir(r"C:\a", &["other"]);
+    assert!(conflicts_with(&[r"C:\a"], &grant, &elsewhere).is_empty());
+    Ok(())
+}

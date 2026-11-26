@@ -67,3 +67,26 @@ fn launch_error_lines() -> TestResult {
     assert!(parse_launch_error("plain", "exec").is_none());
     Ok(())
 }
+
+#[test]
+fn a_holder_without_a_pid_or_path_is_named_undefined() -> TestResult {
+    let out = r#"{"held_by":[{"kind":"profile","path":null}]}"#;
+    let e = refusal_beside_others(&args(&["profile", "grant"]), Some(24), out).ok_or("no refusal")?;
+    assert!(e.message().contains("process undefined"));
+    Ok(())
+}
+
+#[test]
+fn a_blocked_grant_without_holders_names_none() -> TestResult {
+    let e = refusal_beside_others(&args(&["profile", "grant"]), Some(24), "").ok_or("no refusal")?;
+    assert_eq!(e.code(), Code::ProfileGrantBlockedBySession);
+    assert!(e.message().contains("are running, and the grant"));
+    Ok(())
+}
+
+#[test]
+fn an_error_displays_its_message() -> TestResult {
+    let e = refusal_beside_others(&args(&["profile", "grant"]), Some(25), "").ok_or("no refusal")?;
+    assert_eq!(e.to_string(), e.message());
+    Ok(())
+}

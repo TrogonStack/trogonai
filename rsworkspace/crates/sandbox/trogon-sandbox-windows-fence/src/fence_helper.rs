@@ -26,6 +26,14 @@ fn without_window(command: &mut Command) {
 #[cfg(not(windows))]
 fn without_window(_command: &mut Command) {}
 
+fn spawn_failed(subcommand: &str, error: &std::io::Error) -> WindowsSandboxError {
+    WindowsSandboxError::for_subcommand(
+        Code::SpawnFailed,
+        format!("fence-helper {subcommand}: spawn failed: {error}"),
+        subcommand,
+    )
+}
+
 const POLL: Duration = Duration::from_millis(20);
 
 enum Chunk {
@@ -110,13 +118,7 @@ impl FenceHelper {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         without_window(&mut command);
-        let mut child = command.spawn().map_err(|e| {
-            WindowsSandboxError::for_subcommand(
-                Code::SpawnFailed,
-                format!("fence-helper {subcommand}: spawn failed: {e}"),
-                subcommand.clone(),
-            )
-        })?;
+        let mut child = command.spawn().map_err(|e| spawn_failed(&subcommand, &e))?;
         if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
             let bytes = text.as_bytes().to_vec();
             thread::spawn(move || {
@@ -124,15 +126,15 @@ impl FenceHelper {
             });
         }
         let (tx, rx) = mpsc::channel::<Chunk>();
-        if let Some(mut out) = child.stdout.take() {
+        let _ = child.stdout.take().map(|mut out| {
             let tx = tx.clone();
             thread::spawn(move || {
                 let mut bytes = Vec::new();
                 let _ = out.read_to_end(&mut bytes);
                 let _ = tx.send(Chunk::Stdout(String::from_utf8_lossy(&bytes).into_owned()));
-            });
-        }
-        if let Some(err) = child.stderr.take() {
+            })
+        });
+        let _ = child.stderr.take().map(|err| {
             let tx = tx.clone();
             thread::spawn(move || {
                 let mut reader = BufReader::new(err);
@@ -145,8 +147,8 @@ impl FenceHelper {
                         return;
                     }
                 }
-            });
-        }
+            })
+        });
         drop(tx);
 
         let deadline = (!timeout.is_zero()).then(|| Instant::now() + timeout);
@@ -181,20 +183,13 @@ impl FenceHelper {
             }
         }
         let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if !expired() => thread::sleep(POLL),
-                Ok(None) => {
+            match child.try_wait().map_err(|e| spawn_failed(&subcommand, &e))? {
+                Some(status) => break status,
+                None if !expired() => thread::sleep(POLL),
+                None => {
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(timed_out());
-                }
-                Err(e) => {
-                    return Err(WindowsSandboxError::for_subcommand(
-                        Code::SpawnFailed,
-                        format!("fence-helper {subcommand}: spawn failed: {e}"),
-                        subcommand,
-                    ));
                 }
             }
         };

@@ -359,3 +359,132 @@ fn a_profile_operation_in_progress_is_an_error_not_a_status() -> TestResult {
     assert_eq!(error.code(), Code::ProfileOperationInProgress);
     Ok(())
 }
+
+#[test]
+fn the_command_starts_the_helper_with_the_dispatch_argument() -> TestResult {
+    let fake = Fake::new("exit 0")?;
+    let command = fake.fence.fence_helper().command(&["status".to_string()]);
+    assert_eq!(command.get_program(), fake.fence.fence_helper().exe());
+    let args: Vec<_> = command.get_args().collect();
+    assert_eq!(args, ["--fence-helper", "status"]);
+    Ok(())
+}
+
+#[test]
+fn a_timeout_after_the_output_closed_kills_and_is_typed() -> TestResult {
+    let fake = Fake::new("exec >&- 2>&-; sleep 5")?;
+    let Err(e) = fake
+        .fence
+        .fence_helper()
+        .run(&["status".to_string()], Duration::from_millis(150))
+    else {
+        return Err("expected an error".into());
+    };
+    assert_eq!(e.code(), Code::FenceHelperTimeout);
+    Ok(())
+}
+
+#[test]
+fn stderr_after_a_timeout_is_dropped() -> TestResult {
+    let fake = Fake::new("(sleep 0.3; echo late >&2) & sleep 5")?;
+    let Err(e) = fake
+        .fence
+        .fence_helper()
+        .run(&["status".to_string()], Duration::from_millis(100))
+    else {
+        return Err("expected an error".into());
+    };
+    assert_eq!(e.code(), Code::FenceHelperTimeout);
+    std::thread::sleep(Duration::from_millis(800));
+    Ok(())
+}
+
+#[test]
+fn a_helper_that_cannot_start_is_typed() -> TestResult {
+    let fake = Fake::new("exit 0")?;
+    fs::remove_file(fake.dir.path().join("fence-helper"))?;
+    let Err(e) = fake.fence.fence_helper().run(&["status".to_string()], Duration::ZERO) else {
+        return Err("expected an error".into());
+    };
+    assert_eq!(e.code(), Code::SpawnFailed);
+    assert_eq!(e.subcommand(), Some("status"));
+    let Err(e) = fake.fence.profile_grant(&[], false, None, &mut |_| {}) else {
+        return Err("expected an error".into());
+    };
+    assert_eq!(e.code(), Code::SpawnFailed);
+    Ok(())
+}
+
+#[test]
+fn a_nonzero_status_with_only_stdout_reports_it() -> TestResult {
+    let fake = Fake::new("echo only out; exit 7")?;
+    let Err(e) = fake.fence.status(None) else {
+        return Err("expected an error".into());
+    };
+    assert_eq!(e.message(), "fence-helper status exited 7: only out");
+    assert_eq!(e.to_string(), e.message());
+    Ok(())
+}
+
+#[test]
+fn uninstall_keeping_the_user_and_failing_with_only_stdout() -> TestResult {
+    let fake = Fake::new("echo gone; exit 1")?;
+    let opts = UninstallOptions {
+        keep_user: true,
+        ..UninstallOptions::default()
+    };
+    let Err(e) = fake.fence.uninstall(&opts) else {
+        return Err("expected an error".into());
+    };
+    assert_eq!(e.message(), "fence-helper uninstall failed (exit 1): gone");
+    Ok(())
+}
+
+#[test]
+fn a_profile_grant_timeout_says_the_grant_is_incomplete() -> TestResult {
+    let fake = Fake::new("sleep 5")?;
+    let Err(e) = fake.fence.profile_grant(&[], false, Some(150), &mut |_| {}) else {
+        return Err("expected an error".into());
+    };
+    assert_eq!(e.code(), Code::FenceHelperTimeout);
+    assert_eq!(e.subcommand(), Some("profile"));
+    assert!(e.message().contains("profile grant timed out after 150ms"));
+    Ok(())
+}
+
+#[test]
+fn profile_forget_succeeds_and_reports_stdout_when_it_fails_quietly() -> TestResult {
+    let fake = Fake::new("exit 0")?;
+    fake.fence.profile_forget(None)?;
+    assert_eq!(fake.argv()?, ["--fence-helper", "profile", "forget", "--json"]);
+    let fake = Fake::new("echo nope; exit 2")?;
+    let Err(e) = fake.fence.profile_forget(None) else {
+        return Err("expected an error".into());
+    };
+    assert!(e.message().ends_with("exited 2): nope"));
+    Ok(())
+}
+
+#[test]
+fn trust_ca_failing_quietly_reports_stdout() -> TestResult {
+    let fake = Fake::new("echo bad cert; exit 3")?;
+    let Err(e) = fake.fence.trust_ca(Path::new("x.pem")) else {
+        return Err("expected an error".into());
+    };
+    assert!(e.message().ends_with("(exit 3): bad cert"));
+    Ok(())
+}
+
+#[test]
+fn verify_can_ask_for_the_anonymous_egress_attempt() -> TestResult {
+    let fake = Fake::new(
+        r#"echo '{"egress_probe":"blocked","target":"t","low_integrity_probe":"blocked","untrusted_integrity_probe":"blocked"}'"#,
+    )?;
+    let opts = VerifyOptions {
+        anonymous_egress: true,
+        ..VerifyOptions::default()
+    };
+    fake.fence.verify(&opts)?;
+    assert!(fake.argv()?.contains(&"--anonymous-egress".to_string()));
+    Ok(())
+}

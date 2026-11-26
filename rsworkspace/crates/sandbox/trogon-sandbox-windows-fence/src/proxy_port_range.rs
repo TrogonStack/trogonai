@@ -55,8 +55,16 @@ impl ProxyPortRange {
     /// use moves on to the next one, any other failure is the result, and a
     /// port in `exclude` is skipped.
     pub fn listen(&self, exclude: &[u16]) -> io::Result<std::net::TcpListener> {
+        self.listen_with(exclude, |port| std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)))
+    }
+
+    fn listen_with(
+        &self,
+        exclude: &[u16],
+        mut bind: impl FnMut(u16) -> io::Result<std::net::TcpListener>,
+    ) -> io::Result<std::net::TcpListener> {
         for port in (self.low..=self.high).filter(|port| !exclude.contains(port)) {
-            match std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
+            match bind(port) {
                 Ok(listener) => return Ok(listener),
                 Err(error) if error.kind() == io::ErrorKind::AddrInUse => {}
                 Err(error) => return Err(error),
@@ -101,3 +109,6 @@ impl FromStr for ProxyPortRange {
         Self::new(low, high)
     }
 }
+
+#[cfg(test)]
+mod tests;

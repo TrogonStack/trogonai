@@ -139,3 +139,10 @@ fn capabilities_the_helper_lacks_are_refused() -> TestResult {
     check_capabilities(&full)?;
     Ok(())
 }
+
+#[test]
+fn a_matching_setup_version_is_not_a_mismatch() -> TestResult {
+    let s = status(r#","marker_version":4,"setup_version":4"#, INSTALLED)?;
+    assert!(trogon_sandbox_windows_fence::setup_version_mismatch(&s.user, None).is_none());
+    Ok(())
+}

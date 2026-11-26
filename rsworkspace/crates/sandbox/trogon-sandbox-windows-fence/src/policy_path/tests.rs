@@ -42,3 +42,9 @@ fn only_the_topmost_grant_beneath_a_deny_counts() {
     let denies = vec![r"C:\d".to_string()];
     assert_eq!(grants_beneath_denies(&grants, &denies), vec![r"C:\d\a"]);
 }
+
+#[test]
+fn a_bare_drive_has_a_root_native_spelling() {
+    assert_eq!(native("/C:"), Some(r"C:\".to_string()));
+    assert_eq!(native("/C:/"), Some(r"C:\".to_string()));
+}

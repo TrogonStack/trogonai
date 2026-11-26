@@ -11,6 +11,13 @@ use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;
 
 const LISTENER_BIND_ATTEMPTS: usize = 5;
 
+/// A bound, non-blocking loopback listener whose port is outside `range`.
+fn candidate(range: ProxyPortRange) -> Option<(TcpListener, SocketAddr)> {
+    let listener = TcpListener::bind("127.0.0.1:0").ok()?;
+    let addr = listener.local_addr().ok()?;
+    (!range.contains(addr.port()) && listener.set_nonblocking(true).is_ok()).then_some((listener, addr))
+}
+
 pub(crate) struct ProbeListener {
     pub(crate) addr: SocketAddr,
     stop: Arc<AtomicBool>,
@@ -23,22 +30,15 @@ impl ProbeListener {
     /// `connected`. A connect that gets through is accepted and dropped.
     pub(crate) fn bind_outside(range: ProxyPortRange) -> Result<Self, WindowsSandboxError> {
         for _ in 0..LISTENER_BIND_ATTEMPTS {
-            let Ok(listener) = TcpListener::bind("127.0.0.1:0") else {
+            let Some((listener, addr)) = candidate(range) else {
                 continue;
             };
-            let Ok(addr) = listener.local_addr() else {
-                continue;
-            };
-            if range.contains(addr.port()) || listener.set_nonblocking(true).is_err() {
-                continue;
-            }
             let stop = Arc::new(AtomicBool::new(false));
             let flag = Arc::clone(&stop);
             let handle = thread::spawn(move || {
                 while !flag.load(Ordering::Relaxed) {
-                    match listener.accept() {
-                        Ok(_) => {}
-                        Err(_) => thread::sleep(Duration::from_millis(10)),
+                    if listener.accept().is_err() {
+                        thread::sleep(Duration::from_millis(10));
                     }
                 }
             });
@@ -68,3 +68,6 @@ impl Drop for ProbeListener {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

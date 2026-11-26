@@ -161,3 +161,16 @@ fn an_outdated_helper_is_named() -> TestResult {
     assert_eq!(e.code(), Code::FenceHelperTooOld);
     Ok(())
 }
+
+#[test]
+fn a_probe_outcome_not_known_is_kept_and_every_outcome_displays() -> TestResult {
+    let json = CLEAN.replace("\"deny_only_probe\":\"blocked\"", "\"deny_only_probe\":\"odd\"");
+    let r = interpret_wfp_verify(&run(0, &json), &InstallContext::default())?;
+    assert_eq!(r.probes.deny_only, ProbeOutcome::Other("odd".to_string()));
+    let shown: Vec<String> = [ProbeOutcome::Refused, ProbeOutcome::Other("odd".to_string())]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(shown, ["refused", "odd"]);
+    Ok(())
+}
