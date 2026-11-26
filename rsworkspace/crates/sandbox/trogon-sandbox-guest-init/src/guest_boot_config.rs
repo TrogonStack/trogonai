@@ -1,27 +1,30 @@
-use crate::{GuestAgentPort, GuestAgentPortError};
+use crate::{GuestActor, GuestActorId, GuestAgentPort, GuestBootConfigError};
 
 const ACTOR_ARGUMENT: &str = "ate.actor_id=";
 const AGENT_PORT_ARGUMENT: &str = "sandbox.agent_port=";
-const UNBOUND_ACTOR: &str = "unbound";
 
 /// What a guest learns from its kernel command line: the actor it serves and the port its agent
 /// listens on.
 ///
-/// A missing actor argument means the guest is unbound; a missing port argument selects
-/// [`GuestAgentPort::DEFAULT`]. The first occurrence of each argument wins.
+/// A missing actor argument, or one set to the unbound marker, means the guest is unbound; a
+/// missing port argument selects [`GuestAgentPort::DEFAULT`]. The first occurrence of each
+/// argument wins.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct GuestBootConfig {
-    actor_id: String,
+    actor: GuestActor,
     agent_port: GuestAgentPort,
 }
 
 impl GuestBootConfig {
-    pub fn from_kernel_command_line(command_line: &str) -> Result<Self, GuestAgentPortError> {
-        let actor_id = command_line
+    pub fn from_kernel_command_line(command_line: &str) -> Result<Self, GuestBootConfigError> {
+        let actor = match command_line
             .split_whitespace()
             .find_map(|argument| argument.strip_prefix(ACTOR_ARGUMENT))
-            .unwrap_or(UNBOUND_ACTOR)
-            .to_owned();
+        {
+            None => GuestActor::Unbound,
+            Some(GuestActorId::UNBOUND_MARKER) => GuestActor::Unbound,
+            Some(actor_id) => GuestActor::Bound(GuestActorId::new(actor_id)?),
+        };
         let agent_port = match command_line
             .split_whitespace()
             .find_map(|argument| argument.strip_prefix(AGENT_PORT_ARGUMENT))
@@ -29,11 +32,11 @@ impl GuestBootConfig {
             Some(port) => port.parse()?,
             None => GuestAgentPort::DEFAULT,
         };
-        Ok(Self { actor_id, agent_port })
+        Ok(Self { actor, agent_port })
     }
 
-    pub fn actor_id(&self) -> &str {
-        &self.actor_id
+    pub fn actor(&self) -> &GuestActor {
+        &self.actor
     }
 
     pub fn agent_port(&self) -> GuestAgentPort {

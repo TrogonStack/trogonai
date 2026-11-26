@@ -25,9 +25,10 @@ impl FromStr for GuestAgentPort {
     type Err = GuestAgentPortError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let port = value
-            .parse::<u32>()
-            .map_err(|_| GuestAgentPortError::NotANumber(value.to_owned()))?;
+        let port = value.parse::<u32>().map_err(|source| GuestAgentPortError::NotANumber {
+            value: value.to_owned(),
+            source,
+        })?;
         Self::new(port)
     }
 }

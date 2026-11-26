@@ -1,4 +1,6 @@
 #[cfg(target_os = "linux")]
+mod guest_init_error;
+#[cfg(target_os = "linux")]
 mod linux;
 
 #[cfg(target_os = "linux")]

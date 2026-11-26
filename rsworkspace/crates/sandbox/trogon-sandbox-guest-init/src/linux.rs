@@ -5,6 +5,8 @@ use std::process::{Command, Stdio};
 
 use trogon_sandbox_guest_init::GuestBootConfig;
 
+use crate::guest_init_error::GuestInitError;
+
 fn mount(source: &str, target: &str, filesystem: &str, flags: libc::c_ulong, data: &str) -> io::Result<()> {
     std::fs::create_dir_all(target)?;
     let source = CString::new(source)?;
@@ -37,9 +39,9 @@ fn device(path: &str, major: u32, minor: u32) -> io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o666))
 }
 
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run() -> Result<(), GuestInitError> {
     if std::process::id() != 1 {
-        return Err("trogon-sandbox-guest-init must run as guest PID 1".into());
+        return Err(GuestInitError::NotGuestPidOne);
     }
     let restricted = libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC;
     mount("proc", "/proc", "proc", restricted, "")?;
@@ -95,7 +97,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let config = GuestBootConfig::from_kernel_command_line(&std::fs::read_to_string("/proc/cmdline")?)?;
     std::fs::create_dir_all("/run/ate")?;
-    std::fs::write("/run/ate/actor-id", config.actor_id())?;
+    std::fs::write("/run/ate/actor-id", config.actor().as_str())?;
     let agent = Command::new("/.sandbox/agent")
         .args(["--vsock-port", &config.agent_port().to_string()])
         .env_clear()
@@ -115,7 +117,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err(error.into());
         }
         if pid as u32 == agent.id() {
-            return Err(format!("guest agent exited with wait status {status}").into());
+            return Err(GuestInitError::AgentExited { wait_status: status });
         }
     }
 }
