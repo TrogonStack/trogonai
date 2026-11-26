@@ -35,6 +35,7 @@ struct Backend {
     enrollment_committed: Arc<tokio::sync::Notify>,
     fail_enroll: bool,
     pause_enroll: Arc<std::sync::atomic::AtomicBool>,
+    enroll_behavior: EnrollDelay,
     fail_prepare: Arc<std::sync::atomic::AtomicBool>,
     pause_prepare: Arc<std::sync::atomic::AtomicBool>,
     prepare_entered: Arc<tokio::sync::Notify>,
@@ -64,6 +65,13 @@ impl Drop for PendingPrepare {
     fn drop(&mut self) {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
+}
+
+#[derive(Clone)]
+enum EnrollDelay {
+    None,
+    /// Moves the paused tokio clock forward while the enrollment future runs.
+    Advance(std::time::Duration),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -146,6 +154,10 @@ impl EnrollPeer for Backend {
             std::future::pending::<()>().await;
         }
         tokio::time::sleep(self.enroll_delay).await;
+        match &self.enroll_behavior {
+            EnrollDelay::None => {}
+            EnrollDelay::Advance(duration) => tokio::time::advance(*duration).await,
+        }
         if self.fail_enroll {
             return Err(UnconfiguredOperationError);
         }
@@ -221,6 +233,7 @@ fn backend(response: v1::PrepareBatchResponse) -> Backend {
         enrollment_committed: Arc::new(tokio::sync::Notify::new()),
         fail_enroll: false,
         pause_enroll: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        enroll_behavior: EnrollDelay::None,
         fail_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         pause_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         prepare_entered: Arc::new(tokio::sync::Notify::new()),
@@ -374,10 +387,34 @@ async fn model_send_cannot_run_before_native_hook_enrollment() {
 
 #[tokio::test]
 async fn prepared_assignment_cannot_be_silently_truncated_to_fit_context_limits() {
-    let mut response = prepared("review result");
-    response.messages = vec![response.messages[0].clone(); 5];
-    response.batch.as_option_mut().expect("prepared batch").message_ids = vec!["message_1".into(); 5];
-    let adapter = PeerMcp::new(backend(response), config()).expect("valid config");
+    let batch_of = |count: usize| {
+        let mut response = prepared("ok");
+        let template = response.messages[0].clone();
+        response.messages = (1..=count)
+            .map(|index| {
+                let mut message = template.clone();
+                message.metadata.as_option_mut().expect("metadata").message_id = Some(format!("message_{index}"));
+                message
+            })
+            .collect();
+        response.batch.as_option_mut().expect("prepared batch").message_ids =
+            (1..=count).map(|index| format!("message_{index}")).collect();
+        response
+    };
+    let adapter = PeerMcp::new(backend(batch_of(4)), config()).expect("valid config");
+    let accepted = hook_json(
+        adapter
+            .invoke(prompt("native_b", "prompt_1"))
+            .await
+            .expect("four distinct messages fit the limit"),
+    );
+    let context = accepted["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("context text");
+    for index in 1..=4 {
+        assert!(context.contains(&format!("message_{index}")));
+    }
+    let adapter = PeerMcp::new(backend(batch_of(5)), config()).expect("valid config");
     assert!(matches!(
         adapter.invoke(prompt("native_b", "prompt_1")).await,
         Err(PeerMcpError::InvalidBatch(_))
@@ -545,8 +582,9 @@ async fn early_wire_results(adapter: PeerMcp<Backend>, requests: Vec<CallToolReq
     results
 }
 
-fn early_wire_error(result: &Value, expected: &str) {
+fn early_wire_error(result: &Value, code: &str, expected: &str) {
     assert_eq!(result["isError"], true);
+    assert_eq!(result["structuredContent"]["code"], code);
     assert_eq!(result["content"].as_array().expect("error content").len(), 1);
     assert_eq!(result["content"][0]["text"], expected);
     let rendered = result.to_string();
@@ -576,19 +614,32 @@ async fn jsonrpc_dispatch_rejects_invalid_inputs_and_maps_unconfigured_model_por
         request("peer_status", json!({})),
         request("peer_acknowledge_batch", json!({})),
     ]).await;
-    early_wire_error(&results[0], "Peer connector has not enrolled a native session.");
-    early_wire_error(&results[1], "Peer operation is not available in this adapter layer.");
-    for index in [2, 3, 4] {
-        early_wire_error(&results[index], "Peer tool arguments are invalid.");
+    early_wire_error(
+        &results[0],
+        "unbound",
+        "Peer connector has not enrolled a native session.",
+    );
+    early_wire_error(
+        &results[1],
+        "unsupported_tool",
+        "Peer operation is not available in this adapter layer.",
+    );
+    for (index, code) in [
+        (2, "invalid_arguments"),
+        (3, "invalid_arguments"),
+        (4, "invalid_host_identity"),
+    ] {
+        early_wire_error(&results[index], code, "Peer tool arguments are invalid.");
     }
     assert_ne!(results[5]["isError"], true);
     early_wire_error(
         &results[6],
+        "native_session_changed",
         "This connector belongs to another native session; reconnect it for this session.",
     );
-    early_wire_error(&results[7], "Peer metadata is unavailable.");
+    early_wire_error(&results[7], "roster", "Peer metadata is unavailable.");
     for result in &results[8..] {
-        early_wire_error(result, "Peer tool arguments are invalid.");
+        early_wire_error(result, "invalid_arguments", "Peer tool arguments are invalid.");
     }
     assert_eq!(
         calls.lock().expect("calls").len(),
@@ -740,20 +791,18 @@ async fn early_invalid_enrollment_fields_never_reach_preparation_and_have_safe_r
         *backend.enrollment.lock().expect("enrollment") = malformed;
         let adapter = PeerMcp::new(backend, config()).expect("config");
         let result = adapter.invoke(prompt("native_b", "first")).await;
-        assert!(
-            matches!(
-                result,
-                Err(PeerMcpError::InvalidEnrollment | PeerMcpError::InvalidEnrollmentIdentity(_))
-            ),
-            "invalid enrollment admitted: {label}"
-        );
+        let code = match &result {
+            Err(PeerMcpError::InvalidEnrollment) => "invalid_enrollment",
+            Err(PeerMcpError::InvalidEnrollmentIdentity(_)) => "invalid_enrollment_identity",
+            _ => panic!("invalid enrollment admitted: {label}"),
+        };
         assert_eq!(
             calls.lock().expect("calls").len(),
             1,
             "preparation occurred after invalid enrollment: {label}"
         );
         let result = early_wire_results(adapter, vec![prompt("native_b", "retry")]).await;
-        early_wire_error(&result[0], "Peer service returned an invalid enrollment.");
+        early_wire_error(&result[0], code, "Peer service returned an invalid enrollment.");
         assert_eq!(
             calls.lock().expect("calls").len(),
             2,
@@ -809,7 +858,7 @@ async fn early_backend_faults_preserve_native_identity_without_fabricating_an_as
     failed_prepare
         .fail_prepare
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    for (backend, expected_calls) in [(failed_enroll, 1), (failed_prepare, 2)] {
+    for (backend, expected_calls, code) in [(failed_enroll, 1, "enroll"), (failed_prepare, 2, "prepare")] {
         let calls = backend.calls.clone();
         let adapter = PeerMcp::new(backend, config()).expect("config");
         let results = early_wire_results(
@@ -819,10 +868,12 @@ async fn early_backend_faults_preserve_native_identity_without_fabricating_an_as
         .await;
         early_wire_error(
             &results[0],
+            code,
             "Peer service is unavailable; pending delivery remains queued.",
         );
         early_wire_error(
             &results[1],
+            "native_session_changed",
             "This connector belongs to another native session; reconnect it for this session.",
         );
         assert_eq!(calls.lock().expect("calls").len(), expected_calls);
@@ -854,17 +905,21 @@ async fn early_assignment_absence_and_availability_are_not_reinterpreted_as_deli
     missing_metadata.messages[0].metadata = Default::default();
     let mut unavailable = prepared("private_backend_body");
     unavailable.content_availability = Some(v1::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE.into());
-    for (response, diagnostic) in [
-        (missing_batch, "Peer service returned an invalid delivery assignment."),
-        (no_availability, "Peer service returned an invalid delivery assignment."),
-        (unspecified, "Peer service returned an invalid delivery assignment."),
-        (unknown, "Peer service returned an invalid delivery assignment."),
-        (
-            missing_metadata,
-            "Peer service returned an invalid delivery assignment.",
-        ),
+    let unavailable_without_batch = v1::PrepareBatchResponse {
+        content_availability: Some(v1::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE.into()),
+        ..Default::default()
+    };
+    const INVALID: &str = "Peer service returned an invalid delivery assignment.";
+    for (response, code, diagnostic) in [
+        (missing_batch, "invalid_batch", INVALID),
+        (no_availability, "invalid_batch", INVALID),
+        (unspecified, "invalid_batch", INVALID),
+        (unknown, "invalid_batch", INVALID),
+        (missing_metadata, "invalid_batch", INVALID),
+        (unavailable_without_batch, "invalid_batch", INVALID),
         (
             unavailable,
+            "retry_content_unavailable",
             "Peer batch retry content is unavailable; its original preparation record is retained.",
         ),
     ] {
@@ -875,7 +930,7 @@ async fn early_assignment_absence_and_availability_are_not_reinterpreted_as_deli
             vec![prompt("native_b", "first")],
         )
         .await;
-        early_wire_error(&results[0], diagnostic);
+        early_wire_error(&results[0], code, diagnostic);
         assert_eq!(
             calls.lock().expect("calls").len(),
             2,
@@ -2635,4 +2690,66 @@ async fn malformed_reenrollment_reply_cannot_restore_prior_lifecycle_authority()
             heartbeat.await.expect("heartbeat task");
         }
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_hook_completing_after_the_deadline_is_a_deadline_not_a_delivery() {
+    let mut late = backend(prepared("review result"));
+    late.enroll_behavior = EnrollDelay::Advance(std::time::Duration::from_secs(3));
+    let calls = late.calls.clone();
+    let adapter = PeerMcp::new(late, config()).expect("config");
+    let result = adapter.invoke(prompt("native_b", "prompt_1")).await;
+    assert!(matches!(result, Err(PeerMcpError::PromptDeadline)));
+    assert_eq!(
+        calls.lock().expect("calls").len(),
+        2,
+        "the late reply was still produced"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_hook_finishing_exactly_at_the_deadline_is_still_on_time() {
+    let mut exact = backend(prepared("review result"));
+    exact.enroll_behavior = EnrollDelay::Advance(std::time::Duration::from_secs(2));
+    let adapter = PeerMcp::new(exact, config()).expect("config");
+    let hook = hook_json(
+        adapter
+            .invoke(prompt("native_b", "prompt_1"))
+            .await
+            .expect("exact deadline stays on time"),
+    );
+    assert_eq!(hook["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit");
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_hook_acquiring_the_lock_after_its_deadline_never_touches_binding_or_backend() {
+    let mut slow = backend(prepared("review result"));
+    slow.enroll_delay = std::time::Duration::from_secs(3);
+    let calls = slow.calls.clone();
+    let adapter = PeerMcp::new(slow, config()).expect("config");
+    // The first invocation holds the operation lock until its own deadline drops
+    // it; the clock then jumps past the queued invocation's deadline, so that one
+    // acquires the lock late and must report the deadline.
+    let (first, second, ()) = tokio::join!(
+        adapter.invoke(prompt("native_b", "prompt_1")),
+        adapter.invoke(prompt("native_b", "prompt_2")),
+        async {
+            tokio::task::yield_now().await;
+            tokio::time::advance(std::time::Duration::from_millis(2_100)).await;
+        },
+    );
+    assert!(matches!(first, Err(PeerMcpError::PromptDeadline)));
+    assert!(
+        matches!(second, Err(PeerMcpError::PromptDeadline)),
+        "late lock holder must report the deadline before checking the binding"
+    );
+    let observed = calls.lock().expect("calls");
+    assert_eq!(
+        observed
+            .iter()
+            .filter(|call| matches!(call, ObservedCall::Enroll(_)))
+            .count(),
+        1,
+        "the late invocation reached enrollment"
+    );
 }
