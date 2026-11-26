@@ -1,0 +1,69 @@
+[package]
+name = "trogon-sandbox-actor-agent"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "In-actor HTTP agent that carries exec, file, terminal, and identity traffic for sandbox leases"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "trogon-sandbox-actor-agent"
+path = "src/main.rs"
+required-features = ["server"]
+
+[features]
+default = ["server"]
+# The worker links this crate for the guest protocol types alone and must not
+# pull in the HTTP server, so everything the in-actor binary needs is gated.
+server = [
+    "dep:anyhow",
+    "dep:axum",
+    "dep:bytes",
+    "dep:clap",
+    "dep:futures",
+    "dep:hyper-util",
+    "dep:libc",
+    "dep:nix",
+    "dep:sha2",
+    "dep:tokio",
+    "dep:tokio-stream",
+    "dep:tokio-util",
+    "dep:tokio-vsock",
+    "dep:tracing",
+    "dep:tracing-subscriber",
+    "dep:uuid",
+]
+
+[dependencies]
+anyhow = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
+nix = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true, optional = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, optional = true, features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true, features = ["env-filter"] }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+uuid = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-vsock = { workspace = true, optional = true }
+
+[dev-dependencies]
+base64 = { workspace = true }
+reqwest = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread", "sync", "time"] }
