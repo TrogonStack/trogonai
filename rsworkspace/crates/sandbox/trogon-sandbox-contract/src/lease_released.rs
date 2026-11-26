@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{CorrelationId, Digest, LeaseId, LeaseReleasedReason, SnapshotPolicy, TenantId};
+use crate::{CorrelationId, Digest, LeaseId, LeaseReleasedReason, SnapshotPolicy, TenantId, WorkerId};
 
 /// Announces that a lease ended, with the reason.
 ///
@@ -17,7 +17,7 @@ pub struct LeaseReleased {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_out: Option<SnapshotPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_id: Option<String>,
+    pub worker_id: Option<WorkerId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<CorrelationId>,
     /// Digest of the snapshot the lease was restored from; it becomes the parent of the snapshot

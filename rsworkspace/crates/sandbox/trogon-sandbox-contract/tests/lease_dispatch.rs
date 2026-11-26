@@ -255,13 +255,24 @@ fn lease_released_round_trips_minimal_and_full() -> TestResult {
         "released_at": time_json(9),
     }))?;
     assert_eq!(full.reason, LeaseReleasedReason::IdleTimeout);
-    assert_eq!(full.worker_id.as_deref(), Some("w1"));
+    assert_eq!(full.worker_id.as_ref().map(WorkerId::as_str), Some("w1"));
     assert_eq!(full.released_at, Some(time(9)));
     assert_eq!(
         serde_json::from_value::<LeaseReleased>(serde_json::to_value(&full)?)?,
         full
     );
     Ok(())
+}
+
+#[test]
+fn lease_released_rejects_a_malformed_worker_id() {
+    let error = serde_json::from_value::<LeaseReleased>(json!({
+        "lease_id": "lease-1",
+        "tenant": "acme",
+        "reason": "completed",
+        "worker_id": "worker 1",
+    }));
+    assert!(error.is_err());
 }
 
 #[test]
