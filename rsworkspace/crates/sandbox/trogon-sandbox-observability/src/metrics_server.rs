@@ -25,15 +25,27 @@ fn router(registry: Registry) -> axum::Router {
     )
 }
 
+fn listener_error(addr: SocketAddr) -> impl FnOnce(std::io::Error) -> ObservabilityError {
+    move |source| ObservabilityError::Listener { addr, source }
+}
+
 /// Serve `GET /metrics` on `addr` until the listener fails.
 pub async fn serve_metrics(addr: SocketAddr, registry: Registry) -> Result<(), ObservabilityError> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .map_err(|source| ObservabilityError::Listener { addr, source })?;
+        .map_err(listener_error(addr))?;
     tracing::info!(%addr, "prometheus metrics listening");
-    axum::serve(listener, router(registry))
-        .await
-        .map_err(|source| ObservabilityError::Listener { addr, source })
+    served(addr, axum::serve(listener, router(registry)).await)
+}
+
+fn served(addr: SocketAddr, result: std::io::Result<()>) -> Result<(), ObservabilityError> {
+    result.map_err(listener_error(addr))
+}
+
+fn log_exit(addr: SocketAddr, result: Result<(), ObservabilityError>) {
+    if let Err(error) = result {
+        tracing::warn!(%error, %addr, "metrics server exited");
+    }
 }
 
 /// Start the `/metrics` HTTP server in the background.
@@ -41,9 +53,7 @@ pub async fn serve_metrics(addr: SocketAddr, registry: Registry) -> Result<(), O
 /// Must be called from within a Tokio runtime.
 pub fn spawn_metrics_server(addr: SocketAddr, registry: Registry) {
     tokio::spawn(async move {
-        if let Err(error) = serve_metrics(addr, registry).await {
-            tracing::warn!(%error, %addr, "metrics server exited");
-        }
+        log_exit(addr, serve_metrics(addr, registry).await);
     });
 }
 

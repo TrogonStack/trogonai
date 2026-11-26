@@ -31,3 +31,6 @@ impl Drop for TracingGuard {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
