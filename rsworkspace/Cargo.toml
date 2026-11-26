@@ -65,6 +65,7 @@ trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
+trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-windows-fence = { path = "crates/sandbox/trogon-sandbox-windows-fence" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
@@ -135,6 +136,7 @@ tower = "=0.5.3"
 tower-http = { version = "=0.7.1", features = ["trace"] }
 
 # Database
+rusqlite = { version = "=0.43.0", features = ["bundled"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "macros", "migrate", "postgres", "chrono", "json"] }
 
 # Telegram
