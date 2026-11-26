@@ -63,6 +63,7 @@ trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
+trogon-sandbox-cosign = { path = "crates/sandbox/trogon-sandbox-cosign" }
 trogon-sandbox-credential-client = { path = "crates/sandbox/trogon-sandbox-credential-client" }
 trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
 trogon-sandbox-dev = { path = "crates/sandbox/trogon-sandbox-dev" }
@@ -256,6 +257,8 @@ wit-bindgen = "=0.63.0"
 hex = "=0.4.3"
 rand_core = { version = "=0.6.4", features = ["getrandom", "std"] }
 secrecy = "=0.10.3"
+sigstore = { version = "=0.14.0", default-features = false, features = ["cosign", "registry", "rustls-tls", "verify"] }
+zeroize = "=1.8.2"
 hmac = "=0.13.0"
 jsonwebtoken = { version = "=11.1.0", features = ["rust_crypto"] }
 nats-jwt-rs = "=0.1.1"
