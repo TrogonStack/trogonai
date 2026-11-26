@@ -258,6 +258,22 @@ trim output, or move bytes.
 `DispatchTarget` names the worker and attempt a lease is dispatched to, with an
 optional `LeaseEpoch` for workers that support epochs.
 
+`LeaseAttemptIdentity` binds a lease, a `ProviderKind`, and a `DispatchTarget`.
+`ProviderCleanupRequest` carries it with a `CancelIntent`, and
+`ProviderCleanupResponse` is tagged by `outcome` as `cleaned` or `failed`.
+`LeaseDispatchAttempt` records one attempt: its `DispatchAttemptId`, optional
+`LeaseEpoch`, `LeaseRequestKey`, `LeaseAccounting` (`tenant` or `prewarm`), and
+optional cleanup reason, cleanup start, and `PendingDispatch`, which keeps the
+dispatch payload as opaque JSON until the reply commits. A `LeaseRequestKey`
+holds 1 to 256 bytes of ASCII letters, digits, `_`, or `-`; construction,
+parsing, and deserialization all enforce it. `AttemptQuotaReservation` names the
+tenant, attempt, and CPU and wall seconds held for an attempt. `LeaseReleased`
+announces a lease ending with a `LeaseReleasedReason` (`completed`, `expired`,
+`cancelled`, `idle_timeout`, or `failed`). `IdlePauseRetry` and `FreezeInFlight`
+carry the backoff and in-flight markers of idle pauses; `FreezeAction` is
+`Pause` or `Resume`, serialized as the JSON boolean `thaw`. These types describe
+the wire; they do not reserve quota, pick a worker, or drive a retry.
+
 The credential broker contracts cover issuing, revoking, and rotating
 credentials. `CredentialIssueRequest` asks for a token with a
 `CredentialScope`, tagged by `kind`, and a nonzero `ttl_seconds`. It may carry a
