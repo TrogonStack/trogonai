@@ -67,6 +67,7 @@ trogon-sandbox-credential-client = { path = "crates/sandbox/trogon-sandbox-crede
 trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
 trogon-sandbox-dev = { path = "crates/sandbox/trogon-sandbox-dev" }
 trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-helper" }
+trogon-sandbox-file-ops = { path = "crates/sandbox/trogon-sandbox-file-ops" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
@@ -196,9 +197,11 @@ ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 toml = "=1.1.8"
 wasmtime = "=47.0.3"
 http = "=1.5.0"
+regex = "=1.12.3"
 regress = { version = "=0.12.0", features = ["utf16"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rrule = "=0.14.0"
+rustix = { version = "=1.1.4", default-features = false, features = ["fs", "std"] }
 sha2 = "=0.11.1"
 wiremock = "=0.6.5"
 windows = { version = "=0.62.2", features = [
@@ -232,6 +235,7 @@ windows = { version = "=0.62.2", features = [
   "Win32_System_Registry",
 ] }
 testcontainers-modules = { version = "=0.15.0", features = ["nats"] }
+tar = { version = "=0.4.46", default-features = false }
 tempfile = "=3.27.0"
 filetime = "=0.2.29"
 time = "=0.3.55"
