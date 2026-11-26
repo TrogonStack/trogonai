@@ -10,6 +10,10 @@ description = "Validated sandbox identifiers, capability profiles, and operation
 workspace = true
 
 [dependencies]
+base64 = { workspace = true }
+regress = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+unicode-ident = { workspace = true }
+url = { workspace = true }
