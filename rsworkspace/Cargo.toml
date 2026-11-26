@@ -61,6 +61,7 @@ trogon-identity-types = { path = "crates/platform/trogon-identity-types" }
 trogon-jwks-publisher = { path = "crates/platform/trogon-jwks-publisher" }
 trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
+trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
@@ -203,6 +204,8 @@ wit-bindgen = "=0.63.0"
 
 # Auth callout
 hex = "=0.4.3"
+rand_core = { version = "=0.6.4", features = ["getrandom", "std"] }
+secrecy = "=0.10.3"
 hmac = "=0.13.0"
 jsonwebtoken = { version = "=11.1.0", features = ["rust_crypto"] }
 nats-jwt-rs = "=0.1.1"
