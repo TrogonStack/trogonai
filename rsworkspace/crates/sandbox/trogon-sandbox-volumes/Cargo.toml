@@ -1,0 +1,31 @@
+[package]
+name = "trogon-sandbox-volumes"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Typed object-store-backed workspace volume client for sandbox leases"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+volume-cache = []
+
+[dependencies]
+bytes = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+object_store = { workspace = true }
+prometheus = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "process", "time"] }
+tracing = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "time"] }
