@@ -153,7 +153,9 @@ impl EnrollPeer for Backend {
         if self.pause_enroll.load(std::sync::atomic::Ordering::SeqCst) {
             std::future::pending::<()>().await;
         }
-        tokio::time::sleep(self.enroll_delay).await;
+        if !self.enroll_delay.is_zero() {
+            tokio::time::sleep(self.enroll_delay).await;
+        }
         match &self.enroll_behavior {
             EnrollDelay::None => {}
             EnrollDelay::Advance(duration) => tokio::time::advance(*duration).await,
@@ -180,7 +182,7 @@ impl PreparePeerBatch for Backend {
         }
         if let Some(completion_at) = self.prepare_completion_at {
             tokio::time::sleep_until(completion_at).await;
-        } else {
+        } else if !self.prepare_delay.is_zero() {
             tokio::time::sleep(self.prepare_delay).await;
         }
         if self.fail_prepare.load(std::sync::atomic::Ordering::SeqCst) {
