@@ -16,17 +16,14 @@ impl SentinelRegistry {
         real: RealValue,
         inject_hosts: InjectHosts,
     ) -> Result<Sentinel, JwtMaskError> {
-        let claim_name = |index: usize| SecretName::new(format!("{name}.claim-{index}")).ok();
+        let claim_name = |index: usize| claim_entry_name(&name, index);
         let masked = mask_jwt_reusing(masking, &real, &|index| {
-            let claim = claim_name(index)?;
+            let claim = claim_name(index).ok()?;
             self.entry(&claim).map(|entry| entry.sentinel.clone())
         })?;
         let mut claim_entries = Vec::with_capacity(masked.claims.len());
         for (index, claim) in masked.claims.into_iter().enumerate() {
-            let entry_name = claim_name(index).ok_or_else(|| JwtMaskError::ClaimEntryName {
-                binding: name.clone(),
-                index,
-            })?;
+            let entry_name = claim_name(index)?;
             claim_entries.push((entry_name, claim.sentinel, claim.real));
         }
         let whole = self.register_with_sentinel(name, masked.fake, real, inject_hosts.clone());
@@ -36,3 +33,11 @@ impl SentinelRegistry {
         Ok(whole)
     }
 }
+
+/// The registry name of masked claim `index` of `binding`.
+fn claim_entry_name(binding: &SecretName, index: usize) -> Result<SecretName, JwtMaskError> {
+    SecretName::new(format!("{binding}.claim-{index}")).map_err(|_| JwtMaskError::entry_name(binding, index))
+}
+
+#[cfg(test)]
+mod tests;

@@ -195,7 +195,14 @@ fn env_line_handles_single_quotes_and_bare_values() -> TestResult {
 
 #[test]
 fn env_line_without_the_variable_fails_closed() -> TestResult {
-    for content in ["OTHER=1\n  # K=commented\nK=\n", "K\n", "KK=1\n", "K='\n", "K=''\n"] {
+    for content in [
+        "OTHER=1\n  # K=commented\nK=\n",
+        "K\n",
+        "KK=1\n",
+        "K='\n",
+        "K=''\n",
+        "K=#note\n",
+    ] {
         assert_eq!(
             mask(&env_line("K")?, content, &sentinel()),
             Err(ExtractError::NoMatch(ExtractKind::EnvLine)),

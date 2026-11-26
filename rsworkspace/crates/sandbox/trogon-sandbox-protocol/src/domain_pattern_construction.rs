@@ -2,23 +2,21 @@ use std::net::IpAddr;
 
 use trogon_sandbox_contract::{DeniedDomain, DomainPattern, DomainPatternError, Host, PatternTarget, Port};
 
-/// The textual form of a pattern's target: `*`, a host, or `*.name`.
-fn target_text(target: &PatternTarget) -> String {
-    match target {
-        PatternTarget::Any => "*".to_string(),
-        PatternTarget::Exact(host) => host.to_string(),
-        PatternTarget::Subdomains(suffix) => format!("*.{suffix}"),
-    }
+/// The textual form of a pattern's target, without its port.
+fn target_text(pattern: &DomainPattern) -> String {
+    let mut text = pattern.to_string();
+    text.truncate(text.len() - pattern.port().map_or(0, |port| format!(":{port}").len()));
+    text
 }
 
 /// The same pattern restricted to `port`.
 pub fn pattern_with_port(pattern: &DomainPattern, port: Port) -> Result<DomainPattern, DomainPatternError> {
-    DomainPattern::new(&format!("{}:{port}", target_text(pattern.target())))
+    DomainPattern::new(&format!("{}:{port}", target_text(pattern)))
 }
 
 /// The same pattern spanning every port.
 pub fn pattern_without_port(pattern: &DomainPattern) -> Result<DomainPattern, DomainPatternError> {
-    DomainPattern::new(&target_text(pattern.target()))
+    DomainPattern::new(&target_text(pattern))
 }
 
 /// The pattern matching exactly `host` on exactly `port`.

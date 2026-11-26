@@ -341,6 +341,46 @@ async fn purge_arriving_during_release_cannot_inherit_its_cleanup_receipt() -> T
 }
 
 #[tokio::test]
+async fn a_second_release_waiting_on_an_inflight_release_finds_the_attempt_already_cleaned() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let ledger = Arc::new(open(&dir.path().join("attempts.sqlite3"))?);
+    let identity = identity(&ledger)?;
+    ledger.dispatch(&identity, || async { receipt() }).await?;
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+    let (resume_tx, resume_rx) = tokio::sync::oneshot::channel::<()>();
+    let request = release(&identity);
+    let first = {
+        let ledger = ledger.clone();
+        let request = request.clone();
+        tokio::spawn(async move {
+            ledger
+                .cleanup(&request, |_| async move {
+                    let _ = entered_tx.send(());
+                    let _ = resume_rx.await;
+                    Ok::<(), Boxed>(())
+                })
+                .await
+        })
+    };
+    entered_rx.await?;
+    let called = AtomicUsize::new(0);
+    let mut second = Box::pin(ledger.cleanup(&request, |_| async {
+        called.fetch_add(1, Ordering::SeqCst);
+        Ok::<(), Boxed>(())
+    }));
+    assert!(futures::poll!(second.as_mut()).is_pending());
+    resume_tx.send(()).map_err(|_| "the first teardown stopped waiting")?;
+    assert_cleaned(&first.await?)?;
+    assert_cleaned(&second.await)?;
+    assert_eq!(
+        called.load(Ordering::SeqCst),
+        0,
+        "the cleaned attempt is not torn down again"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn backend_identity_is_durable_before_allocation_finishes() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("attempts.sqlite3");

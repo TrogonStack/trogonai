@@ -192,3 +192,58 @@ async fn respond_publishes_small_payloads_inline() -> TestResult {
     assert!(reply.headers.is_none());
     Ok(())
 }
+
+/// Starts `respond` for a payload that needs chunking and returns the descriptor message it published.
+async fn start_large_response(
+    client: &async_nats::Client,
+    reply: &'static str,
+    body: Bytes,
+) -> Result<(tokio::task::JoinHandle<Result<(), NatsTransferError>>, Message), Box<dyn std::error::Error>> {
+    let mut replies = client.subscribe(reply).await?;
+    client.flush().await?;
+    let responder = client.clone();
+    let task = tokio::spawn(async move { respond(&responder, reply, body).await });
+    let descriptor = tokio::time::timeout(TIMEOUT, replies.next())
+        .await?
+        .ok_or("no descriptor")?;
+    Ok((task, descriptor))
+}
+
+#[tokio::test]
+async fn the_chunk_sender_ignores_requests_it_cannot_serve_and_still_completes() -> TestResult {
+    let server = nats_common::Server::start().await;
+    let client = async_nats::connect(server.url()).await?;
+    let body = pattern(200 * 1024 + 3);
+    let (task, descriptor) = start_large_response(&client, "reply.junk", body.clone()).await?;
+    let inbox = serde_json::from_slice::<serde_json::Value>(&descriptor.payload)?["inbox"]
+        .as_str()
+        .ok_or("descriptor inbox")?
+        .to_owned();
+    client.publish(inbox.clone(), Bytes::from_static(b"0")).await?;
+    for payload in ["not-a-number", "999999999", "1"] {
+        client
+            .publish_with_reply(inbox.clone(), "_INBOX.unused", Bytes::from(payload))
+            .await?;
+    }
+    client.flush().await?;
+    assert_eq!(receive(&client, &descriptor).await?, body);
+    tokio::time::timeout(TIMEOUT, task).await???;
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_chunk_sender_ends_when_its_subscription_closes() -> TestResult {
+    let server = nats_common::Server::start().await;
+    let sender = async_nats::connect(server.url()).await?;
+    let reader = async_nats::connect(server.url()).await?;
+    let mut replies = reader.subscribe("reply.closed").await?;
+    reader.flush().await?;
+    let responder = sender.clone();
+    let task = tokio::spawn(async move { respond(&responder, "reply.closed", pattern(200 * 1024)).await });
+    tokio::time::timeout(TIMEOUT, replies.next())
+        .await?
+        .ok_or("no descriptor")?;
+    sender.drain().await?;
+    tokio::time::timeout(TIMEOUT, task).await???;
+    Ok(())
+}

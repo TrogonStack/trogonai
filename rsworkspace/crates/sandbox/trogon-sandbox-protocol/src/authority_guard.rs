@@ -155,9 +155,7 @@ impl AuthorityGuard {
             return;
         }
         for lease in held {
-            if self.suspects.contains_key(lease) {
-                self.still_suspect(lease, now).await;
-            } else {
+            if !self.still_suspect(lease, now).await {
                 AuthorityStats::bump(&self.stats.partitioned);
                 self.suspect(lease, "broker authority unavailable", now).await;
             }
@@ -208,8 +206,7 @@ impl AuthorityGuard {
                 self.reclaimed(lease).await;
                 continue;
             }
-            if self.suspects.contains_key(lease) {
-                self.still_suspect(lease, now).await;
+            if self.still_suspect(lease, now).await {
                 continue;
             }
             // A lease the broker has not had time to record looks the same as one it dropped, so a young lease is
@@ -270,9 +267,10 @@ impl AuthorityGuard {
         }
     }
 
-    async fn still_suspect(&mut self, lease: &HeldLease, now: Instant) {
+    /// Whether `lease` is already a suspect; if so, renews its grace and retries an uncertain freeze.
+    async fn still_suspect(&mut self, lease: &HeldLease, now: Instant) -> bool {
         let Some(suspect) = self.suspects.get_mut(lease) else {
-            return;
+            return false;
         };
         if suspect.reclaiming {
             suspect.reclaiming = false;
@@ -284,6 +282,7 @@ impl AuthorityGuard {
                 suspect.freeze = freeze;
             }
         }
+        true
     }
 
     async fn reclaimed(&mut self, lease: &HeldLease) {

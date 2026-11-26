@@ -339,3 +339,6 @@ impl DispatchVerifier {
 #[cfg(test)]
 #[path = "dispatch_verifier_nonce_tests.rs"]
 mod nonce_tests;
+
+#[cfg(test)]
+mod tests;

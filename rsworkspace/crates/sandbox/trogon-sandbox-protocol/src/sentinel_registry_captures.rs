@@ -51,11 +51,7 @@ impl SentinelRegistry {
         if value.bytes().any(|byte| byte.is_ascii_control()) {
             return Err(CaptureMaskError::ControlCharacter(binding.clone()));
         }
-        let name =
-            SecretName::new(format!("{binding}.capture-{index}")).map_err(|_| CaptureMaskError::CaptureEntryName {
-                binding: binding.clone(),
-                index,
-            })?;
+        let name = capture_entry_name(binding, index)?;
         let real = RealValue::new(value.to_string());
         match rule {
             Extract::Jwt(masking) => self
@@ -68,3 +64,11 @@ impl SentinelRegistry {
         }
     }
 }
+
+/// The registry name of capture `index` of `binding`.
+fn capture_entry_name(binding: &SecretName, index: usize) -> Result<SecretName, CaptureMaskError> {
+    SecretName::new(format!("{binding}.capture-{index}")).map_err(|_| CaptureMaskError::entry_name(binding, index))
+}
+
+#[cfg(test)]
+mod tests;

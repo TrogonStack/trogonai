@@ -14,3 +14,13 @@ pub enum CaptureMaskError {
     #[error("a captured JWT of '{binding}' cannot be masked: {source}")]
     Jwt { binding: SecretName, source: JwtMaskError },
 }
+
+impl CaptureMaskError {
+    /// The refusal of a derived name for capture `index` of `binding`.
+    pub(crate) fn entry_name(binding: &SecretName, index: usize) -> Self {
+        Self::CaptureEntryName {
+            binding: binding.clone(),
+            index,
+        }
+    }
+}

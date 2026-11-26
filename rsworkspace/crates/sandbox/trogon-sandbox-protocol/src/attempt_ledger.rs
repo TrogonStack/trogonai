@@ -18,6 +18,15 @@ use crate::{AttemptLedgerError, AttemptPhase, CleanupState};
 
 const MAX_LEGACY_BYTES: u64 = 64 * 1024 * 1024;
 const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
+const HAS_LEASE: &str = "SELECT EXISTS(SELECT 1 FROM attempts WHERE lease_id=?1)";
+
+/// How a refused try-lock surfaces: contention means another worker owns the ledger, anything else is an I/O failure.
+fn lock_error(error: TryLockError) -> AttemptLedgerError {
+    match error {
+        TryLockError::WouldBlock => AttemptLedgerError::Locked,
+        TryLockError::Error(error) => AttemptLedgerError::Io(error),
+    }
+}
 
 #[derive(Deserialize)]
 struct LegacyJournal {
@@ -90,10 +99,7 @@ impl AttemptLedger {
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
         let lock = options.open(path.with_extension("lock"))?;
-        lock.try_lock().map_err(|error| match error {
-            TryLockError::WouldBlock => AttemptLedgerError::Locked,
-            TryLockError::Error(error) => AttemptLedgerError::Io(error),
-        })?;
+        lock.try_lock().map_err(lock_error)?;
         if let Some(legacy) = Self::read_legacy(&path)? {
             Self::migrate_legacy(&path, &parent, provider, preferred_worker_id.as_ref(), legacy)?;
         }
@@ -269,11 +275,7 @@ impl AttemptLedger {
     pub async fn has_lease(&self, lease: &LeaseId) -> Result<bool, AttemptLedgerError> {
         self.check_backing_file()?;
         let database = self.database.lock().await;
-        Ok(database.query_row(
-            "SELECT EXISTS(SELECT 1 FROM attempts WHERE lease_id=?1)",
-            [lease.as_str()],
-            |row| row.get(0),
-        )?)
+        Ok(database.query_row(HAS_LEASE, [lease.as_str()], |row| row.get(0))?)
     }
 
     /// Every attempt that is not yet cleaned, ordered by attempt id.
@@ -535,3 +537,6 @@ impl AttemptLedger {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

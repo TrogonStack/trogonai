@@ -762,3 +762,16 @@ fn a_fence_file_given_as_a_bare_name_resolves_in_the_working_directory_free_of_p
     assert_eq!(json["t"], "t1");
     Ok(())
 }
+
+#[test]
+fn a_verb_for_an_attempt_that_was_cleaned_is_refused_even_when_no_other_attempt_replaced_it() -> TestResult {
+    let (signer, verifier) = pair(EnforcementMode::Require)?;
+    check(&verifier, &dispatch_for(&signer, "t1", "a1")?)?;
+    let body = cleanup_body("l1", "a1")?;
+    let header = signer.sign_verb(CLEANUP, &body, &scope("t1", "l1", Some("a1"))?)?;
+    verify(&verifier, CLEANUP, &header, &body)?;
+    let stale = signer.sign_verb(RUN, b"{}", &scope("t1", "l1", Some("a1"))?)?;
+    let result = verify(&verifier, RUN, &stale, b"{}");
+    assert!(matches!(result, Err(DispatchAuthError::StaleAttempt)), "{result:?}");
+    Ok(())
+}

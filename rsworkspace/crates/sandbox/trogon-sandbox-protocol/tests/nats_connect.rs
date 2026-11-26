@@ -53,3 +53,10 @@ async fn a_user_without_a_password_is_refused() -> TestResult {
     assert!(error.to_string().contains("no password"));
     Ok(())
 }
+
+#[tokio::test]
+async fn a_tls_url_requires_tls_and_reports_an_unreachable_server() -> TestResult {
+    let error = connect("tls://127.0.0.1:1").await.err().ok_or("expected an error")?;
+    assert!(matches!(error, NatsConnectError::Connect(_)));
+    Ok(())
+}

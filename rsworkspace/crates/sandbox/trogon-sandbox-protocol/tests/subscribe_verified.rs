@@ -238,3 +238,15 @@ async fn process_wide_subscriptions_pass_messages_without_configured_keys() -> R
     assert_eq!(next(&mut queued).await?.payload.as_ref(), b"{}");
     Ok(())
 }
+
+#[tokio::test]
+async fn a_drained_client_ends_the_context_stream() -> Result<(), Box<dyn Error>> {
+    let (_server, client) = nats_common::start_nats().await?;
+    let (_signer, verifier) = pair(EnforcementMode::Require)?;
+    let mut sub = subscribe_with_context(&client, "sandbox.provider.firecracker.heartbeat.l9", verifier).await?;
+    client.flush().await?;
+    client.drain().await?;
+    let ended = tokio::time::timeout(WAIT, sub.next()).await?;
+    assert!(ended.is_none());
+    Ok(())
+}

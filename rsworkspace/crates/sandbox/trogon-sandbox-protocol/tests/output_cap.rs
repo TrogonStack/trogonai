@@ -121,3 +121,54 @@ fn effective_cap_defaults_and_clamps_to_the_ceiling() {
     assert_eq!(effective_max_output_bytes(Some(1000), 100), 100);
     assert_eq!(effective_max_output_bytes(None, 100), 100);
 }
+
+#[test]
+fn a_recap_that_fits_keeps_the_prior_marker_and_reports_truncation() -> TestResult {
+    let data = b"head\n[... 5 bytes truncated ...]\ntail".to_vec();
+    let (bytes, truncation) = recap(data.clone(), 64);
+    assert_eq!(truncation, OutputTruncation::Truncated);
+    assert_eq!(bytes, data);
+    Ok(())
+}
+
+#[test]
+fn text_that_only_resembles_a_marker_is_not_mistaken_for_one() -> TestResult {
+    let data = b"x\n[... nope\n[... 7 bytes truncated ...]\nend".to_vec();
+    let (bytes, truncation) = recap(data.clone(), 64);
+    assert_eq!(truncation, OutputTruncation::Truncated);
+    assert_eq!(bytes, data);
+    Ok(())
+}
+
+#[test]
+fn a_cut_never_splits_a_multibyte_character() -> TestResult {
+    let three = "\u{20ac}".repeat(10).into_bytes();
+    let (bytes, truncation) = recap(three.clone(), 9);
+    assert_eq!(truncation, OutputTruncation::Truncated);
+    assert_eq!(
+        String::from_utf8(bytes)?,
+        "\u{20ac}\n[... 24 bytes truncated ...]\n\u{20ac}"
+    );
+    let (bytes, _) = recap(three, 11);
+    assert_eq!(
+        String::from_utf8(bytes)?,
+        "\u{20ac}\n[... 21 bytes truncated ...]\n\u{20ac}\u{20ac}"
+    );
+    let four = "\u{1f600}".repeat(5).into_bytes();
+    let (bytes, _) = recap(four, 10);
+    assert_eq!(
+        String::from_utf8(bytes)?,
+        "\u{1f600}\n[... 12 bytes truncated ...]\n\u{1f600}"
+    );
+    Ok(())
+}
+
+#[test]
+fn bytes_that_are_not_utf8_are_cut_where_they_fall() {
+    let (bytes, truncation) = recap(vec![0xff; 20], 10);
+    assert_eq!(truncation, OutputTruncation::Truncated);
+    let mut expected = vec![0xff; 5];
+    expected.extend_from_slice(b"\n[... 10 bytes truncated ...]\n");
+    expected.extend_from_slice(&[0xff; 5]);
+    assert_eq!(bytes, expected);
+}

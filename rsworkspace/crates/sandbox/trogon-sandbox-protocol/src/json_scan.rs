@@ -51,16 +51,22 @@ impl JsonScan<'_> {
                 .all(|(step, key)| matches!(step, Step::Key(found) if found == key))
     }
 
-    fn string_end(&self, open: usize) -> usize {
+    /// Where the string opened at `open` ends; the input is valid JSON, so a string always closes.
+    fn string_end(&self, open: usize) -> Result<usize, ExtractError> {
         let mut index = open + 1;
-        while let Some(&byte) = self.src.get(index) {
-            match byte {
+        loop {
+            match self.src.get(index).ok_or(ExtractError::NotJson)? {
                 b'\\' => index += 2,
-                b'"' => return index,
+                b'"' => return Ok(index),
                 _ => index += 1,
             }
         }
-        self.src.len()
+    }
+
+    /// Consumes the bracket that closes the container being scanned. Valid JSON always has one.
+    fn close_container(&mut self) -> Result<(), ExtractError> {
+        self.pos = (self.pos + 1).min(self.src.len());
+        Ok(())
     }
 
     fn value(&mut self) -> Result<(), ExtractError> {
@@ -70,14 +76,14 @@ impl JsonScan<'_> {
             Some(b'[') => self.array(),
             Some(b'"') => {
                 let open = self.pos;
-                let close = self.string_end(open);
+                let close = self.string_end(open)?;
                 if self.at_target() && close > open + 1 {
                     self.spans.push(open + 1..close);
                 }
                 self.pos = close + 1;
                 Ok(())
             }
-            Some(_) => {
+            _ => {
                 while self
                     .src
                     .get(self.pos)
@@ -87,7 +93,6 @@ impl JsonScan<'_> {
                 }
                 Ok(())
             }
-            None => Ok(()),
         }
     }
 
@@ -96,14 +101,10 @@ impl JsonScan<'_> {
         loop {
             self.skip_whitespace();
             match self.src.get(self.pos) {
-                Some(b'}') => {
-                    self.pos += 1;
-                    return Ok(());
-                }
                 Some(b',') => self.pos += 1,
                 Some(b'"') => {
                     let open = self.pos;
-                    let close = self.string_end(open);
+                    let close = self.string_end(open)?;
                     let raw = self.src.get(open..=close).ok_or(ExtractError::NotJson)?;
                     let key: String = serde_json::from_slice(raw).map_err(|_| ExtractError::NotJson)?;
                     self.pos = close + 1;
@@ -113,7 +114,7 @@ impl JsonScan<'_> {
                     self.value()?;
                     self.current.pop();
                 }
-                _ => return Ok(()),
+                _ => return self.close_container(),
             }
         }
     }
@@ -123,17 +124,13 @@ impl JsonScan<'_> {
         loop {
             self.skip_whitespace();
             match self.src.get(self.pos) {
-                Some(b']') => {
-                    self.pos += 1;
-                    return Ok(());
-                }
                 Some(b',') => self.pos += 1,
+                Some(b']') | None => return self.close_container(),
                 Some(_) => {
                     self.current.push(Step::Element);
                     self.value()?;
                     self.current.pop();
                 }
-                None => return Ok(()),
             }
         }
     }

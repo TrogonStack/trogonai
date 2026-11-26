@@ -78,14 +78,11 @@ impl TerminalReplayRing {
         let kept = &data[cut..];
         self.bytes += kept.len();
         self.frames.push_back((seq, kept.to_vec()));
-        while self.bytes > self.capacity {
-            match self.frames.pop_front() {
-                Some((dropped_seq, dropped)) => {
-                    self.bytes -= dropped.len();
-                    self.lost_through = Some(dropped_seq);
-                }
-                None => break,
-            }
+        while self.bytes > self.capacity
+            && let Some((dropped_seq, dropped)) = self.frames.pop_front()
+        {
+            self.bytes -= dropped.len();
+            self.lost_through = Some(dropped_seq);
         }
     }
 

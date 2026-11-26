@@ -19,6 +19,14 @@ pub enum JwtMaskError {
 }
 
 impl JwtMaskError {
+    /// The refusal of a derived name for masked claim `index` of `binding`.
+    pub(crate) fn entry_name(binding: &trogon_sandbox_contract::SecretName, index: usize) -> Self {
+        Self::ClaimEntryName {
+            binding: binding.clone(),
+            index,
+        }
+    }
+
     /// The egress violation reason the refusal is reported under.
     pub fn violation_reason(&self) -> EgressViolationReason {
         match self {

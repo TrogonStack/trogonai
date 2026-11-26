@@ -169,11 +169,8 @@ impl DispatchFence {
     /// Loads the journal at `path` (creating it when absent) and keeps appending to it. A torn last line from a
     /// crash is ignored.
     pub(crate) fn open(path: &Path) -> std::io::Result<Self> {
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            std::fs::create_dir_all(parent)?;
-        }
+        // A bare file name has an empty parent, which `create_dir_all` accepts as already present.
+        std::fs::create_dir_all(path.parent().unwrap_or(Path::new("")))?;
         let mut entries = HashMap::new();
         let mut lines = 0usize;
         let mut recovery_trusted = true;

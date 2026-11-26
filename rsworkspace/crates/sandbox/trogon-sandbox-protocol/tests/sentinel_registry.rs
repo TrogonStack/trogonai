@@ -272,3 +272,18 @@ fn strips_union_at_matching_hosts_only() -> TestResult {
     assert!(registry.strip_for_host(&host("c.org")?, 443).is_empty());
     Ok(())
 }
+
+#[test]
+fn the_debug_form_lists_names_and_sentinels_but_never_real_values() -> TestResult {
+    let mut registry = SentinelRegistry::new();
+    let sentinel = registry.register(
+        name("api-key")?,
+        real("super-secret-value"),
+        hosts(&["api.example.com"])?,
+    );
+    let rendered = format!("{registry:?}");
+    assert!(rendered.contains("api-key"), "{rendered}");
+    assert!(rendered.contains(sentinel.as_str()), "{rendered}");
+    assert!(!rendered.contains("super-secret-value"), "{rendered}");
+    Ok(())
+}

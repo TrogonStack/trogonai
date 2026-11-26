@@ -13,6 +13,7 @@ use crate::subjects::provider_token;
 use crate::{AttemptLedgerError, AttemptPhase, CleanupState};
 
 const MAX_RECEIPT_BYTES: usize = 64 * 1024;
+const HAS_EPOCH_COLUMN: &str = "SELECT EXISTS(SELECT 1 FROM pragma_table_info('attempts') WHERE name='epoch')";
 
 pub(crate) fn create_private_file(path: &Path) -> Result<(), AttemptLedgerError> {
     let mut options = OpenOptions::new();
@@ -48,11 +49,7 @@ pub(crate) fn initialize(
         );
         CREATE INDEX IF NOT EXISTS attempts_by_phase ON attempts(phase);",
     )?;
-    let has_epoch: bool = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('attempts') WHERE name='epoch')",
-        [],
-        |row| row.get(0),
-    )?;
+    let has_epoch: bool = tx.query_row(HAS_EPOCH_COLUMN, [], |row| row.get(0))?;
     if !has_epoch {
         tx.execute("ALTER TABLE attempts ADD COLUMN epoch TEXT", [])?;
     }
@@ -188,3 +185,6 @@ pub(crate) fn read_state(
         receipt: receipt.map(|bytes| serde_json::from_slice(&bytes)).transpose()?,
     }))
 }
+
+#[cfg(test)]
+mod tests;

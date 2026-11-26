@@ -112,7 +112,11 @@ async fn prepare(
 
 /// Resolves either an ordinary inline payload or a bounded transfer descriptor.
 pub async fn receive(client: &Client, message: &Message) -> Result<Bytes, NatsTransferError> {
-    let Some(version) = message.headers.as_ref().and_then(|h| h.get(TRANSFER_HEADER)) else {
+    let Some((headers, version)) = message
+        .headers
+        .as_ref()
+        .and_then(|headers| headers.get(TRANSFER_HEADER).map(|version| (headers, version)))
+    else {
         return Ok(message.payload.clone());
     };
     if version.as_str() != TRANSFER_VERSION {
@@ -138,9 +142,7 @@ pub async fn receive(client: &Client, message: &Message) -> Result<Bytes, NatsTr
             data.extend_from_slice(&reply.payload);
         }
         let data = data.freeze();
-        if let Some(headers) = message.headers.as_ref() {
-            check_reassembled(headers, &data)?;
-        }
+        check_reassembled(headers, &data)?;
         Ok(data)
     })
     .await
