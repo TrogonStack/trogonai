@@ -2757,8 +2757,11 @@ async fn lifetime_commands_refuse_a_store_scoped_to_a_different_tenant_before_io
         f.store.reads.load(Ordering::SeqCst),
         f.store.appends.load(Ordering::SeqCst),
     );
-    assert!(service.enroll(&f.alice, Fixture::enrollment("alice")).await.is_err());
-    assert!(
+    assert!(matches!(
+        service.enroll(&f.alice, Fixture::enrollment("alice")).await,
+        Err(trogon_peer_service::EnrollServiceError::Scope)
+    ));
+    assert!(matches!(
         service
             .heartbeat(
                 &f.alice,
@@ -2768,10 +2771,10 @@ async fn lifetime_commands_refuse_a_store_scoped_to_a_different_tenant_before_io
                     ..Default::default()
                 }
             )
-            .await
-            .is_err()
-    );
-    assert!(
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Scope)
+    ));
+    assert!(matches!(
         service
             .detach(
                 &f.alice,
@@ -2779,9 +2782,9 @@ async fn lifetime_commands_refuse_a_store_scoped_to_a_different_tenant_before_io
                     attachment_ref: f.a.clone().into()
                 }
             )
-            .await
-            .is_err()
-    );
+            .await,
+        Err(trogon_peer_service::PeerApplicationError::Scope)
+    ));
     assert_eq!(
         before,
         (
