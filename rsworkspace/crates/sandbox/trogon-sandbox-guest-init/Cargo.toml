@@ -1,0 +1,17 @@
+[package]
+name = "trogon-sandbox-guest-init"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "PID 1 for OCI-derived Firecracker guests and the parsing of its kernel command line"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+# Only the Linux build mounts filesystems; other targets build a stub.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }

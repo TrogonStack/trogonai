@@ -7801,6 +7801,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-guest-init"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "trogon-scheduler"
 version = "0.1.0"
 dependencies = [
