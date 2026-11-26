@@ -57,9 +57,13 @@ where
         let operation = match request.name.as_ref() {
             "peer_prompt_hook" => {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-                return tokio::time::timeout_at(deadline, self.prompt_hook(request))
+                let result = tokio::time::timeout_at(deadline, self.prompt_hook(request, deadline))
                     .await
                     .map_err(|_| PeerMcpError::PromptDeadline)?;
+                if tokio::time::Instant::now() > deadline {
+                    return Err(PeerMcpError::PromptDeadline);
+                }
+                return result;
             }
             "peer_roster" => ModelOperation::Roster,
             "peer_send" => ModelOperation::Send,
@@ -80,11 +84,18 @@ where
         }
     }
 
-    async fn prompt_hook(&self, request: CallToolRequestParams) -> Result<CallToolResult, PeerMcpError> {
+    async fn prompt_hook(
+        &self,
+        request: CallToolRequestParams,
+        deadline: tokio::time::Instant,
+    ) -> Result<CallToolResult, PeerMcpError> {
         let arguments = Value::Object(request.arguments.unwrap_or_default());
         let input: PromptHookInput = serde_json::from_value(arguments).map_err(PeerMcpError::InvalidArguments)?;
         let (session_id, prompt_id) = input.into_identity()?;
         let mut binding = self.binding.lock().await;
+        if tokio::time::Instant::now() > deadline {
+            return Err(PeerMcpError::PromptDeadline);
+        }
         if binding
             .as_ref()
             .is_some_and(|current| current.native_session_id() != &session_id)
@@ -119,7 +130,18 @@ where
             .await
             .map_err(|error| PeerMcpError::Prepare(Box::new(error)))?;
         let context = match response.batch.as_option() {
-            None if response.messages.is_empty() => String::new(),
+            None if response.messages.is_empty() => {
+                if matches!(
+                    response
+                        .content_availability
+                        .as_ref()
+                        .and_then(|availability| availability.as_known()),
+                    Some(v1::ContentAvailability::CONTENT_AVAILABILITY_RETRY_UNAVAILABLE)
+                ) {
+                    return Err(contract_error());
+                }
+                String::new()
+            }
             None => return Err(contract_error()),
             Some(batch) => {
                 match response
