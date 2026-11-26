@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+plugin=$1
+shift
+
+executable=$(mise which "$plugin" --tool "cargo:$plugin")
+exec "$executable" "$@"

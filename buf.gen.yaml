@@ -19,21 +19,25 @@ inputs:
       - proto/trogonai/library
       - proto/trogonai/platform/api_keys
       - proto/trogonai/platform/api_keyspaces
+      - proto/trogonai/platform/workload_federation
       - proto/trogonai/platform/key_custody
+      - proto/trogonai/policy
       - proto/trogonai/projects
-      - proto/trogonai/secrets
+      - proto/trogonai/secrets/credentials
+      - proto/trogonai/secrets/sources
+      - proto/trogonai/secrets/v1alpha1
       - proto/trogonai/session
       - proto/trogonai/usage
       - proto/trogonai/workflows
 plugins:
-  - local: protoc-gen-buffa
+  - local: [.config/mise/lib/proto-plugin, protoc-gen-buffa]
     out: rsworkspace/crates/platform/trogonai-proto/src/gen
     include_imports: true
     strategy: all
     opt:
       - json=true
       - unknown_fields=false
-  - local: protoc-gen-buffa-packaging
+  - local: [.config/mise/lib/proto-plugin, protoc-gen-buffa-packaging]
     out: rsworkspace/crates/platform/trogonai-proto/src/gen
     include_imports: true
     strategy: all

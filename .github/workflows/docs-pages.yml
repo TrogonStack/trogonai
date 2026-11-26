@@ -36,16 +36,20 @@ jobs:
           cache: pnpm
           cache-dependency-path: docs/pnpm-lock.yaml
 
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
       - name: Setup Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-        working-directory: docs
+        run: mise run --skip-tools github:workflows:docs-pages:install
 
       - name: Build docs
-        run: pnpm docs:build
-        working-directory: docs
+        run: mise run --skip-tools github:workflows:docs-pages:build
         env:
           DOCS_BASE: ${{ vars.DOCS_BASE || format('/{0}/', github.event.repository.name) }}
 

@@ -250,79 +250,79 @@ pub mod field_rules {
             Self::Some(Type::from(v))
         }
     }
-    impl serde::Serialize for Type {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Type {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Float(v) => {
-                    map.serialize_entry("float", v)?;
+                    map.serialize_entry("float", &**v)?;
                 }
                 Self::Double(v) => {
-                    map.serialize_entry("double", v)?;
+                    map.serialize_entry("double", &**v)?;
                 }
                 Self::Int32(v) => {
-                    map.serialize_entry("int32", v)?;
+                    map.serialize_entry("int32", &**v)?;
                 }
                 Self::Int64(v) => {
-                    map.serialize_entry("int64", v)?;
+                    map.serialize_entry("int64", &**v)?;
                 }
                 Self::Uint32(v) => {
-                    map.serialize_entry("uint32", v)?;
+                    map.serialize_entry("uint32", &**v)?;
                 }
                 Self::Uint64(v) => {
-                    map.serialize_entry("uint64", v)?;
+                    map.serialize_entry("uint64", &**v)?;
                 }
                 Self::Sint32(v) => {
-                    map.serialize_entry("sint32", v)?;
+                    map.serialize_entry("sint32", &**v)?;
                 }
                 Self::Sint64(v) => {
-                    map.serialize_entry("sint64", v)?;
+                    map.serialize_entry("sint64", &**v)?;
                 }
                 Self::Fixed32(v) => {
-                    map.serialize_entry("fixed32", v)?;
+                    map.serialize_entry("fixed32", &**v)?;
                 }
                 Self::Fixed64(v) => {
-                    map.serialize_entry("fixed64", v)?;
+                    map.serialize_entry("fixed64", &**v)?;
                 }
                 Self::Sfixed32(v) => {
-                    map.serialize_entry("sfixed32", v)?;
+                    map.serialize_entry("sfixed32", &**v)?;
                 }
                 Self::Sfixed64(v) => {
-                    map.serialize_entry("sfixed64", v)?;
+                    map.serialize_entry("sfixed64", &**v)?;
                 }
                 Self::Bool(v) => {
-                    map.serialize_entry("bool", v)?;
+                    map.serialize_entry("bool", &**v)?;
                 }
                 Self::String(v) => {
-                    map.serialize_entry("string", v)?;
+                    map.serialize_entry("string", &**v)?;
                 }
                 Self::Bytes(v) => {
-                    map.serialize_entry("bytes", v)?;
+                    map.serialize_entry("bytes", &**v)?;
                 }
                 Self::Enum(v) => {
-                    map.serialize_entry("enum", v)?;
+                    map.serialize_entry("enum", &**v)?;
                 }
                 Self::Repeated(v) => {
-                    map.serialize_entry("repeated", v)?;
+                    map.serialize_entry("repeated", &**v)?;
                 }
                 Self::Map(v) => {
-                    map.serialize_entry("map", v)?;
+                    map.serialize_entry("map", &**v)?;
                 }
                 Self::Any(v) => {
-                    map.serialize_entry("any", v)?;
+                    map.serialize_entry("any", &**v)?;
                 }
                 Self::Duration(v) => {
-                    map.serialize_entry("duration", v)?;
+                    map.serialize_entry("duration", &**v)?;
                 }
                 Self::FieldMask(v) => {
-                    map.serialize_entry("fieldMask", v)?;
+                    map.serialize_entry("fieldMask", &**v)?;
                 }
                 Self::Timestamp(v) => {
-                    map.serialize_entry("timestamp", v)?;
+                    map.serialize_entry("timestamp", &**v)?;
                 }
             }
             map.end()
@@ -338,12 +338,12 @@ pub mod float_rules {
         Lte(f32),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -362,12 +362,12 @@ pub mod float_rules {
         Gte(f32),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -390,12 +390,12 @@ pub mod double_rules {
         Lte(f64),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -414,12 +414,12 @@ pub mod double_rules {
         Gte(f64),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -442,12 +442,12 @@ pub mod int32rules {
         Lte(i32),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -466,12 +466,12 @@ pub mod int32rules {
         Gte(i32),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -494,12 +494,12 @@ pub mod int64rules {
         Lte(i64),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -518,12 +518,12 @@ pub mod int64rules {
         Gte(i64),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -546,12 +546,12 @@ pub mod u_int32rules {
         Lte(u32),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -570,12 +570,12 @@ pub mod u_int32rules {
         Gte(u32),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -598,12 +598,12 @@ pub mod u_int64rules {
         Lte(u64),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -622,12 +622,12 @@ pub mod u_int64rules {
         Gte(u64),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -650,12 +650,12 @@ pub mod s_int32rules {
         Lte(i32),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -674,12 +674,12 @@ pub mod s_int32rules {
         Gte(i32),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -702,12 +702,12 @@ pub mod s_int64rules {
         Lte(i64),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -726,12 +726,12 @@ pub mod s_int64rules {
         Gte(i64),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -754,12 +754,12 @@ pub mod fixed32rules {
         Lte(u32),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -778,12 +778,12 @@ pub mod fixed32rules {
         Gte(u32),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -806,12 +806,12 @@ pub mod fixed64rules {
         Lte(u64),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -830,12 +830,12 @@ pub mod fixed64rules {
         Gte(u64),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -858,12 +858,12 @@ pub mod s_fixed32rules {
         Lte(i32),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -882,12 +882,12 @@ pub mod s_fixed32rules {
         Gte(i32),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -910,12 +910,12 @@ pub mod s_fixed64rules {
         Lte(i64),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
@@ -934,12 +934,12 @@ pub mod s_fixed64rules {
         Gte(i64),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
@@ -983,12 +983,12 @@ pub mod string_rules {
         WellKnownRegex(super::super::super::KnownRegex),
     }
     impl ::buffa::Oneof for WellKnown {}
-    impl serde::Serialize for WellKnown {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for WellKnown {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Email(v) => {
@@ -1072,12 +1072,12 @@ pub mod bytes_rules {
         Uuid(bool),
     }
     impl ::buffa::Oneof for WellKnown {}
-    impl serde::Serialize for WellKnown {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for WellKnown {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Ip(v) => {
@@ -1106,19 +1106,19 @@ pub mod duration_rules {
         Lte(::buffa::alloc::boxed::Box<::buffa_types::google::protobuf::Duration>),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
-                    map.serialize_entry("lt", v)?;
+                    map.serialize_entry("lt", &**v)?;
                 }
                 Self::Lte(v) => {
-                    map.serialize_entry("lte", v)?;
+                    map.serialize_entry("lte", &**v)?;
                 }
             }
             map.end()
@@ -1130,19 +1130,19 @@ pub mod duration_rules {
         Gte(::buffa::alloc::boxed::Box<::buffa_types::google::protobuf::Duration>),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
-                    map.serialize_entry("gt", v)?;
+                    map.serialize_entry("gt", &**v)?;
                 }
                 Self::Gte(v) => {
-                    map.serialize_entry("gte", v)?;
+                    map.serialize_entry("gte", &**v)?;
                 }
             }
             map.end()
@@ -1159,19 +1159,19 @@ pub mod timestamp_rules {
         LtNow(bool),
     }
     impl ::buffa::Oneof for LessThan {}
-    impl serde::Serialize for LessThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for LessThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Lt(v) => {
-                    map.serialize_entry("lt", v)?;
+                    map.serialize_entry("lt", &**v)?;
                 }
                 Self::Lte(v) => {
-                    map.serialize_entry("lte", v)?;
+                    map.serialize_entry("lte", &**v)?;
                 }
                 Self::LtNow(v) => {
                     map.serialize_entry("ltNow", v)?;
@@ -1187,19 +1187,19 @@ pub mod timestamp_rules {
         GtNow(bool),
     }
     impl ::buffa::Oneof for GreaterThan {}
-    impl serde::Serialize for GreaterThan {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for GreaterThan {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Gt(v) => {
-                    map.serialize_entry("gt", v)?;
+                    map.serialize_entry("gt", &**v)?;
                 }
                 Self::Gte(v) => {
-                    map.serialize_entry("gte", v)?;
+                    map.serialize_entry("gte", &**v)?;
                 }
                 Self::GtNow(v) => {
                     map.serialize_entry("gtNow", v)?;
@@ -1222,12 +1222,12 @@ pub mod field_path_element {
         StringKey(::buffa::alloc::string::String),
     }
     impl ::buffa::Oneof for Subscript {}
-    impl serde::Serialize for Subscript {
-        fn serialize<S: serde::Serializer>(
+    impl ::serde::Serialize for Subscript {
+        fn serialize<S: ::serde::Serializer>(
             &self,
             s: S,
         ) -> ::core::result::Result<S::Ok, S::Error> {
-            use serde::ser::SerializeMap;
+            use ::serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
                 Self::Index(v) => {

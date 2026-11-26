@@ -1,0 +1,23 @@
+{
+  "model": "managed-model",
+  "permissions": {
+    "allow": [
+      "Bash(ls)"
+    ],
+    "deny": [
+      "Bash(rm:*)"
+    ]
+  },
+  "availableModels": [
+    "sonnet"
+  ],
+  "allowedMcpServers": [
+    {
+      "serverName": "github"
+    }
+  ],
+  "allowManagedHooksOnly": true,
+  "env": {
+    "M": "1"
+  }
+}

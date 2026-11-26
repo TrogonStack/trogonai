@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.gateway.webhooks.v1;
+
+import "trogonai/gateway/webhooks/v1/authentication_mode.proto";
+import "trogonai/gateway/webhooks/v1/endpoint_status.proto";
+
+message EndpointRegistration {
+  string endpoint_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  EndpointStatus status = 3 [features.field_presence = LEGACY_REQUIRED];
+  AuthenticationMode authentication_mode = 4 [features.field_presence = LEGACY_REQUIRED];
+  uint32 max_body_bytes = 5 [features.field_presence = LEGACY_REQUIRED];
+  uint32 timestamp_tolerance_seconds = 6 [features.field_presence = LEGACY_REQUIRED];
+}

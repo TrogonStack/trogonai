@@ -5,16 +5,18 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tower::ServiceExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use trogon_credential_domain::{
+    CredentialIdentity, CredentialKind, CredentialOwnerId, CredentialScope, SourceIntegrationId, SourceKind,
+};
+use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
 use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding};
 use trogon_nats::jetstream::{
     ClaimCheckPublisher, MaxPayload, MockJetStreamContext, MockJetStreamPublisher, MockObjectStore,
 };
+use trogon_secret_store::{MockOpenBaoSecretStore, SecretStorePut};
 
-use crate::credential::commands::domain::{CredentialKind, CredentialOwnerId, CredentialScope, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialRegistry, RuntimeIntegrationProjection};
-use crate::secret_store::{MockOpenBaoSecretStore, SecretStorePut};
-use crate::source_integration_id::SourceIntegrationId;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -37,7 +39,7 @@ fn compute_sig(secret: &NotionVerificationToken, body: &[u8]) -> String {
 fn test_config() -> NotionConfig {
     NotionConfig {
         verification_token: NotionVerificationToken::new(TEST_VERIFICATION_TOKEN).unwrap(),
-        subject_prefix: NatsToken::new("notion").unwrap(),
+        subject_prefix: DottedNatsToken::new("notion").unwrap(),
         stream_name: NatsToken::new("NOTION").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),
@@ -57,12 +59,14 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router 
     let store = MockOpenBaoSecretStore::default();
     let credential = store
         .put(
-            CredentialScope::integration(
-                CredentialOwnerId::new("tenant-1").unwrap(),
-                SourceKind::Notion,
-                integration_id.clone(),
+            CredentialIdentity::derive(
+                CredentialScope::integration(
+                    CredentialOwnerId::new("tenant-1").unwrap(),
+                    SourceKind::Notion,
+                    integration_id.clone(),
+                ),
+                CredentialKind::VerificationToken,
             ),
-            CredentialKind::VerificationToken,
             trogon_std::SecretString::new(secret).unwrap(),
         )
         .await
@@ -70,7 +74,7 @@ async fn runtime_app(publisher: MockJetStreamPublisher, secret: &str) -> Router 
     let registry = RuntimeCredentialRegistry::default();
     registry
         .projections()
-        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1).unwrap())
+        .upsert(RuntimeIntegrationProjection::active_from_credential_ref(credential, 1))
         .await;
 
     runtime_router(

@@ -42,6 +42,12 @@ pub struct GatewayDecisionView<'a> {
             'a,
         >,
     >,
+    /// Field 9: `workload_peer`
+    pub workload_peer: ::buffa::MessageFieldView<
+        super::super::super::super::workload_identity::v1alpha1::__buffa::view::WorkloadPeerEvidenceView<
+            'a,
+        >,
+    >,
     #[doc(hidden)]
     pub __buffa_required_seen_0: u64,
 }
@@ -67,9 +73,11 @@ impl<'a> ::buffa::MessageView<'a> for GatewayDecisionView<'a> {
     type Owned = super::super::GatewayDecision;
     fn decode_view(buf: &'a [u8]) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         let __limit = ::core::cell::Cell::new(::buffa::DEFAULT_UNKNOWN_FIELD_LIMIT);
+        let __elem = ::core::cell::Cell::new(::buffa::DEFAULT_ELEMENT_MEMORY_LIMIT);
         <Self as ::buffa::MessageView>::decode_view_ctx(
             buf,
-            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit),
+            ::buffa::DecodeContext::new(::buffa::RECURSION_LIMIT, &__limit)
+                .with_element_memory(&__elem),
         )
     }
     fn decode_view_with_ctx(
@@ -174,6 +182,27 @@ impl<'a> ::buffa::MessageView<'a> for GatewayDecisionView<'a> {
                     }
                 }
             }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                let __sub_ctx = ctx.descend()?;
+                let sub = ::buffa::types::borrow_bytes(&mut cur)?;
+                match view.workload_peer.as_mut() {
+                    Some(existing) => {
+                        ::buffa::MessageView::merge_into_view(existing, sub, __sub_ctx)?
+                    }
+                    None => {
+                        view.workload_peer = ::buffa::MessageFieldView::set(
+                            <super::super::super::super::workload_identity::v1alpha1::__buffa::view::WorkloadPeerEvidenceView as ::buffa::MessageView>::decode_view_ctx(
+                                sub,
+                                __sub_ctx,
+                            )?,
+                        );
+                    }
+                }
+            }
             7u32 => {
                 ::buffa::encoding::check_wire_type(
                     tag,
@@ -244,6 +273,17 @@ impl<'a> ::buffa::MessageView<'a> for GatewayDecisionView<'a> {
                 }
                 None => ::buffa::MessageField::none(),
             },
+            workload_peer: match self.workload_peer.as_option() {
+                Some(v) => {
+                    ::buffa::MessageField::<
+                        super::super::super::super::workload_identity::v1alpha1::WorkloadPeerEvidence,
+                        ::buffa::Inline<
+                            super::super::super::super::workload_identity::v1alpha1::WorkloadPeerEvidence,
+                        >,
+                    >::some(v.to_owned_from_source(__buffa_src)?)
+                }
+                None => ::buffa::MessageField::none(),
+            },
             ..::core::default::Default::default()
         })
     }
@@ -287,6 +327,14 @@ impl<'a> ::buffa::ViewEncode<'a> for GatewayDecisionView<'a> {
         if self.session.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.session.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
+        if self.workload_peer.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.workload_peer.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
@@ -336,6 +384,14 @@ impl<'a> ::buffa::ViewEncode<'a> for GatewayDecisionView<'a> {
                 buf,
             );
             self.session.write_to(__cache, buf);
+        }
+        if self.workload_peer.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                9u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.workload_peer.write_to(__cache, buf);
         }
     }
 }
@@ -391,6 +447,11 @@ impl<'__a> ::serde::Serialize for GatewayDecisionView<'__a> {
         {
             if let ::core::option::Option::Some(__v) = self.session.as_option() {
                 __map.serialize_entry("session", __v)?;
+            }
+        }
+        {
+            if let ::core::option::Option::Some(__v) = self.workload_peer.as_option() {
+                __map.serialize_entry("workloadPeer", __v)?;
             }
         }
         __map.end()
@@ -546,6 +607,17 @@ impl GatewayDecisionOwnedView {
         >,
     > {
         &self.0.reborrow().session
+    }
+    /// Field 9: `workload_peer`
+    #[must_use]
+    pub fn workload_peer(
+        &self,
+    ) -> &::buffa::MessageFieldView<
+        super::super::super::super::workload_identity::v1alpha1::__buffa::view::WorkloadPeerEvidenceView<
+            '_,
+        >,
+    > {
+        &self.0.reborrow().workload_peer
     }
 }
 impl ::core::convert::From<::buffa::OwnedView<GatewayDecisionView<'static>>>

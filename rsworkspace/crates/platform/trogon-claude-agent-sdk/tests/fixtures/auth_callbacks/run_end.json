@@ -1,0 +1,28 @@
+{
+  "captured_from": {
+    "typescript": "sdk.mjs 0.3.323"
+  },
+  "scenarios": {
+    "turn_no_needs": {
+      "stdin_closed_after": "result"
+    },
+    "turn_needs_running": {
+      "stdin_closed_after": "idle"
+    },
+    "turn_needs_no_state": {
+      "stdin_closed_after": "result"
+    },
+    "turn_no_needs_no_state": {
+      "stdin_closed_after": "result"
+    },
+    "stream_no_needs": {
+      "stdin_closed_after": "nothing"
+    },
+    "stream_needs_running": {
+      "stdin_closed_after": "idle"
+    },
+    "stream_needs_no_state": {
+      "stdin_closed_after": "result"
+    }
+  }
+}

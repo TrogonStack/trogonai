@@ -1,0 +1,9 @@
+pub const VERSION: u32 = 1;
+pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
+pub const MAX_DATA_BYTES: usize = 4096;
+pub const MAX_CHILDREN: usize = 4096;
+pub const MAX_ENV_BYTES: usize = 65536;
+pub const MAX_ARGUMENT_BYTES: usize = 512 * 1024;
+pub const DEFAULT_RELEASE_TIMEOUT_MS: u64 = 30_000;
+pub const MAX_RELEASE_TIMEOUT_MS: u64 = 60_000;
+pub const MAX_COMMAND_TIMEOUT_MS: u64 = 365 * 24 * 60 * 60 * 1000;

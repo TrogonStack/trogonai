@@ -25,6 +25,7 @@ use a2a_auth_callout::credentials::oidc::{JwksOidcVerifier, OidcIssuerUrl, OidcV
 use a2a_auth_callout::dispatcher::{AuthDispatcher, CalloutDispatcher, CalloutDispatcherConfig};
 use a2a_auth_callout::jwt::{ExternalSubject, UserJwtClaims, decode_nats_user_payload};
 use a2a_auth_callout::signing_key_source::{KeyVersion, SigningKeySource, StaticSigningKeySource};
+use a2a_auth_callout::tenant_admission::{TenantMembership, TenantMemberships};
 use a2a_auth_callout::wire::ServerAuthRequestClaims;
 use a2a_auth_callout::{
     AccountSigningKey, AuthAccount, AuthCalloutWireCodec, CalloutXkey, DenialCategory, MintedUserJwt, TenantAccount,
@@ -45,9 +46,9 @@ use jsonwebtoken::jwk::{
     AlgorithmParameters, CommonParameters, Jwk, JwkSet, KeyOperations, PublicKeyUse, RSAKeyParameters, RSAKeyType,
 };
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use nats_jwt_rs::account::{Account, ExternalAuthorization};
+use nats_jwt_rs::account::{Account, ExternalAuthorization, JetStreamLimits, OperatorLimits};
 use nats_jwt_rs::operator::Operator;
-use nats_jwt_rs::types::{Permission, Permissions, SigningKey};
+use nats_jwt_rs::types::{NO_LIMIT, Permission, Permissions, SigningKey};
 use nats_jwt_rs::user::{User, UserPermissionLimits};
 use rand_core::OsRng;
 use rcgen::{BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, Issuer, KeyPair, SanType};
@@ -64,12 +65,17 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const NATS_IMAGE: &str = "nats";
-const NATS_TAG: &str = "2.14.1";
+const NATS_TAG: &str = "2.14.2-alpine";
 const NATS_CLIENT_PORT: u16 = 4222;
 const NATS_CONFIG_ROOT: &str = "/etc/nats";
 const AUTH_CALLOUT_SUBJECT: &str = "$SYS.REQ.USER.AUTH";
 const A2A_PREFIX: &str = "a2a";
 const TENANT_OBSERVED_SUBJECTS: &str = "a2a.v1.>";
+const INVALIDATION_STREAM: &str = "SECRETS_INVALIDATION";
+const INVALIDATION_SUBJECTS: &str = "secrets.invalidation.v1.*.>";
+const INVALIDATION_WATCH: &str = "secrets.invalidation.v1.>";
+/// JetStream's error code for a stream that does not exist.
+const JS_STREAM_NOT_FOUND: i64 = 10059;
 
 const API_KEY_HMAC: &[u8] = b"integration-api-key-hmac-secret--";
 const API_KEY_VALUE: &str = "k_live_integration";
@@ -166,6 +172,13 @@ fn sentinel_permissions() -> UserPermissionLimits {
     }
 }
 
+/// Whether an account may use JetStream; only the accounts that hold streams get it.
+#[derive(Clone, Copy)]
+enum JetStreamAccess {
+    Disabled,
+    Enabled,
+}
+
 struct AccountJwt {
     account: String,
     jwt: String,
@@ -177,9 +190,22 @@ impl AccountJwt {
         account: &str,
         signers: &[&nkeys::KeyPair],
         authorization: Option<ExternalAuthorization>,
+        jetstream: JetStreamAccess,
         operator_signing: &nkeys::KeyPair,
     ) -> Self {
         let mut claims = Account::new_claims(name.to_owned(), account.to_owned());
+        if let JetStreamAccess::Enabled = jetstream {
+            claims.nats.limits = Some(OperatorLimits {
+                jetstream: Some(JetStreamLimits {
+                    memory_storage: Some(NO_LIMIT),
+                    disk_storage: Some(NO_LIMIT),
+                    streams: Some(NO_LIMIT),
+                    consumer: Some(NO_LIMIT),
+                    ..JetStreamLimits::default()
+                }),
+                ..OperatorLimits::default()
+            });
+        }
         claims.nats.signing_keys = Some(
             signers
                 .iter()
@@ -207,6 +233,7 @@ struct OperatorFixture {
     callout_service: NatsUser,
     sentinel: NatsUser,
     tenant_observer: NatsUser,
+    platform_user: NatsUser,
 }
 
 impl OperatorFixture {
@@ -236,26 +263,49 @@ impl OperatorFixture {
             UserPermissionLimits::default(),
         );
 
+        let platform_user = NatsUser::issue(
+            "platform-reader",
+            &platform,
+            &platform_signing,
+            UserPermissionLimits::default(),
+        );
+
         let callout = ExternalAuthorization {
             auth_users: Some(BTreeSet::from([callout_service.public_key()])),
             allowed_accounts: Some(BTreeSet::from([tenant.name()])),
             xkey: Some(callout_xkey.public_key()),
         };
         let account_jwts = vec![
-            AccountJwt::issue("SYS", &system, &[&system_signing], None, &operator_signing),
+            AccountJwt::issue(
+                "SYS",
+                &system,
+                &[&system_signing],
+                None,
+                JetStreamAccess::Disabled,
+                &operator_signing,
+            ),
             AccountJwt::issue(
                 "AUTH",
                 &auth,
                 &[&auth_user_issuer, &auth_response_signing],
                 Some(callout),
+                JetStreamAccess::Disabled,
                 &operator_signing,
             ),
-            AccountJwt::issue("PLATFORM", &platform, &[&platform_signing], None, &operator_signing),
+            AccountJwt::issue(
+                "PLATFORM",
+                &platform,
+                &[&platform_signing],
+                None,
+                JetStreamAccess::Enabled,
+                &operator_signing,
+            ),
             AccountJwt::issue(
                 "TENANT",
                 tenant.account.as_str(),
                 &[&tenant.user_issuer, &tenant.callout_signing],
                 None,
+                JetStreamAccess::Enabled,
                 &operator_signing,
             ),
         ];
@@ -275,6 +325,7 @@ impl OperatorFixture {
             callout_service,
             sentinel,
             tenant_observer,
+            platform_user,
         }
     }
 
@@ -319,6 +370,10 @@ resolver {{
 }}
 resolver_preload: {{
 {preload}}}
+
+jetstream {{
+  store_dir: "/data/jetstream"
+}}
 
 default_sentinel: "{sentinel}"
 "#,
@@ -618,6 +673,7 @@ struct NatsCalloutStack {
     client_tls: NatsClientTls,
     sentinel_jwt: String,
     tenant_observer: NatsUser,
+    platform_user: NatsUser,
     capture: MintedJwtCapture,
     dispatch_errors: DispatchErrorCapture,
     signing: Arc<dyn SigningKeySource>,
@@ -704,6 +760,7 @@ impl NatsCalloutStack {
             client_tls: tls.client,
             sentinel_jwt: operator.sentinel.jwt,
             tenant_observer: operator.tenant_observer,
+            platform_user: operator.platform_user,
             capture,
             dispatch_errors,
             signing: tenant.verification_source(),
@@ -886,6 +943,211 @@ impl NatsCalloutStack {
         );
     }
 
+    async fn connect_as(&self, user: &NatsUser) -> async_nats::Client {
+        self.client_tls
+            .apply(
+                user.connect_options()
+                    .request_timeout(Some(INVALIDATION_REQUEST_TIMEOUT)),
+            )
+            .connect(self.nats_url.as_str())
+            .await
+            .expect("connect with the user's own JWT")
+    }
+
+    /// Provisions the stream as `provision-secrets-invalidation.sh` shapes it, then
+    /// proves a PLATFORM user reads it and receives a published notice.
+    async fn assert_platform_holds_the_invalidation_stream(&self, platform: &async_nats::Client, notice_subject: &str) {
+        let config = serde_json::json!({
+            "name": INVALIDATION_STREAM,
+            "subjects": [INVALIDATION_SUBJECTS],
+            "storage": "file",
+            "retention": "limits",
+            "discard": "old",
+            "num_replicas": 1,
+            "duplicate_window": 120_000_000_000_i64,
+            "max_age": 3_600_000_000_000_i64,
+            "max_msgs": -1,
+            "max_bytes": -1,
+            "max_msg_size": 1024,
+            "max_msgs_per_subject": -1,
+            "deny_delete": true,
+            "deny_purge": true,
+            "allow_rollup_hdrs": false,
+            "allow_direct": true,
+        });
+        let created = retry_js_api_until_enabled(
+            platform,
+            &format!("$JS.API.STREAM.CREATE.{INVALIDATION_STREAM}"),
+            config.to_string(),
+        )
+        .await;
+        assert_eq!(
+            created["config"]["name"], INVALIDATION_STREAM,
+            "create reply: {created}"
+        );
+
+        let info = js_api(platform, &format!("$JS.API.STREAM.INFO.{INVALIDATION_STREAM}"), "").await;
+        assert_eq!(
+            info["config"]["name"], INVALIDATION_STREAM,
+            "PLATFORM stream info: {info}"
+        );
+        assert_eq!(info["state"]["messages"], 0, "PLATFORM stream info: {info}");
+
+        let mut notices = platform
+            .subscribe(INVALIDATION_WATCH)
+            .await
+            .expect("PLATFORM subscribes to the notices");
+        platform.flush().await.expect("PLATFORM flush");
+        let ack = js_api(platform, notice_subject, "release").await;
+        assert_eq!(ack["stream"], INVALIDATION_STREAM, "publish ack: {ack}");
+        assert_eq!(ack["seq"], 1, "publish ack: {ack}");
+        let notice = tokio::time::timeout(Duration::from_secs(5), notices.next())
+            .await
+            .expect("PLATFORM receives the notice")
+            .expect("PLATFORM subscription stays open");
+        assert_eq!(notice.subject.as_str(), notice_subject);
+    }
+
+    /// Publishes a second notice and proves a tenant account member subscribed to the
+    /// same subjects never sees either notice.
+    async fn assert_tenant_member_sees_no_notice(&self, platform: &async_nats::Client, notice_subject: &str) {
+        let member = self.connect_as(&self.tenant_observer).await;
+        let mut watch = member
+            .subscribe(INVALIDATION_WATCH)
+            .await
+            .expect("tenant member subscribes");
+        member.flush().await.expect("tenant member flush");
+
+        let ack = js_api(platform, notice_subject, "release").await;
+        assert_eq!(ack["seq"], 2, "the PLATFORM publish happened: {ack}");
+        platform.flush().await.expect("PLATFORM flush");
+        member.flush().await.expect("tenant member flush after the publish");
+        let delivered = tokio::time::timeout(Duration::from_secs(2), watch.next()).await;
+        assert!(
+            delivered.is_err(),
+            "a tenant subscription received a PLATFORM notice: {delivered:?}"
+        );
+    }
+
+    /// A tenant user with unrestricted permissions still gets its own account's
+    /// JetStream, which has no such stream.
+    async fn assert_tenant_jetstream_has_no_invalidation_stream(&self) {
+        let member = self.connect_as(&self.tenant_observer).await;
+        let info = js_api(&member, &format!("$JS.API.STREAM.INFO.{INVALIDATION_STREAM}"), "").await;
+        assert_not_found(&info);
+        let consumer = serde_json::json!({
+            "stream_name": INVALIDATION_STREAM,
+            "config": {"durable_name": "tenant-reader", "ack_policy": "explicit"},
+        });
+        let created = js_api(
+            &member,
+            &format!("$JS.API.CONSUMER.DURABLE.CREATE.{INVALIDATION_STREAM}.tenant-reader"),
+            &consumer.to_string(),
+        )
+        .await;
+        assert_not_found(&created);
+    }
+
+    /// A callout-minted tenant user holds no `$JS.API` or notice grant, so the server
+    /// refuses each attempt and nothing answers it.
+    async fn assert_minted_tenant_user_is_refused_the_invalidation_stream(&self, caller: &Caller) {
+        let (events_tx, mut events) = tokio::sync::mpsc::channel(64);
+        let client = caller
+            .connect_options(&self.client_tls)
+            .request_timeout(Some(INVALIDATION_REQUEST_TIMEOUT))
+            .event_callback(move |event| {
+                let _ = events_tx.try_send(event);
+                async {}
+            })
+            .connect(self.nats_url.as_str())
+            .await
+            .unwrap_or_else(|err| {
+                panic!(
+                    "the callout admits the caller: {err:?}; dispatch errors: {:?}",
+                    self.dispatch_errors.drain()
+                )
+            });
+
+        let info_subject = format!("$JS.API.STREAM.INFO.{INVALIDATION_STREAM}");
+        let consumer_subject = format!("$JS.API.CONSUMER.DURABLE.CREATE.{INVALIDATION_STREAM}.minted-reader");
+        let info = client.request(info_subject.clone(), "".into()).await;
+        assert!(
+            info.is_err(),
+            "the minted tenant user got a stream info reply: {info:?}"
+        );
+        let consumer = client
+            .request(
+                consumer_subject.clone(),
+                serde_json::json!({
+                    "stream_name": INVALIDATION_STREAM,
+                    "config": {"durable_name": "minted-reader", "ack_policy": "explicit"},
+                })
+                .to_string()
+                .into(),
+            )
+            .await;
+        assert!(
+            consumer.is_err(),
+            "the minted tenant user got a consumer create reply: {consumer:?}"
+        );
+        let mut watch = client
+            .subscribe(INVALIDATION_WATCH)
+            .await
+            .expect("subscribe outside the grant");
+        client.flush().await.expect("caller flush");
+        let delivered = tokio::time::timeout(Duration::from_secs(1), watch.next()).await;
+        assert!(
+            delivered.is_err(),
+            "the minted tenant user received a notice: {delivered:?}"
+        );
+
+        let mut unrefused: BTreeSet<String> = [
+            format!("Permissions Violation for Publish to \"{info_subject}\""),
+            format!("Permissions Violation for Publish to \"{consumer_subject}\""),
+            format!("Permissions Violation for Subscription to \"{INVALIDATION_WATCH}\""),
+        ]
+        .into();
+        let mut reported = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_secs(5), async {
+            while !unrefused.is_empty() {
+                match events.recv().await {
+                    Some(Event::ServerError(ServerError::Other(message))) => {
+                        unrefused.remove(&message);
+                        reported.push(message);
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+        })
+        .await;
+        assert!(
+            unrefused.is_empty(),
+            "nats-server did not refuse {unrefused:?}; it reported {reported:?}"
+        );
+    }
+
+    async fn assert_tenant_cannot_reach_the_invalidation_stream(&self, caller: &Caller, tenant: &TenantFixture) {
+        // The real shape is secrets.invalidation.v1.{tenant}.{owner_token}.{credential_id}, and
+        // this notice names the tenant account the isolation is checked against.
+        let notice_subject = format!("secrets.invalidation.v1.{}.owner~1.cred-1", tenant.name());
+        let platform = self.connect_as(&self.platform_user).await;
+        self.assert_platform_holds_the_invalidation_stream(&platform, &notice_subject)
+            .await;
+        self.assert_tenant_member_sees_no_notice(&platform, &notice_subject)
+            .await;
+        self.assert_tenant_jetstream_has_no_invalidation_stream().await;
+        self.assert_minted_tenant_user_is_refused_the_invalidation_stream(caller)
+            .await;
+
+        let info = js_api(&platform, &format!("$JS.API.STREAM.INFO.{INVALIDATION_STREAM}"), "").await;
+        assert_eq!(info["state"]["messages"], 2, "PLATFORM stream info: {info}");
+        assert_eq!(
+            info["state"]["consumer_count"], 0,
+            "a tenant user created a consumer on the PLATFORM stream: {info}"
+        );
+    }
+
     async fn assert_refuses(&self, caller: &Caller) {
         let attempt = caller
             .connect_options(&self.client_tls)
@@ -893,6 +1155,44 @@ impl NatsCalloutStack {
             .await;
         assert!(attempt.is_err(), "nats-server admitted a caller the callout refused");
     }
+}
+
+const INVALIDATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Sends a JetStream API request or a JetStream publish and parses the JSON reply.
+///
+/// The failure message names no subject, since a notice subject is built from a
+/// generated account key; the caller's line says which request failed.
+async fn js_api(client: &async_nats::Client, subject: &str, payload: &str) -> serde_json::Value {
+    let reply = client
+        .request(subject.to_owned(), payload.to_owned().into())
+        .await
+        .unwrap_or_else(|err| panic!("a jetstream request got no reply: {err:?}"));
+    serde_json::from_slice(&reply.payload).expect("jetstream replies with json")
+}
+
+/// JetStream finishes enabling a preloaded account shortly after the server starts, so
+/// the first requests can find nobody listening.
+async fn retry_js_api_until_enabled(client: &async_nats::Client, subject: &str, payload: String) -> serde_json::Value {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        match client.request(subject.to_owned(), payload.clone().into()).await {
+            Ok(reply) => return serde_json::from_slice(&reply.payload).expect("jetstream replies with json"),
+            Err(err) if std::time::Instant::now() >= deadline => panic!("{subject} got no reply: {err:?}"),
+            Err(_) => tokio::time::sleep(Duration::from_millis(250)).await,
+        }
+    }
+}
+
+fn assert_not_found(reply: &serde_json::Value) {
+    assert_eq!(
+        reply["error"]["err_code"], JS_STREAM_NOT_FOUND,
+        "the tenant account answered with something other than stream not found: {reply}"
+    );
+    assert!(
+        reply.get("config").is_none() && reply.get("state").is_none(),
+        "PLATFORM stream details reached a tenant user: {reply}"
+    );
 }
 
 fn drain_events(events: &mut tokio::sync::mpsc::Receiver<Event>) -> Vec<String> {
@@ -939,7 +1239,7 @@ fn test_jwks_and_encoding_key(rng: &mut OsRng) -> (JwkSet, EncodingKey) {
 
 async fn mock_oidc_issuer() -> (MockServer, MockOidcIssuerUrl, JwkSet, EncodingKey) {
     let server = MockServer::start().await;
-    let issuer = MockOidcIssuerUrl(server.uri());
+    let issuer = MockOidcIssuerUrl("https://issuer.example".to_owned());
     let (jwks, enc) = test_jwks_and_encoding_key(&mut OsRng);
     Mock::given(method("GET"))
         .and(path("/.well-known/openid-configuration"))
@@ -1061,6 +1361,12 @@ fn grant_prefix() -> A2aPrefix {
 }
 
 fn dispatcher_with_oidc(tenant: &TenantFixture, issuer: OidcIssuerUrl, jwks: JwkSet) -> CalloutDispatcher {
+    let membership = TenantMembership::for_oidc_subject(
+        tenant.account.clone(),
+        &issuer,
+        &ExternalSubject::new("user-integration-oidc").unwrap(),
+    )
+    .unwrap();
     let oidc: Arc<dyn OidcVerifier> = Arc::new(JwksOidcVerifier::with_static_jwks(
         issuer,
         vec![OIDC_AUDIENCE.into()],
@@ -1068,6 +1374,7 @@ fn dispatcher_with_oidc(tenant: &TenantFixture, issuer: OidcIssuerUrl, jwks: Jwk
     ));
     CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: tenant.signing_keys(),
+        tenant_admission: Arc::new(TenantMemberships::new([membership]).unwrap()),
         user_jwt_ttl: Duration::from_secs(300),
         a2a_prefix: grant_prefix(),
         oidc: Some(oidc),
@@ -1077,9 +1384,15 @@ fn dispatcher_with_oidc(tenant: &TenantFixture, issuer: OidcIssuerUrl, jwks: Jwk
 }
 
 fn dispatcher_with_mtls(tenant: &TenantFixture, trust_anchor_pem: String) -> CalloutDispatcher {
+    let membership = TenantMembership::for_legacy_mtls_subject(
+        tenant.account.clone(),
+        &ExternalSubject::new("CN=integration-client").unwrap(),
+    )
+    .unwrap();
     let mtls: Arc<dyn MTlsVerifier> = Arc::new(X509MtlsVerifier::new(TrustAnchorPem::new(trust_anchor_pem)));
     CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: tenant.signing_keys(),
+        tenant_admission: Arc::new(TenantMemberships::new([membership]).unwrap()),
         user_jwt_ttl: Duration::from_secs(300),
         a2a_prefix: grant_prefix(),
         oidc: None,
@@ -1090,6 +1403,11 @@ fn dispatcher_with_mtls(tenant: &TenantFixture, trust_anchor_pem: String) -> Cal
 
 #[allow(deprecated)]
 fn dispatcher_with_api_key(tenant: &TenantFixture) -> CalloutDispatcher {
+    let membership = TenantMembership::for_legacy_api_key_subject(
+        tenant.account.clone(),
+        &ExternalSubject::new("svc-integration").unwrap(),
+    )
+    .unwrap();
     let mut registry = ApiKeyRegistry::new(API_KEY_HMAC.to_vec());
     let key = ApiKey::new(API_KEY_VALUE).expect("api key");
     registry.register(
@@ -1103,6 +1421,7 @@ fn dispatcher_with_api_key(tenant: &TenantFixture) -> CalloutDispatcher {
     let api_key: Arc<dyn ApiKeyVerifier> = Arc::new(HmacApiKeyVerifier::new(Arc::new(registry)));
     CalloutDispatcher::new(CalloutDispatcherConfig {
         tenant_signing_keys: tenant.signing_keys(),
+        tenant_admission: Arc::new(TenantMemberships::new([membership]).unwrap()),
         user_jwt_ttl: Duration::from_secs(300),
         a2a_prefix: grant_prefix(),
         oidc: None,
@@ -1181,5 +1500,21 @@ async fn a_bridge_routed_caller_reaches_agents_only_through_the_gateway() {
 
     stack
         .assert_bridge_routed_caller_holds_only_its_grant(&bridge, &tenant)
+        .await;
+}
+
+#[tokio::test]
+async fn a_callout_minted_tenant_user_cannot_reach_the_platform_invalidation_stream() {
+    let tenant = TenantFixture::generate();
+    let tls = TlsFixture::generate();
+    let dispatcher = dispatcher_with_mtls(&tenant, tls.trust_anchor_pem.clone());
+    let stack = NatsCalloutStack::start(&tenant, tls, dispatcher).await;
+
+    let caller = Caller {
+        tenant: tenant.account.clone(),
+        credential: CallerCredential::ClientCertificateOnly,
+    };
+    stack
+        .assert_tenant_cannot_reach_the_invalidation_stream(&caller, &tenant)
         .await;
 }

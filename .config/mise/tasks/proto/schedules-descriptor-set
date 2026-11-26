@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Generate FileDescriptorSet for the schedules decider test runner"
+
+mkdir -p rsworkspace/target/wasm32-unknown-unknown/release && buf build -o rsworkspace/target/wasm32-unknown-unknown/release/trogon_schedules_decider.binpb --as-file-descriptor-set --path proto/trogonai/scheduler/schedules "$@"

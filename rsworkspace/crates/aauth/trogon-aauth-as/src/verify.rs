@@ -8,11 +8,12 @@
 //! the JWTs carried in the request body and the trust/binding relationships
 //! between them.
 
-use trogon_aauth_verify::{JwksResolver, TimeSource, TokenVerifier, VerifiedAuth};
+use trogon_aauth_verify::{JwksResolver, TimeSource, TokenError, TokenVerifier, VerifiedAuth};
 use trogon_identity_types::aauth::federation::AsTokenRequest;
 use trogon_identity_types::aauth::{AgentClaims, ResourceClaims};
 
 use crate::error::RequestVerificationError;
+use crate::mint::AuthTokenTtl;
 use crate::request::BindingAgent;
 use crate::subagent::parent_agent_of;
 use crate::trust::{TrustRegistry, TrustedIssuer};
@@ -25,6 +26,32 @@ pub struct VerifiedRequest {
     pub subagent_claims: Option<AgentClaims>,
     pub upstream: Option<VerifiedAuth>,
     pub binding: BindingAgent,
+}
+
+impl VerifiedRequest {
+    pub(crate) fn auth_token_ttl(
+        &self,
+        now: i64,
+        maximum: AuthTokenTtl,
+    ) -> Result<AuthTokenTtl, RequestVerificationError> {
+        let mut ttl = maximum
+            .bounded_by(now, self.agent_claims.exp)
+            .map_err(RequestVerificationError::AgentToken)?;
+        if self.resource_claims.exp <= now {
+            return Err(RequestVerificationError::ResourceToken(TokenError::Expired));
+        }
+        if let Some(subagent) = &self.subagent_claims {
+            ttl = ttl
+                .bounded_by(now, subagent.exp)
+                .map_err(RequestVerificationError::SubagentToken)?;
+        }
+        if let Some(upstream) = &self.upstream {
+            ttl = ttl
+                .bounded_by(now, upstream.claims.exp)
+                .map_err(RequestVerificationError::UpstreamToken)?;
+        }
+        Ok(ttl)
+    }
 }
 
 /// Verifies the PS-to-AS request body against this AS's own identity and

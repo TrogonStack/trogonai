@@ -1,6 +1,7 @@
 use crate::audit_name::AuditName;
 
-/// Who caused the act, by identifier only.
+/// Who caused the act, by identifier only. A platform service acting under its
+/// bus principal is a `Service`, never an `Agent`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Actor {
     Unattributed,
@@ -8,6 +9,7 @@ pub enum Actor {
     HumanSession { subject: AuditName, issuer: AuditName },
     BreakGlass { operator: AuditName, host: AuditName },
     Agent { agent_id: AuditName },
+    Service { service_id: AuditName },
 }
 
 impl Actor {

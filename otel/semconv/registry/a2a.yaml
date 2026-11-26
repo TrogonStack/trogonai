@@ -56,3 +56,27 @@ groups:
     span_kind: server
     stability: development
     brief: A2A server push/delete request.
+
+  - id: registry.trogonai.a2a.relay
+    type: attribute_group
+    display_name: A2A Relay Admission
+    brief: Bounded admission scopes for imported request relays.
+    attributes:
+      - id: a2a.gateway.relay.limit
+        type: string
+        stability: development
+        brief: Admission scope, either global or caller. Never contains an identity.
+
+  - id: metric.a2a.gateway.imported_reply.capacity_refusals
+    type: metric
+    metric_name: a2a.gateway.imported_reply.capacity_refusals
+    annotations:
+      code_generation:
+        metric_value_type: int
+    brief: Imported reply requests refused by concurrent admission limits.
+    instrument: counter
+    unit: "{request}"
+    stability: development
+    attributes:
+      - ref: a2a.gateway.relay.limit
+        requirement_level: required

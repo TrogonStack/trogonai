@@ -14,10 +14,10 @@ use axum::Router;
 use tracing::info;
 use trogon_nats::client::RequestClient;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 
 use crate::config::{ResolvedConfig, SourceIntegration};
 use crate::credential_runtime_projection::RuntimeCredentialResolver;
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
 
 pub type SourceId = &'static str;
 
@@ -56,6 +56,7 @@ pub struct SentryPlugin;
 pub struct DatadogPlugin;
 pub struct ZoomPlugin;
 pub struct PlaidPlugin;
+pub struct WhatsAppPlugin;
 
 pub(crate) struct RuntimeCredentialMounts<G> {
     pub(crate) github: Option<RuntimeCredentialResolver<G>>,
@@ -925,6 +926,38 @@ impl PlaidPlugin {
     }
 }
 
+impl SourcePlugin for WhatsAppPlugin {
+    fn id(&self) -> SourceId {
+        "whatsapp"
+    }
+
+    async fn provision<C: JetStreamContext>(&self, client: &C, config: &ResolvedConfig) -> Result<(), C::Error> {
+        provision_integrations(&config.whatsapp, self.id(), client, crate::source::whatsapp::provision).await
+    }
+
+    fn mount<P, S, R>(
+        &self,
+        app: Router,
+        publisher: ClaimCheckPublisher<P, S>,
+        _requester: &R,
+        config: &ResolvedConfig,
+    ) -> Router
+    where
+        P: JetStreamPublisher,
+        S: ObjectStorePut,
+        R: RequestClient,
+    {
+        mount_integrations(
+            &config.whatsapp,
+            app,
+            publisher,
+            self.id(),
+            &self.path_prefix(),
+            crate::source::whatsapp::router,
+        )
+    }
+}
+
 /// Provision JetStream streams for every webhook source. Discord is provisioned separately by the caller.
 pub async fn provision_webhook_sources<C: JetStreamContext>(
     client: &C,
@@ -943,6 +976,7 @@ pub async fn provision_webhook_sources<C: JetStreamContext>(
     DatadogPlugin.provision(client, config).await?;
     ZoomPlugin.provision(client, config).await?;
     PlaidPlugin.provision(client, config).await?;
+    WhatsAppPlugin.provision(client, config).await?;
     Ok(())
 }
 
@@ -970,6 +1004,7 @@ where
     app = SentryPlugin.mount(app, publisher.clone(), requester, config);
     app = DatadogPlugin.mount(app, publisher.clone(), requester, config);
     app = ZoomPlugin.mount(app, publisher.clone(), requester, config);
+    app = WhatsAppPlugin.mount(app, publisher.clone(), requester, config);
     PlaidPlugin.mount(app, publisher, requester, config)
 }
 
@@ -1040,6 +1075,7 @@ where
     };
     app = DatadogPlugin.mount(app, publisher.clone(), requester, config);
     app = ZoomPlugin.mount(app, publisher.clone(), requester, config);
+    app = WhatsAppPlugin.mount(app, publisher.clone(), requester, config);
     match runtime_credentials.plaid {
         Some(plaid_credentials) => PlaidPlugin.mount_runtime(app, publisher, config, plaid_credentials),
         None => PlaidPlugin.mount(app, publisher, requester, config),

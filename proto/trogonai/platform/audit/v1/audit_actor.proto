@@ -7,19 +7,21 @@ import "trogonai/agents/agents/v1alpha1/identity.proto";
 
 // AuditActor is who caused a record.
 //
-// It carries the four arms of the API key audit actor (ADR#0078) and one more,
-// agent, for the platform's own AgentId (ADR#0017). The api_keys package keeps
-// its own message until it has Rust bindings, so no existing proto moves.
+// It carries the four arms of the API key audit actor (ADR#0078) and two more:
+// agent, for the platform's own AgentId (ADR#0017), and service, for a
+// platform service's bus principal (ADR#0082). The api_keys package keeps its
+// own message until it has Rust bindings, so no existing proto moves.
 //
 // The oneof exists so the unattributed case is a named state rather than an
 // empty string. There is deliberately no system or component arm: a synthetic
 // "system" actor would make the audit log claim an authentication that never
-// happened. The process that wrote a record is named by Integrity.writer_id,
-// which is a statement about the writer and not about who caused the act. A
-// runtime point sets the actor from the principal it authenticated, never from
-// a header. A record projected from an event carries the actor of that event
-// when its envelope has one and Unattributed when it does not; a projector
-// never infers one.
+// happened. A service actor is not that, because the bus authenticated it. The
+// process that wrote a record is named by Integrity.writer_id, which is a
+// statement about the writer and not about who caused the act. A runtime point
+// sets the actor from the principal it authenticated, never from a header. A
+// record projected from an event carries the actor of that event when its
+// envelope has one and Unattributed when it does not; a projector never infers
+// one.
 message AuditActor {
   oneof kind {
     option (buf.validate.oneof).required = true;
@@ -29,6 +31,7 @@ message AuditActor {
     HumanSessionActor human_session = 3;
     BreakGlassActor break_glass = 4;
     AgentActor agent = 5;
+    ServiceActor service = 6;
   }
 
   // No actor was authenticated, or the source event does not record one.
@@ -58,5 +61,13 @@ message AuditActor {
   // (ADR#0017) or by the mTLS identity of the egress proxy.
   message AgentActor {
     trogonai.agents.agents.v1alpha1.AgentId agent_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  }
+
+  // A platform service acting under its own bus principal, service.{id},
+  // which the receiver derives from the subject the service was allowed to
+  // publish on (ADR#0082 Decision 1). It names a caller the bus
+  // authenticated, never a synthetic system actor.
+  message ServiceActor {
+    string service_id = 1 [features.field_presence = LEGACY_REQUIRED];
   }
 }

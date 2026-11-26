@@ -94,3 +94,69 @@ fn rejects_non_string_signature() {
         })
     );
 }
+
+#[test]
+fn rejects_a_spiffe_identity_type_with_a_malformed_spiffe_id() {
+    let too_long = format!("spiffe://example.com/{}", "a".repeat(2048));
+    let trust_domain_too_long = format!("spiffe://{}/agent", "a".repeat(256));
+    for identity in [
+        trust_domain_too_long.as_str(),
+        "spiffe://example.com",
+        "did:web:example.com",
+        "https://example.com/agent",
+        "SPIFFE://example.com/agent",
+        "spiffe://",
+        "spiffe:///agent",
+        "spiffe://Example.com/agent",
+        "spiffe://example.com/agent/",
+        "spiffe://example.com//agent",
+        "spiffe://example.com/agent/..",
+        "spiffe://example.com/agent/.",
+        "spiffe://example.com/agent?x=1",
+        "spiffe://example.com/agent#f",
+        "spiffe://example.com:443/agent",
+        "spiffe://user@example.com/agent",
+        "spiffe://example.com/agent/a b",
+        "spiffe://example.com/agent/%41",
+        "spiffe://example.com/agent/did:key:x",
+        too_long.as_str(),
+    ] {
+        assert_eq!(
+            TrustManifest::new(json!({ "identity": identity, "identityType": "spiffe" })),
+            Err(TrustManifestError::InvalidSpiffeIdentity),
+            "{identity:?}"
+        );
+    }
+}
+
+#[test]
+fn accepts_well_formed_spiffe_ids_and_leaves_other_identity_types_opaque() {
+    for identity in [
+        "spiffe://example.com/agent/assistant",
+        "spiffe://a-b_c.example.com/A/b-c_d.e/1",
+    ] {
+        assert!(TrustManifest::new(json!({ "identity": identity, "identityType": "spiffe" })).is_ok());
+    }
+    for (identity, identity_type) in [
+        ("not a spiffe id", "other"),
+        ("spiffe://Example.com//x", "other"),
+        ("did:web:example.com", "did"),
+    ] {
+        assert!(TrustManifest::new(json!({ "identity": identity, "identityType": identity_type })).is_ok());
+    }
+    assert!(TrustManifest::new(json!({ "identity": "not a spiffe id" })).is_ok());
+}
+
+#[test]
+fn rejects_a_non_string_identity() {
+    assert_eq!(
+        TrustManifest::new(json!({ "identity": 7 })),
+        Err(TrustManifestError::InvalidIdentity)
+    );
+}
+
+#[test]
+fn accepts_a_spiffe_id_whose_trust_domain_is_exactly_at_the_length_limit() {
+    let identity = format!("spiffe://{}/agent", "a".repeat(255));
+    assert!(TrustManifest::new(json!({ "identity": identity, "identityType": "spiffe" })).is_ok());
+}

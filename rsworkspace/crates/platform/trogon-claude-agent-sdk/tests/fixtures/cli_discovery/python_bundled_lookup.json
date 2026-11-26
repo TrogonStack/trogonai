@@ -1,0 +1,93 @@
+{
+  "source": "claude_agent_sdk 0.2.181 SubprocessCLITransport._find_cli",
+  "cases": [
+    {
+      "name": "bundled_file_wins_over_path",
+      "windows": false,
+      "bundled": "file",
+      "path": true,
+      "home": true,
+      "python": "bundled"
+    },
+    {
+      "name": "bundled_executable_wins_over_path",
+      "windows": false,
+      "bundled": "executable",
+      "path": true,
+      "home": false,
+      "python": "bundled"
+    },
+    {
+      "name": "bundled_symlink_to_a_file_counts",
+      "windows": false,
+      "bundled": "symlink",
+      "path": true,
+      "home": false,
+      "python": "bundled"
+    },
+    {
+      "name": "bundled_directory_falls_through_to_path",
+      "windows": false,
+      "bundled": "directory",
+      "path": true,
+      "home": false,
+      "python": "path"
+    },
+    {
+      "name": "dangling_bundled_symlink_falls_through_to_path",
+      "windows": false,
+      "bundled": "dangling",
+      "path": true,
+      "home": false,
+      "python": "path"
+    },
+    {
+      "name": "no_bundled_directory_uses_path",
+      "windows": false,
+      "bundled": null,
+      "path": true,
+      "home": false,
+      "python": "path"
+    },
+    {
+      "name": "bundled_file_wins_with_nothing_else",
+      "windows": false,
+      "bundled": "file",
+      "path": false,
+      "home": false,
+      "python": "bundled"
+    },
+    {
+      "name": "bundled_directory_falls_through_to_home",
+      "windows": false,
+      "bundled": "directory",
+      "path": false,
+      "home": true,
+      "python": "home"
+    },
+    {
+      "name": "windows_bundled_exe_wins_over_path",
+      "windows": true,
+      "bundled": "file",
+      "path": true,
+      "home": false,
+      "python": "bundled"
+    },
+    {
+      "name": "windows_extensionless_bundled_is_ignored",
+      "windows": true,
+      "bundled": "extensionless",
+      "path": true,
+      "home": false,
+      "python": "path"
+    },
+    {
+      "name": "windows_bundled_directory_falls_through_to_path",
+      "windows": true,
+      "bundled": "directory",
+      "path": true,
+      "home": false,
+      "python": "path"
+    }
+  ]
+}

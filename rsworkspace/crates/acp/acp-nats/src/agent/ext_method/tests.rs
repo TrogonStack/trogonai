@@ -3,7 +3,7 @@ use crate::agent::test_support::{
     has_error_metric, has_request_metric, mock_bridge, mock_bridge_with_metrics, set_json_response,
 };
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{ExtRequest, ExtResponse};
+use agent_client_protocol::v1::schema::{ExtRequest, ExtResponse};
 use serde_json::value::RawValue;
 
 #[tokio::test]
@@ -29,7 +29,7 @@ async fn ext_method_returns_error_when_nats_fails() {
     let request = ExtRequest::new("my_method", params.into());
     let err = bridge.ext_method(request).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::Other(crate::error::AGENT_UNAVAILABLE));
+    assert_eq!(err.code, ErrorCode::new(crate::error::AGENT_UNAVAILABLE));
 }
 
 #[tokio::test]
@@ -41,7 +41,7 @@ async fn ext_method_returns_error_when_response_is_invalid_json() {
     let request = ExtRequest::new("my_method", params.into());
     let err = bridge.ext_method(request).await.unwrap_err();
 
-    assert_eq!(err.code, ErrorCode::InternalError);
+    assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
 }
 
 #[tokio::test]
@@ -52,7 +52,7 @@ async fn ext_method_validates_method_name() {
     let err = bridge.ext_method(request).await.unwrap_err();
 
     assert!(err.message.contains("Invalid method name"));
-    assert_eq!(err.code, ErrorCode::InvalidParams);
+    assert_eq!(err.code, ErrorCode::INVALID_PARAMS);
 }
 
 #[tokio::test]

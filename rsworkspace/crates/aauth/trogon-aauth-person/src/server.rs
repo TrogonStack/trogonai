@@ -160,6 +160,7 @@ where
         mission_id: Option<&MissionId>,
     ) -> Result<TokenEndpointOutcome, PersonServerError> {
         let mission_ctx = self.load_mission_context(mission_id).await?;
+        verified.auth_token_ttl(self.clock.now(), AuthTokenTtl::default())?;
         let decision = self
             .policy
             .decide(DecisionRequest {
@@ -186,13 +187,20 @@ where
         verified: &crate::agent::VerifiedRequest,
         mission_id: Option<&MissionId>,
     ) -> Result<TokenEndpointOutcome, PersonServerError> {
+        let iat = self.clock.now();
+        let ttl = self.pending_token_ttl(pending, verified, iat).await?;
         match decision {
             PolicyDecision::Grant { scope } => {
                 let act = verified
                     .upstream
                     .as_ref()
-                    .map(|u| nest_act(verified.agent_claims.sub.clone(), u.claims.act.clone()));
-                let iat = self.clock.now();
+                    .map(|u| nest_act(verified.agent_claims.sub.clone(), u.claims.act.clone()))
+                    .or_else(|| {
+                        verified
+                            .subagent_claims
+                            .as_ref()
+                            .map(|_| nest_act(verified.agent_claims.sub.clone(), None))
+                    });
                 let jti = crate::pending::PendingId::generate().0;
                 let inputs = AuthTokenInputs {
                     iss: &self.iss,
@@ -214,7 +222,7 @@ where
                     consent_id: None,
                     resource: Some(&verified.resource_claims.iss),
                     iat,
-                    ttl: AuthTokenTtl::default(),
+                    ttl,
                 };
                 let auth_token =
                     mint_auth_jwt(&self.signing_key, self.alg, &self.kid, &inputs).map_err(PersonServerError::Mint)?;
@@ -406,19 +414,6 @@ where
             }
         }
 
-        let mission_ctx = self.load_mission_context(pending.mission_id.as_ref()).await?;
-        let decision = self
-            .policy
-            .decide(DecisionRequest {
-                agent: &pending.agent,
-                resource: &pending.resource,
-                justification: pending.justification.as_deref(),
-                mission: mission_ctx.as_ref(),
-                clarification_round: pending.clarification_round,
-            })
-            .await
-            .map_err(|e| PersonServerError::Policy(Box::new(e)))?;
-
         let binding = crate::mint::BindingAgent {
             agent: pending.resource.agent.clone(),
             agent_jkt: pending.resource.agent_jkt.clone(),
@@ -431,9 +426,43 @@ where
             binding,
             justification: pending.justification.clone(),
         };
+        let mission_ctx = self.load_mission_context(pending.mission_id.as_ref()).await?;
+        self.pending_token_ttl(&mut pending, &verified, self.clock.now())
+            .await?;
+        let decision = self
+            .policy
+            .decide(DecisionRequest {
+                agent: &pending.agent,
+                resource: &pending.resource,
+                justification: pending.justification.as_deref(),
+                mission: mission_ctx.as_ref(),
+                clarification_round: pending.clarification_round,
+            })
+            .await
+            .map_err(|e| PersonServerError::Policy(Box::new(e)))?;
         let mission_id = pending.mission_id.clone();
         self.apply_decision(&mut pending, decision, &verified, mission_id.as_ref())
             .await
+    }
+
+    async fn pending_token_ttl(
+        &self,
+        pending: &mut PendingRequest,
+        verified: &crate::agent::VerifiedRequest,
+        now: i64,
+    ) -> Result<AuthTokenTtl, PersonServerError> {
+        match verified.auth_token_ttl(now, AuthTokenTtl::default()) {
+            Ok(ttl) => Ok(ttl),
+            Err(error) => {
+                // Terminal state releases correlation for a fresh authorization attempt.
+                pending.cancel();
+                self.store
+                    .update_pending(pending.clone())
+                    .await
+                    .map_err(PersonServerError::Store)?;
+                Err(error.into())
+            }
+        }
     }
 
     /// "Mission Approval": approves a mission proposal and persists the

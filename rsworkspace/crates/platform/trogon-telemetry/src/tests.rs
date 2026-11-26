@@ -201,3 +201,62 @@ fn telemetry_shutdown_error_includes_logger_failure() {
         [TelemetryProviderShutdownError::Logger { .. }]
     ));
 }
+
+fn finishes_at_once(_: Duration) -> Result<(), TelemetryProviderShutdownError> {
+    Ok(())
+}
+
+fn never_finishes(_: Duration) -> Result<(), TelemetryProviderShutdownError> {
+    std::thread::sleep(Duration::from_secs(30));
+    Ok(())
+}
+
+fn fails_at_once(_: Duration) -> Result<(), TelemetryProviderShutdownError> {
+    Err(TelemetryProviderShutdownError::Logger {
+        source: anyhow::anyhow!("rejected"),
+    })
+}
+
+#[test]
+fn shutdown_providers_succeeds_when_every_provider_finishes() {
+    assert!(shutdown_providers([finishes_at_once; 3], Duration::from_secs(1)).is_ok());
+}
+
+#[test]
+fn shutdown_providers_gives_up_on_a_provider_that_ignores_its_timeout() {
+    let started = Instant::now();
+    let error = shutdown_providers(
+        [finishes_at_once, never_finishes, finishes_at_once],
+        Duration::from_millis(200),
+    )
+    .unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(matches!(
+        error.errors.as_slice(),
+        [TelemetryProviderShutdownError::Meter { .. }]
+    ));
+}
+
+#[test]
+fn shutdown_providers_runs_providers_concurrently_and_reports_each_failure() {
+    let started = Instant::now();
+    let error = shutdown_providers(
+        [never_finishes, never_finishes, fails_at_once],
+        Duration::from_millis(300),
+    )
+    .unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(matches!(
+        error.errors.as_slice(),
+        [
+            TelemetryProviderShutdownError::Tracer { .. },
+            TelemetryProviderShutdownError::Meter { .. },
+            TelemetryProviderShutdownError::Logger { .. }
+        ]
+    ));
+}
+
+#[test]
+fn the_shutdown_bound_is_three_seconds() {
+    assert_eq!(constants::SHUTDOWN_TIMEOUT, Duration::from_secs(3));
+}

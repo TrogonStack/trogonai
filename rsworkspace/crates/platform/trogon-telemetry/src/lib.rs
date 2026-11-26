@@ -17,6 +17,8 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use std::error::Error;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
@@ -61,6 +63,17 @@ pub enum TelemetryProviderShutdownError {
         #[source]
         source: anyhow::Error,
     },
+}
+
+impl TelemetryProviderShutdownError {
+    fn timed_out(index: usize, timeout: Duration) -> Self {
+        let source = anyhow::anyhow!("did not finish within {timeout:?}");
+        match index {
+            0 => Self::Tracer { source },
+            1 => Self::Meter { source },
+            _ => Self::Logger { source },
+        }
+    }
 }
 
 fn try_open_log_file<F: CreateDirAll + OpenAppendFile>(
@@ -192,20 +205,47 @@ where
     Ok((tracer_provider, meter_provider, logger_provider))
 }
 
+/// Flushes and shuts down the OpenTelemetry providers, giving up after
+/// [`constants::SHUTDOWN_TIMEOUT`] in total even when the collector is
+/// unreachable. Telemetry that has not been exported by then is dropped.
 pub fn shutdown_otel() -> Result<(), TelemetryShutdownError> {
     tracing::info!("Shutting down OpenTelemetry providers");
+    shutdown_providers(
+        [trace::shutdown, metric::shutdown, log::shutdown],
+        constants::SHUTDOWN_TIMEOUT,
+    )
+}
 
-    let mut errors = Vec::new();
-    if let Err(e) = trace::shutdown() {
-        errors.push(e);
+type ProviderShutdown = fn(Duration) -> Result<(), TelemetryProviderShutdownError>;
+
+fn shutdown_providers(providers: [ProviderShutdown; 3], timeout: Duration) -> Result<(), TelemetryShutdownError> {
+    let (sender, receiver) = mpsc::sync_channel(providers.len());
+    for (index, shutdown) in providers.into_iter().enumerate() {
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send((index, shutdown(timeout)));
+        });
     }
-    if let Err(e) = metric::shutdown() {
-        errors.push(e);
-    }
-    if let Err(e) = log::shutdown() {
-        errors.push(e);
+    drop(sender);
+
+    let deadline = Instant::now() + timeout;
+    let mut outcomes: [Option<Result<(), TelemetryProviderShutdownError>>; 3] = [None, None, None];
+    while outcomes.iter().any(Option::is_none) {
+        match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok((index, outcome)) => outcomes[index] = Some(outcome),
+            Err(_) => break,
+        }
     }
 
+    let errors: Vec<_> = outcomes
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, outcome)| match outcome {
+            Some(Ok(())) => None,
+            Some(Err(error)) => Some(error),
+            None => Some(TelemetryProviderShutdownError::timed_out(index, timeout)),
+        })
+        .collect();
     if errors.is_empty() {
         Ok(())
     } else {

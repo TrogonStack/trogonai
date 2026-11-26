@@ -1,0 +1,15 @@
+edition = "2024";
+
+package trogonai.gateway.webhooks.v1;
+
+import "google/protobuf/timestamp.proto";
+
+message WebhookReceived {
+  string endpoint_id = 1 [features.field_presence = LEGACY_REQUIRED];
+  string project_id = 2 [features.field_presence = LEGACY_REQUIRED];
+  uint64 configuration_revision = 3 [features.field_presence = LEGACY_REQUIRED];
+  string delivery_id = 4 [features.field_presence = LEGACY_REQUIRED];
+  google.protobuf.Timestamp received_at = 5 [features.field_presence = LEGACY_REQUIRED];
+  bytes body = 6 [features.field_presence = LEGACY_REQUIRED];
+  string content_type = 7;
+}

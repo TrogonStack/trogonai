@@ -7,7 +7,7 @@ use async_trait::async_trait;
 
 use a2a_auth_callout::credentials::oidc::BearerToken;
 use a2a_auth_callout::{
-    BridgeCredential, BridgeCredentialError, BridgeMintRequest, BridgeMintResponse, SealedBridgeCredential, XkeyPublic,
+    BridgeCredential, BridgeCredentialError, BridgeMintReply, BridgeMintRequest, SealedBridgeCredential, XkeyPublic,
 };
 
 pub use callout_mint::{BridgeTenantAccount, InProcessCalloutDispatcherMintWire};
@@ -155,7 +155,7 @@ impl<W: AuthMintWire + 'static> AuthCalloutJsonMintClient<W> {
 
     #[must_use]
     pub fn default_mint_subject() -> &'static str {
-        "a2a.bridge.auth.callout.request"
+        a2a_auth_callout::constants::DEFAULT_BRIDGE_MINT_SUBJECT
     }
 }
 
@@ -177,9 +177,15 @@ impl<W: AuthMintWire + 'static> AuthCalloutClient for AuthCalloutJsonMintClient<
             .roundtrip_message(self.mint_subject.to_string(), BytesPayload(bytes))
             .await?;
 
-        let response: BridgeMintResponse =
+        let reply: BridgeMintReply =
             serde_json::from_slice(&reply).map_err(|e: serde_json::Error| BridgeError::Deserialize(e))?;
-        BridgeUserJwt::new(response.user_jwt)
+        match reply {
+            BridgeMintReply::Minted(response) => BridgeUserJwt::new(response.user_jwt),
+            BridgeMintReply::Refused(refusal) => Err(BridgeError::Mint(format!(
+                "auth callout refused the mint: {}",
+                refusal.refusal
+            ))),
+        }
     }
 }
 

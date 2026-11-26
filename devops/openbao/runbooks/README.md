@@ -36,10 +36,10 @@ exists and is undocumented.
 `secret/data/trogonai/{owner_id}/credentials/{credential_id}` and its
 metadata at `secret/metadata/trogonai/{owner_id}/credentials/{credential_id}`,
 where `owner_id` is the project id ([ADR#0046](../../../docs/adr/0046-project-anchored-resource-hierarchy.md)) and `credential_id` is
-`openbao:{owner}:{scope_key}:{kind}`. The credential id contains `:` and
-`/`, so it is not a single path segment. See
-[../policies/README.md](../policies/README.md) for why that matters to
-policy authoring.
+the opaque credential id: a canonical UUID that the credential's write request
+records and every later event's key repeats. It is always a single path
+segment. See [../policies/README.md](../policies/README.md) for how the
+policies match it.
 
 **Roles.** Five policies exist in [../policies](../policies): `control_plane_write`,
 `gateway_read`, `lifecycle_worker_cleanup`, `audit_read`, and

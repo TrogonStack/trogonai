@@ -13,7 +13,7 @@ async fn a_panicked_client_proxy_becomes_an_error() {
     let error = outcome.expect_err("a JoinError must surface as a connection error");
     assert_eq!(
         error.code,
-        agent_client_protocol::ErrorCode::InternalError,
+        agent_client_protocol::ErrorCode::INTERNAL_ERROR,
         "the SDK transport should see an internal error, not a clean close"
     );
 }
@@ -31,7 +31,7 @@ fn a_boundary_error_stays_an_error() {
 
     assert_eq!(
         outcome.expect_err("a boundary error must propagate").code,
-        agent_client_protocol::ErrorCode::InternalError
+        agent_client_protocol::ErrorCode::INTERNAL_ERROR
     );
 }
 

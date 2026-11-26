@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#MISE description="Run every Bazel test with coverage using the runner's Bazel cache"
+set -euo pipefail
+
+mkdir -p "${RUNNER_TEMP:?}/bazel-profiles"
+
+# Coverage runs every test as `bazel test` would, so the tests run once and
+# also produce the report the coverage gate reads.
+# --keep_going so one broken target does not hide the results of all others.
+exec bazel coverage \
+  --config=ci \
+  --config=coverage \
+  --keep_going \
+  --profile="$RUNNER_TEMP/bazel-profiles/coverage.profile.gz" \
+  //...

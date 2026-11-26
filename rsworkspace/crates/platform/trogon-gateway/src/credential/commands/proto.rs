@@ -13,7 +13,7 @@ use super::domain::{
 use crate::source_integration_id::{SourceIntegrationId, SourceIntegrationIdError};
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub(crate) enum CredentialProtoDecodeError {
+pub enum CredentialProtoDecodeError {
     #[error("credential field '{field}' is missing")]
     MissingField { field: CredentialFieldPath },
     #[error("credential field '{field}' is invalid: {reason}")]
@@ -25,7 +25,7 @@ pub(crate) enum CredentialProtoDecodeError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub(crate) enum CredentialFieldInvalidError {
+pub enum CredentialFieldInvalidError {
     #[error(transparent)]
     CredentialId(#[from] CredentialIdError),
     #[error(transparent)]
@@ -56,7 +56,7 @@ pub(crate) enum CredentialFieldInvalidError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum UnspecifiedEnumKind {
+pub enum UnspecifiedEnumKind {
     SourceKind,
     CredentialKind,
     CredentialStatus,
@@ -75,7 +75,7 @@ impl fmt::Display for UnspecifiedEnumKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct CredentialFieldPath(Cow<'static, str>);
+pub struct CredentialFieldPath(Cow<'static, str>);
 
 impl CredentialFieldPath {
     pub(crate) fn child(&self, name: &'static str) -> Self {

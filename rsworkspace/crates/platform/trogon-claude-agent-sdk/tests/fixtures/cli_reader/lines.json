@@ -1,0 +1,3657 @@
+{
+ "about": "One CLI stdout line, written before a system message and again as the unterminated tail after one, through claude_agent_sdk 0.2.181 ClaudeSDKClient.receive_messages on CPython 3.12.16 and @anthropic-ai/claude-agent-sdk 0.3.323 query() on Node 24: each message as JSON text, or what was raised. TypeScript's text lists keys in the order Object.keys gives and writes -0 as -0. An entry that the public message types cannot hold names the upstream value and what the crate does instead.",
+ "cases": [
+  {
+   "name": "before U+0000",
+   "line": "\u0000{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+0000",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u0000",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u0000..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+0000",
+   "line": "{\"type\":\"system\",\u0000\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u0000\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+0009",
+   "line": "\t{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "after U+0009",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\t",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+0009",
+   "line": "{\"type\":\"system\",\t\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "before U+000B",
+   "line": "\u000b{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+000B",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u000b",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+000B",
+   "line": "{\"type\":\"system\",\u000b\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u000b\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+000C",
+   "line": "\f{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+000C",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\f",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+000C",
+   "line": "{\"type\":\"system\",\f\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\f\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+000D",
+   "line": "\r{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "after U+000D",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\r",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+000D",
+   "line": "{\"type\":\"system\",\r\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+0020",
+   "line": " {\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "after U+0020",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1} ",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+0020",
+   "line": "{\"type\":\"system\", \"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "before U+001C",
+   "line": "\u001c{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+001C",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u001c",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+001C",
+   "line": "{\"type\":\"system\",\u001c\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u001c\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+001D",
+   "line": "\u001d{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+001D",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u001d",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+001D",
+   "line": "{\"type\":\"system\",\u001d\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u001d\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+001E",
+   "line": "\u001e{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+001E",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u001e",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+001E",
+   "line": "{\"type\":\"system\",\u001e\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u001e\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+001F",
+   "line": "\u001f{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+001F",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u001f",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+001F",
+   "line": "{\"type\":\"system\",\u001f\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u001f\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+0085",
+   "line": "\u0085{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+0085",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u0085",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+0085",
+   "line": "{\"type\":\"system\",\u0085\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u0085\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+00A0",
+   "line": "\u00a0{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+00A0",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u00a0",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+00A0",
+   "line": "{\"type\":\"system\",\u00a0\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u00a0\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+1680",
+   "line": "\u1680{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+1680",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u1680",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+1680",
+   "line": "{\"type\":\"system\",\u1680\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u1680\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+180E",
+   "line": "\u180e{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+180E",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u180e",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u180e..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+180E",
+   "line": "{\"type\":\"system\",\u180e\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u180e\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+2000",
+   "line": "\u2000{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+2000",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u2000",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+2000",
+   "line": "{\"type\":\"system\",\u2000\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u2000\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+200A",
+   "line": "\u200a{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+200A",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u200a",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+200A",
+   "line": "{\"type\":\"system\",\u200a\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u200a\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+200B",
+   "line": "\u200b{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+200B",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u200b",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u200b..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+200B",
+   "line": "{\"type\":\"system\",\u200b\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u200b\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+2028",
+   "line": "\u2028{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "after U+2028",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u2028",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+2028",
+   "line": "{\"type\":\"system\",\u2028\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u2028\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+2029",
+   "line": "\u2029{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "after U+2029",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u2029",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+2029",
+   "line": "{\"type\":\"system\",\u2029\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u2029\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+202F",
+   "line": "\u202f{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+202F",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u202f",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+202F",
+   "line": "{\"type\":\"system\",\u202f\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u202f\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+205F",
+   "line": "\u205f{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+205F",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u205f",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+205F",
+   "line": "{\"type\":\"system\",\u205f\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u205f\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+3000",
+   "line": "\u3000{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+3000",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\u3000",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+3000",
+   "line": "{\"type\":\"system\",\u3000\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\u3000\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "before U+FEFF",
+   "line": "\ufeff{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "after U+FEFF",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\ufeff",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":1}\ufeff..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "inside U+FEFF",
+   "line": "{\"type\":\"system\",\ufeff\"subtype\":\"x\",\"v\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\ufeff\"subtype\":\"x\",\"v\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "value NaN",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":NaN}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': nan}",
+     "rust": {
+      "raised": "CLIJSONDecodeError",
+      "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":NaN}..."
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': nan}",
+     "rust": null
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "value Infinity",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': inf}",
+     "rust": {
+      "raised": "CLIJSONDecodeError",
+      "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}..."
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': inf}",
+     "rust": null
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "value -Infinity",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-Infinity}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': -inf}",
+     "rust": {
+      "raised": "CLIJSONDecodeError",
+      "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":-Infinity}..."
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': -inf}",
+     "rust": null
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "value 1e400",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1e400}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': inf}",
+     "rust": {
+      "raised": "CLIJSONDecodeError",
+      "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":1e400}..."
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': inf}",
+     "rust": null
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "value -1e400",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-1e400}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': -inf}",
+     "rust": {
+      "raised": "CLIJSONDecodeError",
+      "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":-1e400}..."
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': -inf}",
+     "rust": null
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-Infinity}",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-Infinity}",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "value 1e-400",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1e-400}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 0.0}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 0.0}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":0}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":0}"
+    }
+   ]
+  },
+  {
+   "name": "value -0",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-0}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 0}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 0}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-0}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-0}"
+    }
+   ]
+  },
+  {
+   "name": "value -0.0",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-0.0}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": -0.0}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": -0.0}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-0}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-0}"
+    }
+   ]
+  },
+  {
+   "name": "value 0.0",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":0.0}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 0.0}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 0.0}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":0}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":0}"
+    }
+   ]
+  },
+  {
+   "name": "value 1.0",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1.0}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1.0}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1.0}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1}"
+    }
+   ]
+  },
+  {
+   "name": "value 1E2",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1E2}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 100.0}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 100.0}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":100}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":100}"
+    }
+   ]
+  },
+  {
+   "name": "value 18446744073709551615",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":18446744073709551615}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 18446744073709551615}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 18446744073709551615}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":18446744073709552000}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":18446744073709552000}"
+    }
+   ]
+  },
+  {
+   "name": "value 18446744073709551616",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":18446744073709551616}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': 18446744073709551616}",
+     "rust": {
+      "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1.8446744073709552e+19}"
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': 18446744073709551616}",
+     "rust": {
+      "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1.8446744073709552e+19}"
+     }
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":18446744073709552000}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":18446744073709552000}"
+    }
+   ]
+  },
+  {
+   "name": "value -9223372036854775808",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-9223372036854775808}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": -9223372036854775808}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": -9223372036854775808}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-9223372036854776000}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-9223372036854776000}"
+    }
+   ]
+  },
+  {
+   "name": "value -9223372036854775809",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-9223372036854775809}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': -9223372036854775809}",
+     "rust": {
+      "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": -9.223372036854776e+18}"
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': -9223372036854775809}",
+     "rust": {
+      "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": -9.223372036854776e+18}"
+     }
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-9223372036854776000}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-9223372036854776000}"
+    }
+   ]
+  },
+  {
+   "name": "value 123456789012345678901",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":123456789012345678901}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': 123456789012345678901}",
+     "rust": {
+      "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1.2345678901234568e+20}"
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': 123456789012345678901}",
+     "rust": {
+      "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 1.2345678901234568e+20}"
+     }
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":123456789012345680000}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":123456789012345680000}"
+    }
+   ]
+  },
+  {
+   "name": "value 9007199254740993",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":9007199254740993}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 9007199254740993}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": 9007199254740993}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":9007199254740992}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":9007199254740992}"
+    }
+   ]
+  },
+  {
+   "name": "value 111111111111..(4300 chars)",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': 1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}",
+     "rust": {
+      "raised": "CLIJSONDecodeError",
+      "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":11111111111111111111111111111111111111111111111111111111111111111..."
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': 1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}",
+     "rust": null
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "value 111111111111..(4301 chars)",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}",
+   "python_line": [
+    {
+     "raised": "ValueError",
+     "text": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "raised": "ValueError",
+     "text": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit"
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "value -11111111111..(4302 chars)",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111}",
+   "python_line": [
+    {
+     "raised": "ValueError",
+     "text": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "raised": "ValueError",
+     "text": "Exceeds the limit (4300 digits) for integer string conversion: value has 4301 digits; use sys.set_int_max_str_digits() to increase the limit"
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-Infinity}",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":-Infinity}",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "value 111111111111..(4303 chars)",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111.0}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': inf}",
+     "rust": {
+      "raised": "CLIJSONDecodeError",
+      "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":11111111111111111111111111111111111111111111111111111111111111111..."
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': inf}",
+     "rust": null
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":Infinity}",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "value \"\\ud800\"",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ud800\"}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': '\\ud800'}",
+     "rust": {
+      "raised": "CLIJSONDecodeError",
+      "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ud800\"}..."
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': '\\ud800'}",
+     "rust": null
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ud800\"}",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ud800\"}",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "value \"\\udc00\\ud800\"",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\udc00\\ud800\"}",
+   "python_line": [
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': '\\udc00\\ud800'}",
+     "rust": {
+      "raised": "CLIJSONDecodeError",
+      "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\udc00\\ud800\"}..."
+     }
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "unrepresentable": "{'type': 'system', 'subtype': 'x', 'v': '\\udc00\\ud800'}",
+     "rust": null
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\udc00\\ud800\"}",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\udc00\\ud800\"}",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "value \"\\ud83d\\ude00\"",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ud83d\\ude00\"}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": \"\\ud83d\\ude00\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": \"\\ud83d\\ude00\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ud83d\\ude00\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ud83d\\ude00\"}"
+    }
+   ]
+  },
+  {
+   "name": "value \"\\u0000\"",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\u0000\"}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": \"\\u0000\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": \"\\u0000\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\u0000\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\u0000\"}"
+    }
+   ]
+  },
+  {
+   "name": "value {\"a\":1,\"a\":2}",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"a\":1,\"a\":2}}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": {\"a\": 2}}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": {\"a\": 2}}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"a\":2}}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"a\":2}}"
+    }
+   ]
+  },
+  {
+   "name": "value {\"b\":1,\"2\":2,\"1\":3,\"a\":4}",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"b\":1,\"2\":2,\"1\":3,\"a\":4}}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": {\"b\": 1, \"2\": 2, \"1\": 3, \"a\": 4}}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": {\"b\": 1, \"2\": 2, \"1\": 3, \"a\": 4}}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"1\":3,\"2\":2,\"b\":1,\"a\":4}}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"1\":3,\"2\":2,\"b\":1,\"a\":4}}"
+    }
+   ]
+  },
+  {
+   "name": "value {\"__proto__\":1}",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"__proto__\":1}}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": {\"__proto__\": 1}}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": {\"__proto__\": 1}}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"__proto__\":1}}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"__proto__\":1}}"
+    }
+   ]
+  },
+  {
+   "name": "value {\"b\":1,\"a\":2,\"b\":3}",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"b\":1,\"a\":2,\"b\":3}}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": {\"b\": 3, \"a\": 2}}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": {\"b\": 3, \"a\": 2}}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"b\":3,\"a\":2}}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":{\"b\":3,\"a\":2}}"
+    }
+   ]
+  },
+  {
+   "name": "value [1,]",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":[1,]}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":[1,]}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "value 01",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":01}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":01}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "value .5",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":.5}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":.5}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "value +1",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":+1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":+1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "value 0x10",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":0x10}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":0x10}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "value true",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":true}",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": true}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    },
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"x\", \"v\": true}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":true}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":true}"
+    }
+   ]
+  },
+  {
+   "name": "value nul",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":nul}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":nul}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "line [1]",
+   "line": "[1]",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "[1]",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "[1]",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "line 1",
+   "line": "1",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "1",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "1",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "line null",
+   "line": "null",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "raised": "TypeError",
+     "text": "Cannot read properties of null (reading 'type')"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "raised": "TypeError",
+     "text": "Cannot read properties of null (reading 'type')"
+    }
+   ]
+  },
+  {
+   "name": "line \"x\"",
+   "line": "\"x\"",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "\"x\"",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "\"x\"",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "line true",
+   "line": "true",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "true",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "true",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "line [{\"type\":\"system\",\"subtype\":\"x\"}]",
+   "line": "[{\"type\":\"system\",\"subtype\":\"x\"}]",
+   "python_line": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"after\"}"
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "unrepresentable": "[{\"type\":\"system\",\"subtype\":\"x\"}]",
+     "rust": null
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "unrepresentable": "[{\"type\":\"system\",\"subtype\":\"x\"}]",
+     "rust": null
+    }
+   ]
+  },
+  {
+   "name": "line {\"type\":\"system\",\"subtype\":\"x\"} {\"a\":1}",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\"} {\"a\":1}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\"} {\"a\":1}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "line {\"type\":\"system\",\"subtype\":\"x\"}garbage",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\"}garbage",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\"}garbage..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "invalid utf-8",
+   "line_hex": "7b2274797065223a2273797374656d222c2273756274797065223a2278222c2276223a22ff227d",
+   "python_line": [
+    {
+     "raised": "UnicodeDecodeError",
+     "text": "'utf-8' codec can't decode byte 0xff in position 36: invalid start byte"
+    }
+   ],
+   "python_tail": [
+    {
+     "raised": "UnicodeDecodeError",
+     "text": "'utf-8' codec can't decode byte 0xff in position 73: invalid start byte"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ufffd\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ufffd\"}"
+    }
+   ]
+  },
+  {
+   "name": "cr inside",
+   "line": "{\"type\":\"system\",\"subtype\":\"a\"}\r{\"type\":\"system\",\"subtype\":\"b\"}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"a\"}\r{\"type\":\"system\",\"subtype\":\"b\"}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"a\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"b\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"a\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"b\"}"
+    }
+   ]
+  },
+  {
+   "name": "raw control char",
+   "line": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\u0001\"}",
+   "python_line": [
+    {
+     "raised": "CLIJSONDecodeError",
+     "text": "Failed to decode JSON: {\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\u0001\"}..."
+    }
+   ],
+   "python_tail": [
+    {
+     "message": "{\"type\": \"system\", \"subtype\": \"before\"}"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    }
+   ]
+  },
+  {
+   "name": "raw lone surrogate bytes",
+   "line_hex": "7b2274797065223a2273797374656d222c2273756274797065223a2278222c2276223a22eda080227d",
+   "python_line": [
+    {
+     "raised": "UnicodeDecodeError",
+     "text": "'utf-8' codec can't decode byte 0xed in position 141: invalid continuation byte"
+    }
+   ],
+   "python_tail": [
+    {
+     "raised": "UnicodeDecodeError",
+     "text": "'utf-8' codec can't decode byte 0xed in position 73: invalid continuation byte"
+    }
+   ],
+   "typescript_line": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ufffd\\ufffd\\ufffd\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"after\"}"
+    }
+   ],
+   "typescript_tail": [
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"before\"}"
+    },
+    {
+     "message": "{\"type\":\"system\",\"subtype\":\"x\",\"v\":\"\\ufffd\\ufffd\\ufffd\"}"
+    }
+   ]
+  }
+ ]
+}

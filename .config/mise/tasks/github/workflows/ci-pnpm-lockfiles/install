@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Install a pnpm workspace from its lockfile, failing when the lockfile is out of date"
+set -euo pipefail
+
+: "${PNPM_WORKSPACE:?PNPM_WORKSPACE is required}"
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/${PNPM_WORKSPACE}"
+
+# Bazel reads pnpm-lock.yaml as it is, so a package.json change without a
+# matching lockfile update would pass there and break every pnpm install.
+exec pnpm install --frozen-lockfile --ignore-scripts

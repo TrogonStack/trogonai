@@ -1,0 +1,56 @@
+edition = "2024";
+
+package trogonai.evaluation.bindings.v1alpha1;
+
+import "buf/validate/validate.proto";
+import "trogonai/agents/agents/v1alpha1/editable_surface.proto";
+import "trogonai/evaluation/bindings/v1alpha1/claim_check.proto";
+
+// One thing a judge found worth changing. A score says how good a run was; a
+// finding says what to change and where. The category is meaningful only
+// against the bound rubric version, like a criterion name, so no vertical's
+// vocabulary is fixed here. Findings exist only in the evaluation streams and
+// must never be readable via agent, proposal, or session queries (ADR#0024).
+message Finding {
+  string category = 1 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).string.min_len = 1
+  ];
+  FindingTarget target = 2 [features.field_presence = LEGACY_REQUIRED];
+  double confidence = 3 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).double = {
+      finite: true
+      gte: 0
+      lte: 1
+    }
+  ];
+  // The judge's reasoning for this finding, held out of line.
+  ClaimCheck rationale_ref = 4;
+}
+
+// The surface a finding says to change, expressed in the same terms as the
+// EditableSurface a candidate may edit, so a finding can only point at
+// something a candidate could change.
+message FindingTarget {
+  oneof target {
+    option (buf.validate.oneof).required = true;
+
+    string settings_path = 1 [(buf.validate.field).string.min_len = 1];
+    trogonai.agents.agents.v1alpha1.PlatformComponent platform_component = 2 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+}
+
+// What the judge actually received of the run, taken from the run-history read
+// it was given, so a score can be read against what the judge did not see.
+message JudgeInputCoverage {
+  // The highest ordinal the judge's read covered after rewind and clamping.
+  uint64 effective_through = 1 [features.field_presence = LEGACY_REQUIRED];
+  // Items rendered as elided because they matched withheld vocabulary.
+  uint32 withheld_count = 2 [features.field_presence = LEGACY_REQUIRED];
+  // Items clamped away by contract negotiation.
+  uint32 contract_clamped_count = 3 [features.field_presence = LEGACY_REQUIRED];
+}

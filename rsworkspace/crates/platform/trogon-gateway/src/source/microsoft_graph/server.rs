@@ -12,18 +12,17 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tracing::{info, instrument, warn};
-use trogon_nats::NatsToken;
+use trogon_credential_domain::{CredentialKind, SourceIntegrationId, SourceKind};
+use trogon_nats::DottedNatsToken;
 use trogon_nats::jetstream::{ClaimCheckPublisher, JetStreamContext, JetStreamPublisher, ObjectStorePut};
+use trogon_secret_store::{SecretStoreError, SecretStoreGet};
 use trogon_semconv::span::MICROSOFT_GRAPH_WEBHOOK;
 use trogon_std::NonZeroDuration;
 
 use super::client_state::MicrosoftGraphClientState;
 use super::config::MicrosoftGraphConfig;
 use super::constants::HTTP_BODY_SIZE_MAX;
-use crate::credential::commands::domain::{CredentialKind, SourceKind};
 use crate::credential_runtime_projection::{RuntimeCredentialResolver, RuntimeIntegrationKey};
-use crate::secret_store::{SecretStoreError, SecretStoreGet};
-use crate::source_integration_id::SourceIntegrationId;
 
 #[derive(Deserialize)]
 struct ChangeNotificationCollection {
@@ -34,7 +33,7 @@ struct ChangeNotificationCollection {
 struct AppState<P: JetStreamPublisher, S: ObjectStorePut> {
     publisher: ClaimCheckPublisher<P, S>,
     client_state: MicrosoftGraphClientState,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -43,7 +42,7 @@ struct RuntimeAppState<P: JetStreamPublisher, S: ObjectStorePut, G> {
     publisher: ClaimCheckPublisher<P, S>,
     credential_resolver: RuntimeCredentialResolver<G>,
     runtime_key: RuntimeIntegrationKey,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
 }
 
@@ -175,7 +174,7 @@ where
 async fn publish_notification_collection<P: JetStreamPublisher, S: ObjectStorePut>(
     publisher: ClaimCheckPublisher<P, S>,
     client_state: MicrosoftGraphClientState,
-    subject_prefix: NatsToken,
+    subject_prefix: DottedNatsToken,
     nats_ack_timeout: NonZeroDuration,
     body: Bytes,
 ) -> StatusCode {

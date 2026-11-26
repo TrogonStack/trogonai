@@ -10,8 +10,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-use trogon_nats::NatsToken;
 use trogon_nats::jetstream::StreamMaxAge;
+use trogon_nats::{DottedNatsToken, NatsToken};
 use trogon_std::NonZeroDuration;
 
 const TEST_BOT_TOKEN: &str = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -134,7 +134,7 @@ fn test_config() -> TelegramSourceConfig {
             public_webhook_url: TelegramPublicWebhookUrl::new("https://example.com/sources/telegram/primary/webhook")
                 .unwrap(),
         }),
-        subject_prefix: NatsToken::new("telegram").unwrap(),
+        subject_prefix: DottedNatsToken::new("telegram").unwrap(),
         stream_name: NatsToken::new("TELEGRAM").unwrap(),
         stream_max_age: StreamMaxAge::from_secs(3600).unwrap(),
         nats_ack_timeout: NonZeroDuration::from_secs(10).unwrap(),

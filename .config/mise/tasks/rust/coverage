@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Run rsworkspace coverage on pinned nightly and write rsworkspace/coverage.xml"
+#MISE depends=["artifacts:wasm-components"]
+#
+# The decider tests load target/wasm32-unknown-unknown/release/trogon_schedules_decider.wasm,
+# so the wasm components are built before the coverage run.
+set -euo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/rsworkspace"
+
+rustup run nightly-2026-04-16 cargo cov nextest --cobertura --output-path coverage.xml

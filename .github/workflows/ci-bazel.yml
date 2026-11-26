@@ -1,0 +1,316 @@
+name: CI Bazel
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # No paths filter: branch rules require Bazel result, and a pull request
+    # the filter skipped would wait forever on a check nothing reports.
+
+concurrency:
+  group: ci-bazel-${{ github.ref }}
+  # Runs on main finish so their uploads fill the sunny-go remote cache; a
+  # newer push queues behind the running one instead of cancelling it.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Sends verify to an idle self-hosted runner when one is free and to a hosted
+  # runner otherwise. The selection lives in ci-selection.yml because the Baton
+  # key is only readable from that workflow file.
+  choose-runner:
+    uses: ./.github/workflows/ci-selection.yml
+    with:
+      self-hosted-job-names: verify
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: read
+
+  verify:
+    needs: choose-runner
+    runs-on: ${{ fromJSON(needs.choose-runner.outputs.runs-on-by-job).verify }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install build tools via mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        env:
+          # The protoc plugins build from crates.io, which drops connections often
+          # enough on hosted runners to fail the install without retries.
+          CARGO_NET_RETRY: '10'
+        with:
+          install_args: bazel buf go kubeconform node rust cargo:wasm-tools github:open-telemetry/weaver github:rhysd/actionlint cargo:protoc-gen-buffa cargo:protoc-gen-buffa-packaging cargo:cargo-deny
+          cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      # Self-hosted sunny-go runners have a bazel-remote cache on their private
+      # network, so they skip the GitHub Actions Bazel caches below. Pushes to
+      # main are the only runs that receive the write password.
+      - name: Configure Bazel cache
+        id: cache-config
+        run: mise run --skip-tools github:workflows:ci-bazel:cache-config
+        env:
+          SUNNY_GO_CACHE_PASSWORD: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.SUNNY_GO_CACHE_PASSWORD || '' }}
+
+      - name: Restore Bazel cache
+        id: bazel-cache
+        if: ${{ steps.cache-config.outputs.remote != 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/bazel-disk-cache
+            ${{ runner.temp }}/bazel-repository-cache
+          key: bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock') }}-
+
+      - name: Test Bazel targets with coverage
+        run: mise run --skip-tools github:workflows:ci-bazel:test
+
+      - name: Convert coverage report
+        run: mise run --skip-tools github:workflows:ci-bazel:coverage-report
+
+      - name: Record coverage context
+        run: mise run --skip-tools github:workflows:ci-bazel:coverage-context
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-coverage-${{ github.run_attempt }}
+          path: |
+            rsworkspace/coverage-bazel.xml
+            rsworkspace/coverage-context.json
+          if-no-files-found: error
+          retention-days: 7
+
+      # Bazel skips printing a failing test's output once it passes 1 MiB, so
+      # the full logs are kept where a failure can still be read.
+      - name: Upload failed test logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-testlogs
+          path: bazel-testlogs/**/test.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Build Bazel targets
+        run: mise run --skip-tools github:workflows:ci-bazel:build
+
+      # Lint even when tests or the build fail, so their findings are not
+      # hidden behind an unrelated failure.
+      - name: Lint Bazel targets
+        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || steps.cache-config.outputs.remote == 'true') }}
+        run: mise run --skip-tools github:workflows:ci-bazel:lint
+
+      - name: Upload Bazel profiles
+        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || steps.cache-config.outputs.remote == 'true') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bazel-profiles-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bazel-profiles/*.profile.gz
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Trim Bazel disk cache
+        if: ${{ !cancelled() && steps.bazel-cache.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: mise run --skip-tools github:workflows:ci-bazel:trim-disk-cache
+
+      # Bazel's disk cache is keyed by action inputs, so what a failing run
+      # cached is still valid; saving only on success left main without a
+      # cache because its runs were either cancelled by newer merges or red.
+      - name: Save Bazel cache
+        if: ${{ !cancelled() && steps.bazel-cache.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/bazel-disk-cache
+            ${{ runner.temp }}/bazel-repository-cache
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
+
+      # Self-hosted workspaces outlive the job, and the file holds the write credential on
+      # pushes to main. It is deleted even when the job fails or is cancelled.
+      - name: Remove Bazel cache config
+        if: ${{ always() }}
+        run: mise run --skip-tools github:workflows:ci-bazel:cache-config-cleanup
+
+  # Nothing reserves the self-hosted runner choose-runner saw idle, so verify
+  # can wait behind another run, or for up to 24 hours if every self-hosted
+  # runner goes offline. Past the limit this cancels the run and has
+  # ci-requeue.yml run it again, which chooses runners afresh.
+  watch-self-hosted-queue:
+    needs: choose-runner
+    if: ${{ needs.choose-runner.outputs.self-hosted-count != '0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      actions: write
+    steps:
+      - name: Watch verify's queue
+        uses: TrogonStack/github-actions/actions/runs-on-fallback-watch-queue@5a31768301365e9980bb9e5f020155b694a8148c # runs-on-fallback-watch-queue@v0.0.1
+        with:
+          job-name: verify
+          # A verify takes about 16 minutes, so a job that lost its runner to
+          # another run usually gets one back sooner than this.
+          queue-limit-seconds: '1200'
+          max-run-attempts: '3'
+          requeue-workflow: ci-requeue.yml
+
+  # The gate writes to the storage branch and comments on the pull request, so
+  # it runs apart from verify, which keeps a read-only token.
+  coverage:
+    needs: verify
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # Forks use the read-only fork-coverage job and a separate trusted publisher.
+      COVERAGE_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    steps:
+      # The action reads the measured sources and the baseline's from history.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download coverage report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bazel-coverage-${{ github.run_attempt }}
+          path: rsworkspace
+
+      # Kept in step with the action below, whose helper records the baseline.
+      - name: Checkout coverage tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: TrogonStack/github-actions
+          ref: 8d32cdde455b381daffbea5133a0319f374989ee
+          path: .coverage-tools
+          sparse-checkout: actions/coverage-report
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+
+      # Bazel measures coverage differently from cargo llvm-cov, so its baseline
+      # lives on its own storage branch.
+      - name: Check coverage baseline
+        id: baseline
+        if: ${{ env.COVERAGE_FORK != 'true' }}
+        run: mise run --skip-tools github:workflows:ci-bazel:coverage-baseline
+        env:
+          COVERAGE_STORAGE: _xml_coverage_reports_bazel
+          COVERAGE_REPORT: rsworkspace/coverage-bazel.xml
+          COVERAGE_TOOLS: .coverage-tools/actions/coverage-report
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Coverage report and gate
+        uses: TrogonStack/github-actions/actions/coverage-report@8d32cdde455b381daffbea5133a0319f374989ee
+        with:
+          path: rsworkspace/coverage-bazel.xml
+          source-root: rsworkspace
+          threshold: 95
+          fail: true
+          publish: ${{ env.COVERAGE_FORK != 'true' }}
+          diff: ${{ steps.baseline.outputs.ready == 'true' }}
+          skip-diff-storage: ${{ steps.baseline.outputs.ready != 'true' }}
+          diff-branch: main
+          diff-storage: _xml_coverage_reports_bazel
+          # Pull requests are the gate. main only records its baseline, which the
+          # action stores only after the gate passes, so failing here once would
+          # keep main red until coverage returned to the stale baseline.
+          uncovered-statements-increase-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          new-uncovered-statements-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          coverage-rate-reduction-failure: ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'rust:coverage-baseline-reset') }}
+          togglable-report: true
+          report-low-coverage-only: true
+
+  fork-coverage:
+    needs: verify
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout measured merge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download coverage report
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bazel-coverage-${{ github.run_attempt }}
+          path: rsworkspace
+
+      - name: Checkout coverage tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: TrogonStack/github-actions
+          ref: 8d32cdde455b381daffbea5133a0319f374989ee
+          path: .coverage-tools
+          sparse-checkout: actions/coverage-report
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+
+      - name: Install pycobertura
+        uses: insightsengineering/pip-action@905c7a9be173f62965b791e91d0079355d99f19b # v2.0.2
+        with:
+          packages: pycobertura==3.0.0
+
+      - name: Gate fork coverage
+        run: mise run --skip-tools github:workflows:ci-bazel:coverage-fork
+        env:
+          COVERAGE_TOOLS: .coverage-tools/actions/coverage-report
+          GH_TOKEN: ${{ github.token }}
+
+  result:
+    # Branch rules require this job instead of verify, because a job named
+    # verify also exists in other workflows and a cancelled run skips it.
+    name: Bazel result
+    needs: [choose-runner, verify, coverage, fork-coverage]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
+      - name: Check Bazel jobs
+        env:
+          SELECTION_RESULT: success
+          SELECTED: 'true'
+          JOB_RESULTS: ${{ needs.choose-runner.result }} ${{ needs.verify.result }} ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && needs['fork-coverage'].result || needs.coverage.result }}
+        run: mise run --skip-tools github:workflows:ci-bazel:result

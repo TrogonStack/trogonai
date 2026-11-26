@@ -4,6 +4,8 @@ package trogonai.session.sessions.v1alpha1;
 
 import "buf/validate/validate.proto";
 import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
+import "trogonai/session/sessions/v1alpha1/child_session_creation.proto";
+import "trogonai/session/sessions/v1alpha1/delegation_binding_ref.proto";
 
 // DelegationDispatched is the parent-side link fact recording a dispatched
 // child session, reusing the operation-ledger id to dedupe dispatch (ADR#0035
@@ -14,11 +16,18 @@ import "trogonai/session/sessions/v1alpha1/cascade_policy.proto";
 // (WRITE_PRECONDITION = At), letting DispatchDelegation refuse to spawn under
 // an already-terminal parent race-safely. Crash repair: the reconciler
 // observes a DelegationDispatched with no child stream and re-issues child
-// creation; NoStream makes the repair exactly-once. cascade_policy here is the
-// authoritative saga input: repair mints the child from this fact alone, and
-// ParentLinked.cascade_policy is copied verbatim from it, with a mismatching
-// copy rejected at child creation as a typed conflict.
+// creation with the retained child_creation, never by resolving inputs again.
+// NoStream guards creation once. The binding and known, nonzero cascade policy
+// are authoritative saga inputs copied verbatim to the child lineage; differing
+// copies fail creation as a typed conflict. Parent and child ids must differ.
+// Current child admission remains mandatory on repair.
 message DelegationDispatched {
+  option (buf.validate.message).cel = {
+    id: "delegation_dispatched.distinct_child"
+    message: "child session must differ from parent session"
+    expression: "this.session_id != this.child_session_id"
+  };
+
   string session_id = 1 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
@@ -31,10 +40,18 @@ message DelegationDispatched {
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
-  CascadePolicy cascade_policy = 5 [features.field_presence = LEGACY_REQUIRED];
+  CascadePolicy cascade_policy = 5 [
+    features.field_presence = LEGACY_REQUIRED,
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }
+  ];
   // Turn this dispatch belongs to (see UserMessageRecorded.turn_id).
   string turn_id = 6 [
     features.field_presence = LEGACY_REQUIRED,
     (buf.validate.field).string.min_len = 1
   ];
+  DelegationBindingRef delegate_binding = 7 [(buf.validate.field).required = true];
+  ChildSessionCreation child_creation = 8 [(buf.validate.field).required = true];
 }

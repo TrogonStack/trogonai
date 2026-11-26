@@ -13,9 +13,23 @@ pub const __SERVICE_JSON_EXT: ::buffa::type_registry::JsonExtEntry = ::buffa::ty
     to_json: ::buffa::extension_registry::helpers::message_to_json::<
         super::super::ServiceOptions,
     >,
-    from_json: ::buffa::extension_registry::helpers::message_from_json::<
-        super::super::ServiceOptions,
-    >,
+    from_json: {
+        fn __from_json(
+            value: ::buffa::serde_json::Value,
+            number: u32,
+        ) -> ::core::result::Result<
+            ::buffa::alloc::vec::Vec<::buffa::UnknownField>,
+            ::buffa::alloc::string::String,
+        > {
+            if value.is_null() {
+                return ::core::result::Result::Ok(::buffa::alloc::vec::Vec::new());
+            }
+            ::buffa::extension_registry::helpers::message_from_json::<
+                super::super::ServiceOptions,
+            >(value, number)
+        }
+        __from_json
+    },
 };
 ///Extension `method` on `.google.protobuf.MethodOptions` (field 870015).
 pub const METHOD: ::buffa::Extension<
@@ -29,7 +43,21 @@ pub const __METHOD_JSON_EXT: ::buffa::type_registry::JsonExtEntry = ::buffa::typ
     to_json: ::buffa::extension_registry::helpers::message_to_json::<
         super::super::MethodOptions,
     >,
-    from_json: ::buffa::extension_registry::helpers::message_from_json::<
-        super::super::MethodOptions,
-    >,
+    from_json: {
+        fn __from_json(
+            value: ::buffa::serde_json::Value,
+            number: u32,
+        ) -> ::core::result::Result<
+            ::buffa::alloc::vec::Vec<::buffa::UnknownField>,
+            ::buffa::alloc::string::String,
+        > {
+            if value.is_null() {
+                return ::core::result::Result::Ok(::buffa::alloc::vec::Vec::new());
+            }
+            ::buffa::extension_registry::helpers::message_from_json::<
+                super::super::MethodOptions,
+            >(value, number)
+        }
+        __from_json
+    },
 };

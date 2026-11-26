@@ -3,7 +3,7 @@ use crate::client_handler::ClientHandler;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
-use agent_client_protocol::schema::v1::{ReadTextFileRequest, ReadTextFileResponse};
+use agent_client_protocol::v1::schema::{ReadTextFileRequest, ReadTextFileResponse};
 use async_nats::header::HeaderMap;
 use tracing::{instrument, warn};
 use trogon_semconv::span::ACP_CLIENT_FS_READ_TEXT_FILE;
@@ -16,10 +16,12 @@ pub enum FsReadTextFileError {
     ClientError(#[source] agent_client_protocol::Error),
 }
 
-pub fn error_code_and_message(e: &FsReadTextFileError) -> (ErrorCode, String) {
-    match e {
-        FsReadTextFileError::InvalidRequest(message) => (ErrorCode::InvalidParams, message.clone()),
-        FsReadTextFileError::ClientError(inner) => (inner.code, inner.message.clone()),
+impl From<&FsReadTextFileError> for agent_client_protocol::Error {
+    fn from(error: &FsReadTextFileError) -> Self {
+        match error {
+            FsReadTextFileError::InvalidRequest(message) => Self::new(ErrorCode::INVALID_PARAMS, message.clone()),
+            FsReadTextFileError::ClientError(inner) => inner.clone(),
+        }
     }
 }
 
@@ -50,21 +52,14 @@ pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
             rpc_reply::publish_success_reply(nats, reply_to, response_id, &response, "fs_read_text_file reply").await;
         }
         Err(e) => {
-            let (code, message) = error_code_and_message(&e);
+            let error = agent_client_protocol::Error::from(&e);
             warn!(
                 error = %e,
                 session_id = %session_id,
                 "Failed to handle fs_read_text_file"
             );
-            rpc_reply::publish_error_reply(
-                nats,
-                reply_to,
-                response_id,
-                code,
-                &message,
-                "fs_read_text_file error reply",
-            )
-            .await;
+            rpc_reply::publish_agent_error_reply(nats, reply_to, response_id, &error, "fs_read_text_file error reply")
+                .await;
         }
     }
 }

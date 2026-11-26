@@ -378,7 +378,7 @@ impl SpiceDbTier1Gate for RecordingTier1 {
 
 #[derive(Default)]
 pub struct RecordingOwner {
-    pub failure: Option<OwnerEmitError>,
+    pub failure: Mutex<Option<OwnerEmitError>>,
     pub calls: Mutex<Vec<Tier1OwnerTuple>>,
 }
 
@@ -386,6 +386,6 @@ pub struct RecordingOwner {
 impl OwnerTupleEmitter for RecordingOwner {
     async fn emit_owner(&self, owner: &Tier1OwnerTuple) -> Result<(), OwnerEmitError> {
         self.calls.lock().expect("owner calls").push(owner.clone());
-        self.failure.clone().map_or(Ok(()), Err)
+        self.failure.lock().expect("owner failure").take().map_or(Ok(()), Err)
     }
 }

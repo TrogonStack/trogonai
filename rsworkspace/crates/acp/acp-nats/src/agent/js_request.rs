@@ -14,7 +14,7 @@ use crate::acp_prefix::AcpPrefix;
 use crate::constants::SESSION_ID_HEADER;
 use crate::jetstream::{consumers, streams};
 use crate::req_id::ReqId;
-use crate::wire::{WireError, decode_response, encode_request, req_id_from_request_headers};
+use crate::wire::{decode_response, encode_request, req_id_from_request_headers};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn js_request<J, Req, Res>(
@@ -38,29 +38,27 @@ where
     let stream = js
         .get_stream(&responses_stream)
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("get stream: {e}")))?;
-    let resp_consumer = stream.create_consumer(resp_config).await.map_err(|e| {
-        Error::new(
-            ErrorCode::InternalError.into(),
-            format!("create response consumer: {e}"),
-        )
-    })?;
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("get stream: {e}")))?;
+    let resp_consumer = stream
+        .create_consumer(resp_config)
+        .await
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("create response consumer: {e}")))?;
     let mut resp_messages = resp_consumer
         .messages()
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("response messages: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("response messages: {e}")))?;
 
     let encoded = encode_request(method, RequestId::String(req_id.as_str().to_string()), request)
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("encode request: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("encode request: {e}")))?;
 
     let mut headers = encoded.headers;
     headers.insert(SESSION_ID_HEADER, session_id.as_str());
 
     js.publish_with_headers(subject.to_string(), headers, encoded.body)
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js publish: {e}")))?
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("js publish: {e}")))?
         .await
-        .map_err(|e| Error::new(ErrorCode::InternalError.into(), format!("js ack: {e}")))?;
+        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("js ack: {e}")))?;
 
     let deadline = tokio::time::Instant::now() + operation_timeout;
 
@@ -84,34 +82,24 @@ where
                         let _ = js_msg.ack().await;
                         Err(agent_err)
                     }
-                    Err(WireError::Codec(_) | WireError::Deserialize(_) | WireError::UnexpectedMessage) => {
+                    Err(_) => {
                         let _ = js_msg.ack_with(AckKind::Term).await;
-                        Err(Error::new(ErrorCode::InternalError.into(), "bad response payload"))
-                    }
-                    Err(e) => {
-                        let _ = js_msg.ack_with(AckKind::Term).await;
-                        Err(Error::new(
-                            ErrorCode::InternalError.into(),
-                            format!("decode response: {e}"),
-                        ))
+                        Err(Error::new(ErrorCode::INTERNAL_ERROR, "bad response payload"))
                     }
                 };
             }
             Ok(Some(Err(e))) => {
-                return Err(Error::new(
-                    ErrorCode::InternalError.into(),
-                    format!("response consumer: {e}"),
-                ));
+                return Err(Error::new(ErrorCode::INTERNAL_ERROR, format!("response consumer: {e}")));
             }
             Ok(None) => {
                 return Err(Error::new(
-                    ErrorCode::InternalError.into(),
+                    ErrorCode::INTERNAL_ERROR,
                     "response stream closed unexpectedly",
                 ));
             }
             Err(_elapsed) => {
                 return Err(Error::new(
-                    ErrorCode::InternalError.into(),
+                    ErrorCode::INTERNAL_ERROR,
                     "request timed out waiting for runner",
                 ));
             }

@@ -75,6 +75,16 @@ pub struct GatewayDecision {
         super::super::super::session::sessions::v1alpha1::SessionId,
         ::buffa::Inline<super::super::super::session::sessions::v1alpha1::SessionId>,
     >,
+    /// Field 9: `workload_peer`
+    #[serde(
+        rename = "workloadPeer",
+        alias = "workload_peer",
+        skip_serializing_if = "::buffa::json_helpers::skip_if::is_unset_message_field"
+    )]
+    pub workload_peer: ::buffa::MessageField<
+        super::super::workload_identity::v1alpha1::WorkloadPeerEvidence,
+        ::buffa::Inline<super::super::workload_identity::v1alpha1::WorkloadPeerEvidence>,
+    >,
 }
 impl ::core::fmt::Debug for GatewayDecision {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -87,6 +97,7 @@ impl ::core::fmt::Debug for GatewayDecision {
             .field("tls_mode", &self.tls_mode)
             .field("layer_verdicts", &self.layer_verdicts)
             .field("session", &self.session)
+            .field("workload_peer", &self.workload_peer)
             .finish()
     }
 }
@@ -181,6 +192,14 @@ impl ::buffa::Message for GatewayDecision {
                 += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
                     + inner_size as u64;
         }
+        if self.workload_peer.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.workload_peer.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u64 + ::buffa::encoding::varint_len(inner_size as u64) as u64
+                    + inner_size as u64;
+        }
         ::buffa::saturate_size(size)
     }
     fn write_to(
@@ -224,6 +243,14 @@ impl ::buffa::Message for GatewayDecision {
                 buf,
             );
             self.session.write_to(__cache, buf);
+        }
+        if self.workload_peer.is_set() {
+            ::buffa::types::put_len_delimited_header(
+                9u32,
+                u64::from(__cache.consume_next()),
+                buf,
+            );
+            self.workload_peer.write_to(__cache, buf);
         }
     }
     fn merge_field(
@@ -314,6 +341,17 @@ impl ::buffa::Message for GatewayDecision {
                     ctx,
                 )?;
             }
+            9u32 => {
+                ::buffa::encoding::check_wire_type(
+                    tag,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )?;
+                ::buffa::Message::merge_length_delimited(
+                    self.workload_peer.get_or_insert_default(),
+                    buf,
+                    ctx,
+                )?;
+            }
             _ => {
                 ::buffa::encoding::skip_field_depth(tag, buf, ctx.depth())?;
             }
@@ -329,6 +367,7 @@ impl ::buffa::Message for GatewayDecision {
         self.tls_mode = ::core::option::Option::None;
         self.layer_verdicts.clear();
         self.session = ::buffa::MessageField::none();
+        self.workload_peer = ::buffa::MessageField::none();
     }
 }
 impl ::buffa::json_helpers::ProtoElemJson for GatewayDecision {

@@ -1,11 +1,14 @@
-use agent_client_protocol::schema::v1::{
-    AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
-    DeleteSessionRequest, DeleteSessionResponse, DisableProviderRequest, DisableProviderResponse, ExtNotification,
-    ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse,
-    ListProvidersRequest, ListProvidersResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
-    PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SetProviderRequest, SetProviderResponse,
-    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+use agent_client_protocol::v1::schema::{
+    ArchiveSessionRequest, ArchiveSessionResponse, AuthStatusRequest, AuthStatusResponse, AuthenticateRequest,
+    AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse, DeleteSessionRequest,
+    DeleteSessionResponse, DisableProviderRequest, DisableProviderResponse, ExtNotification, ExtRequest, ExtResponse,
+    ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse, ListProvidersRequest,
+    ListProvidersResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SessionStatusRequest, SessionStatusResponse, SetProviderRequest,
+    SetProviderResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
+    SetSessionModeResponse, SetSessionTitleRequest, SetSessionTitleResponse, UnarchiveSessionRequest,
+    UnarchiveSessionResponse,
 };
 use agent_client_protocol::{Error, Result};
 
@@ -14,6 +17,26 @@ use agent_client_protocol::{Error, Result};
 /// See ADR#0020 for why this trait exists instead of implementing an SDK trait directly.
 #[async_trait::async_trait]
 pub trait AgentHandler {
+    async fn auth_status(&self, _args: AuthStatusRequest) -> Result<AuthStatusResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn archive_session(&self, _args: ArchiveSessionRequest) -> Result<ArchiveSessionResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn unarchive_session(&self, _args: UnarchiveSessionRequest) -> Result<UnarchiveSessionResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn session_status(&self, _args: SessionStatusRequest) -> Result<SessionStatusResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn set_session_title(&self, _args: SetSessionTitleRequest) -> Result<SetSessionTitleResponse> {
+        Err(Error::method_not_found())
+    }
+
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse>;
 
     async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse>;

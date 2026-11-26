@@ -69,6 +69,44 @@ fn decode_err_contains(err: JwtError, needle: &str) -> bool {
 }
 
 #[test]
+fn public_mint_never_rounds_a_zero_or_subsecond_lifetime_up_to_one_second() {
+    let (material, _, _, _) = fixture_material();
+    let (claims, subject, _) = fixture_claims(&material);
+    let issued_at = SystemTime::now();
+    let mut unexpected_mints = Vec::new();
+    for ttl in [Duration::ZERO, Duration::from_nanos(999_999_999)] {
+        match claims.mint(&material, &subject, issued_at, ttl) {
+            Ok(_) => unexpected_mints.push(ttl),
+            Err(error) => {
+                assert!(matches!(
+                    &error,
+                    JwtError::Lifetime(crate::CredentialExpiryError::EmptyLifetime)
+                ));
+                let source = std::error::Error::source(&error).unwrap();
+                assert!(matches!(
+                    source.downcast_ref::<crate::CredentialExpiryError>(),
+                    Some(crate::CredentialExpiryError::EmptyLifetime)
+                ));
+                assert_eq!(
+                    crate::DenialCategory::from_auth_callout_error(&error.into()),
+                    crate::DenialCategory::InternalError
+                );
+            }
+        }
+    }
+    for ttl in [Duration::from_secs(1), Duration::from_millis(1500)] {
+        let minted = claims.mint(&material, &subject, issued_at, ttl).unwrap();
+        let payload = decode_nats_user_payload(minted.as_str()).unwrap();
+        assert_eq!(payload["exp"].as_i64().unwrap() - payload["iat"].as_i64().unwrap(), 1);
+        assert_eq!(payload["caller_id"], claims.caller_id.as_str());
+    }
+    assert!(
+        unexpected_mints.is_empty(),
+        "public mint exceeded the requested lifetime: {unexpected_mints:?}"
+    );
+}
+
+#[test]
 fn minted_jwt_has_nats_header_and_verifies() {
     let (material, issuer_seed, issuer, user) = fixture_material();
     let caller_id = CallerId::new("caller1").unwrap();

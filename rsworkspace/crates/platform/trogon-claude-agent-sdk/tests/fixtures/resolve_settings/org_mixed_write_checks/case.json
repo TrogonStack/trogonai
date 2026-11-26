@@ -1,0 +1,23 @@
+{
+  "platform": "linux",
+  "env": {
+    "CLAUDE_CODE_ENTRYPOINT": "remote_cowork"
+  },
+  "process": {
+    "euid": 4242,
+    "uid": 4242,
+    "egid": 4242,
+    "gid": 4242,
+    "groups": [
+      4242
+    ]
+  },
+  "writable": {
+    "/etc/claude-code/managed-settings.json": "yes",
+    "*": "EACCES"
+  },
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": []
+  }
+}

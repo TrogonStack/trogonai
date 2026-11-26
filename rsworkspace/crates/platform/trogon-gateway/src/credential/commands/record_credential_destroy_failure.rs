@@ -1,41 +1,37 @@
+use trogon_credential_aggregate::proto::{decode_destroy_requested_state, destroy_failed_to_proto};
+use trogon_credential_domain::{CredentialFailureReason, CredentialKey, CredentialRef};
 use trogon_decider_runtime::{CommandSnapshotPolicy, Decider, Decision, FrequencySnapshot, WritePrecondition};
-use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, state_v1, v1};
+use trogonai_proto::gateway::credentials::{CredentialStateSnapshotCase, v1};
 
-use super::domain::{CredentialFailureReason, CredentialRef};
-use super::proto::{decode_destroy_requested_state, destroy_failed_to_proto};
-use super::state::{CredentialDecideError, CredentialEvolveError, validate_same_ref};
+use super::state::{CredentialDecideError, ensure_recorded_ref};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordCredentialDestroyFailure {
+    stream_id: CredentialKey,
     credential_ref: CredentialRef,
     reason: CredentialFailureReason,
 }
 
 impl RecordCredentialDestroyFailure {
     pub fn new(credential_ref: CredentialRef, reason: CredentialFailureReason) -> Self {
-        Self { credential_ref, reason }
+        Self {
+            stream_id: credential_ref.key(),
+            credential_ref,
+            reason,
+        }
     }
 }
 
 impl Decider for RecordCredentialDestroyFailure {
-    type StreamId = str;
-    type State = state_v1::CredentialStateSnapshot;
+    type StreamId = CredentialKey;
+    type State = super::state::CredentialState;
     type Event = v1::CredentialEvent;
     type DecideError = CredentialDecideError;
-    type EvolveError = CredentialEvolveError;
 
     const WRITE_PRECONDITION: WritePrecondition = WritePrecondition::StreamUnchanged;
 
     fn stream_id(&self) -> &Self::StreamId {
-        self.credential_ref.id().as_str()
-    }
-
-    fn initial_state() -> Self::State {
-        super::state::initial_state()
-    }
-
-    fn evolve(state: Self::State, event: &Self::Event) -> Result<Self::State, Self::EvolveError> {
-        super::state::evolve(state, event)
+        &self.stream_id
     }
 
     fn decide(state: &Self::State, command: &Self) -> Result<Decision<Self>, Self::DecideError> {
@@ -46,7 +42,7 @@ impl Decider for RecordCredentialDestroyFailure {
             });
         };
         let (current_ref, _) = decode_destroy_requested_state(pending)?;
-        validate_same_ref(&current_ref, &command.credential_ref)?;
+        ensure_recorded_ref(&current_ref, &command.credential_ref)?;
         Ok(Decision::event(v1::CredentialEvent {
             event: Some(destroy_failed_to_proto(&command.credential_ref, &command.reason).into()),
         }))

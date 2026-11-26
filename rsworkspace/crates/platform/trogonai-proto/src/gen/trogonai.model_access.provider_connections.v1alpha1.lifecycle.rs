@@ -2,6 +2,7 @@
 // source: trogonai/model_access/provider_connections/v1alpha1/lifecycle.proto
 
 /// All lifecycle and replacement enums reject unspecified and unknown values.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum ProviderConnectionLifecycle {
@@ -185,6 +186,7 @@ impl ::buffa::Enumeration for ProviderConnectionLifecycle {
         ]
     }
 }
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum CredentialBindingLifecycle {
@@ -384,6 +386,7 @@ impl ::buffa::Enumeration for CredentialBindingLifecycle {
 }
 /// Drain requires explicit policy permission for bounded credential overlap.
 /// FailIfInUse rejects atomically if any live Session pins the old binding.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum BindingReplacementMode {

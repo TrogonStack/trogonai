@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use acp_nats::nats::{AcpStream, commands, global, responses};
 use acp_nats::{AcpPrefix, AcpSessionId, NatsConfig};
-use agent_client_protocol::schema::v1::{CancelNotification, ContentBlock, NewSessionRequest, PromptRequest};
+use agent_client_protocol::v1::schema::{CancelNotification, ContentBlock, NewSessionRequest, PromptRequest};
 use futures::StreamExt;
 use serde_json::{Value, json};
 use trogon_channel::{
@@ -79,7 +79,7 @@ impl Fixture {
         let id = acp_nats::wire::response_id_from_request_headers(request.headers.as_ref().expect("request headers"));
         let encoded = match result {
             Ok(value) => acp_nats::wire::encode_success(id, &value),
-            Err(error) => acp_nats::wire::encode_agent_error(id, &error),
+            Err(error) => Ok(acp_nats::wire::encode_agent_error(id, &error)),
         }
         .expect("agent response");
         self.client
@@ -101,7 +101,7 @@ impl Fixture {
         let id = acp_nats::wire::response_id_from_request_headers(request.headers.as_ref().expect("request headers"));
         let encoded = match result {
             Ok(value) => acp_nats::wire::encode_success(id, &value),
-            Err(error) => acp_nats::wire::encode_agent_error(id, &error),
+            Err(error) => Ok(acp_nats::wire::encode_agent_error(id, &error)),
         }
         .expect("agent response");
         self.js
@@ -190,7 +190,7 @@ async fn session_creation_preserves_agent_errors_and_rejects_unusable_ids() {
     };
     let (result, ()) = tokio::join!(fixture.port.create_session(&record), respond);
     assert!(
-        matches!(result, Err(AcpPortError::Rpc(error)) if error.code == agent_client_protocol::ErrorCode::AuthRequired)
+        matches!(result, Err(AcpPortError::Rpc(error)) if error.code == agent_client_protocol::ErrorCode::AUTH_REQUIRED)
     );
     let respond = async {
         let request = next(&mut requests).await;
@@ -326,10 +326,6 @@ async fn release_cancels_before_close_and_keeps_close_failure_nonfatal() {
             assert_eq!(
                 next(&mut requests).await.subject.as_str(),
                 commands::CancelSubject::new(&fixture.prefix, &acp_session).to_string()
-            );
-            assert_eq!(
-                next(&mut requests).await.subject.as_str(),
-                responses::CancelledSubject::new(&fixture.prefix, &acp_session).to_string()
             );
             let request = next(&mut requests).await;
             assert_eq!(

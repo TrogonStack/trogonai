@@ -1,0 +1,17 @@
+{
+  "platform": "linux",
+  "env": {
+    "CLAUDE_CODE_ENTRYPOINT": "remote_cowork"
+  },
+  "process": {
+    "euid": null,
+    "uid": null,
+    "egid": null,
+    "gid": null,
+    "groups": null
+  },
+  "options": {
+    "cwd": "$ROOT/work",
+    "settingSources": []
+  }
+}

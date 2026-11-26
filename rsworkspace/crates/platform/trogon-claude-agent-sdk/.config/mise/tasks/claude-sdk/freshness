@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#MISE description="Report Claude SDK upstream changes and Rust mapping review work"
+#MISE depends=["claude-sdk:install"]
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:?Run this task through mise}"
+output="${CLAUDE_SDK_FRESHNESS_OUT:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/claude-sdk-freshness-report}"
+args=(--out "$output")
+case "${CLAUDE_SDK_FRESHNESS_REPORT_MODE-local}" in
+  local) ;;
+  issue) args+=(--file-issue) ;;
+  *)
+    printf '%s\n' 'CLAUDE_SDK_FRESHNESS_REPORT_MODE must be local or issue' >&2
+    exit 2
+    ;;
+esac
+if [[ -n "${CLAUDE_SDK_FRESHNESS_RUN_URL:-}" ]]; then
+  args+=(--run-url "$CLAUDE_SDK_FRESHNESS_RUN_URL")
+fi
+cd "$root"
+exec python3 "$root/.config/mise/lib/claude-sdk-freshness/check.py" "${args[@]}" "$@"

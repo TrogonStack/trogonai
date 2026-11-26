@@ -1,0 +1,9 @@
+edition = "2024";
+
+package trogonai.gateway.webhooks.v1;
+
+enum EndpointStatus {
+  ENDPOINT_STATUS_UNSPECIFIED = 0;
+  ENDPOINT_STATUS_ENABLED = 1;
+  ENDPOINT_STATUS_DISABLED = 2;
+}

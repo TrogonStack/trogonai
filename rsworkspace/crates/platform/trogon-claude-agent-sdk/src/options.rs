@@ -1,0 +1,477 @@
+use std::{num::NonZeroUsize, path::PathBuf, sync::Arc};
+
+use crate::{
+    AgentDefinition, AgentName, BuiltinToolName, DialogKind, EffortLevel, ElicitationHandler, Environment,
+    HookRegistration, McpServerName, McpServerOptions, ModelName, OutputSchema, PermissionMode, QueueCapacity,
+    SdkMcpServer, SessionId, SessionStoreOptions, SettingSource, Timeout, ToolPermissionHandler, ToolRule, UsdBudget,
+    UserDialogHandler, WindowsBatchCli,
+    process_options::{
+        ArgvStyle, ClaudeCodeMarker, EnvironmentMode, ExtraArgument, ScriptRuntime, StderrHandler, TraceContext,
+    },
+};
+
+/// MCP server configs keyed by name, in the order the caller inserted them.
+pub type McpServers = indexmap::IndexMap<McpServerName, McpServerOptions>;
+/// In-process MCP servers keyed by name, in the order the caller inserted them.
+pub type SdkMcpServers = indexmap::IndexMap<McpServerName, Arc<dyn SdkMcpServer>>;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum ToolSet {
+    #[default]
+    CliDefault,
+    Only(Vec<BuiltinToolName>),
+    /// The `{"type": "preset", "preset": "claude_code"}` object both SDKs accept, passed as `--tools default`.
+    ClaudeCodePreset,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum McpDiscovery {
+    /// Passes `--strict-mcp-config`. Upstream sends it only when the caller asks for it.
+    Disabled,
+    #[default]
+    CliDefault,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SessionPersistence {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Customizations {
+    #[default]
+    Configured,
+    Bare,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FileCheckpointing {
+    #[default]
+    Disabled,
+    Enabled,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ContinueConversation {
+    #[default]
+    No,
+    Yes,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SessionFork {
+    #[default]
+    Continue,
+    Fork,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PartialMessages {
+    #[default]
+    Exclude,
+    Include,
+}
+
+pub use crate::system_prompt::SystemPrompt;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VerbatimPrompts {
+    #[default]
+    Disabled,
+    /// Marks every user message `client_composed`, so the CLI skips `@path` expansion and slash commands.
+    Enabled,
+}
+
+/// How messages wait for the caller to read them.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MessageBuffer {
+    /// TypeScript: an unbounded queue; the CLI is read whether or not the caller keeps up.
+    #[default]
+    Unbounded,
+    /// Python: once this many messages wait, stdout is not read until the caller takes one, so control responses,
+    /// callbacks and mirror frames wait too.
+    Backpressure(QueueCapacity),
+    /// Opt-in: fail the run with [`crate::Error::MessageQueueFull`] when this many messages wait.
+    FailWhenFull(QueueCapacity),
+}
+
+impl MessageBuffer {
+    pub(crate) fn capacity(self) -> Option<QueueCapacity> {
+        match self {
+            Self::Unbounded => None,
+            Self::Backpressure(capacity) | Self::FailWhenFull(capacity) => Some(capacity),
+        }
+    }
+}
+
+/// How long the initialize request may go unanswered.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum InitializeTimeout {
+    /// TypeScript: 660 seconds, armed only when a hook is set to block on failure or managed settings are sent;
+    /// otherwise no limit. Expiry is [`crate::Error::InitializeNotConfirmed`], or
+    /// [`crate::Error::ManagedSettingsNotConfirmed`] when only managed settings armed it.
+    #[default]
+    TypeScript,
+    /// Python: `CLAUDE_CODE_STREAM_CLOSE_TIMEOUT` milliseconds from the parent environment, at least 60 seconds.
+    /// Expiry is [`crate::Error::ControlTimeout`] for the initialize operation.
+    Python,
+    /// Opt-in: this wait, whatever the hooks; expiry is [`crate::Error::ControlTimeout`].
+    Fixed(Timeout),
+}
+
+/// How long after the last result a run with no idle state waits before it ends quietly.
+///
+/// Both upstream SDKs read `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`, with a default of 600 seconds, zero for no limit,
+/// and a clamp to 2^31 - 1 milliseconds; they disagree on what the variable may spell and where it is read.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RunEndTimeout {
+    /// TypeScript: the variable in the child environment this SDK builds, so `ClaudeAgentOptions::env` when it
+    /// replaces the inherited environment and the process environment otherwise. Whole numbers in exponent form
+    /// such as `1e3`, a thousands separator as in `1,000` or `1_000`, and the leading digits of `12abc` all count.
+    #[default]
+    TypeScript,
+    /// Python: `ClaudeAgentOptions::env` first, then the process environment, parsed with `int()`: whitespace
+    /// around the number, Unicode decimal digits, and single underscores between digits. Text `int()` refuses and
+    /// negative numbers are the default.
+    Python,
+    /// Opt-in: this wait, whatever the environment says. Zero ends the run at once.
+    Fixed(Timeout),
+}
+
+/// How the process is stopped once stdin is closed.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Shutdown {
+    /// TypeScript: wait 2 seconds, then SIGTERM, then SIGKILL 5 seconds later without waiting for it; stderr gets
+    /// 200 ms after the exit to close. Nothing here is an error.
+    #[default]
+    TypeScript,
+    /// Python: wait 5 seconds, SIGTERM, wait 5 seconds, SIGKILL, wait 5 seconds. Nothing here is an error.
+    Python,
+    /// Opt-in: Python's ladder with this wait at each step, failing with [`crate::Error::ShutdownTimeout`] when the
+    /// process outlives it and [`crate::Error::StderrDrainTimeout`] when stderr stays open as long.
+    Strict(Timeout),
+}
+
+/// What an inbound control request does while another with the same id is in flight.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DuplicateControlRequests {
+    /// TypeScript: the duplicate is skipped without a response.
+    #[default]
+    Skip,
+    /// Python: both run and both answer.
+    RunBoth,
+    /// Opt-in: the run fails with [`crate::ProtocolError::DuplicateControlRequest`].
+    Fail,
+}
+
+/// What happens when the control request counter runs out.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RequestIdExhaustion {
+    /// The counter wraps, so ids never run out, like upstream's random ids.
+    #[default]
+    Wrap,
+    /// Opt-in: the run fails with [`crate::Error::RequestIdExhausted`].
+    Fail,
+}
+
+/// A prompt sent after [`crate::ClientHandle::finish_input`] while stdin is still open.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum InputAfterFinish {
+    /// Upstream: written like any other input, extending the run.
+    #[default]
+    Write,
+    /// Opt-in: refused with [`crate::Error::InputClosed`].
+    Reject,
+}
+
+/// Output that ends in the middle of a turn: the CLI closed stdout before the result, and exits cleanly.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EndWithoutResult {
+    /// Upstream: the messages end quietly, as TypeScript and Python do when the CLI exits with status 0.
+    #[default]
+    End,
+    /// Opt-in: the messages end with [`crate::Error::UnexpectedEof`].
+    Fail,
+}
+
+/// Waits and bounds on the runtime. The default is TypeScript's: no control or write timeout and no bounded queue.
+/// [`Limits::python`] selects Python's values. Every other bound is opt-in.
+#[derive(Clone, Debug)]
+pub struct Limits {
+    /// Python's `max_buffer_size`: the longest stdout line, in characters, before
+    /// [`crate::Error::JsonDecode`]. TypeScript has no cap.
+    ///
+    /// Zero is valid, as in Python: every non-empty line then exceeds the limit.
+    pub max_buffer_size: Option<usize>,
+    /// UTF-16 code units of stderr kept for the process error. TypeScript keeps 2048; Python keeps none.
+    pub stderr_tail: usize,
+    pub message_buffer: MessageBuffer,
+    /// Opt-in: commands buffered ahead of the runtime. Neither upstream SDK queues them.
+    pub command_queue_capacity: Option<QueueCapacity>,
+    /// Opt-in: how long a command waits for room in a bounded command queue before
+    /// [`crate::Error::CommandQueueTimeout`].
+    pub command_queue_timeout: Option<Timeout>,
+    /// Opt-in: outstanding outbound control requests before [`crate::Error::TooManyControls`].
+    pub max_pending_controls: Option<QueueCapacity>,
+    /// Opt-in: inbound SDK callbacks running at once before the next one is refused with an error response.
+    pub max_incoming_callbacks: Option<QueueCapacity>,
+    /// Opt-in: background tasks tracked for run completion before [`crate::Error::TooManyTasks`].
+    pub max_tracked_tasks: Option<QueueCapacity>,
+    /// Opt-in: user inputs awaiting a result before [`crate::Error::TooManyInputs`].
+    pub max_queued_inputs: Option<QueueCapacity>,
+    /// The wait for a control response before [`crate::Error::ControlTimeout`]: none in TypeScript, 60 seconds in
+    /// Python.
+    pub control_timeout: Option<Timeout>,
+    pub initialize_timeout: InitializeTimeout,
+    /// Opt-in: how long an inbound SDK callback may run before its timeout answer is sent. Neither upstream SDK
+    /// times out callbacks; when set, a hook's own timeout applies to its callbacks instead.
+    pub callback_timeout: Option<Timeout>,
+    /// Opt-in: how long one stdin write may take before [`crate::Error::WriteTimeout`].
+    pub write_timeout: Option<Timeout>,
+    pub shutdown: Shutdown,
+    /// `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` in both upstream SDKs: with no idle state after the last result, the
+    /// run ends this long after it. Read from the environment by default, as each upstream SDK does.
+    pub run_end_timeout: RunEndTimeout,
+    pub duplicate_control_requests: DuplicateControlRequests,
+    pub request_id_exhaustion: RequestIdExhaustion,
+    pub input_after_finish: InputAfterFinish,
+    pub end_without_result: EndWithoutResult,
+}
+
+impl Limits {
+    /// TypeScript keeps the last 2048 UTF-16 code units of stderr.
+    pub const TYPESCRIPT_STDERR_TAIL: usize = 2048;
+    /// Python's `_DEFAULT_MAX_BUFFER_SIZE`.
+    pub const PYTHON_MAX_BUFFER_SIZE: usize = 1024 * 1024;
+
+    /// Python's values: a 60-second control wait, a 1 MiB line cap, a 100-message buffer with backpressure, its
+    /// initialize wait, shutdown ladder and run-end ceiling parse, no stderr tail, and duplicate control requests
+    /// that all run.
+    pub fn python() -> Self {
+        Self {
+            max_buffer_size: Some(Self::PYTHON_MAX_BUFFER_SIZE),
+            stderr_tail: 0,
+            message_buffer: MessageBuffer::Backpressure(QueueCapacity::PYTHON_MESSAGES),
+            control_timeout: Some(Timeout::default()),
+            initialize_timeout: InitializeTimeout::Python,
+            shutdown: Shutdown::Python,
+            run_end_timeout: RunEndTimeout::Python,
+            duplicate_control_requests: DuplicateControlRequests::RunBoth,
+            ..Self::default()
+        }
+    }
+}
+
+impl ClaudeAgentOptions {
+    /// `captureSdkMcpManifests`: the explicit option, else `!truthy(process.env.CLAUDE_AGENT_SDK_DISABLE_MCP_MANIFESTS)`.
+    /// The variable is read from the process environment, never from `ClaudeAgentOptions::env`. Pass the value the
+    /// parent process has for it.
+    pub fn captures_sdk_mcp_manifests(&self, disable_variable: Option<&std::ffi::OsStr>) -> bool {
+        self.capture_sdk_mcp_manifests
+            .unwrap_or_else(|| !crate::session_prompt::js_env_truthy(disable_variable))
+    }
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_buffer_size: None,
+            stderr_tail: Self::TYPESCRIPT_STDERR_TAIL,
+            message_buffer: MessageBuffer::Unbounded,
+            command_queue_capacity: None,
+            command_queue_timeout: None,
+            max_pending_controls: None,
+            max_incoming_callbacks: None,
+            max_tracked_tasks: None,
+            max_queued_inputs: None,
+            control_timeout: None,
+            initialize_timeout: InitializeTimeout::TypeScript,
+            callback_timeout: None,
+            write_timeout: None,
+            shutdown: Shutdown::TypeScript,
+            run_end_timeout: RunEndTimeout::TypeScript,
+            duplicate_control_requests: DuplicateControlRequests::Skip,
+            request_id_exhaustion: RequestIdExhaustion::Wrap,
+            input_after_finish: InputAfterFinish::Write,
+            end_without_result: EndWithoutResult::End,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ClaudeAgentOptions {
+    pub cli_path: Option<PathBuf>,
+    /// Python `_find_bundled_cli`: the directory that holds `_bundled`, Python's package directory. When `connect`
+    /// discovers the CLI it takes `<root>/_bundled/claude` (`claude.exe` on Windows) before anything else, as long
+    /// as it is a file. `None`, the default, has no bundled lookup, as in TypeScript.
+    pub bundled_cli_root: Option<PathBuf>,
+    pub cwd: Option<PathBuf>,
+    pub model: Option<ModelName>,
+    pub max_turns: Option<NonZeroUsize>,
+    pub tools: ToolSet,
+    pub mcp_discovery: McpDiscovery,
+    pub session_persistence: SessionPersistence,
+    pub customizations: Customizations,
+    pub allowed_tools: Vec<ToolRule>,
+    pub disallowed_tools: Vec<ToolRule>,
+    pub permission_mode: Option<PermissionMode>,
+    pub resume: Option<SessionId>,
+    pub partial_messages: PartialMessages,
+    pub system_prompt: SystemPrompt,
+    /// Filesystem settings to load: `None` inherits CLI defaults; an empty list disables them.
+    pub setting_sources: Option<Vec<SettingSource>>,
+    pub limits: Limits,
+    pub permission_handler: Option<Arc<dyn ToolPermissionHandler>>,
+    pub hooks: Vec<HookRegistration>,
+    /// TypeScript `hooks: {}`: with [`crate::EmptyCollection::Sent`] an empty `hooks` reaches `initialize` as `{}`.
+    pub hooks_when_empty: crate::EmptyCollection,
+    /// Agents in insertion order, like the object either SDK sends.
+    pub agents: indexmap::IndexMap<AgentName, AgentDefinition>,
+    pub agent: Option<AgentName>,
+    /// Servers the CLI connects to itself, sent in insertion order like a TypeScript object.
+    pub mcp_servers: McpServers,
+    /// In-process servers. A name also present in `mcp_servers` resolves to the in-process server, the
+    /// way a TypeScript object spread does.
+    pub sdk_mcp_servers: SdkMcpServers,
+    /// Python `mcp_servers` given as a `str` or `Path`: a config file path or JSON text sent as its own
+    /// `--mcp-config` value, verbatim, after the one built from the server maps. Debug output redacts it.
+    pub mcp_config: Option<crate::McpConfig>,
+    pub max_budget_usd: Option<UsdBudget>,
+    pub output_schema: Option<OutputSchema>,
+    pub file_checkpointing: FileCheckpointing,
+    pub effort: Option<EffortLevel>,
+    pub env: Environment,
+    pub additional_directories: Vec<PathBuf>,
+    pub plugins: Vec<crate::LocalPlugin>,
+    /// TypeScript's `pluginDelivery`. Ignored with `ArgvStyle::Python`, which has no such option.
+    pub plugin_delivery: crate::PluginDelivery,
+    pub continue_conversation: ContinueConversation,
+    pub fork_session: SessionFork,
+    pub session_store: Option<SessionStoreOptions>,
+    pub elicitation_handler: Option<Arc<dyn ElicitationHandler>>,
+    pub user_dialog_handler: Option<Arc<dyn UserDialogHandler>>,
+    pub supported_dialog_kinds: Vec<DialogKind>,
+    /// TypeScript `supportedDialogKinds: []`: with [`crate::EmptyCollection::Sent`] an empty list reaches
+    /// `initialize` as `[]`.
+    pub supported_dialog_kinds_when_empty: crate::EmptyCollection,
+    /// TypeScript `getOAuthToken`. Setting it also sets `CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH=1`. Without a handler a
+    /// token request is answered with `getOAuthToken callback is not provided.`.
+    pub oauth_token_handler: Option<Arc<dyn crate::OAuthTokenHandler>>,
+    /// TypeScript `getHostAuthToken`. Setting it also sets `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH=1`.
+    pub host_auth_token_handler: Option<Arc<dyn crate::HostAuthTokenHandler>>,
+    /// TypeScript `toolConfig`, delivered as environment variables. Ignored with `ArgvStyle::Python`.
+    pub tool_config: crate::ToolConfig,
+    /// TypeScript `workload`: `--workload <value>` after every built-in flag, replacing the value of an `extra_args`
+    /// entry of the same name in place. An empty string sends nothing. Ignored with `ArgvStyle::Python`.
+    pub workload: Option<String>,
+    pub argv_style: ArgvStyle,
+    /// How the messages the CLI writes are decoded: `TypeScript` (the default) yields every message, `Python`
+    /// rejects the ones `parse_message` rejects and skips the ones it skips.
+    pub message_decoding: crate::MessageDecoding,
+    /// The JavaScript runtime whose engine error texts the TypeScript dialect reproduces: `Node` (the default)
+    /// or `Bun`. Ignored with `ArgvStyle::Python`.
+    pub js_runtime: crate::JsRuntime,
+    pub environment_mode: EnvironmentMode,
+    pub claude_code_marker: ClaudeCodeMarker,
+    /// `CLAUDE_CODE_ENTRYPOINT`; `None` selects `sdk-trogon-rs`.
+    pub entrypoint: Option<String>,
+    /// Application name (optionally `name/version`) reported as `CLAUDE_AGENT_SDK_CLIENT_APP` in every environment
+    /// mode, over a value `env` configures.
+    pub client_app: Option<String>,
+    /// Python dialect: derive `CLAUDE_AGENT_SDK_DERIVED_CLIENT_APP` for a bundled CLI. TypeScript derives none.
+    pub client_app_derivation: crate::ClientAppDerivation,
+    pub trace_context: Option<TraceContext>,
+    pub stderr_handler: Option<StderrHandler>,
+    /// TypeScript `abortController`. Cancelling it stops the process and ends the run with
+    /// `AbortError("Claude Code process aborted by user")`; a token already cancelled makes `connect` fail with that
+    /// error. `None` uses a fresh token, which `abort()` cancels. Closing the client does not cancel it.
+    pub abort_controller: Option<crate::CancellationToken>,
+    /// TypeScript `spawnClaudeCodeProcess`: start the CLI with this instead of the SDK's own spawn. The SDK's own
+    /// spawn passes the child only its stdio under the Python dialect, and on Apple platforms under the TypeScript
+    /// one, as the upstream SDKs do; with this function, which descriptors the child keeps is the caller's choice.
+    pub spawn_claude_code_process: Option<crate::SpawnClaudeCodeProcess>,
+    /// TypeScript `onProcessSpawned`: told the process id when the SDK starts the CLI itself.
+    pub on_process_spawned: Option<crate::OnProcessSpawned>,
+    pub extra_args: Vec<ExtraArgument>,
+    pub script_runtime: ScriptRuntime,
+    /// Python's `user`: the CLI runs as this account (Unix only). The name is looked up in `/etc/passwd`; only the
+    /// real and effective uid change (`setreuid`, no `setgroups`), as with `Popen(user=...)`. Takes precedence over
+    /// `run_as_uid`.
+    pub user: Option<String>,
+    /// Numeric user id the CLI runs as (Unix only), as `Popen(user=int)` does.
+    pub run_as_uid: Option<u32>,
+    /// Python's `debug_stderr`: deprecated, no longer read by the transport. Accepted so options port unchanged.
+    pub debug_stderr: bool,
+    /// `thinking` / `thinkingConfig`. Takes precedence over `max_thinking_tokens`.
+    pub thinking: Option<crate::ThinkingConfig>,
+    /// The deprecated `max_thinking_tokens`. TypeScript treats `0` as disabled thinking; Python forwards it as is.
+    pub max_thinking_tokens: Option<u64>,
+    pub task_budget: Option<crate::TaskBudget>,
+    pub betas: Vec<crate::SdkBeta>,
+    pub fallback_model: Option<ModelName>,
+    /// The permission prompt tool. Rejected together with `permission_handler`.
+    pub permission_prompt_tool_name: Option<String>,
+    /// TypeScript `permissionPrompts`. Ignored with `ArgvStyle::Python`.
+    pub permission_prompts: Option<crate::PermissionPrompts>,
+    /// TypeScript `channels`. Ignored with `ArgvStyle::Python`.
+    pub channels: Vec<String>,
+    /// TypeScript `debug`. Ignored with `ArgvStyle::Python`.
+    pub debug: crate::DebugOutput,
+    /// TypeScript `debugFile`. Ignored with `ArgvStyle::Python`.
+    pub debug_file: Option<PathBuf>,
+    pub include_hook_events: crate::HookEvents,
+    pub session_id: Option<SessionId>,
+    pub resume_session_at: Option<String>,
+    /// Forwarded whenever set, including the empty string, so the CLI rejects a malformed value.
+    pub resume_drops_turn: Option<String>,
+    /// TypeScript `allowDangerouslySkipPermissions`. Ignored with `ArgvStyle::Python`.
+    pub allow_dangerously_skip_permissions: crate::DangerousPermissionSkip,
+    /// TypeScript `projectConfigRoot`. Ignored with `ArgvStyle::Python`.
+    pub project_config_root: Option<PathBuf>,
+    pub skills: Option<crate::Skills>,
+    /// `settings`: a settings file path, JSON text or a settings object. Passed as `--settings`; with
+    /// `sandbox` set the dialect decides how the two are combined.
+    pub settings: Option<crate::SettingsInput>,
+    /// `sandbox`: merged into the settings document, as both upstream SDKs do.
+    pub sandbox: Option<crate::SandboxSettings>,
+    /// TypeScript `managedSettings`. Ignored with `ArgvStyle::Python`.
+    pub managed_settings: Option<crate::Settings>,
+    /// TypeScript `managedSettingsDelivery`. Ignored with `ArgvStyle::Python`.
+    pub managed_settings_delivery: crate::ManagedSettingsDelivery,
+    /// `verbatimPrompts` / `verbatim_prompts`.
+    pub verbatim_prompts: VerbatimPrompts,
+    /// `planModeInstructions`. TypeScript only.
+    pub plan_mode_instructions: Option<String>,
+    /// `appendSubagentSystemPrompt`. TypeScript only.
+    pub append_subagent_system_prompt: Option<String>,
+    /// `toolAliases`, in insertion order; a repeated name keeps its first position with the last value, as a
+    /// JavaScript object does. TypeScript only.
+    pub tool_aliases: Option<Vec<(String, String)>>,
+    /// `codeRunningMcpTools`. TypeScript only.
+    pub code_running_mcp_tools: Option<Vec<String>>,
+    /// `title`. TypeScript only.
+    pub title: Option<String>,
+    /// `webSearchIsolationExemptMcpServers`. TypeScript only.
+    pub web_search_isolation_exempt_mcp_servers: Option<Vec<String>>,
+    /// `promptSuggestions`. TypeScript only.
+    pub prompt_suggestions: Option<bool>,
+    /// `agentProgressSummaries`. TypeScript only; it never reaches the environment, as upstream.
+    pub agent_progress_summaries: Option<bool>,
+    /// `forwardSubagentText` / `forward_subagent_text`. Python sends it only when it is `true`.
+    pub forward_subagent_text: Option<bool>,
+    /// `perTaskStopAffordance`. TypeScript only.
+    pub per_task_stop_affordance: Option<bool>,
+    /// `rapidFollowupPreempt`. TypeScript only.
+    pub rapid_followup_preempt: Option<bool>,
+    /// `forwardNestedSubagentToolCalls`. TypeScript only.
+    pub forward_nested_subagent_tool_calls: Option<bool>,
+    /// `workspaceTrust`. TypeScript only; an accepted trust without an absolute directory is dropped with a warning.
+    pub workspace_trust: Option<crate::WorkspaceTrust>,
+    /// `captureSdkMcpManifests`. `None` derives it from the process environment, see
+    /// [`ClaudeAgentOptions::captures_sdk_mcp_manifests`].
+    pub capture_sdk_mcp_manifests: Option<bool>,
+    /// Whether a Windows `.bat` or `.cmd` CLI path may start. Defaults to the TypeScript SDK, which runs it.
+    pub windows_batch_cli: WindowsBatchCli,
+}

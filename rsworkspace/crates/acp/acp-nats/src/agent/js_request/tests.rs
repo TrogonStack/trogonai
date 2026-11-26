@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::PromptResponse;
+use agent_client_protocol::v1::schema::PromptResponse;
 use bytes::Bytes;
 use jsonrpc_nats::{Message, ResponseId, encode};
 use trogon_nats::jetstream::mocks::*;
@@ -16,8 +16,8 @@ fn test_sid(s: &str) -> AcpSessionId {
     AcpSessionId::new(s).expect("test session id")
 }
 
-fn prompt_request() -> agent_client_protocol::schema::v1::PromptRequest {
-    agent_client_protocol::schema::v1::PromptRequest::new("s1", vec![])
+fn prompt_request() -> agent_client_protocol::v1::schema::PromptRequest {
+    agent_client_protocol::v1::schema::PromptRequest::new("s1", vec![])
 }
 
 fn make_nats_msg(payload: &[u8], headers: Option<async_nats::HeaderMap>) -> async_nats::Message {
@@ -68,7 +68,7 @@ async fn js_request_success() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(consumer);
 
-    let response = PromptResponse::new(agent_client_protocol::schema::v1::StopReason::EndTurn);
+    let response = PromptResponse::new(agent_client_protocol::v1::schema::StopReason::EndTurn);
     let msg = MockJsMessage::new(make_wire_success_msg("req-1", &response));
     tx.unbounded_send(Ok(msg)).unwrap();
 
@@ -87,7 +87,7 @@ async fn js_request_success() {
     assert!(result.is_ok());
     assert_eq!(
         result.unwrap().stop_reason,
-        agent_client_protocol::schema::v1::StopReason::EndTurn
+        agent_client_protocol::v1::schema::StopReason::EndTurn
     );
 }
 
@@ -163,6 +163,7 @@ async fn js_request_bad_response_payload() {
     js.consumer_factory.add_consumer(consumer);
 
     let msg = MockJsMessage::new(make_bad_payload_msg("req-1"));
+    let observed = msg.clone();
     tx.unbounded_send(Ok(msg)).unwrap();
 
     let result: agent_client_protocol::Result<PromptResponse> = js_request(
@@ -177,8 +178,72 @@ async fn js_request_bad_response_payload() {
     )
     .await;
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().message.contains("bad response payload"));
+    let error = result.unwrap_err();
+    assert_eq!(error.code, agent_client_protocol::ErrorCode::INTERNAL_ERROR);
+    assert_eq!(error.message, "bad response payload");
+    assert_eq!(observed.signals(), vec![AckKindSnapshot::AckWith(AckKindValue::Term)]);
+}
+
+#[tokio::test]
+async fn js_request_terminates_invalid_results_and_response_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    let wrong_direction = encode(&Message::Request {
+        id: jsonrpc_nats::RequestId::String("req-1".into()),
+        method: "session/prompt".into(),
+        params: serde_json::json!({"sessionId": "s1", "prompt": []}),
+    })?;
+    let mut conflicting_metadata = make_wire_success_msg(
+        "req-1",
+        &PromptResponse::new(agent_client_protocol::v1::schema::StopReason::EndTurn),
+    );
+    conflicting_metadata
+        .headers
+        .as_mut()
+        .ok_or("encoded response has no headers")?
+        .insert(jsonrpc_nats::HEADER_ERROR_CODE, "-32603");
+
+    for (case, message) in [
+        (
+            "invalid result",
+            make_wire_success_msg("req-1", &serde_json::Value::Null),
+        ),
+        (
+            "request on the response stream",
+            make_nats_msg(&wrong_direction.body, Some(wrong_direction.headers)),
+        ),
+        ("conflicting error-code projection", conflicting_metadata),
+    ] {
+        let js = MockJs::new();
+        let (consumer, tx) = MockJetStreamConsumer::new();
+        js.consumer_factory.add_consumer(consumer);
+        let message = MockJsMessage::new(message);
+        let observed = message.clone();
+        assert!(tx.unbounded_send(Ok(message)).is_ok());
+
+        let result: agent_client_protocol::Result<PromptResponse> = js_request(
+            &js,
+            "acp.v1.session.s1.agent.prompt",
+            "session/prompt",
+            &agent_client_protocol::v1::schema::PromptRequest::new(
+                "s1",
+                vec![agent_client_protocol::v1::schema::ContentBlock::from("Continue.")],
+            ),
+            &test_prefix(),
+            &test_sid("s1"),
+            &ReqId::from_test("req-1"),
+            Duration::from_secs(5),
+        )
+        .await;
+
+        let error = result.err().ok_or("invalid response was accepted")?;
+        assert_eq!(error.code, agent_client_protocol::ErrorCode::INTERNAL_ERROR, "{case}");
+        assert_eq!(error.message, "bad response payload", "{case}");
+        assert_eq!(
+            observed.signals(),
+            vec![AckKindSnapshot::AckWith(AckKindValue::Term)],
+            "{case}"
+        );
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -209,8 +274,7 @@ async fn js_request_agent_error_response() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(consumer);
 
-    let agent_err =
-        agent_client_protocol::Error::new(agent_client_protocol::ErrorCode::InternalError.into(), "agent failed");
+    let agent_err = agent_client_protocol::Error::new(agent_client_protocol::ErrorCode::INTERNAL_ERROR, "agent failed");
     let msg = MockJsMessage::new(make_wire_error_msg("req-1", &agent_err));
     tx.unbounded_send(Ok(msg)).unwrap();
 
@@ -288,11 +352,11 @@ async fn js_request_skips_a_response_addressed_to_another_request() {
     let (consumer, tx) = MockJetStreamConsumer::new();
     js.consumer_factory.add_consumer(consumer);
 
-    let other = PromptResponse::new(agent_client_protocol::schema::v1::StopReason::Cancelled);
+    let other = PromptResponse::new(agent_client_protocol::v1::schema::StopReason::Cancelled);
     tx.unbounded_send(Ok(MockJsMessage::new(make_wire_success_msg("req-other", &other))))
         .unwrap();
 
-    let mine = PromptResponse::new(agent_client_protocol::schema::v1::StopReason::EndTurn);
+    let mine = PromptResponse::new(agent_client_protocol::v1::schema::StopReason::EndTurn);
     tx.unbounded_send(Ok(MockJsMessage::new(make_wire_success_msg("req-1", &mine))))
         .unwrap();
 
@@ -310,7 +374,7 @@ async fn js_request_skips_a_response_addressed_to_another_request() {
 
     assert_eq!(
         result.expect("expected the reply addressed to req-1").stop_reason,
-        agent_client_protocol::schema::v1::StopReason::EndTurn
+        agent_client_protocol::v1::schema::StopReason::EndTurn
     );
 }
 

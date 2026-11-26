@@ -4,6 +4,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::Duration;
 #[cfg(target_os = "macos")]
 use trogon_std::dirs::HomeDir;
 #[cfg(not(target_os = "macos"))]
@@ -27,10 +28,10 @@ pub(crate) fn init_provider(resource: &Resource) -> anyhow::Result<SdkLoggerProv
     Ok(provider)
 }
 
-pub(crate) fn shutdown() -> Result<(), TelemetryProviderShutdownError> {
+pub(crate) fn shutdown(timeout: Duration) -> Result<(), TelemetryProviderShutdownError> {
     if let Some(provider) = LOGGER_PROVIDER.get() {
         provider
-            .shutdown()
+            .shutdown_with_timeout(timeout)
             .map_err(|source| TelemetryProviderShutdownError::Logger { source: source.into() })?;
     }
     Ok(())

@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_binary")
+load("//.config/bazel:go.bzl", "gofmt_test")
+
+go_binary(
+    name = "protoc-gen-wit",
+    srcs = ["main.go"],
+    importpath = "github.com/TrogonStack/trogonai/goworkspace/cmd/protoc-gen-wit",
+    visibility = ["//visibility:public"],
+    deps = ["//goworkspace/internal/protowit"],
+)
+
+gofmt_test(
+    name = "gofmt_test",
+    srcs = glob(["*.go"]),
+)

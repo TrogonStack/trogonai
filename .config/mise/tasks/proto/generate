@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Generate Buffa Rust protobuf bindings from Buf modules"
+#MISE depends_post=["proto:format:rust"]
+
+exec buf generate "$@"

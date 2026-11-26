@@ -8,19 +8,30 @@ use std::process::ExitCode;
 use clap::Parser;
 use tokio_util::sync::CancellationToken;
 use trogon_egress_proxy::{Args, Config, start};
+use trogon_telemetry::ServiceName;
 
 #[tokio::main]
 #[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    trogon_telemetry::init_logger(
+        ServiceName::TrogonEgressProxy,
+        [],
+        &trogon_std::env::SystemEnv,
+        &trogon_std::fs::SystemFs,
+    );
 
-    let config = match Config::try_from(Args::parse()) {
+    let code = run().await;
+    if let Err(error) = trogon_telemetry::shutdown_otel() {
+        tracing::error!(%error, "trogon-egress-proxy telemetry shutdown failed");
+    }
+    code
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+async fn run() -> ExitCode {
+    let args = Args::parse();
+    let readiness_listen = args.readiness_listen;
+    let config = match Config::try_from(args) {
         Ok(config) => config,
         Err(error) => return fail(&error),
     };
@@ -28,6 +39,11 @@ async fn main() -> ExitCode {
         Ok(server) => server,
         Err(error) => return fail(&error),
     };
+    let listener = match tokio::net::TcpListener::bind(readiness_listen).await {
+        Ok(listener) => listener,
+        Err(error) => return fail(&error),
+    };
+    let readiness = server.readiness();
 
     let shutdown = CancellationToken::new();
     let on_signal = shutdown.clone();
@@ -35,7 +51,7 @@ async fn main() -> ExitCode {
         trogon_std::signal::shutdown_signal().await;
         on_signal.cancel();
     });
-    server.run(shutdown).await;
+    tokio::join!(server.run(shutdown.clone()), readiness.serve(listener, shutdown));
     ExitCode::SUCCESS
 }
 

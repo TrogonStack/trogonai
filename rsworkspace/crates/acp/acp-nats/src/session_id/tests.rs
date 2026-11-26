@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::v1::SessionId;
+use agent_client_protocol::v1::schema::SessionId;
 
 #[test]
 fn acp_session_id_too_long_returns_err() {

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Check ACP freshness and file a drift issue if behind"
+#MISE depends=["acp-freshness"]
+set -euo pipefail

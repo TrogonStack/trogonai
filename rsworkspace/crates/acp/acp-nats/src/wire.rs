@@ -50,19 +50,19 @@ pub fn merge_jsonrpc_headers(base: HeaderMap, overlay: HeaderMap) -> HeaderMap {
     jsonrpc_nats::merge_jsonrpc_headers(base, overlay)
 }
 
-pub fn acp_request_id(id: &ResponseId) -> agent_client_protocol::schema::v1::RequestId {
+pub fn acp_request_id(id: &ResponseId) -> agent_client_protocol::v1::schema::RequestId {
     match id {
-        ResponseId::Number(n) => agent_client_protocol::schema::v1::RequestId::Number(*n),
-        ResponseId::String(s) => agent_client_protocol::schema::v1::RequestId::Str(s.clone()),
-        ResponseId::Null => agent_client_protocol::schema::v1::RequestId::Null,
+        ResponseId::Number(n) => agent_client_protocol::v1::schema::RequestId::Number(*n),
+        ResponseId::String(s) => agent_client_protocol::v1::schema::RequestId::Str(s.clone()),
+        ResponseId::Null => agent_client_protocol::v1::schema::RequestId::Null,
     }
 }
 
-pub fn response_id_from_acp(id: &agent_client_protocol::schema::v1::RequestId) -> ResponseId {
+pub fn response_id_from_acp(id: &agent_client_protocol::v1::schema::RequestId) -> ResponseId {
     match id {
-        agent_client_protocol::schema::v1::RequestId::Number(n) => ResponseId::Number(*n),
-        agent_client_protocol::schema::v1::RequestId::Str(s) => ResponseId::String(s.clone()),
-        agent_client_protocol::schema::v1::RequestId::Null => ResponseId::Null,
+        agent_client_protocol::v1::schema::RequestId::Number(n) => ResponseId::Number(*n),
+        agent_client_protocol::v1::schema::RequestId::Str(s) => ResponseId::String(s.clone()),
+        agent_client_protocol::v1::schema::RequestId::Null => ResponseId::Null,
     }
 }
 
@@ -86,14 +86,13 @@ pub fn encode_success<Res: Serialize>(id: ResponseId, result: &Res) -> Result<En
 }
 
 /// Encode an agent error response (complete body; code projected to `Jsonrpc-Error-Code`).
-pub fn encode_agent_error(id: ResponseId, error: &agent_client_protocol::Error) -> Result<Encoded, WireError> {
-    encode(&Message::Error {
+pub fn encode_agent_error(id: ResponseId, error: &agent_client_protocol::Error) -> Encoded {
+    Encoded::from(&Message::Error {
         id,
         code: i32::from(error.code),
         message: error.message.clone(),
         data: error.data.clone(),
     })
-    .map_err(WireError::from)
 }
 
 /// Decode a JSON-RPC response into a typed result or structured agent error.

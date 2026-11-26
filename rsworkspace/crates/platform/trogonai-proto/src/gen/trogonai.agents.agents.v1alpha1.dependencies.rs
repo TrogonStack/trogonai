@@ -5,6 +5,7 @@
 /// resolve to at least one authorized dependency before Session start. An
 /// optional declaration may resolve to none; it never permits a substitution
 /// outside the declaration. Availability is not an authorization grant.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum DependencyRequirement {
@@ -1113,18 +1114,21 @@ impl ::buffa::Message for ToolDeclaration {
         self.selection = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for ToolDeclaration {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for ToolDeclaration {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = ToolDeclaration;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct ToolDeclaration")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<ToolDeclaration, A::Error> {
@@ -1142,9 +1146,9 @@ impl<'de> serde::Deserialize<'de> for ToolDeclaration {
                         "bindingName" | "binding_name" => {
                             __f_binding_name = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::string::String;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -1160,9 +1164,9 @@ impl<'de> serde::Deserialize<'de> for ToolDeclaration {
                         "requirement" => {
                             __f_requirement = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::EnumValue<DependencyRequirement>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -1187,7 +1191,7 @@ impl<'de> serde::Deserialize<'de> for ToolDeclaration {
                             if let Some(v) = v {
                                 if __oneof_selection.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'selection'",
                                         ),
                                     );
@@ -1211,7 +1215,7 @@ impl<'de> serde::Deserialize<'de> for ToolDeclaration {
                             if let Some(v) = v {
                                 if __oneof_selection.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'selection'",
                                         ),
                                     );
@@ -1224,7 +1228,7 @@ impl<'de> serde::Deserialize<'de> for ToolDeclaration {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }
@@ -1619,18 +1623,21 @@ impl ::buffa::Message for DelegateDeclaration {
         self.selection = ::core::option::Option::None;
     }
 }
-impl<'de> serde::Deserialize<'de> for DelegateDeclaration {
-    fn deserialize<D: serde::Deserializer<'de>>(
+impl<'de> ::serde::Deserialize<'de> for DelegateDeclaration {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
         d: D,
     ) -> ::core::result::Result<Self, D::Error> {
         struct _V;
-        impl<'de> serde::de::Visitor<'de> for _V {
+        impl<'de> ::serde::de::Visitor<'de> for _V {
             type Value = DelegateDeclaration;
-            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            fn expecting(
+                &self,
+                f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
                 f.write_str("struct DelegateDeclaration")
             }
             #[allow(clippy::field_reassign_with_default)]
-            fn visit_map<A: serde::de::MapAccess<'de>>(
+            fn visit_map<A: ::serde::de::MapAccess<'de>>(
                 self,
                 mut map: A,
             ) -> ::core::result::Result<DelegateDeclaration, A::Error> {
@@ -1648,9 +1655,9 @@ impl<'de> serde::Deserialize<'de> for DelegateDeclaration {
                         "bindingName" | "binding_name" => {
                             __f_binding_name = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::alloc::string::String;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -1666,9 +1673,9 @@ impl<'de> serde::Deserialize<'de> for DelegateDeclaration {
                         "requirement" => {
                             __f_requirement = Some({
                                 struct _S;
-                                impl<'de> serde::de::DeserializeSeed<'de> for _S {
+                                impl<'de> ::serde::de::DeserializeSeed<'de> for _S {
                                     type Value = ::buffa::EnumValue<DependencyRequirement>;
-                                    fn deserialize<D: serde::Deserializer<'de>>(
+                                    fn deserialize<D: ::serde::Deserializer<'de>>(
                                         self,
                                         d: D,
                                     ) -> ::core::result::Result<
@@ -1693,7 +1700,7 @@ impl<'de> serde::Deserialize<'de> for DelegateDeclaration {
                             if let Some(v) = v {
                                 if __oneof_selection.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'selection'",
                                         ),
                                     );
@@ -1717,7 +1724,7 @@ impl<'de> serde::Deserialize<'de> for DelegateDeclaration {
                             if let Some(v) = v {
                                 if __oneof_selection.is_some() {
                                     return Err(
-                                        serde::de::Error::custom(
+                                        ::serde::de::Error::custom(
                                             "multiple oneof fields set for 'selection'",
                                         ),
                                     );
@@ -1730,7 +1737,7 @@ impl<'de> serde::Deserialize<'de> for DelegateDeclaration {
                             }
                         }
                         _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
+                            map.next_value::<::serde::de::IgnoredAny>()?;
                         }
                     }
                 }

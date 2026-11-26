@@ -4,6 +4,7 @@
 /// Advertised configuration vocabulary only. A protocol flag does not prove
 /// that a pinned driver implements it or authenticates a particular provider.
 /// Unspecified and unknown values are invalid wherever these enums are used.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum ProviderProtocol {
@@ -266,6 +267,7 @@ impl ::buffa::Enumeration for ProviderProtocol {
 }
 /// Explicit inference differs from omission. Applies only to OpenAI protocol
 /// translation, whose exact behavior must be proved by the pinned driver.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum OpenAiOutputLimitField {
@@ -460,6 +462,7 @@ impl ::buffa::Enumeration for OpenAiOutputLimitField {
 /// Names observed authorization choices, not arbitrary headers or an SDK API.
 /// Wire spelling, precedence, and protocol compatibility require a validated
 /// driver contract; selecting an enum never establishes runtime support.
+#[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(i32)]
 pub enum AuthorizationScheme {

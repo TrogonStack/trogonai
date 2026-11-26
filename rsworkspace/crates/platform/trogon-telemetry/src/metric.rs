@@ -2,6 +2,7 @@ use opentelemetry_otlp::MetricExporter;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::TelemetryProviderShutdownError;
 use crate::constants::METRIC_EXPORT_INTERVAL;
@@ -23,9 +24,9 @@ pub(crate) fn init_provider(resource: &Resource) -> anyhow::Result<SdkMeterProvi
     Ok(provider)
 }
 
-pub(crate) fn shutdown() -> Result<(), TelemetryProviderShutdownError> {
+pub(crate) fn shutdown(timeout: Duration) -> Result<(), TelemetryProviderShutdownError> {
     if let Some(provider) = METER_PROVIDER.get()
-        && let Err(source) = provider.shutdown()
+        && let Err(source) = provider.shutdown_with_timeout(timeout)
     {
         return Err(TelemetryProviderShutdownError::Meter { source: source.into() });
     }
