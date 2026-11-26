@@ -8053,6 +8053,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-dev"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "bytes",
+ "clap",
+ "futures",
+ "libc",
+ "rand_core 0.6.4",
+ "secrecy",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-nats",
+ "trogon-sandbox-auth",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-protocol",
+]
+
+[[package]]
 name = "trogon-sandbox-fence-helper"
 version = "0.1.0"
 dependencies = [
