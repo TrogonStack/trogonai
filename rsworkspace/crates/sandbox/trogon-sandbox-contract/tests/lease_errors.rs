@@ -244,7 +244,7 @@ fn cases() -> Result<Vec<Case>, Box<dyn std::error::Error>> {
             "9 bytes of file content are too large to send in one 4-byte bus message",
         ),
         (
-            LeaseError::NameConflict { name: text("dev") },
+            LeaseError::NameConflict { name: "dev".parse()? },
             json!({ "kind": "name_conflict", "name": "dev" }),
             "named lease 'dev' is being created by another request; retry",
         ),
