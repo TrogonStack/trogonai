@@ -4,8 +4,9 @@ use std::time::{Duration, SystemTime};
 use serde_json::error::Category::Data;
 use serde_json::json;
 use trogon_sandbox_contract::{
-    AccountLimits, GetAccountLimitsRequest, GetLeaseUsageRequest, GetTenantUsageRequest, LeaseCounters, LeaseId,
-    LeaseStatus, LeaseUsage, ResourceGauges, ResourceUsageRequest, TagLimits, TenantId, TenantUsage,
+    AccountLimits, GetAccountLimitsRequest, GetAccountLimitsResponse, GetLeaseUsageRequest, GetLeaseUsageResponse,
+    GetTenantUsageRequest, GetTenantUsageResponse, LeaseCounters, LeaseError, LeaseId, LeaseStatus, LeaseUsage,
+    ResourceGauges, ResourceUsageRequest, ResourceUsageResponse, TagLimits, TenantId, TenantUsage,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -307,5 +308,92 @@ fn usage_requests_carry_validated_identifiers() -> TestResult {
     assert!(serde_json::from_value::<GetLeaseUsageRequest>(invalid.clone()).is_err());
     assert!(serde_json::from_value::<GetTenantUsageRequest>(invalid.clone()).is_err());
     assert!(serde_json::from_value::<GetAccountLimitsRequest>(invalid).is_err());
+    Ok(())
+}
+
+fn denied() -> (LeaseError, serde_json::Value) {
+    (
+        LeaseError::NoProviderAvailable,
+        json!({ "outcome": "denied", "kind": "no_provider_available" }),
+    )
+}
+
+#[test]
+fn resource_usage_responses_are_tagged_by_outcome() -> TestResult {
+    let gauges = ResourceGauges {
+        memory_bytes: Some(2),
+        ..ResourceGauges::default()
+    };
+    let (error, denied_wire) = denied();
+    for (response, wire) in [
+        (
+            ResourceUsageResponse::Gauges(gauges),
+            json!({ "outcome": "gauges", "memory_bytes": 2 }),
+        ),
+        (ResourceUsageResponse::Unsupported, json!({ "outcome": "unsupported" })),
+        (ResourceUsageResponse::Denied(error), denied_wire),
+    ] {
+        assert_eq!(serde_json::to_value(&response)?, wire);
+        assert_eq!(serde_json::from_value::<ResourceUsageResponse>(wire)?, response);
+    }
+    assert!(serde_json::from_value::<ResourceUsageResponse>(json!({ "outcome": "other" })).is_err());
+    Ok(())
+}
+
+#[test]
+fn usage_and_limits_responses_are_tagged_by_outcome() -> TestResult {
+    let (error, denied_wire) = denied();
+
+    let lease = GetLeaseUsageResponse::Usage {
+        usage: released_usage()?,
+    };
+    let wire = serde_json::to_value(&lease)?;
+    assert_eq!(wire["outcome"], json!("usage"));
+    assert_eq!(wire["usage"]["lease_id"], json!("lease-1"));
+    assert_eq!(serde_json::from_value::<GetLeaseUsageResponse>(wire)?, lease);
+    let refused = GetLeaseUsageResponse::Denied(error.clone());
+    assert_eq!(serde_json::to_value(&refused)?, denied_wire);
+    assert_eq!(
+        serde_json::from_value::<GetLeaseUsageResponse>(denied_wire.clone())?,
+        refused
+    );
+
+    let tenant = GetTenantUsageResponse::Usage {
+        usage: TenantUsage::default(),
+    };
+    let wire = serde_json::to_value(&tenant)?;
+    assert_eq!(wire["outcome"], json!("usage"));
+    assert_eq!(wire["usage"]["live_leases"], json!(0));
+    assert_eq!(serde_json::from_value::<GetTenantUsageResponse>(wire)?, tenant);
+    let refused = GetTenantUsageResponse::Denied(error.clone());
+    assert_eq!(serde_json::to_value(&refused)?, denied_wire);
+    assert_eq!(
+        serde_json::from_value::<GetTenantUsageResponse>(denied_wire.clone())?,
+        refused
+    );
+
+    let limits = GetAccountLimitsResponse::Limits {
+        limits: AccountLimits {
+            active_leases: 1,
+            max_active_leases: 2,
+            cpu_seconds_used: 3,
+            cpu_seconds_cap: 4,
+            wall_seconds_used: 5,
+            wall_seconds_cap: 6,
+            max_cpu_seconds_per_request: 7,
+            max_memory_mib_per_request: 8,
+            per_tag: None,
+        },
+    };
+    let wire = serde_json::to_value(&limits)?;
+    assert_eq!(wire["outcome"], json!("limits"));
+    assert_eq!(wire["limits"]["max_active_leases"], json!(2));
+    assert_eq!(serde_json::from_value::<GetAccountLimitsResponse>(wire)?, limits);
+    let refused = GetAccountLimitsResponse::Denied(error);
+    assert_eq!(serde_json::to_value(&refused)?, denied_wire);
+    assert_eq!(
+        serde_json::from_value::<GetAccountLimitsResponse>(denied_wire)?,
+        refused
+    );
     Ok(())
 }

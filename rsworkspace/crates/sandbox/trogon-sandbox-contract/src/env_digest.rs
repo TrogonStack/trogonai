@@ -12,6 +12,9 @@ use crate::{Digest, DigestError};
 pub struct EnvDigest(Digest);
 
 impl EnvDigest {
+    /// OCI annotation key that carries the digest on a published snapshot manifest and in its signed payload.
+    pub const ANNOTATION_KEY: &'static str = "io.trogon.sandbox.env-digest";
+
     pub fn new(value: impl Into<String>) -> Result<Self, DigestError> {
         Digest::new(value).map(Self)
     }

@@ -135,7 +135,11 @@ flattens its storage into the record, and `DriveRecord::DEFAULT_SIZE_GIB` (100)
 and `DriveRecord::MAX_SIZE_GIB` (1024) bound a requested size. `DriveError` is
 tagged by `kind`. `SandboxUserName` and `SandboxGroupName` accept only
 `^[a-z_][a-z0-9_-]*$` within 32 bytes, on construction, parsing, and
-deserialization. These contracts describe drives and accounts; they do not
+deserialization. `CreateSandboxUserRequest`, `CreateSandboxGroupRequest`, and
+`ModifyGroupMembershipRequest` name a lease and those validated names, and their
+responses are tagged by `outcome` as `created`, `already_exists`,
+`missing_dependency`, `applied`, or `denied`. `GroupMembershipAction` is `add` or
+`remove`. These contracts describe drives and accounts; they do not
 provision storage, mount volumes, or create users.
 
 `WorkerHeartbeat` is the periodic report a worker publishes: its `WorkerId`,
@@ -147,6 +151,24 @@ flag. Fields added after the first heartbeat default when an older worker omits
 them, and empty volume bindings and warm-pool counts are left out of the JSON. A
 heartbeat reports state; it does not register a worker or route a lease.
 
+`EnvironmentDefinition` names what makes one execution environment differ from
+another: its `ProviderKind`, architecture, pinned `components` (a sorted map), boot
+arguments, snapshot format, isolation profile, and optional CPU template, stamped
+with `EnvironmentDefinition::SCHEMA_VERSION`. `EnvDigest` carries the manifest
+annotation key as `EnvDigest::ANNOTATION_KEY`. `LegacySnapshotPolicy` is
+`allow_with_warning` by default, or `refuse`, for snapshots that record no digest.
+The contract does not hash a definition into a digest or decide whether a restore
+may run.
+`SnapshotKvRecord` is the catalog entry a snapshot builder writes, with optional
+`parent`, `created_at` in serde's `SystemTime` encoding, and `env_digest` that are
+omitted when absent.
+
+`WorkerAuthorityRequest` asks the broker which of a worker's `LeaseId` values it
+still owns. `WorkerAuthorityResponse` lists the `OwnedLease` values, each with an
+optional `LeaseEpoch` omitted when absent, and the `not_assigned` leases, which
+default to empty. These types carry the question and answer; they do not check
+ownership or freeze a lease.
+
 `LeaseStatus` uses the JSON strings `pending`, `running`, `paused`, `suspending`,
 `suspended`, `waking`, `cancelling`, `released`, and `failed`. `LeaseUsage`
 reports one lease's command and file counters, its running, paused, and suspended
@@ -157,7 +179,10 @@ bookkeeping untouched. `AccountLimits` pairs a
 tenant's usage with its caps, and `TagLimits` adds an optional cap on active
 leases per tag value. `ResourceUsageRequest`, `GetLeaseUsageRequest`,
 `GetTenantUsageRequest`, and `GetAccountLimitsRequest` carry the identifiers for
-those reads. These types report usage; they do not meter, bill, or enforce a
+those reads. `ResourceUsageResponse`, `GetLeaseUsageResponse`,
+`GetTenantUsageResponse`, and `GetAccountLimitsResponse` answer them, tagged by
+`outcome` as `gauges`, `unsupported`, `usage`, `limits`, or `denied` with a
+`LeaseError`. These types report usage; they do not meter, bill, or enforce a
 quota.
 
 The lease lifecycle messages cover stop, cancel, pause, resume, rollback, suspend,
@@ -188,6 +213,28 @@ digest a worker restored. `LeaseFailed` reports a `LeaseFailedReason`, tagged by
 `actual` digests differ, which construction and deserialization both enforce.
 These events describe snapshots; they do not push, delete, or charge for
 artifacts.
+
+The snapshot API carries the client-facing requests and responses for snapshots.
+Lookup, lineage, tag, and delete requests name a tenant and a `Digest` or a
+`SnapshotTagName`. Each response is tagged by `outcome`, and a refusal arrives as
+`denied` with a `LeaseError`, so it is never mistaken for `not_found`.
+`SnapshotTreeResponse` and `SnapshotTagHistoryResponse` carry an optional `denied`
+field that older brokers never send. `SnapshotLeaseRequest` captures a running
+lease. Its `accept_native` flag is a `NativeSnapshotAcceptance`, a JSON boolean
+that reads as `Declined` when omitted. `SnapshotLeaseResponse` returns an OCI
+`LeaseSnapshotReceipt` or a `NativeSnapshotReceipt`. `SnapshotPushTarget`,
+`SnapshotExportRequest`, `CheckpointRunningRequest`, and `SnapshotExportError`
+carry the worker-side export. These types describe the exchange; they do not
+export, delete, or authorize anything.
+
+The lease operations carry the other lease and drive requests. They cover fork,
+extend, tag update, list, delete by lease or by name, owned cleanup, and drive
+create, list, and delete. Lease names in by-name requests, lease rows, and name conflicts are a `LeaseName`, 1 to 128 bytes of text, enforced on construction, parsing, and deserialization. Each response is tagged by `outcome`. `ReapLeasesRequest`
+releases leases that match its filters, and its `dry_run` field is a `ReapMode`,
+a JSON boolean that reads as `Release` when omitted. A reap needs at least one of `tags`,
+`older_than_seconds`, or `idle_for_seconds`; construction and deserialization
+both enforce it with a `ReapLeasesRequestError`. The tag filters are `SandboxTags`. Page size, drive size, and lease lifetime limits
+are broker policy and are not part of these types.
 
 `WorkspaceSource` is keyed by its variant name: `clone` checks out a Git `sha`
 with `CloneAuth`, `host_mount` mounts a host directory, `s3_volume` mounts an S3
@@ -236,6 +283,22 @@ trim output, or move bytes.
 `DispatchTarget` names the worker and attempt a lease is dispatched to, with an
 optional `LeaseEpoch` for workers that support epochs.
 
+`LeaseAttemptIdentity` binds a lease, a `ProviderKind`, and a `DispatchTarget`.
+`ProviderCleanupRequest` carries it with a `CancelIntent`, and
+`ProviderCleanupResponse` is tagged by `outcome` as `cleaned` or `failed`.
+`LeaseDispatchAttempt` records one attempt: its `DispatchAttemptId`, optional
+`LeaseEpoch`, `LeaseRequestKey`, `LeaseAccounting` (`tenant` or `prewarm`), and
+optional cleanup reason, cleanup start, and `PendingDispatch`, which keeps the
+dispatch payload as opaque JSON until the reply commits. A `LeaseRequestKey`
+holds 1 to 256 bytes of ASCII letters, digits, `_`, or `-`; construction,
+parsing, and deserialization all enforce it. `AttemptQuotaReservation` names the
+tenant, attempt, and CPU and wall seconds held for an attempt. `LeaseReleased`
+announces a lease ending with a `LeaseReleasedReason` (`completed`, `expired`,
+`cancelled`, `idle_timeout`, or `failed`). `IdlePauseRetry` and `FreezeInFlight`
+carry the backoff and in-flight markers of idle pauses; `FreezeAction` is
+`Pause` or `Resume`, serialized as the JSON boolean `thaw`. These types describe
+the wire; they do not reserve quota, pick a worker, or drive a retry.
+
 The credential broker contracts cover issuing, revoking, and rotating
 credentials. `CredentialIssueRequest` asks for a token with a
 `CredentialScope`, tagged by `kind`, and a nonzero `ttl_seconds`. It may carry a
@@ -272,3 +335,12 @@ including self-transitions.
 This package defines values and allowed transitions. It does not execute
 operations, persist state, authorize transitions, enforce claim ownership, or
 provide worker, provider, transport, or lease-generation behavior.
+
+`SubstrateSizeClass` pairs a non-empty label with non-zero memory in MiB, and
+serializes as `{"label", "memory_mib"}`. A label cannot contain `,` or `=` or
+carry surrounding whitespace, so every ladder renders to text that parses back
+to the same ladder. `SubstrateSizeClasses` is a non-empty
+ladder sorted by memory with no two classes sharing a size; it serializes as an
+array and parses from `small=2048,medium=8192,large=32768`. Construction,
+parsing, and deserialization enforce both rules and fail with
+`SubstrateSizeClassError`. The types do not select a class or schedule work.
