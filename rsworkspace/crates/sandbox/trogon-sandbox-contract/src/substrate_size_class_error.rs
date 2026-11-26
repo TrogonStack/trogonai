@@ -5,6 +5,8 @@ pub enum SubstrateSizeClassError {
     Empty,
     #[error("size class label must not be empty")]
     EmptyLabel,
+    #[error("size class label `{label}` must not contain `,` or `=` or surrounding whitespace")]
+    TextIncompatibleLabel { label: String },
     #[error("size class `{label}` must declare non-zero memory")]
     ZeroMemory { label: String },
     #[error("two size classes declare {memory_mib} MiB")]

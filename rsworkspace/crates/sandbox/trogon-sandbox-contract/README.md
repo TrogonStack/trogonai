@@ -319,7 +319,9 @@ operations, persist state, authorize transitions, enforce claim ownership, or
 provide worker, provider, transport, or lease-generation behavior.
 
 `SubstrateSizeClass` pairs a non-empty label with non-zero memory in MiB, and
-serializes as `{"label", "memory_mib"}`. `SubstrateSizeClasses` is a non-empty
+serializes as `{"label", "memory_mib"}`. A label cannot contain `,` or `=` or
+carry surrounding whitespace, so every ladder renders to text that parses back
+to the same ladder. `SubstrateSizeClasses` is a non-empty
 ladder sorted by memory with no two classes sharing a size; it serializes as an
 array and parses from `small=2048,medium=8192,large=32768`. Construction,
 parsing, and deserialization enforce both rules and fail with

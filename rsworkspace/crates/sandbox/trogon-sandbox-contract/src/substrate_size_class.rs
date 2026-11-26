@@ -6,7 +6,8 @@ use crate::substrate_size_class_wire::SubstrateSizeClassWire;
 /// One memory-tiered worker pool, named by the label value the substrate deployment stamps on its
 /// pools.
 ///
-/// Construction and deserialization reject an empty label and zero memory.
+/// Construction and deserialization reject an empty label, a label the ladder text form cannot
+/// carry (one containing `,` or `=`, or with leading or trailing whitespace), and zero memory.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "SubstrateSizeClassWire")]
 pub struct SubstrateSizeClass {
@@ -19,6 +20,9 @@ impl SubstrateSizeClass {
         let label = label.into();
         if label.is_empty() {
             return Err(SubstrateSizeClassError::EmptyLabel);
+        }
+        if label.contains([',', '=']) || label.trim() != label {
+            return Err(SubstrateSizeClassError::TextIncompatibleLabel { label });
         }
         if memory_mib == 0 {
             return Err(SubstrateSizeClassError::ZeroMemory { label });
