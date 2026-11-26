@@ -7922,6 +7922,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-credential-client"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "bytes",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-protocol",
+]
+
+[[package]]
 name = "trogon-sandbox-guest-init"
 version = "0.1.0"
 dependencies = [
