@@ -64,6 +64,7 @@ trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-sandbox-credential-client = { path = "crates/sandbox/trogon-sandbox-credential-client" }
+trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
