@@ -64,6 +64,7 @@ trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-sandbox-cosign = { path = "crates/sandbox/trogon-sandbox-cosign" }
+trogon-sandbox-credential-broker = { path = "crates/sandbox/trogon-sandbox-credential-broker" }
 trogon-sandbox-credential-client = { path = "crates/sandbox/trogon-sandbox-credential-client" }
 trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
 trogon-sandbox-dev = { path = "crates/sandbox/trogon-sandbox-dev" }
@@ -192,6 +193,7 @@ moka = { version = "=0.12.16", features = ["future"] }
 object_store = { version = "=0.14.2", default-features = false, features = ["aws", "azure", "fs", "gcp"] }
 
 # Misc
+aes-gcm = "=0.11.0"
 libc = "=0.2.186"
 chrono = "=0.4.45"
 chrono-tz = "=0.10.4"
