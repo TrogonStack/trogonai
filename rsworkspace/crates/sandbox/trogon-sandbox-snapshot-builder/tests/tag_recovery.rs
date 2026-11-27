@@ -735,3 +735,86 @@ async fn ambiguous_worker_export_outcome_is_retained_without_replaying_the_effec
     );
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_release_records_its_snapshot_digest_and_publishes_it() -> TestResult {
+    let server = JetStreamTestServer::start().await;
+    let nats = server.client().await;
+    let _accounting = real_accounting_fixture(nats.clone()).await?;
+    let receipt = fixture_receipt('c')?;
+    let exporter = fake_exporter(nats.clone(), {
+        let receipt = receipt.clone();
+        move |_| receipt.clone()
+    })
+    .await?;
+    let mut publications = nats.subscribe(SNAPSHOT_PUBLISHED).await?;
+    nats.flush().await?;
+    let mut builder = start_builder(&server, fresh_metrics()?).await?;
+    let parent = Digest::new(format!("sha256:{}", "b".repeat(64)))?;
+    let mut event = fixture_release("records-and-publishes", 100, None)?;
+    event.restored_from = Some(parent.clone());
+    wait_for_release_subscription(&nats, &lease_released(&event.lease_id)).await?;
+    publish_release(&nats, &event).await?;
+
+    let (published, _) = next_publication(&mut publications).await?;
+    assert_eq!(published.lease_id, event.lease_id);
+    assert_eq!(published.tenant, event.tenant);
+    assert_eq!(published.digest, receipt.digest);
+    assert_eq!(published.artifact_type, receipt.artifact_type);
+    assert_eq!(published.bytes, receipt.bytes);
+
+    let record = SnapshotKvStore::open(jetstream::new(nats.clone()))
+        .await?
+        .get_owned(&event.tenant, &published.digest)
+        .await?
+        .ok_or("the snapshot record is missing")?;
+    assert_eq!(record.lease_id, event.lease_id);
+    assert_eq!(record.digest, receipt.digest);
+    assert_eq!(record.artifact_type, ArtifactType::SandboxRootfsV1);
+    assert_eq!(record.registry, fixture_config(&server).default_registry);
+    assert_eq!(record.repository, REPOSITORY);
+    assert_eq!(record.parent, Some(parent));
+    assert!(record.created_at.is_some());
+    assert_eq!(
+        record.env_digest, None,
+        "nothing was scanned or signed, so no environment digest was read"
+    );
+    assert_eq!(*exporter.repositories.lock().await, [REPOSITORY]);
+    builder.stop().await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_release_with_an_out_of_range_retention_is_dropped_without_export() -> TestResult {
+    let server = JetStreamTestServer::start().await;
+    let nats = server.client().await;
+    let _accounting = real_accounting_fixture(nats.clone()).await?;
+    let receipt = fixture_receipt('a')?;
+    let exporter = fake_exporter(nats.clone(), move |_| receipt.clone()).await?;
+    let mut publications = nats.subscribe(SNAPSHOT_PUBLISHED).await?;
+    nats.flush().await?;
+    let mut builder = start_builder(&server, fresh_metrics()?).await?;
+    let refused = fixture_release("out-of-range-retention", 100, Some("latest"))?;
+    let mut payload = serde_json::to_value(&refused)?;
+    payload["snapshot_out"]["retention"] = serde_json::json!({ "max_tags": 0, "max_age_days": 7 });
+    let accepted = fixture_release("in-range-retention", 200, Some("latest"))?;
+    wait_for_release_subscription(&nats, &lease_released(&refused.lease_id)).await?;
+
+    // One builder reads its releases in order, so the in-range release arrives after the refused one was handled.
+    nats.publish(lease_released(&refused.lease_id), serde_json::to_vec(&payload)?.into())
+        .await?;
+    publish_release(&nats, &accepted).await?;
+    let (published, _) = next_publication(&mut publications).await?;
+    assert_eq!(published.lease_id, accepted.lease_id);
+    assert!(
+        no_publication_within(&mut publications, Duration::from_millis(250)).await,
+        "a release whose retention is out of range must not be published"
+    );
+    assert_eq!(
+        exporter.calls.load(Ordering::SeqCst),
+        1,
+        "a release whose retention is out of range must not be exported"
+    );
+    let capture = capture_store(&jetstream::new(nats.clone())).await?;
+    assert!(capture.get(&refused.lease_id).await?.is_none());
+    builder.stop().await
+}

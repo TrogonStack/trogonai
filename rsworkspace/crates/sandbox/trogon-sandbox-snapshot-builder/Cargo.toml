@@ -43,5 +43,8 @@ trogon-std = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
