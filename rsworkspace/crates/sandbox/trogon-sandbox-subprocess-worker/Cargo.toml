@@ -73,6 +73,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-sandbox-auth = { workspace = true }
 trogon-sandbox-conformance = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }
 which = { workspace = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]

@@ -374,6 +374,30 @@ fn a_glob_base_below_a_root_is_pinned_but_a_root_is_not() -> Result<(), Box<dyn 
 }
 
 #[test]
+fn an_allow_with_a_bracket_that_spells_no_set_matches_the_bracket_as_text() -> Result<(), Box<dyn std::error::Error>> {
+    assert!(
+        GlobPattern::new("/work/open[bracket").is_err(),
+        "a bracket alone spells no wildcard"
+    );
+    let entries = [glob("/work/open[bracket*")?];
+    let allow = Region::translate_allows(&entries, &identity())?;
+    let sources = regexes(&allow.filters);
+    let [source] = sources.as_slice() else {
+        return Err(format!("one allow filter expected, got {sources:?}").into());
+    };
+    assert!(source.starts_with("^/work/open"), "{source}");
+    assert!(source.ends_with('$'), "{source}");
+    assert!(!source.contains("(/.*)?"), "an allow matches exactly: {source}");
+    assert!(matches_source(source, "/work/open[bracket-notes"), "{source}");
+    assert!(
+        !matches_source(source, "/work/openb"),
+        "the bracket is no set: {source}"
+    );
+    assert!(!matches_source(source, "/work/open[bracket/inner"), "{source}");
+    Ok(())
+}
+
+#[test]
 fn an_allow_glob_matches_exactly_and_a_deny_glob_covers_the_subtree() -> Result<(), Box<dyn std::error::Error>> {
     let entries = [glob("/work/proj*")?];
     let deny = Region::translate(&entries, &identity())?;

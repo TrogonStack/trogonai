@@ -3,7 +3,7 @@ use std::error::Error;
 use serde_json::{Value, json};
 use trogon_sandbox_contract::{
     CapabilityNeed, CapabilityRequirements, CapabilitySupport, CredentialProvider, CredentialRequest, CredentialScope,
-    IsolationTier, LeaseRequest, ProviderCapabilityProfile, PullSecretId, ResourceRange,
+    IsolationTier, LeaseRequest, ProviderCapabilityProfile, PullSecretId, ResourceRange, SandboxSpec,
 };
 
 use super::{Egress, admit, admit_with};
@@ -155,6 +155,21 @@ fn terminating_tls_is_admitted_only_by_a_worker_that_does() -> Result<(), Box<dy
     let profile = appcontainer_profile();
     assert!(admit_with(&lease, &profile, Egress::DomainAllowlist).is_err());
     admit_with(&lease, &profile, Egress::DomainAllowlistTerminatingTls)?;
+    Ok(())
+}
+
+/// An env past the entry limit never parses into a lease request, so it cannot reach admission.
+#[test]
+fn an_oversized_env_is_refused() -> Result<(), Box<dyn Error>> {
+    let error = request(|wire| {
+        let env: serde_json::Map<String, Value> = (0..=SandboxSpec::MAX_ENV_ENTRIES)
+            .map(|i| (format!("K{i}"), json!("v")))
+            .collect();
+        wire["spec"]["env"] = Value::Object(env);
+    })
+    .err()
+    .ok_or("the oversized env should be refused")?;
+    assert!(error.to_string().contains("env"), "{error}");
     Ok(())
 }
 
