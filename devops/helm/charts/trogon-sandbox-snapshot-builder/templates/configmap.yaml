@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "trogon-sandbox-snapshot-builder.fullname" . }}
+  labels:
+    {{- include "trogon-sandbox-snapshot-builder.labels" . | nindent 4 }}
+data:
+  SANDBOX_NATS_URL: {{ include "trogon-sandbox-snapshot-builder.natsUrl" . | quote }}
+  SANDBOX_REGISTRY_URL: {{ include "trogon-sandbox-snapshot-builder.registryUrl" . | quote }}

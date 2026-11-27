@@ -7,13 +7,13 @@ on:
   push:
     branches: [main]
     paths:
-      - 'devops/helm/sandbox/**'
+      - 'devops/helm/**'
       - '.config/mise/tasks/github/workflows/ci-sandbox-deploy-checks/**'
       - '.github/workflows/ci-sandbox-deploy-checks.yml'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - 'devops/helm/sandbox/**'
+      - 'devops/helm/**'
       - '.config/mise/tasks/github/workflows/ci-sandbox-deploy-checks/**'
       - '.github/workflows/ci-sandbox-deploy-checks.yml'
 

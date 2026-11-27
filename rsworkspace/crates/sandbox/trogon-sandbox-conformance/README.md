@@ -37,7 +37,7 @@ A check only runs when the target declares the capability it exercises: `support
   return a `RedispatchError` when a repeat launches again or a released sandbox is handed out.
   `dispatch_lease` sends one dispatch through a handler.
 - Charts: `chart_egress_enforcement` reads the `egressEnforcement` a worker's Helm chart under
-  `devops/helm/sandbox/charts` renders, and `ensure_chart_egress_matches_profile` and
+  `devops/helm/charts` renders, and `ensure_chart_egress_matches_profile` and
   `ensure_chart_egress_at_least_profile` return a `ChartEgressError` when it drifts from or is
   weaker than the worker profile.
 

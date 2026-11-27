@@ -1,0 +1,32 @@
+name: trogonai-sandbox
+
+# Local smoke stack: a JetStream NATS server and the sandbox broker with in-memory
+# quota and idempotency backends. Workers run on the host;
+# `mise run sandbox:smoke-docker` starts this stack and a docker worker against it.
+services:
+  nats:
+    image: nats:2.14.2-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "127.0.0.1:${SANDBOX_NATS_PORT:-24222}:4222"
+      - "127.0.0.1:${SANDBOX_NATS_MONITOR_PORT:-28222}:8222"
+
+  trogon-sandbox-broker:
+    build:
+      context: ../../../..
+      dockerfile: devops/docker/images/trogon-sandbox-broker/Dockerfile
+    environment:
+      NATS_URL: nats://nats:4222
+      SANDBOX_QUOTA_BACKEND: in-memory
+      SANDBOX_IDEMPOTENCY_BACKEND: in-memory
+      SANDBOX_JETSTREAM_REPLICAS: "1"
+      # Local stack only: the broker enforces auth and the image allow-list by
+      # default; this turns them off.
+      SANDBOX_INSECURE_DEV: "true"
+      # The broker signs lease dispatches, per-lease requests and cleanup; workers
+      # run with SANDBOX_DISPATCH_VERIFY=require. Source
+      # .config/mise/lib/sandbox-dispatch-keys.sh to generate a throwaway key, or
+      # export your own base64 Ed25519 seed.
+      SANDBOX_DISPATCH_SIGNING_KEY: ${SANDBOX_DISPATCH_SIGNING_KEY:?source .config/mise/lib/sandbox-dispatch-keys.sh or set a base64 Ed25519 seed}
+    depends_on:
+      - nats

@@ -1,7 +1,7 @@
 //! End to end: `SandboxClient` to the broker to `trogon-sandbox-firecracker-worker` to a real Firecracker microVM,
 //! with commands and files carried over vsock to the guest agent.
 //!
-//! Run it with `devops/docker/compose/sandbox/smoke-firecracker.sh`, which starts the broker and a supervised worker
+//! Run it with `mise run sandbox:smoke-firecracker`, which starts the broker and a supervised worker
 //! on a host with `/dev/kvm` and then runs this lane with `--ignored`. The worker serves the image named by
 //! `SANDBOX_FIRECRACKER_IMAGE` (default `guest:base`). When `SANDBOX_FIRECRACKER_STATE_DIR` names the worker's
 //! state dir, released leases are also checked to leave nothing behind on the host. See `stack_support` for how
@@ -80,7 +80,7 @@ fn assert_truncated(output: &CommandOutput) {
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn lease_microvm_run_command_and_files_via_broker_and_firecracker_worker() -> TestResult {
     let client = &stack_support::connect().await?;
     let mut parts = spec_parts(30, 256)?;
@@ -117,7 +117,7 @@ async fn lease_microvm_run_command_and_files_via_broker_and_firecracker_worker()
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn exit_codes_and_output_streams_reach_the_caller_unchanged() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |granted| async move {
@@ -142,7 +142,7 @@ async fn exit_codes_and_output_streams_reach_the_caller_unchanged() -> TestResul
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_timed_out_command_is_killed_and_the_lease_keeps_working() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |granted| async move {
@@ -164,7 +164,7 @@ async fn a_timed_out_command_is_killed_and_the_lease_keeps_working() -> TestResu
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn detached_commands_can_be_polled_and_killed_with_everything_they_forked() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |granted| async move {
@@ -204,7 +204,7 @@ async fn detached_commands_can_be_polled_and_killed_with_everything_they_forked(
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn interactive_stdin_reaches_a_detached_command() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |granted| async move {
@@ -236,7 +236,7 @@ async fn interactive_stdin_reaches_a_detached_command() -> TestResult {
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn streamed_output_arrives_in_order_and_matches_the_final_output() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |granted| async move {
@@ -279,7 +279,7 @@ async fn streamed_output_arrives_in_order_and_matches_the_final_output() -> Test
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_created_user_runs_commands_as_itself() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |granted| async move {
@@ -318,7 +318,7 @@ async fn a_created_user_runs_commands_as_itself() -> TestResult {
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn files_round_trip_byte_exactly() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |granted| async move {
@@ -379,7 +379,7 @@ async fn files_round_trip_byte_exactly() -> TestResult {
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn each_lease_is_its_own_privileged_offline_vm_with_the_memory_it_asked_for() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |small| async move {
@@ -427,7 +427,7 @@ async fn each_lease_is_its_own_privileged_offline_vm_with_the_memory_it_asked_fo
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn concurrent_leases_each_get_their_own_ready_vm() -> TestResult {
     let client = &stack_support::connect().await?;
     let requests = (0..4).map(|_| request(256, 120)).collect::<Fallible<Vec<_>>>()?;
@@ -496,7 +496,7 @@ async fn concurrent_leases_each_get_their_own_ready_vm() -> TestResult {
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_cancelled_lease_refuses_commands_and_leaves_nothing_on_the_host() -> TestResult {
     let client = &stack_support::connect().await?;
     let granted = lease(client, &request(256, 120)?).await?;
@@ -510,7 +510,7 @@ async fn a_cancelled_lease_refuses_commands_and_leaves_nothing_on_the_host() -> 
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn an_expired_lease_is_reclaimed_by_the_broker() -> TestResult {
     let client = &stack_support::connect().await?;
     let granted = lease(client, &request(256, 8)?).await?;
@@ -527,7 +527,7 @@ async fn an_expired_lease_is_reclaimed_by_the_broker() -> TestResult {
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn retrying_a_lease_with_the_same_idempotency_key_returns_the_same_vm() -> TestResult {
     let client = &stack_support::connect().await?;
     let req = request(256, 120)?;
@@ -547,7 +547,7 @@ async fn retrying_a_lease_with_the_same_idempotency_key_returns_the_same_vm() ->
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn files_over_the_nats_payload_limit_roundtrip_and_leave_the_lease_usable() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |granted| async move {
@@ -592,7 +592,7 @@ async fn files_over_the_nats_payload_limit_roundtrip_and_leave_the_lease_usable(
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_lease_the_worker_cannot_launch_is_denied_with_the_worker_reason() -> TestResult {
     let client = &stack_support::connect().await?;
     let mut parts = spec_parts(30, 256)?;
@@ -618,7 +618,7 @@ async fn a_lease_the_worker_cannot_launch_is_denied_with_the_worker_reason() -> 
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn output_too_large_for_the_bus_arrives_truncated_with_its_exit_code() -> TestResult {
     const TWO_MIB_OF_OUTPUT: &str = "head -c 2097152 /dev/zero | tr '\\0' a";
 
@@ -665,7 +665,7 @@ async fn output_too_large_for_the_bus_arrives_truncated_with_its_exit_code() -> 
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_terminal_runs_a_shell_in_the_guest_and_reports_its_exit_status() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(256, 120)?, |granted| async move {

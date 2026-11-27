@@ -46,4 +46,4 @@ from the usual AWS provider sources, such as the environment or a profile.
   replace the assume-role policy in your copy.
 - `retention_days = 0`, the default, disables object expiration.
 - Registry access control for snapshots is configured in the Helm chart, not
-  here: see `accessControl` in `devops/helm/sandbox/charts/zot/values.yaml`.
+  here: see `accessControl` in `devops/helm/charts/zot/values.yaml`.

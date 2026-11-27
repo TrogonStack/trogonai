@@ -17,14 +17,14 @@ SANDBOX_SPICEDB_TENANT_RESOURCE_TYPE=<current-tenant-resource-type>
 
 The defaults are `sandbox-api-keys` and `sandbox_tenant`. Set `SANDBOX_API_KEY_BUCKET` to the same bucket for the WebSocket gateway, the SSH gateway and every `trogon-sandbox-admin api-key` command. Confirm which bucket actually contains the deployed keys before selecting an override.
 
-For the Helm chart at `devops/helm/sandbox`, keep a protected upgrade values file with:
+For the Helm chart at `devops/helm/charts/trogon-sandbox`, keep a protected upgrade values file with:
 
 ```yaml
 global:
   apiKeyBucket: <current-api-key-bucket>
   spicedb:
     tenantResourceType: <current-tenant-resource-type>
-sandbox-k8s-worker:
+trogon-sandbox-k8s-worker:
   resourceNaming: legacy
 ```
 
@@ -56,7 +56,7 @@ After all consumers use the canonical type and the rollback window closes, retir
 
 Before upgrading an existing Kubernetes worker, select `SANDBOX_K8S_RESOURCE_NAMING=legacy` or `--resource-naming legacy`. Retain its service account with `SANDBOX_SERVICE_ACCOUNT`, and use `SANDBOX_IMAGE` to select the guest image you verified with the old workers. For Daytona, keep `SANDBOX_DAYTONA_SNAPSHOT` pinned to a verified snapshot. This keeps resource discovery, clone secret lookup and guest image selection tied to the existing deployment.
 
-For Helm, set `sandbox-k8s-worker.resourceNaming=legacy` and preserve the installed `sandbox-k8s-worker.serviceAccountName` and `sandbox-k8s-worker.image` values. Change `resourceNaming` to `sandbox` only after the drain and verification below.
+For Helm, set `trogon-sandbox-k8s-worker.resourceNaming=legacy` and preserve the installed `trogon-sandbox-k8s-worker.serviceAccountName` and `trogon-sandbox-k8s-worker.image` values. Change `resourceNaming` to `sandbox` only after the drain and verification below.
 
 The two modes stamp different names on the objects the worker creates:
 

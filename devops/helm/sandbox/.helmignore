@@ -1,4 +1,0 @@
-# Chart checks and operator scripts are not part of the packaged chart.
-ci/
-scripts/
-.helmignore

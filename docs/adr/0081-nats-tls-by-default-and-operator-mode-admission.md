@@ -68,9 +68,9 @@ replaces the public roots rather than adding to them (`src/tls.rs:58-75`).
 **The servers trust everything.** The compose NATS server runs
 `nats:2.14.2-alpine` with `--jetstream`, `--store_dir=/data` and
 `--http_port=8222` and nothing else
-(`devops/docker/compose/compose.yml:4-18`): no TLS, no accounts, no
+(`devops/docker/compose/compose.yaml:4-18`): no TLS, no accounts, no
 authorization, an unencrypted store, and plain HTTP monitoring. Services reach
-it at `nats://nats:4222` (`compose.yml:32`). Clients fall back to
+it at `nats://nats:4222` (`compose.yaml:32`). Clients fall back to
 `NatsAuth::None` when no credential is configured
 (`rsworkspace/crates/platform/trogon-nats/src/settings.rs:96`,
 `src/connect.rs:106`), so any process that can reach the port lands in the
@@ -101,12 +101,12 @@ returns `TlsRequired` unless `OPENBAO_ALLOW_PLAINTEXT` is `true`
 (`rsworkspace/crates/platform/trogon-gateway/src/main.rs:993-1001`), and
 `TlsRequired` refuses an `http` address
 (`src/secret_store/openbao_secret_store.rs:251-259`). The compose stack sets
-that flag (`compose.yml:33-35`). Postgres cannot use TLS at all: the workspace
+that flag (`compose.yaml:33-35`). Postgres cannot use TLS at all: the workspace
 sqlx dependency enables no TLS feature (`rsworkspace/Cargo.toml:118`), the
 scheduler's Postgres projection takes a caller-built `PgPool`
 (`rsworkspace/crates/scheduler/trogon-scheduler/src/projections/postgres/store.rs:43`),
 and the compose OpenBao reaches its Postgres with `sslmode=disable`
-(`compose.yml:108`).
+(`compose.yaml:108`).
 
 **What this builds on.** [ADR#0015](./0015-rust-tls-library.md) already prefers rustls with aws-lc-rs, and
 prefers terminating TLS at the deployment edge with in-process TLS as the
@@ -472,7 +472,7 @@ The compose stack runs the topology above rather than a plaintext stand-in:
 an operator, the full resolver, `SYS`, `AUTH`, `PLATFORM` and a development
 tenant, TLS from a development CA with `verify: true`, and an encrypted store.
 A one-shot bootstrap service, in the pattern `openbao-bootstrap` already
-follows (`devops/docker/compose/compose.yml:128-154`), generates the
+follows (`devops/docker/compose/compose.yaml:128-154`), generates the
 operator, the accounts and their users with nsc, along with the development
 CA, the certificates and the store key, on first start, and is a no-op
 afterwards. No private key, seed or credentials file is committed; each
@@ -485,7 +485,7 @@ This decision supersedes the fail-open client default and its documentation
 (`rsworkspace/crates/platform/trogon-nats/README.md:22`,
 `devops/docker/compose/.env.example:52`), the direct connects in the a2a
 crates, the plaintext compose NATS server
-(`devops/docker/compose/compose.yml:4-18`), and the "allow plaintext" framing
+(`devops/docker/compose/compose.yaml:4-18`), and the "allow plaintext" framing
 wherever it appears.
 
 It amends [ADR#0015](./0015-rust-tls-library.md): the workspace has one rustls provider, aws-lc-rs, and

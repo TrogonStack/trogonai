@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "trogon-sandbox-snapshot-builder.fullname" . }}
+  labels:
+    {{- include "trogon-sandbox-snapshot-builder.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: sandbox-snapshot-builder
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metricsPort }}
+      targetPort: metrics

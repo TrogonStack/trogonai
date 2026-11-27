@@ -1,0 +1,3 @@
+# Chart checks are not part of the packaged chart.
+ci/
+.helmignore

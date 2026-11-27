@@ -1,0 +1,75 @@
+apiVersion: v2
+name: trogon-sandbox
+description: Umbrella Helm chart for the sandbox control plane, snapshot store, and workers
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: zot
+    repository: file://../zot
+    version: 0.1.0
+    condition: zot.enabled
+  - name: nats
+    repository: file://../nats
+    version: 0.1.0
+    condition: nats.enabled
+  - name: spicedb
+    repository: file://../spicedb
+    version: 0.1.0
+    condition: spicedb.enabled
+  - name: trogon-sandbox-broker
+    repository: file://../trogon-sandbox-broker
+    version: 0.1.0
+    condition: trogon-sandbox-broker.enabled
+  - name: trogon-sandbox-snapshot-builder
+    repository: file://../trogon-sandbox-snapshot-builder
+    version: 0.1.0
+    condition: trogon-sandbox-snapshot-builder.enabled
+  - name: trogon-sandbox-credential-broker
+    repository: file://../trogon-sandbox-credential-broker
+    version: 0.1.0
+    condition: trogon-sandbox-credential-broker.enabled
+  - name: trogon-sandbox-ws-gateway
+    repository: file://../trogon-sandbox-ws-gateway
+    version: 0.1.0
+    condition: trogon-sandbox-ws-gateway.enabled
+  - name: trogon-sandbox-ssh-gateway
+    repository: file://../trogon-sandbox-ssh-gateway
+    version: 0.1.0
+    condition: trogon-sandbox-ssh-gateway.enabled
+  - name: trogon-sandbox-dashboard
+    repository: file://../trogon-sandbox-dashboard
+    version: 0.1.0
+    condition: trogon-sandbox-dashboard.enabled
+  - name: trogon-sandbox-hyperlight-worker
+    repository: file://../trogon-sandbox-hyperlight-worker
+    version: 0.1.0
+    condition: trogon-sandbox-hyperlight-worker.enabled
+  - name: trogon-sandbox-docker-worker
+    repository: file://../trogon-sandbox-docker-worker
+    version: 0.1.0
+    condition: trogon-sandbox-docker-worker.enabled
+  - name: trogon-sandbox-k8s-worker
+    repository: file://../trogon-sandbox-k8s-worker
+    version: 0.1.0
+    condition: trogon-sandbox-k8s-worker.enabled
+  - name: trogon-sandbox-kubevirt-worker
+    repository: file://../trogon-sandbox-kubevirt-worker
+    version: 0.1.0
+    condition: trogon-sandbox-kubevirt-worker.enabled
+  - name: trogon-sandbox-daytona-worker
+    repository: file://../trogon-sandbox-daytona-worker
+    version: 0.1.0
+    condition: trogon-sandbox-daytona-worker.enabled
+  - name: trogon-sandbox-aca-worker
+    repository: file://../trogon-sandbox-aca-worker
+    version: 0.1.0
+    condition: trogon-sandbox-aca-worker.enabled
+  - name: trogon-sandbox-modal-worker
+    repository: file://../trogon-sandbox-modal-worker
+    version: 0.1.0
+    condition: trogon-sandbox-modal-worker.enabled
+  - name: trogon-sandbox-subprocess-worker
+    repository: file://../trogon-sandbox-subprocess-worker
+    version: 0.1.0
+    condition: trogon-sandbox-subprocess-worker.enabled

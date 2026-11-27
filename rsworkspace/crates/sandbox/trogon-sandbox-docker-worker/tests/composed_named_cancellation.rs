@@ -637,7 +637,7 @@ async fn actual_docker_named_cancellation_uses_the_secure_composed_sdk_stack() -
         let address = std::str::from_utf8(&port)?.trim().to_owned();
         ensure!(address.starts_with("127.0.0.1:"), "real SpiceDB must bind only loopback");
         let schema_path =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../devops/helm/sandbox/charts/spicedb/schema.zed");
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../devops/helm/charts/spicedb/schema.zed");
         let schema = std::fs::read_to_string(&schema_path).context("the sandbox SpiceDB schema must exist")?;
         tokio::time::timeout(WAIT, async {
             loop {

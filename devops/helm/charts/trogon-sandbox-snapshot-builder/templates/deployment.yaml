@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trogon-sandbox-snapshot-builder.fullname" . }}
+  labels:
+    {{- include "trogon-sandbox-snapshot-builder.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-snapshot-builder
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "trogon-sandbox-snapshot-builder.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "trogon-sandbox-snapshot-builder.fullname" . }}
+      containers:
+        - name: sandbox-snapshot-builder
+          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-snapshot-builder:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - --max-concurrent={{ .Values.maxConcurrent }}
+            - --metrics-addr=0.0.0.0:{{ .Values.metricsPort }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "trogon-sandbox-snapshot-builder.fullname" . }}
+          {{- with .Values.global.dispatchAuth }}
+          env:
+            - name: SANDBOX_DISPATCH_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .signingKeyKey }}
+          {{- end }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 15

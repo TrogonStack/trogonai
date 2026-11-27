@@ -2,7 +2,7 @@
 
 This tutorial takes you from a tenant id `acme` to a provisioned tenant with its own S3 bucket, KMS key, registry pull policy and quota caps. At the end you can mint API keys for the tenant, run leases, publish snapshots and tag them.
 
-It assumes you finished [your first sandbox lease](./first-sandbox-lease.md) and [publishing a signed snapshot](./publish-signed-snapshot.md). You also need `terraform` on your path, an AWS account with KMS and S3 permissions, and the sandbox stack deployed to a cluster with the chart in `devops/helm/sandbox/`. The admin commands below run `trogon-sandbox-admin` from any host that can reach the stack's NATS server.
+It assumes you finished [your first sandbox lease](./first-sandbox-lease.md) and [publishing a signed snapshot](./publish-signed-snapshot.md). You also need `terraform` on your path, an AWS account with KMS and S3 permissions, and the sandbox stack deployed to a cluster with the chart in `devops/helm/charts/trogon-sandbox/`. The admin commands below run `trogon-sandbox-admin` from any host that can reach the stack's NATS server.
 
 ## What you will build
 
@@ -37,7 +37,7 @@ The module creates:
 
 ### 2. Add the tenant to the registry access control
 
-Edit `devops/helm/sandbox/values.yaml`. The registry settings sit under the `zot` key:
+Edit `devops/helm/charts/trogon-sandbox/values.yaml`. The registry settings sit under the `zot` key:
 
 ```yaml
 zot:
@@ -53,7 +53,7 @@ zot:
 Then upgrade the release:
 
 ```bash
-helm upgrade <release> devops/helm/sandbox/
+helm upgrade <release> devops/helm/charts/trogon-sandbox/
 ```
 
 This grants `sandbox-acme-puller` read-only access to the `snapshots/acme` repository. The snapshot builder identity keeps push access to `snapshots/**`.
@@ -134,7 +134,7 @@ To off-board the tenant:
 trogon-sandbox-admin api-key revoke --token <token>
 trogon-sandbox-admin tenant-limit clear --tenant acme
 trogon-sandbox-admin image-policy clear --tenant acme
-helm upgrade <release> devops/helm/sandbox/   # after removing acme from values.yaml
+helm upgrade <release> devops/helm/charts/trogon-sandbox/   # after removing acme from values.yaml
 terraform destroy -var tenant_id=acme -var region=us-east-1
 ```
 

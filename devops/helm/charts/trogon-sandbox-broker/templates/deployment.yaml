@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trogon-sandbox-broker.fullname" . }}
+  labels:
+    {{- include "trogon-sandbox-broker.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-broker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "trogon-sandbox-broker.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "trogon-sandbox-broker.fullname" . }}
+      containers:
+        - name: sandbox-broker
+          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-broker:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "trogon-sandbox-broker.fullname" . }}
+          {{- if or (not .Values.insecureDev) .Values.global.dispatchAuth }}
+          env:
+          {{- if not .Values.insecureDev }}
+            # The preshared key is read from a Secret the operator creates; it is never a value.
+            - name: SPICEDB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "global.spicedb.presharedKeySecret.name is required unless trogon-sandbox-broker.insecureDev is true" .Values.global.spicedb.presharedKeySecret.name }}
+                  key: {{ .Values.global.spicedb.presharedKeySecret.key }}
+          {{- end }}
+          {{- with .Values.global.dispatchAuth }}
+            - name: SANDBOX_DISPATCH_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .signingKeyKey }}
+          {{- end }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 15

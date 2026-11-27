@@ -1,7 +1,7 @@
 //! End to end: `SandboxClient` to the broker to `trogon-sandbox-docker-worker` to a host `docker run`.
 //!
-//! Needs NATS and the broker from `devops/docker/compose/sandbox/compose.yml` and a `trogon-sandbox-docker-worker`
-//! on the host against them, started the way `devops/docker/compose/sandbox/smoke-docker.sh` starts them and still
+//! Needs NATS and the broker from `devops/docker/compose/sandbox/compose.yaml` and a `trogon-sandbox-docker-worker`
+//! on the host against them, started the way `mise run sandbox:smoke-docker` starts them and still
 //! running, then run this lane with `--ignored`. See `stack_support` for how the lane finds NATS.
 
 mod common;

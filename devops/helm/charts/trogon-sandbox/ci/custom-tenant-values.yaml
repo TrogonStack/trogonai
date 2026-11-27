@@ -1,0 +1,7 @@
+# External SpiceDB whose schema names the tenant resource type itself.
+spicedb:
+  enabled: false
+global:
+  spicedb:
+    endpoint: authz.example:50051
+    tenantResourceType: custom_tenant

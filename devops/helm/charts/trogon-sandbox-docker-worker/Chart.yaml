@@ -1,0 +1,6 @@
+apiVersion: v2
+name: trogon-sandbox-docker-worker
+description: Helm subchart for trogon-sandbox-docker-worker
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -64,10 +64,10 @@ Point the broker and the workers at the new registry, then run a test restore le
 
 ## Periodic backup with the Helm chart
 
-The sandbox chart at `devops/helm/sandbox` ships a CronJob (`templates/cronjobs/snapshot-backup.yaml`). It renders when `backup.enabled` is true and `backup.repositories` is not empty. It runs `oras backup` for each listed repository and writes tarballs to the PVC named by `backup.storage.pvcName` (default `sandbox-backup`).
+The sandbox chart at `devops/helm/charts/trogon-sandbox` ships a CronJob (`templates/cronjobs/snapshot-backup.yaml`). It renders when `backup.enabled` is true and `backup.repositories` is not empty. It runs `oras backup` for each listed repository and writes tarballs to the PVC named by `backup.storage.pvcName` (default `sandbox-backup`).
 
 ```bash
-helm upgrade sandbox ./devops/helm/sandbox \
+helm upgrade sandbox ./devops/helm/charts/trogon-sandbox \
   --reuse-values \
   --set 'backup.repositories={snapshots/acme}' \
   --set backup.schedule='0 3 * * *'
@@ -75,7 +75,7 @@ helm upgrade sandbox ./devops/helm/sandbox \
 
 `backup.plainHttp` defaults to true for the bundled Zot registry. Set it to false for a registry behind TLS. Tarballs land in `/backup` on the volume, named `snapshot-backup-<timestamp>.tar.<repository>`.
 
-The script `devops/helm/sandbox/scripts/dr-drill.sh` rehearses the recovery. It tears down the bundled Zot, restores from the latest backup and checks that a snapshot is queryable. Set `TEST_REPO` to a repository listed in `backup.repositories`.
+The `mise run sandbox:dr-drill` task rehearses the recovery. It tears down the bundled Zot, restores from the latest backup and checks that a snapshot is queryable. Set `TEST_REPO` to a repository listed in `backup.repositories`.
 
 ## Periodic backup from an external scheduler
 

@@ -1,0 +1,6 @@
+# Local stack only: switches the broker's bearer auth, image allow-list and worker registry
+# off and does not deploy SpiceDB. Use with `helm install -f values.dev.yaml`.
+trogon-sandbox-broker:
+  insecureDev: true
+spicedb:
+  enabled: false

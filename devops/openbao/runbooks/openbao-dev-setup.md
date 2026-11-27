@@ -65,7 +65,7 @@ To apply the policies to the compose instance instead:
 cd devops/openbao/policies
 for policy in *.hcl; do
   name="${policy%.hcl}"
-  docker compose -f ../../docker/compose/compose.yml exec -T \
+  docker compose -f ../../docker/compose/compose.yaml exec -T \
     -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=local-dev-root-token openbao \
     bao policy write "${name//-/_}" - < "$policy"
 done

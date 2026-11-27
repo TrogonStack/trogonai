@@ -82,7 +82,7 @@ fences a lease only when the lease has credential references.
 | `--fence-mode` / `SANDBOX_CREDENTIAL_FENCE_MODE` | `trogon-sandbox-credential-broker` | `optional` | `required` refuses any request without a fence. |
 
 The binaries default to the permissive values, except the broker commit flag, so an upgrade does not break a running
-deployment. The Helm charts under `devops/helm/sandbox/charts` set the strict values (`commitCredentialPolicies: true`,
+deployment. The Helm charts under `devops/helm/charts` set the strict values (`commitCredentialPolicies: true`,
 `requireCommittedPolicy: true`, `fenceMode: required`).
 
 ### Rollout order

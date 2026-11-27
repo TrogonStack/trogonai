@@ -92,7 +92,7 @@ of terminate-all and secret termination and requires no binding.
 
 ## Configuring the daemon
 
-`trogon-sandbox-egress-proxyd` reads these environment variables; each is optional and unset keeps the default behavior. Workers that start the daemon pass them through, and the `sandbox-subprocess-worker` chart (`devops/helm/sandbox/charts/sandbox-subprocess-worker`) sets them from its `egressProxy` values.
+`trogon-sandbox-egress-proxyd` reads these environment variables; each is optional and unset keeps the default behavior. Workers that start the daemon pass them through, and the `trogon-sandbox-subprocess-worker` chart (`devops/helm/charts/trogon-sandbox-subprocess-worker`) sets them from its `egressProxy` values.
 
 | Variable | Effect |
 |----------|--------|

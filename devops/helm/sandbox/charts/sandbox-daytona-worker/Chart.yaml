@@ -1,6 +1,0 @@
-apiVersion: v2
-name: sandbox-daytona-worker
-description: Helm subchart for sandbox-daytona-worker
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

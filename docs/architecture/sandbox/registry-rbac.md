@@ -2,7 +2,7 @@
 
 This page explains how the Zot snapshot store enforces tenant isolation. Only the platform identity may push artifacts. Tenants may pull only their own repository. Anonymous access is denied.
 
-The configuration lives in the Zot Helm subchart, `devops/helm/sandbox/charts/zot/`. The chart renders it into `http.accessControl` in the Zot configuration, and also emits a standalone reference ConfigMap from `templates/access-control-configmap.yaml`.
+The configuration lives in the Zot Helm subchart, `devops/helm/charts/zot/`. The chart renders it into `http.accessControl` in the Zot configuration, and also emits a standalone reference ConfigMap from `templates/access-control-configmap.yaml`.
 
 ## Trust model
 

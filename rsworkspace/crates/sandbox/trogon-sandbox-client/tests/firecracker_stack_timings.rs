@@ -1,5 +1,5 @@
 //! Lease-to-ready timings against the same stack as `firecracker_stack_smoke`, one lease at a time and four at once.
-//! `devops/docker/compose/sandbox/smoke-firecracker.sh` runs this file on its own, after the other lanes, so nothing
+//! `mise run sandbox:smoke-firecracker` runs this file on its own, after the other lanes, so nothing
 //! else competes for the host while it measures.
 
 mod common;
@@ -42,7 +42,7 @@ fn summary(samples: &mut [Duration]) -> String {
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn lease_to_ready_one_at_a_time_and_four_at_once() -> TestResult {
     let client = &stack_support::connect().await?;
 

@@ -51,7 +51,7 @@ SANDBOX_POD_RUNTIME_CLASS_MICRO_VM=kata
 SANDBOX_POD_RUNTIME_CLASS_USER_SPACE_KERNEL=gvisor
 ```
 
-The `sandbox-k8s-worker` chart sets `SANDBOX_POD_RUNTIME_CLASS` from its
+The `trogon-sandbox-k8s-worker` chart sets `SANDBOX_POD_RUNTIME_CLASS` from its
 `runtimeClass` value, whose default `kata-fc` does not exist on Talos, so
 install it with `--set runtimeClass=kata`. The per-tier variables are not
 chart values; set them on the worker Deployment if you need a separate
