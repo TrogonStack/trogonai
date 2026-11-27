@@ -16,6 +16,22 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:trogon-peer:peer",
+            "tool": "peer_detach_hook",
+            "timeout": 1,
+            "input": {
+              "session_id": "${session_id}",
+              "hook_event_name": "${hook_event_name}"
+            }
+          }
+        ]
+      }
     ]
   }
 }

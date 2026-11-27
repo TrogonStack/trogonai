@@ -1,6 +1,10 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 
+use std::future::Future as _;
+use std::future::poll_fn;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
+use trogon_peer_mcp::AvailabilityObservation;
 
 use buffa::MessageField;
 use rmcp::model::{CallToolRequestParams, CallToolResult};
@@ -18,6 +22,8 @@ type EnrollmentMutationCase = (&'static str, fn(&mut Value));
 enum ObservedCall {
     Enroll(v1::EnrollRequest),
     Prepare(v1::PrepareBatchRequest),
+    Heartbeat(v1::HeartbeatRequest),
+    Detach(v1::DetachRequest),
 }
 
 #[derive(Clone)]
@@ -25,13 +31,40 @@ struct Backend {
     calls: Arc<Mutex<Vec<ObservedCall>>>,
     response: v1::PrepareBatchResponse,
     enrollment: Arc<Mutex<v1::EnrollResponse>>,
+    committed_enrollments: Arc<Mutex<Vec<v1::EnrollRequest>>>,
+    enrollment_committed: Arc<tokio::sync::Notify>,
     fail_enroll: bool,
     pause_enroll: Arc<std::sync::atomic::AtomicBool>,
     enroll_behavior: EnrollDelay,
     fail_prepare: Arc<std::sync::atomic::AtomicBool>,
+    pause_prepare: Arc<std::sync::atomic::AtomicBool>,
+    prepare_entered: Arc<tokio::sync::Notify>,
+    prepare_dropped: Arc<std::sync::atomic::AtomicUsize>,
+    pause_heartbeat: Arc<std::sync::atomic::AtomicBool>,
+    heartbeat_entered: Arc<tokio::sync::Notify>,
+    heartbeat_inflight: Arc<std::sync::atomic::AtomicUsize>,
+    enroll_overlapped_heartbeat: Arc<std::sync::atomic::AtomicBool>,
     enroll_delay: std::time::Duration,
     prepare_delay: std::time::Duration,
     prepare_completion_at: Option<tokio::time::Instant>,
+    detach_delay: std::time::Duration,
+    fail_detach: Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct PendingHeartbeat(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for PendingHeartbeat {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+struct PendingPrepare(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for PendingPrepare {
+    fn drop(&mut self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 #[derive(Clone)]
@@ -39,8 +72,6 @@ enum EnrollDelay {
     None,
     /// Moves the paused tokio clock forward while the enrollment future runs.
     Advance(std::time::Duration),
-    /// The first enrollment yields once, then blocks the executor thread.
-    BlockOnce(std::time::Duration, Arc<std::sync::atomic::AtomicBool>),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -106,10 +137,19 @@ fn enrollment() -> v1::EnrollResponse {
 impl EnrollPeer for Backend {
     type Error = UnconfiguredOperationError;
     async fn enroll(&self, request: v1::EnrollRequest) -> Result<v1::EnrollResponse, Self::Error> {
+        if self.heartbeat_inflight.load(std::sync::atomic::Ordering::SeqCst) != 0 {
+            self.enroll_overlapped_heartbeat
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         self.calls
             .lock()
             .expect("call recorder")
-            .push(ObservedCall::Enroll(request));
+            .push(ObservedCall::Enroll(request.clone()));
+        self.committed_enrollments
+            .lock()
+            .expect("remote enrollment state")
+            .push(request);
+        self.enrollment_committed.notify_one();
         if self.pause_enroll.load(std::sync::atomic::Ordering::SeqCst) {
             std::future::pending::<()>().await;
         }
@@ -119,12 +159,6 @@ impl EnrollPeer for Backend {
         match &self.enroll_behavior {
             EnrollDelay::None => {}
             EnrollDelay::Advance(duration) => tokio::time::advance(*duration).await,
-            EnrollDelay::BlockOnce(duration, started) => {
-                if !started.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                    tokio::task::yield_now().await;
-                    std::thread::sleep(*duration);
-                }
-            }
         }
         if self.fail_enroll {
             return Err(UnconfiguredOperationError);
@@ -141,6 +175,11 @@ impl PreparePeerBatch for Backend {
             .lock()
             .expect("call recorder")
             .push(ObservedCall::Prepare(request));
+        if self.pause_prepare.load(std::sync::atomic::Ordering::SeqCst) {
+            let _pending = PendingPrepare(self.prepare_dropped.clone());
+            self.prepare_entered.notify_one();
+            std::future::pending::<()>().await;
+        }
         if let Some(completion_at) = self.prepare_completion_at {
             tokio::time::sleep_until(completion_at).await;
         } else if !self.prepare_delay.is_zero() {
@@ -192,13 +231,24 @@ fn backend(response: v1::PrepareBatchResponse) -> Backend {
         calls: Arc::new(Mutex::new(Vec::new())),
         response,
         enrollment: Arc::new(Mutex::new(enrollment())),
+        committed_enrollments: Arc::new(Mutex::new(Vec::new())),
+        enrollment_committed: Arc::new(tokio::sync::Notify::new()),
         fail_enroll: false,
         pause_enroll: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         enroll_behavior: EnrollDelay::None,
         fail_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        pause_prepare: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        prepare_entered: Arc::new(tokio::sync::Notify::new()),
+        prepare_dropped: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        pause_heartbeat: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        heartbeat_entered: Arc::new(tokio::sync::Notify::new()),
+        heartbeat_inflight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        enroll_overlapped_heartbeat: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         enroll_delay: std::time::Duration::ZERO,
         prepare_delay: std::time::Duration::ZERO,
         prepare_completion_at: None,
+        detach_delay: std::time::Duration::ZERO,
+        fail_detach: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }
 }
 
@@ -1142,7 +1192,7 @@ async fn wire_results(adapter: PeerMcp<Backend>, requests: Vec<CallToolRequestPa
     });
     let client = ().serve(client_transport).await.expect("client handshake");
     let tools = client.list_all_tools().await.expect("list tools");
-    assert_eq!(tools.len(), 5);
+    assert_eq!(tools.len(), 6);
     assert!(tools.iter().any(|tool| tool.name == "peer_prompt_hook"));
     let mut results = Vec::new();
     for request in requests {
@@ -1276,6 +1326,7 @@ async fn native_prompt_deadline_covers_the_complete_work_and_lock_wait() {
     assert!(calls.lock().expect("calls").iter().all(|call| match call {
         ObservedCall::Enroll(request) => request.native_session_id.as_deref() == Some("native_b"),
         ObservedCall::Prepare(request) => request.attachment_ref.generation == Some(1),
+        _ => false,
     }));
 }
 
@@ -1329,6 +1380,531 @@ async fn completed_prompt_outcome_at_deadline_is_preserved() {
     }
 }
 
+impl trogon_peer_mcp::HeartbeatPeer for Backend {
+    type Error = UnconfiguredOperationError;
+    async fn heartbeat(&self, request: v1::HeartbeatRequest) -> Result<v1::HeartbeatResponse, Self::Error> {
+        self.calls.lock().expect("calls").push(ObservedCall::Heartbeat(request));
+        if self.pause_heartbeat.load(std::sync::atomic::Ordering::SeqCst) {
+            self.heartbeat_inflight
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _pending = PendingHeartbeat(self.heartbeat_inflight.clone());
+            self.heartbeat_entered.notify_one();
+            std::future::pending::<()>().await;
+        }
+        Ok(Default::default())
+    }
+}
+
+impl trogon_peer_mcp::DetachPeer for Backend {
+    type Error = UnconfiguredOperationError;
+    async fn detach(&self, request: v1::DetachRequest) -> Result<v1::DetachResponse, Self::Error> {
+        self.calls.lock().expect("calls").push(ObservedCall::Detach(request));
+        tokio::time::sleep(self.detach_delay).await;
+        if self.fail_detach.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(UnconfiguredOperationError);
+        }
+        Ok(Default::default())
+    }
+}
+
+fn detach(session: &str) -> CallToolRequestParams {
+    request(
+        "peer_detach_hook",
+        json!({"session_id": session, "hook_event_name":"SessionEnd"}),
+    )
+}
+
+#[tokio::test(start_paused = true)]
+async fn lifecycle_heartbeats_only_bound_attachments_and_terminal_detach_stops_them() {
+    let backend = backend(Default::default());
+    let calls = backend.calls.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    let loop_task = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move {
+            adapter
+                .run_heartbeat(trogon_peer_mcp::AvailabilityObservation::Ready)
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    assert!(calls.lock().expect("calls").is_empty());
+    adapter.invoke(prompt("native_b", "stable")).await.expect("bind");
+    tokio::task::yield_now().await;
+    for _ in 0..2 {
+        tokio::time::advance(std::time::Duration::from_secs(2)).await;
+        tokio::task::yield_now().await;
+    }
+    let heartbeats: Vec<_> = calls
+        .lock()
+        .expect("calls")
+        .iter()
+        .filter_map(|call| match call {
+            ObservedCall::Heartbeat(request) => Some(request.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(heartbeats.len(), 2, "each two-second bound interval reports liveness");
+    for heartbeat in heartbeats {
+        assert_eq!(heartbeat.attachment_ref.as_option(), Some(&attachment()));
+        assert_eq!(
+            heartbeat.availability.and_then(|v| v.as_known()),
+            Some(v1::PeerAvailability::PEER_AVAILABILITY_READY)
+        );
+        assert!(!heartbeat.active_at.is_set());
+        assert!(heartbeat.condition.is_none());
+    }
+    adapter.invoke(detach("native_b")).await.expect("native detach");
+    loop_task.await.expect("heartbeat settles");
+    let before = calls.lock().expect("calls").len();
+    adapter.invoke(detach("native_b")).await.expect("repeat detach");
+    adapter.shutdown().await.expect("repeat shutdown");
+    tokio::time::advance(std::time::Duration::from_secs(20)).await;
+    assert!(adapter.invoke(prompt("native_b", "later")).await.is_err());
+    assert_eq!(calls.lock().expect("calls").len(), before);
+}
+
+#[tokio::test(start_paused = true)]
+async fn lifecycle_detach_is_strict_unbound_idempotent_and_total_budgeted() {
+    let mut backend = backend(Default::default());
+    backend.detach_delay = std::time::Duration::from_secs(3);
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    adapter.invoke(detach("native_b")).await.expect("unbound detach");
+    assert!(calls.lock().expect("calls").is_empty());
+    adapter.invoke(prompt("native_b", "stable")).await.expect("bind");
+    let before = calls.lock().expect("calls").len();
+    for bad in [
+        detach("native_c"),
+        detach(""),
+        request(
+            "peer_detach_hook",
+            json!({"session_id":"native_b", "hook_event_name":"UserPromptSubmit"}),
+        ),
+        request(
+            "peer_detach_hook",
+            json!({"session_id":"native_b", "hook_event_name":"SessionEnd", "prompt":"private body"}),
+        ),
+    ] {
+        assert!(adapter.invoke(bad).await.is_err());
+    }
+    assert_eq!(calls.lock().expect("calls").len(), before);
+    let started = tokio::time::Instant::now();
+    assert!(adapter.invoke(detach("native_b")).await.is_err());
+    assert_eq!(started.elapsed(), std::time::Duration::from_secs(1));
+    assert!(adapter.invoke(prompt("native_b", "later")).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn lifecycle_detach_retries_keep_attachment_and_never_enroll() {
+    let backend = backend(Default::default());
+    let failing = backend.fail_detach.clone();
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    adapter.invoke(prompt("native_b", "stable")).await.expect("bind");
+    failing.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(adapter.invoke(detach("native_b")).await.is_err());
+    failing.store(false, std::sync::atomic::Ordering::SeqCst);
+    adapter.invoke(detach("native_b")).await.expect("retry");
+    let calls = calls.lock().expect("calls");
+    assert_eq!(calls.len(), 4);
+    assert_eq!(
+        calls[2],
+        ObservedCall::Detach(v1::DetachRequest {
+            attachment_ref: attachment().into()
+        })
+    );
+    assert_eq!(calls[2], calls[3]);
+}
+
+#[test]
+fn lifecycle_detach_schema_is_exact() {
+    let adapter = PeerMcp::new(backend(Default::default()), config()).expect("config");
+    let tool = adapter.get_tool("peer_detach_hook").expect("detach tool");
+    let schema = serde_json::to_value(tool.input_schema).expect("schema");
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(schema["properties"].as_object().expect("properties").len(), 2);
+    assert_eq!(
+        schema["properties"]["hook_event_name"]["$ref"],
+        json!("#/$defs/DetachHookEvent")
+    );
+    assert_eq!(schema["$defs"]["DetachHookEvent"]["enum"], json!(["SessionEnd"]));
+}
+
+#[tokio::test(start_paused = true)]
+async fn detach_cannot_confirm_a_cancelled_remotely_committed_enrollment() {
+    for shutdown in [false, true] {
+        let mut backend = backend(Default::default());
+        backend.enroll_delay = std::time::Duration::from_secs(3);
+        let committed = backend.committed_enrollments.clone();
+        let enrollment_committed = backend.enrollment_committed.clone();
+        let calls = backend.calls.clone();
+        let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+        let prompt_task = {
+            let adapter = adapter.clone();
+            tokio::spawn(async move { adapter.invoke(prompt("native_b", "stable_prompt")).await })
+        };
+        enrollment_committed.notified().await;
+        assert_eq!(committed.lock().expect("remote enrollment state").len(), 1);
+
+        let outcome = if shutdown {
+            adapter.shutdown().await
+        } else {
+            adapter.invoke(detach("native_b")).await.map(|_| ())
+        };
+
+        assert!(
+            matches!(outcome, Err(PeerMcpError::EnrollmentUncertain)),
+            "detach must retain uncertainty after an enrollment reply is lost"
+        );
+        assert!(matches!(
+            prompt_task.await.expect("prompt task"),
+            Err(PeerMcpError::Detached)
+        ));
+        assert!(matches!(
+            adapter.invoke(detach("native_b")).await,
+            Err(PeerMcpError::EnrollmentUncertain)
+        ));
+        assert!(matches!(
+            adapter.shutdown().await,
+            Err(PeerMcpError::EnrollmentUncertain)
+        ));
+        assert!(matches!(
+            adapter.invoke(prompt("native_b", "stable_prompt")).await,
+            Err(PeerMcpError::Detached)
+        ));
+        assert_eq!(committed.lock().expect("remote enrollment state").len(), 1);
+        assert_eq!(
+            calls.lock().expect("calls").len(),
+            1,
+            "no invented attachment or recovery enrollment"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn lifecycle_preserves_every_explicit_availability_without_inventing_activity() {
+    for (observation, expected) in [
+        (
+            AvailabilityObservation::Ready,
+            v1::PeerAvailability::PEER_AVAILABILITY_READY,
+        ),
+        (
+            AvailabilityObservation::Busy,
+            v1::PeerAvailability::PEER_AVAILABILITY_BUSY,
+        ),
+        (
+            AvailabilityObservation::Blocked,
+            v1::PeerAvailability::PEER_AVAILABILITY_BLOCKED,
+        ),
+        (
+            AvailabilityObservation::Draining,
+            v1::PeerAvailability::PEER_AVAILABILITY_DRAINING,
+        ),
+    ] {
+        let backend = backend(Default::default());
+        let calls = backend.calls.clone();
+        let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+        adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+        let heartbeats = {
+            let adapter = adapter.clone();
+            tokio::spawn(async move { adapter.run_heartbeat(observation).await })
+        };
+        tokio::task::yield_now().await;
+        tokio::time::advance(std::time::Duration::from_secs(2)).await;
+        tokio::task::yield_now().await;
+        let observed: Vec<_> = calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .filter_map(|call| match call {
+                ObservedCall::Heartbeat(request) => Some(request.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(observed.len(), 1, "one reporting interval must emit one heartbeat");
+        assert_eq!(
+            observed[0].availability.as_ref().and_then(|value| value.as_known()),
+            Some(expected)
+        );
+        assert_eq!(observed[0].attachment_ref.as_option(), Some(&attachment()));
+        assert!(
+            !observed[0].active_at.is_set(),
+            "liveness must not fabricate model progress"
+        );
+        assert!(
+            observed[0].condition.is_none(),
+            "liveness must not fabricate a host condition"
+        );
+        adapter.shutdown().await.expect("detach");
+        heartbeats.await.expect("heartbeat exits after terminal shutdown");
+    }
+}
+
+#[tokio::test]
+async fn jsonrpc_terminal_detach_rejects_all_model_operations_before_backend_access() {
+    let backend = backend(Default::default());
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    let results = wire_results(
+        adapter,
+        vec![
+            prompt("native_b", "initial"),
+            detach("native_b"),
+            request("peer_roster", json!({})),
+            request(
+                "peer_send",
+                json!({"recipient_peer_id":sender_peer_id(),"idempotency_key":"after_detach","text":"must stay local"}),
+            ),
+            request("peer_status", json!({"idempotency_key":"after_detach"})),
+            request("peer_acknowledge_batch", json!({"batch_id":"batch_1"})),
+        ],
+    )
+    .await;
+    for result in &results[2..] {
+        assert_wire_error(result, "Peer connector is detached; start a new connector runtime.");
+    }
+    assert_eq!(
+        calls.lock().expect("calls").len(),
+        3,
+        "detached tools must not reach any backend port"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn jsonrpc_detach_failure_and_deadline_report_uncertainty_without_backend_details() {
+    for deadline in [false, true] {
+        let mut backend = backend(Default::default());
+        if deadline {
+            backend.detach_delay = std::time::Duration::from_secs(3);
+        } else {
+            backend.fail_detach.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        let calls = backend.calls.clone();
+        let adapter = PeerMcp::new(backend, config()).expect("config");
+        let results = wire_results(adapter, vec![prompt("native_b", "initial"), detach("native_b")]).await;
+        assert_wire_error(
+            &results[1],
+            "Peer detach was not confirmed; lease expiry remains the fallback.",
+        );
+        assert_eq!(
+            calls.lock().expect("calls").len(),
+            3,
+            "failed detach must not invent an enrollment retry"
+        );
+    }
+}
+
+#[test]
+fn invalid_connector_values_are_rejected_at_construction_without_backend_effects() {
+    let invalidators: [fn(&mut ConnectorConfigInput); 4] = [
+        |input| input.installation_id.clear(),
+        |input| input.connector_id.clear(),
+        |input| input.collaboration_ref.clear(),
+        |input| input.display_name.clear(),
+    ];
+    for invalidate in invalidators {
+        let mut input = config();
+        invalidate(&mut input);
+        let backend = backend(Default::default());
+        let calls = backend.calls.clone();
+        assert!(matches!(
+            PeerMcp::new(backend, input),
+            Err(PeerMcpError::InvalidConfig(_))
+        ));
+        assert!(calls.lock().expect("calls").is_empty());
+    }
+}
+
+#[tokio::test]
+async fn shutdown_without_a_reserved_native_session_never_contacts_the_backend() {
+    let backend = backend(Default::default());
+    let calls = backend.calls.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    adapter.shutdown().await.expect("no session needs detach");
+    adapter.shutdown().await.expect("repeated empty shutdown");
+    assert!(calls.lock().expect("calls").is_empty());
+    assert!(matches!(
+        adapter.invoke(prompt("native_b", "after_shutdown")).await,
+        Err(PeerMcpError::Detached)
+    ));
+    assert!(calls.lock().expect("calls").is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_model_operation_queued_behind_uncertain_enrollment_observes_terminal_shutdown() {
+    let mut backend = backend(Default::default());
+    backend.enroll_delay = std::time::Duration::from_secs(3);
+    let calls = backend.calls.clone();
+    let committed = backend.committed_enrollments.clone();
+    let adapter = PeerMcp::new(backend, config()).expect("config");
+    let enrollment = adapter.invoke(prompt("native_b", "pending_enrollment"));
+    tokio::pin!(enrollment);
+    assert!(poll_fn(|cx| Poll::Ready(enrollment.as_mut().poll(cx).is_pending())).await);
+    assert_eq!(committed.lock().expect("remote enrollment state").len(), 1);
+
+    let model = adapter.invoke(request("peer_roster", json!({})));
+    tokio::pin!(model);
+    assert!(poll_fn(|cx| Poll::Ready(model.as_mut().poll(cx).is_pending())).await);
+    let shutdown = adapter.shutdown();
+    tokio::pin!(shutdown);
+    assert!(poll_fn(|cx| Poll::Ready(shutdown.as_mut().poll(cx).is_pending())).await);
+
+    assert!(matches!(enrollment.await, Err(PeerMcpError::Detached)));
+    assert!(matches!(model.await, Err(PeerMcpError::Detached)));
+    assert!(matches!(shutdown.await, Err(PeerMcpError::EnrollmentUncertain)));
+    assert!(matches!(
+        adapter.shutdown().await,
+        Err(PeerMcpError::EnrollmentUncertain)
+    ));
+    assert_eq!(committed.lock().expect("remote enrollment state").len(), 1);
+    assert_eq!(calls.lock().expect("calls").len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn heartbeat_uses_the_latest_valid_attachment_after_same_native_session_revalidation() {
+    let backend = backend(Default::default());
+    let calls = backend.calls.clone();
+    let enrollment_response = backend.enrollment.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter
+        .invoke(prompt("native_b", "generation_1"))
+        .await
+        .expect("first binding");
+    let loop_task = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move {
+            adapter
+                .run_heartbeat(trogon_peer_mcp::AvailabilityObservation::Ready)
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    let first: Vec<_> = calls
+        .lock()
+        .expect("calls")
+        .iter()
+        .filter_map(|call| match call {
+            ObservedCall::Heartbeat(request) => Some(request.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].attachment_ref.as_option(), Some(&attachment()));
+    let mut replacement = enrollment();
+    replacement
+        .attachment
+        .as_option_mut()
+        .expect("valid lease")
+        .attachment_ref
+        .as_option_mut()
+        .expect("valid attachment")
+        .generation = Some(2);
+    *enrollment_response.lock().expect("enrollment response") = replacement;
+    adapter
+        .invoke(prompt("native_b", "generation_2"))
+        .await
+        .expect("same native session revalidation");
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    let mut expected = attachment();
+    expected.generation = Some(2);
+    {
+        let observed = calls.lock().expect("calls");
+        let enrollments: Vec<_> = observed
+            .iter()
+            .filter_map(|call| match call {
+                ObservedCall::Enroll(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(enrollments.len(), 2);
+        assert!(
+            enrollments
+                .iter()
+                .all(|request| request.native_session_id.as_deref() == Some("native_b"))
+        );
+        let preparations: Vec<_> = observed
+            .iter()
+            .filter_map(|call| match call {
+                ObservedCall::Prepare(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(preparations.len(), 2);
+        assert_eq!(preparations[0].attachment_ref.as_option(), Some(&attachment()));
+        assert_eq!(preparations[1].attachment_ref.as_option(), Some(&expected));
+        let heartbeats: Vec<_> = observed
+            .iter()
+            .filter_map(|call| match call {
+                ObservedCall::Heartbeat(request) => Some(request),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(heartbeats.len(), 2);
+        assert_eq!(heartbeats[0].attachment_ref.as_option(), Some(&attachment()));
+        assert_eq!(heartbeats[1].attachment_ref.as_option(), Some(&expected));
+        for heartbeat in heartbeats {
+            assert_eq!(
+                heartbeat.availability.as_ref().and_then(|value| value.as_known()),
+                Some(v1::PeerAvailability::PEER_AVAILABILITY_READY)
+            );
+            assert!(!heartbeat.active_at.is_set());
+            assert!(heartbeat.condition.is_none());
+        }
+    }
+    adapter.shutdown().await.expect("detach latest attachment");
+    loop_task.await.expect("heartbeat settles after shutdown");
+    let observed = calls.lock().expect("calls");
+    let detaches: Vec<_> = observed
+        .iter()
+        .filter_map(|call| match call {
+            ObservedCall::Detach(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(detaches.len(), 1);
+    assert_eq!(detaches[0].attachment_ref.as_option(), Some(&expected));
+}
+
+#[tokio::test(start_paused = true)]
+async fn heartbeat_waits_for_a_confirmed_attachment_when_the_native_session_is_only_reserved() {
+    let mut backend = backend(Default::default());
+    backend.enroll_delay = std::time::Duration::from_secs(3);
+    let calls = backend.calls.clone();
+    let committed = backend.committed_enrollments.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    let enrollment = adapter.invoke(prompt("native_b", "reserved_session"));
+    tokio::pin!(enrollment);
+    assert!(poll_fn(|cx| Poll::Ready(enrollment.as_mut().poll(cx).is_pending())).await);
+    assert_eq!(committed.lock().expect("remote enrollment state").len(), 1);
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move {
+            adapter
+                .run_heartbeat(trogon_peer_mcp::AvailabilityObservation::Ready)
+                .await
+        })
+    };
+    tokio::task::yield_now().await;
+    assert_eq!(
+        calls.lock().expect("calls").len(),
+        1,
+        "an unconfirmed attachment must not emit a heartbeat"
+    );
+    let shutdown = adapter.shutdown();
+    tokio::pin!(shutdown);
+    assert!(poll_fn(|cx| Poll::Ready(shutdown.as_mut().poll(cx).is_pending())).await);
+    assert!(matches!(enrollment.await, Err(PeerMcpError::Detached)));
+    assert!(matches!(shutdown.await, Err(PeerMcpError::EnrollmentUncertain)));
+    heartbeat.await.expect("heartbeat settles after terminal cancellation");
+    assert_eq!(committed.lock().expect("remote enrollment state").len(), 1);
+    assert_eq!(calls.lock().expect("calls").len(), 1);
+}
+
 #[tokio::test]
 async fn plugin_declared_hooks_are_listed_and_invoke_through_public_mcp() {
     let adapter = PeerMcp::new(backend(Default::default()), config()).expect("config");
@@ -1379,6 +1955,148 @@ async fn plugin_declared_hooks_are_listed_and_invoke_through_public_mcp() {
     server.await.expect("server task");
 }
 
+#[tokio::test(start_paused = true)]
+async fn prompt_preempts_background_heartbeat_without_spending_its_delivery_budget() {
+    let mut backend = backend(prepared("context after heartbeat contention"));
+    backend.enroll_delay = std::time::Duration::from_millis(50);
+    backend.pause_heartbeat.store(true, std::sync::atomic::Ordering::SeqCst);
+    let entered = backend.heartbeat_entered.clone();
+    let inflight = backend.heartbeat_inflight.clone();
+    let overlap = backend.enroll_overlapped_heartbeat.clone();
+    let calls = backend.calls.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move {
+            adapter.run_heartbeat(AvailabilityObservation::Ready).await;
+        })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    entered.notified().await;
+
+    let started = tokio::time::Instant::now();
+    let outcome = adapter.invoke(prompt("native_b", "contended")).await;
+    let elapsed = started.elapsed();
+    assert_eq!(inflight.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(
+        !overlap.load(std::sync::atomic::Ordering::SeqCst),
+        "heartbeat future must drop before enrollment starts"
+    );
+    adapter.shutdown().await.expect("shutdown");
+    heartbeat.await.expect("heartbeat settles");
+
+    let result = hook_json(outcome.expect("prompt must not wait for background heartbeat"));
+    assert!(
+        result["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .expect("context")
+            .contains("context after heartbeat contention")
+    );
+    assert_eq!(elapsed, std::time::Duration::from_millis(50));
+    let calls = calls.lock().expect("calls");
+    assert!(matches!(calls[2], ObservedCall::Heartbeat(_)));
+    assert!(matches!(calls[3], ObservedCall::Enroll(_)));
+    assert!(matches!(calls[4], ObservedCall::Prepare(_)));
+    assert!(matches!(calls[5], ObservedCall::Detach(_)));
+    assert_eq!(
+        calls.len(),
+        6,
+        "preemption must not retry or overlap backend operations"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn invalid_native_session_cannot_preempt_background_heartbeat() {
+    let backend = backend(Default::default());
+    backend.pause_heartbeat.store(true, std::sync::atomic::Ordering::SeqCst);
+    let entered = backend.heartbeat_entered.clone();
+    let inflight = backend.heartbeat_inflight.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.run_heartbeat(AvailabilityObservation::Ready).await })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    entered.notified().await;
+
+    let outcome = adapter.invoke(prompt("native_other", "wrong_session")).await;
+    let remaining = inflight.load(std::sync::atomic::Ordering::SeqCst);
+    let malformed = adapter.invoke(prompt("", "malformed_session")).await;
+    let after_malformed = inflight.load(std::sync::atomic::Ordering::SeqCst);
+    adapter.shutdown().await.expect("shutdown");
+    heartbeat.await.expect("heartbeat settles");
+
+    assert!(matches!(outcome, Err(PeerMcpError::NativeSessionChanged)));
+    assert_eq!(remaining, 1, "a foreign native session must not cancel liveness work");
+    assert!(matches!(malformed, Err(PeerMcpError::InvalidHostIdentity(_))));
+    assert_eq!(
+        after_malformed, 1,
+        "a malformed native identity must not cancel liveness work"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn prompt_preempts_queued_heartbeat_without_cancelling_foreground_work() {
+    let backend = backend(prepared("context after queued heartbeat"));
+    backend.pause_heartbeat.store(true, std::sync::atomic::Ordering::SeqCst);
+    let prepare_paused = backend.pause_prepare.clone();
+    let prepare_entered = backend.prepare_entered.clone();
+    let prepare_dropped = backend.prepare_dropped.clone();
+    let calls = backend.calls.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.run_heartbeat(AvailabilityObservation::Ready).await })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_millis(1900)).await;
+    prepare_paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    let foreground = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.invoke(prompt("native_b", "busy")).await })
+    };
+    prepare_entered.notified().await;
+    tokio::time::advance(std::time::Duration::from_millis(100)).await;
+    tokio::task::yield_now().await;
+    let delivery = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.invoke(prompt("native_b", "next")).await })
+    };
+    tokio::task::yield_now().await;
+    assert!(
+        !foreground.is_finished(),
+        "prompt arrival must not cancel foreground preparation"
+    );
+    assert_eq!(prepare_dropped.load(std::sync::atomic::Ordering::SeqCst), 0);
+    prepare_paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    foreground.abort();
+    assert!(foreground.await.expect_err("explicit test cancellation").is_cancelled());
+    let outcome = delivery.await.expect("delivery task");
+    adapter.shutdown().await.expect("shutdown");
+    heartbeat.await.expect("heartbeat settles");
+
+    let result = hook_json(outcome.expect("queued background heartbeat must not take the prompt lock"));
+    assert!(
+        result["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .expect("context")
+            .contains("context after queued heartbeat")
+    );
+    assert_eq!(prepare_dropped.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(
+        calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .all(|call| !matches!(call, ObservedCall::Heartbeat(_)))
+    );
+}
+
 #[tokio::test]
 async fn cancelled_reenrollment_does_not_reuse_the_prior_model_attachment() {
     let backend = backend(Default::default());
@@ -1400,6 +2118,138 @@ async fn cancelled_reenrollment_does_not_reuse_the_prior_model_attachment() {
         adapter.invoke(request("peer_roster", json!({}))).await,
         Err(PeerMcpError::EnrollmentUncertain)
     ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn lost_reenrollment_reply_cannot_confirm_detach_with_the_prior_generation() {
+    for shutdown in [false, true] {
+        for deadline in [false, true] {
+            let backend = backend(Default::default());
+            let paused = backend.pause_enroll.clone();
+            let calls = backend.calls.clone();
+            let response = backend.enrollment.clone();
+            let committed = backend.committed_enrollments.clone();
+            let adapter = PeerMcp::new(backend, config()).expect("config");
+            adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+            response
+                .lock()
+                .expect("response")
+                .attachment
+                .as_option_mut()
+                .expect("lease")
+                .attachment_ref
+                .as_option_mut()
+                .expect("attachment")
+                .generation = Some(2);
+            paused.store(true, std::sync::atomic::Ordering::SeqCst);
+            {
+                let enrollment = adapter.invoke(prompt("native_b", "generation_2"));
+                tokio::pin!(enrollment);
+                assert!(poll_fn(|cx| Poll::Ready(enrollment.as_mut().poll(cx).is_pending())).await);
+                assert_eq!(committed.lock().expect("remote enrollment state").len(), 2);
+                if deadline {
+                    assert!(matches!(enrollment.await, Err(PeerMcpError::PromptDeadline)));
+                }
+            }
+
+            let result = if shutdown {
+                adapter.shutdown().await
+            } else {
+                adapter.invoke(detach("native_b")).await.map(|_| ())
+            };
+            assert!(
+                matches!(result, Err(PeerMcpError::EnrollmentUncertain)),
+                "a lost generation-two reply must not confirm generation-one detach"
+            );
+            assert!(matches!(
+                adapter.shutdown().await,
+                Err(PeerMcpError::EnrollmentUncertain)
+            ));
+            assert_eq!(
+                calls.lock().expect("calls").len(),
+                3,
+                "no stale detach or recovery enrollment"
+            );
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn lost_reenrollment_reply_suspends_stale_attachment_use_until_valid_retry() {
+    let backend = backend(Default::default());
+    let paused = backend.pause_enroll.clone();
+    let calls = backend.calls.clone();
+    let response = backend.enrollment.clone();
+    let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+    adapter.invoke(prompt("native_b", "initial")).await.expect("bind");
+    let heartbeat = {
+        let adapter = adapter.clone();
+        tokio::spawn(async move { adapter.run_heartbeat(AvailabilityObservation::Ready).await })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    let heartbeat_count = || {
+        calls
+            .lock()
+            .expect("calls")
+            .iter()
+            .filter(|call| matches!(call, ObservedCall::Heartbeat(_)))
+            .count()
+    };
+    assert_eq!(heartbeat_count(), 1);
+    response
+        .lock()
+        .expect("response")
+        .attachment
+        .as_option_mut()
+        .expect("lease")
+        .attachment_ref
+        .as_option_mut()
+        .expect("attachment")
+        .generation = Some(2);
+    paused.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(matches!(
+        adapter.invoke(prompt("native_b", "generation_2")).await,
+        Err(PeerMcpError::PromptDeadline)
+    ));
+    let before = heartbeat_count();
+    for _ in 0..3 {
+        tokio::time::advance(std::time::Duration::from_secs(2)).await;
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        heartbeat_count(),
+        before,
+        "uncertain enrollment cannot advertise the prior generation"
+    );
+    assert!(matches!(
+        adapter.invoke(request("peer_roster", json!({}))).await,
+        Err(PeerMcpError::EnrollmentUncertain)
+    ));
+    paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    adapter
+        .invoke(prompt("native_b", "generation_2"))
+        .await
+        .expect("valid retry rebinds generation two");
+    tokio::time::advance(std::time::Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(heartbeat_count(), before + 1);
+    adapter.shutdown().await.expect("detach validated generation two");
+    heartbeat.await.expect("heartbeat task");
+    let observed = calls.lock().expect("calls");
+    let Some(ObservedCall::Detach(detach)) = observed.last() else {
+        panic!("detach");
+    };
+    assert_eq!(detach.attachment_ref.generation, Some(2));
+    let Some(ObservedCall::Heartbeat(heartbeat)) = observed
+        .iter()
+        .rev()
+        .find(|call| matches!(call, ObservedCall::Heartbeat(_)))
+    else {
+        panic!("heartbeat");
+    };
+    assert_eq!(heartbeat.attachment_ref.generation, Some(2));
 }
 
 #[tokio::test]
@@ -1477,6 +2327,123 @@ async fn malformed_reenrollment_suspends_model_authority_until_valid_retry() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn malformed_reenrollment_reply_cannot_restore_prior_lifecycle_authority() {
+    let mutations: [EnrollmentMutationCase; 10] = [
+        ("missing peer", |response| response["peerId"] = Value::Null),
+        ("invalid peer", |response| response["peerId"] = json!("invalid")),
+        ("missing lease", |response| response["attachment"] = Value::Null),
+        ("detached lease", |response| {
+            response["attachment"]["status"] = json!("ATTACHMENT_STATUS_DETACHED")
+        }),
+        ("missing observation", |response| {
+            response["attachment"]["observedAt"] = Value::Null
+        }),
+        ("expired lease", |response| {
+            response["attachment"]["expiresAt"] = json!("2026-11-02T11:59:59Z")
+        }),
+        ("missing attachment", |response| {
+            response["attachment"]["attachmentRef"] = Value::Null
+        }),
+        ("wrong connector", |response| {
+            response["attachment"]["attachmentRef"]["connectorId"] = json!("other_connector")
+        }),
+        ("zero generation", |response| {
+            response["attachment"]["attachmentRef"]["generation"] = json!(0)
+        }),
+        ("changed peer", |response| {
+            response["peerId"] = json!("c".repeat(64));
+            response["attachment"]["attachmentRef"]["peerId"] = response["peerId"].clone();
+        }),
+    ];
+    for (label, mutate) in mutations {
+        for recover in [false, true] {
+            let backend = backend(Default::default());
+            let response = backend.enrollment.clone();
+            let calls = backend.calls.clone();
+            let adapter = Arc::new(PeerMcp::new(backend, config()).expect("config"));
+            adapter
+                .invoke(prompt("native_b", "initial"))
+                .await
+                .expect("bind generation one");
+            let heartbeat = {
+                let adapter = adapter.clone();
+                tokio::spawn(async move { adapter.run_heartbeat(AvailabilityObservation::Ready).await })
+            };
+            tokio::task::yield_now().await;
+            tokio::time::advance(std::time::Duration::from_secs(2)).await;
+            tokio::task::yield_now().await;
+            let heartbeat_count = || {
+                calls
+                    .lock()
+                    .expect("calls")
+                    .iter()
+                    .filter(|call| matches!(call, ObservedCall::Heartbeat(_)))
+                    .count()
+            };
+            assert_eq!(heartbeat_count(), 1, "initial heartbeat: {label}");
+
+            let mut valid = serde_json::to_value(enrollment()).expect("enrollment JSON");
+            valid["attachment"]["attachmentRef"]["generation"] = json!(2);
+            let mut invalid = valid.clone();
+            mutate(&mut invalid);
+            *response.lock().expect("enrollment response") = serde_json::from_value(invalid).expect("response");
+            assert!(
+                matches!(
+                    adapter.invoke(prompt("native_b", "generation_two")).await,
+                    Err(PeerMcpError::InvalidEnrollment | PeerMcpError::InvalidEnrollmentIdentity(_))
+                ),
+                "malformed enrollment was accepted: {label}"
+            );
+            for _ in 0..3 {
+                tokio::time::advance(std::time::Duration::from_secs(2)).await;
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(
+                heartbeat_count(),
+                1,
+                "rejected enrollment restored a prior heartbeat: {label}"
+            );
+            assert!(
+                matches!(
+                    adapter.invoke(request("peer_roster", json!({}))).await,
+                    Err(PeerMcpError::EnrollmentUncertain)
+                ),
+                "rejected enrollment admitted model work: {label}"
+            );
+            if recover {
+                *response.lock().expect("enrollment response") = serde_json::from_value(valid).expect("valid response");
+                adapter
+                    .invoke(prompt("native_b", "generation_two"))
+                    .await
+                    .expect("valid retry");
+                tokio::time::advance(std::time::Duration::from_secs(2)).await;
+                tokio::task::yield_now().await;
+                assert_eq!(heartbeat_count(), 2, "valid retry must resume heartbeats: {label}");
+                adapter.shutdown().await.expect("detach validated generation two");
+                let observed = calls.lock().expect("calls");
+                let Some(ObservedCall::Detach(detach)) = observed.last() else {
+                    panic!("detach")
+                };
+                assert_eq!(detach.attachment_ref.generation, Some(2));
+            } else {
+                assert!(
+                    matches!(adapter.shutdown().await, Err(PeerMcpError::EnrollmentUncertain)),
+                    "rejected enrollment confirmed stale detach: {label}"
+                );
+                assert!(
+                    calls
+                        .lock()
+                        .expect("calls")
+                        .iter()
+                        .all(|call| !matches!(call, ObservedCall::Detach(_)))
+                );
+            }
+            heartbeat.await.expect("heartbeat task");
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn prompt_hook_completing_after_the_deadline_is_a_deadline_not_a_delivery() {
     let mut late = backend(prepared("review result"));
     late.enroll_behavior = EnrollDelay::Advance(std::time::Duration::from_secs(3));
@@ -1505,20 +2472,22 @@ async fn prompt_hook_finishing_exactly_at_the_deadline_is_still_on_time() {
     assert_eq!(hook["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn prompt_hook_acquiring_the_lock_after_its_deadline_never_touches_binding_or_backend() {
-    let mut blocking = backend(prepared("review result"));
-    blocking.enroll_behavior = EnrollDelay::BlockOnce(
-        std::time::Duration::from_millis(2_100),
-        Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    );
-    let calls = blocking.calls.clone();
-    let adapter = PeerMcp::new(blocking, config()).expect("config");
-    // One invocation holds the binding lock and blocks the executor past both
-    // deadlines, so no timer can fire; the other acquires the lock afterwards.
-    let (first, second) = tokio::join!(
+    let mut slow = backend(prepared("review result"));
+    slow.enroll_delay = std::time::Duration::from_secs(3);
+    let calls = slow.calls.clone();
+    let adapter = PeerMcp::new(slow, config()).expect("config");
+    // The first invocation holds the operation lock until its own deadline drops
+    // it; the clock then jumps past the queued invocation's deadline, so that one
+    // acquires the lock late and must report the deadline.
+    let (first, second, ()) = tokio::join!(
         adapter.invoke(prompt("native_b", "prompt_1")),
-        adapter.invoke(prompt("native_other", "prompt_2")),
+        adapter.invoke(prompt("native_b", "prompt_2")),
+        async {
+            tokio::task::yield_now().await;
+            tokio::time::advance(std::time::Duration::from_millis(2_100)).await;
+        },
     );
     assert!(matches!(first, Err(PeerMcpError::PromptDeadline)));
     assert!(
