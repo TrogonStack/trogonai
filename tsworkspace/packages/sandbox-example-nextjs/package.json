@@ -1,0 +1,34 @@
+{
+  "name": "@trogonai/sandbox-example-nextjs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js example: run code in a sandbox from a route handler and a server action, mint a browser token, and reap stale leases from a cron route.",
+  "license": "Apache-2.0",
+  "author": "TrogonAI",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "smoke": "SANDBOX_PROVIDER=memory node run-typescript.mjs smoke.ts",
+    "test": "node run-typescript.mjs --test app/input.test.ts server/*.test.ts",
+    "test:gateway": "node run-typescript.mjs --env-file-if-exists=.env.local --test gateway-smoke.ts",
+    "lint": "oxlint --deny-warnings ."
+  },
+  "dependencies": {
+    "@trogonai/sandbox-ws-client": "workspace:*",
+    "next": "16.4.6",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=22.7"
+  }
+}

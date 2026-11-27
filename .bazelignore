@@ -14,3 +14,4 @@ tsworkspace/packages/sandbox-ws-client/node_modules
 tsworkspace/packages/sandbox-agent-tools/node_modules
 tsworkspace/packages/sandbox-cli/node_modules
 tsworkspace/packages/sandbox-example-hono/node_modules
+tsworkspace/packages/sandbox-example-nextjs/node_modules
