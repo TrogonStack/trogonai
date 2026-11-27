@@ -14,6 +14,7 @@ fn agent_commands_consumer_is_durable_and_starts_at_new_commands() {
     assert_eq!(config.durable_name.as_deref(), Some(COMMANDS_CONSUMER_DURABLE));
     assert_eq!(config.deliver_policy, DeliverPolicy::New);
     assert_eq!(config.ack_policy, AckPolicy::Explicit);
+    assert_eq!(config.ack_wait, std::time::Duration::from_secs(5 * 60));
 }
 
 #[test]

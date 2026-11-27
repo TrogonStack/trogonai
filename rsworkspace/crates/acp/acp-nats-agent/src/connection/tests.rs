@@ -8,6 +8,7 @@ use agent_client_protocol::v1::schema::{
 };
 use agent_client_protocol::{Error as AcpError, ErrorCode};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::MockNatsClient;
 use trogon_nats::jetstream::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
@@ -1450,4 +1451,142 @@ async fn schema_1_15_durable_dispatch_preserves_request_and_response() {
         assert_eq!(published_response::<serde_json::Value>(&nats), result);
         assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
     }
+}
+
+/// Agent whose prompts block until released, counting how many it received.
+#[derive(Default)]
+struct GatedPromptAgent {
+    prompts: AtomicUsize,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl AgentHandler for GatedPromptAgent {
+    async fn initialize(&self, _args: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
+        Err(AcpError::method_not_found())
+    }
+
+    async fn authenticate(&self, _args: AuthenticateRequest) -> agent_client_protocol::Result<AuthenticateResponse> {
+        Err(AcpError::method_not_found())
+    }
+
+    async fn new_session(&self, _args: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
+        Err(AcpError::method_not_found())
+    }
+
+    async fn prompt(&self, _args: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
+        self.prompts.fetch_add(1, Ordering::SeqCst);
+        self.release.notified().await;
+        Ok(PromptResponse::new(StopReason::EndTurn))
+    }
+
+    async fn cancel(&self, _args: CancelNotification) -> agent_client_protocol::Result<()> {
+        Ok(())
+    }
+}
+
+/// Yields to the spawned tasks until `reached` holds.
+async fn yield_until(mut reached: impl FnMut() -> bool) {
+    for _ in 0..10_000 {
+        if reached() {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("condition not reached");
+}
+
+#[tokio::test]
+async fn serve_js_does_not_dispatch_a_redelivery_of_an_in_flight_command() {
+    let nats = MockNatsClient::new();
+    let agent = Rc::new(GatedPromptAgent::default());
+    let factory = MockJetStreamConsumerFactory::new();
+    let (consumer, tx) = MockJetStreamConsumer::new();
+    factory.add_consumer(consumer);
+
+    let original = make_js_msg(
+        "acp.v1.session.s1.agent.prompt",
+        &PromptRequest::new("s1", Vec::new()),
+        None,
+    );
+    // A redelivery carries the same subject and headers, with its own ack handle.
+    let redelivered = MockJsMessage::new(original.message().clone());
+    let redelivered_signals = redelivered.clone();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let serve = tokio::task::spawn_local({
+                let (agent, nats) = (agent.clone(), nats.clone());
+                async move {
+                    serve_js(agent, nats, factory, &test_prefix(), |fut| {
+                        tokio::task::spawn_local(fut);
+                    })
+                    .await
+                }
+            });
+
+            tx.unbounded_send(Ok(original)).unwrap();
+            yield_until(|| agent.prompts.load(Ordering::SeqCst) > 0).await;
+            tx.unbounded_send(Ok(redelivered)).unwrap();
+            yield_until(|| !redelivered_signals.signals().is_empty()).await;
+
+            assert_eq!(
+                agent.prompts.load(Ordering::SeqCst),
+                1,
+                "the redelivery must not reach the agent"
+            );
+            assert_eq!(
+                redelivered_signals.signals(),
+                [AckKindSnapshot::AckWith(AckKindValue::Progress)],
+                "the redelivery is only kept in progress"
+            );
+            assert!(nats.published_messages().is_empty());
+
+            agent.release.notify_one();
+            yield_until(|| !nats.published_messages().is_empty()).await;
+            assert_eq!(nats.published_messages(), ["acp.v1.session.s1.agent.response"]);
+
+            drop(tx);
+            serve.await.unwrap().unwrap();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn serve_js_recreates_a_lost_consumer() {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let factory = MockJetStreamConsumerFactory::new();
+    let (lost, lost_tx) = MockJetStreamConsumer::new();
+    let (recreated, recreated_tx) = MockJetStreamConsumer::new();
+    factory.add_consumer(lost);
+    factory.add_consumer(recreated);
+
+    lost_tx
+        .unbounded_send(Err(trogon_nats::mocks::MockError::consumer_deleted()))
+        .unwrap();
+    recreated_tx
+        .unbounded_send(Ok(make_js_msg(
+            "acp.v1.session.s1.agent.load",
+            &LoadSessionRequest::new("s1", "/tmp"),
+            None,
+        )))
+        .unwrap();
+    drop(recreated_tx);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let result = serve_js(Rc::new(agent), nats.clone(), factory.clone(), &test_prefix(), |fut| {
+                tokio::task::spawn_local(fut);
+            })
+            .await;
+            yield_until(|| !nats.published_messages().is_empty()).await;
+
+            assert!(result.is_ok());
+            assert_eq!(factory.get_stream_calls(), ["ACP_COMMANDS", "ACP_COMMANDS"]);
+            assert_js_response_method_not_found(&nats, "acp.v1.session.s1.agent.response");
+        })
+        .await;
 }
