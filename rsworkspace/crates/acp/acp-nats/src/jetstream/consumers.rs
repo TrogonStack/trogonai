@@ -23,13 +23,31 @@ pub fn response_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId) -> Confi
     }
 }
 
-/// Observer consumer for the COMMANDS stream.
+/// Durable name of the agent side's consumer on the COMMANDS stream.
 ///
-/// Acks messages for audit persistence. No filter needed — the stream-level
-/// subject list already scopes to session-scoped commands only.
-pub fn commands_observer() -> Config {
+/// The stream is already prefix-scoped (`{PREFIX}_COMMANDS`), so the name does
+/// not repeat the prefix. Agent hosts serving one prefix share this consumer:
+/// a restart resumes after the last acked command, and more than one host
+/// splits commands instead of each receiving all of them (ADR#0055,
+/// "Subscriptions and scaling").
+pub const COMMANDS_CONSUMER_DURABLE: &str = "AGENT_COMMANDS";
+
+/// Agent-side consumer for the COMMANDS stream.
+///
+/// COMMANDS is a `Limits` stream kept for `max_age`, so a consumer that starts
+/// from the beginning would replay every past prompt and cancel each time the
+/// agent side starts. The consumer is durable instead: acked commands are
+/// never delivered again, and commands published while no agent host is
+/// running wait in the stream until one starts.
+///
+/// `DeliverPolicy::New` only applies when the durable is first created, so a
+/// host meeting an existing stream for the first time does not replay its
+/// history either. No filter needed — the stream-level subject list already
+/// scopes to session-scoped commands only.
+pub fn agent_commands_consumer() -> Config {
     Config {
-        deliver_policy: DeliverPolicy::All,
+        durable_name: Some(COMMANDS_CONSUMER_DURABLE.to_owned()),
+        deliver_policy: DeliverPolicy::New,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
         ..Default::default()

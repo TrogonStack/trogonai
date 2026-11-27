@@ -2,4 +2,7 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
     compile_data = ["README.md"],
+    integration_tests = {
+        "commands_replay": {"tags": ["requires-network"]},
+    },
 )

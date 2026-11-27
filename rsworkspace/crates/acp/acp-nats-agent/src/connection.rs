@@ -1,4 +1,4 @@
-use acp_nats::jetstream::consumers::commands_observer;
+use acp_nats::jetstream::consumers::agent_commands_consumer;
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
@@ -598,7 +598,7 @@ where
     A: AgentHandler + Sync + 'static,
 {
     let stream_name = commands_stream_name(prefix);
-    let config = commands_observer();
+    let config = agent_commands_consumer();
 
     info!(stream = %stream_name, "Starting JetStream consumer for COMMANDS stream");
 
