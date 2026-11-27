@@ -27,7 +27,7 @@ thiserror = { workspace = true }
 axum = { workspace = true, optional = true }
 bytesize = "2.3.1"
 clap = { workspace = true, optional = true }
-log = { version = "=0.4.29", features = ["std"], optional = true }
+log = { version = "=0.4.32", features = ["std"], optional = true }
 opentelemetry = { workspace = true, optional = true }
 rustls = { workspace = true, optional = true }
 trogon-semconv = { workspace = true, optional = true }
@@ -41,7 +41,7 @@ tracing-subscriber = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
 [dev-dependencies]
-log = { version = "=0.4.29", features = ["std"] }
+log = { version = "=0.4.32", features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = { workspace = true, features = ["log"] }

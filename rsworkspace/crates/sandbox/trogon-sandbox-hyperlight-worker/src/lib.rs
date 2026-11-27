@@ -9,8 +9,10 @@
 //!   [`HyperlightRuntime`].
 //! - Worker: [`HyperlightWorker`] serves one provider on NATS, and [`launch`] builds it from
 //!   [`WorkerArgs`].
-//! - Backends: [`UnsupportedHypervisor`] is the backend of a host with no hypervisor; the binary
-//!   uses it and exits at startup.
+//! - Backends: `WasmHypervisor` runs guests on Hyperlight through hyperlight-wasm. It is built
+//!   when the `trogon_hyperlight_wasm` cfg is set on Linux (KVM or MSHV) and Windows (WHP), and
+//!   the binary uses it there. [`UnsupportedHypervisor`] is the backend of every other build; a binary
+//!   that uses it exits at startup.
 
 mod cancel_subject;
 mod cleanup_handle;
@@ -40,6 +42,12 @@ mod snapshot_artifact;
 mod snapshot_transport_error;
 mod unsupported_hypervisor;
 mod warm_pool;
+#[cfg(all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows")))]
+mod wasm_guest;
+#[cfg(all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows")))]
+mod wasm_hypervisor;
+#[cfg(all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows")))]
+mod wasm_hypervisor_error;
 mod worker_args;
 
 pub use component_path::resolve_component_path;
@@ -62,6 +70,12 @@ pub use snapshot_artifact::{
 };
 pub use snapshot_transport_error::SnapshotTransportError;
 pub use unsupported_hypervisor::UnsupportedHypervisor;
+#[cfg(all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows")))]
+pub use wasm_guest::WasmGuest;
+#[cfg(all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows")))]
+pub use wasm_hypervisor::WasmHypervisor;
+#[cfg(all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows")))]
+pub use wasm_hypervisor_error::WasmHypervisorError;
 pub use worker_args::WorkerArgs;
 
 pub(crate) use cleanup_handle::CleanupHandle;

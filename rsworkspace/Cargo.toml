@@ -253,6 +253,9 @@ chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 ext4-view = { version = "=1.0.0", features = ["std"] }
 flate2 = "=1.1.10"
+# Runs Wasm components in Hyperlight guests. The fork tracks a host release whose
+# snapshots save to and load from an OCI image layout, which cross-host restore needs.
+hyperlight-wasm = { git = "https://github.com/yordis/hyperlight-wasm.git", rev = "28b6c052eaf2c0eade8c73de48c530e29eccc422" }
 toml = "=1.1.8"
 wasmtime = "=47.0.3"
 http = "=1.5.0"

@@ -6,8 +6,16 @@ license = "Apache-2.0"
 publish = false
 description = "Sandbox leases as Wasm components in hypervisor-isolated guests behind a hypervisor seam"
 
-[lints]
-workspace = true
+# The workspace lints plus the `trogon_hyperlight_wasm` cfg that turns the Hyperlight backend on.
+[lints.rust]
+warnings = "deny"
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage)', 'cfg(coverage_nightly)', 'cfg(dylint_lib, values(any()))', 'cfg(trogon_hyperlight_wasm)'] }
+
+[lints.clippy]
+all = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
 
 [lib]
 path = "src/lib.rs"
@@ -15,6 +23,14 @@ path = "src/lib.rs"
 [[bin]]
 name = "trogon-sandbox-hyperlight-worker"
 path = "src/main.rs"
+
+[[example]]
+name = "e2e_provider_roundtrip"
+path = "examples/e2e_provider_roundtrip.rs"
+
+[[example]]
+name = "e2e_snapshot_roundtrip"
+path = "examples/e2e_snapshot_roundtrip.rs"
 
 [dependencies]
 async-nats = { workspace = true }
@@ -38,7 +54,15 @@ trogon-sandbox-protocol = { workspace = true }
 trogon-std = { workspace = true }
 uuid = { workspace = true }
 
+# Runs leases on Hyperlight through hyperlight-wasm. A rustc cfg gates it rather than a feature
+# so that `--all-features` builds leave it out: its build script needs a toolchain that accepts
+# custom target specifications, which stable Rust stopped doing in 1.95. It only builds for
+# Linux (KVM or MSHV) and Windows (WHP).
+[target.'cfg(all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows")))'.dependencies]
+hyperlight-wasm = { workspace = true }
+
 [dev-dependencies]
+anyhow = { workspace = true }
 axum = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
