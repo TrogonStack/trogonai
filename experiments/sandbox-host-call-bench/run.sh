@@ -35,7 +35,7 @@ if [ "$kvm" = yes ]; then
   # hyperlight-wasm's build script writes its guest runtime under target/ outside cargo's
   # tracking; a restored cache can keep the script's fingerprint but drop that file, and cargo
   # then never reruns the script. Clean the package so the script runs again.
-  [ -d host/target/hyperlight-wasm-runtime ] \
+  [ -f host/target/hyperlight-wasm-runtime/x86_64-hyperlight-none/release/hyperlight-wasm-runtime ] \
     || cargo clean --release --manifest-path host/Cargo.toml -p hyperlight-wasm >&2
   # hyperlight-wasm's build script compiles its guest runtime for a custom target, which stable
   # Rust only accepts with RUSTC_BOOTSTRAP (see trogon-sandbox-hyperlight-worker/README.md).
