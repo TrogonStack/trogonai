@@ -167,6 +167,7 @@ export default async () => {
                 text: "Reference",
                 items: [
                   { text: "Documentation Map", link: "/reference/sandbox/documentation-map" },
+                  { text: "Sandbox Providers", link: "/reference/sandbox-providers" },
                   { text: "Provider Option Matrix", link: "/reference/sandbox/provider-option-matrix" },
                   { text: "OCI Media Types", link: "/reference/sandbox/media-types" },
                   { text: "Client NATS Permissions", link: "/reference/sandbox/client-nats-permissions" },

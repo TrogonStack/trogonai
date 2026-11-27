@@ -5,8 +5,9 @@ WebSocket gateway. It provides Zod request and response schemas, a low-level
 `SandboxWsClient`, a higher-level `Sandbox` handle and an in-memory client
 for application tests.
 
-The package connects to an operator-supplied gateway. It does not start a
-local runtime or provide the gateway, broker or provider fleet.
+The client connects to a gateway supplied by the operator. The
+[Sandbox product page](../product/sandbox.md) covers the broker, gateways and
+provider workers in the public source and the work underway.
 
 ## Where the client sits
 
@@ -20,25 +21,30 @@ Sandbox handle / SandboxWsClient
     |
     | authenticated gateway connection
     v
-Compatible sandbox gateway                 deployment prerequisite
+Sandbox WebSocket gateway
     |
+    | NATS request/reply
     v
-Broker and provider workers                 deployment prerequisite
-  tenant admission, quotas, capabilities,
-  native ownership and lifecycle
+Sandbox broker
+  tenant admission, quotas and worker selection
     |
+    | worker dispatch (signing configurable)
     v
-Sandbox runtime
+Provider worker and its sandbox runtime
+  native resources and lifecycle
 ```
 
-A complete deployment can route leases to different runtime providers. The
-client carries the selected provider preferences and capability requirements;
-it does not make their guarantees interchangeable.
+The broker matches the lease's requirements against registered worker
+capabilities. The worker executes the operation on its provider. Running this
+path requires a configured gateway, NATS with JetStream, a broker and an
+eligible worker. The [interactive protocol map](../product/sandbox.md#sandbox-protocols)
+shows the request and reply for each client. Rust applications can also use the
+[Rust client](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/sandbox/trogon-sandbox-client/README.md)
+to reach the broker over NATS.
 
-The source package is at `tsworkspace/packages/sandbox-ws-client`. Its README
-documents connection options, the supported API and examples. It is currently
-consumed as a monorepo workspace package; this import does not publish a
-registry release.
+The TypeScript client is a workspace package. For connection options and
+examples, see the
+[package README](https://github.com/TrogonStack/trogonai/blob/main/tsworkspace/packages/sandbox-ws-client/README.md).
 
 ## API responsibilities
 
@@ -109,34 +115,19 @@ Live gateway/provider acceptance requires a separately prepared deployment.
 Operator scripts with external infrastructure requirements are not part of
 this standalone client package's local contract test suite.
 
-## Next runtime boundaries
+## Runtime responsibilities
 
-The Rust foundation includes standalone building blocks that do not start a
-sandbox deployment:
-
-- `sandbox-command-supervisor` owns a Linux command family, including held
-  launch, signals, output and confirmed descendant cleanup. Its caller still
-  supplies container or VM isolation and authorization.
-- `trogon-sandbox-contract` defines validated worker, dispatch and durable
-  operation identifiers, SHA-256 content digests, artifact media types, provider
-  identities, isolation tiers, operation kinds and legal operation-state
-  transitions.
-  The contract describes which transitions are allowed; it does not persist
-  operations, perform provider effects or prove their completion.
-
-See the [command supervisor](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/platform/sandbox-command-supervisor/README.md)
-and [operation contract](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/sandbox/trogon-sandbox-contract/README.md)
-package documentation for their public interfaces.
-
-A server-side import must integrate with the repository's existing NATS,
-telemetry, identity and credential boundaries. It must retain exact native
-ownership, distinguish acknowledgements from completion, and earn each
-advertised provider capability through the intended runtime.
-
-See [crate boundaries](../adr/0002-rust-crate-boundaries.md) and
-[domain grouping](../adr/0034-rust-crate-domain-grouping.md) for the Rust
-integration rules. A runtime or provider will have its own acceptance contract;
-the client package alone does not supply one.
+- The WebSocket gateway exchanges a tenant API key for a short-lived session
+  token. The browser uses that token to call the gateway, which holds the NATS
+  connection. [Gateway handshake](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/sandbox/trogon-sandbox-ws-gateway/README.md#auth-handshake)
+- The broker admits requests against tenant policy and quotas, selects a worker,
+  signs dispatches when configured and records outcomes in JetStream. [Broker responsibilities](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/sandbox/trogon-sandbox-broker/README.md)
+- The contract defines lease requirements, worker capabilities, isolation tiers
+  and valid operation transitions. Workers report which operations their runtimes
+  can carry out. [Sandbox contract](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/sandbox/trogon-sandbox-contract/README.md)
+- On Linux, the command supervisor manages a command and its descendants through
+  launch, signals, output and cleanup. Its caller supplies isolation and
+  authorization. [Command supervisor](https://github.com/TrogonStack/trogonai/blob/main/rsworkspace/crates/platform/sandbox-command-supervisor/README.md)
 
 ## Sandbox broker and workers
 
