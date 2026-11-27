@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sandbox Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>Sandbox Dashboard</h1>
+    <p class="subtitle">Read-only observability via the WebSocket gateway</p>
+  </header>
+
+  <section id="connect-panel" class="panel connect">
+    <h2>Connect</h2>
+    <form id="connect-form">
+      <label>
+        WS gateway URL
+        <input id="ws-url" name="ws-url" type="text" placeholder="ws://127.0.0.1:8443/v1/ws" required>
+      </label>
+      <label>
+        Bearer token
+        <input id="bearer-token" name="bearer-token" type="password" placeholder="session token" required>
+      </label>
+      <button type="submit" id="connect-btn">Connect</button>
+      <span id="connection-status" class="status">disconnected</span>
+    </form>
+  </section>
+
+  <main id="dashboard" class="hidden">
+    <section class="panel" id="panel-leases">
+      <h2>Live Leases</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tenant</th>
+              <th>Provider</th>
+              <th>Image</th>
+              <th>State</th>
+              <th>Started</th>
+              <th>TTL (s)</th>
+            </tr>
+          </thead>
+          <tbody id="leases-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-snapshots">
+      <h2>Snapshot Inventory</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Digest</th>
+              <th>Artifact Type</th>
+              <th>Tenant</th>
+              <th>Published</th>
+              <th>Bytes</th>
+            </tr>
+          </thead>
+          <tbody id="snapshots-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-workers">
+      <h2>Worker Fleet</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Worker ID</th>
+              <th>Capability Profile</th>
+              <th>Cached Digests</th>
+              <th>Last Heartbeat</th>
+            </tr>
+          </thead>
+          <tbody id="workers-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-tags">
+      <h2>Tag Map</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tenant</th>
+              <th>Tag</th>
+              <th>Resolved Digest</th>
+              <th>Artifact Type</th>
+            </tr>
+          </thead>
+          <tbody id="tags-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

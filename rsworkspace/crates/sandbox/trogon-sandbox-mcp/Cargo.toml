@@ -1,0 +1,46 @@
+[package]
+name = "trogon-sandbox-mcp"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "MCP stdio server exposing sandbox lease operations over NATS"
+
+[lib]
+name = "trogon_sandbox_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-mcp"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+regex = { workspace = true }
+rmcp = { workspace = true, features = ["macros"] }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+trogon-sandbox-client = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+async-nats = { workspace = true }
+rmcp = { workspace = true, features = ["client", "macros"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "test-util", "time"] }
+trogon-std = { workspace = true, features = ["test-support"] }

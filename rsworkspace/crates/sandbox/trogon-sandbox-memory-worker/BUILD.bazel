@@ -1,0 +1,16 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    compile_data = ["README.md"],
+    integration_tests = {
+        "*": {"compile_data": ["tests/*/mod.rs"]},
+        # These start a NATS server in a container through Docker.
+        "binary": {"tags": ["requires-network"]},
+        "commands": {"tags": ["requires-network"]},
+        "lease_verbs": {"tags": ["requires-network"]},
+        "lifecycle": {"tags": ["requires-network"]},
+        "processes": {"tags": ["requires-network"]},
+        "run": {"tags": ["requires-network"]},
+        "terminals": {"tags": ["requires-network"]},
+    },
+)
