@@ -69,6 +69,7 @@ trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-help
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
+trogon-sandbox-volumes = { path = "crates/sandbox/trogon-sandbox-volumes" }
 trogon-sandbox-windows-fence = { path = "crates/sandbox/trogon-sandbox-windows-fence" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
@@ -182,6 +183,9 @@ thiserror = "=2.0.21"
 authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
 tonic = { version = "=0.14.9", default-features = false, features = ["transport", "codegen", "router"] }
 moka = { version = "=0.12.16", features = ["future"] }
+
+# Object storage
+object_store = { version = "=0.14.2", default-features = false, features = ["aws", "azure", "fs", "gcp"] }
 
 # Misc
 libc = "=0.2.186"
