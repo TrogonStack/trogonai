@@ -5667,6 +5667,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "secrecy"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
+dependencies = [
+ "zeroize",
+]
+
+[[package]]
 name = "security-framework"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7799,6 +7808,30 @@ dependencies = [
  "trogon-semconv",
  "trogon-std",
  "trogon-telemetry",
+]
+
+[[package]]
+name = "trogon-sandbox-auth"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "futures",
+ "hex",
+ "rand_core 0.6.4",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "spicedb-grpc-tonic",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-prost",
+ "trogon-nats",
+ "trogon-sandbox-contract",
 ]
 
 [[package]]
