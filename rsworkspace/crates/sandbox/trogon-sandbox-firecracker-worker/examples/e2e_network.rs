@@ -200,7 +200,7 @@ print('proxy request succeeded; direct guest egress denied')
 
     match outcome? {
         RunCommandResponse::Completed(output) => {
-            print!("{}", String::from_utf8_lossy(&output.stdout));
+            write!(std::io::stdout(), "{}", String::from_utf8_lossy(&output.stdout))?;
             anyhow::ensure!(
                 output.exit_code == 0,
                 "network probe exited {}: {}",

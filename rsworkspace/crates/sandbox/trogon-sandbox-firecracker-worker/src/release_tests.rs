@@ -867,3 +867,5 @@ async fn capacity_counts_an_exited_vm_until_its_cleanup_releases_the_slot() -> T
     assert!(!provider.config().state_dir.as_path().join(lease.as_str()).exists());
     Ok(())
 }
+
+mod pipeline_tests;

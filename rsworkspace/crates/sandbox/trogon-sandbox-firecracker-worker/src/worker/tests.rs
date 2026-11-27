@@ -46,6 +46,12 @@ fn detached_interactive_stdin_is_accepted() -> anyhow::Result<()> {
 }
 
 #[test]
+fn interactive_stdin_requires_a_detached_command() {
+    let attached = run_command(serde_json::json!({"detached": false, "stdin": "interactive"}));
+    assert!(attached.is_err(), "{attached:?}");
+}
+
+#[test]
 fn lease_deadline_is_still_refused() -> anyhow::Result<()> {
     let request = run_command(serde_json::json!({"detached": true, "deadline": "lease"}))?;
     assert!(run_command_spec_violation(&request).is_some());

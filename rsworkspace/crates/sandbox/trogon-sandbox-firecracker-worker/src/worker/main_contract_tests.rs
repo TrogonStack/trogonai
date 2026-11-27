@@ -27,6 +27,14 @@ fn a_networked_worker_advertises_allow_lists() -> anyhow::Result<()> {
 }
 
 #[test]
+fn verb_subjects_are_scoped_to_the_firecracker_provider() {
+    assert_eq!(
+        verb_subject("run_command"),
+        "sandbox.provider.firecracker.run_command.>"
+    );
+}
+
+#[test]
 fn the_lease_id_is_the_last_subject_token() -> anyhow::Result<()> {
     let id = extract_cancel_lease_id("sandbox.provider.firecracker.cancel.01J0")
         .ok_or_else(|| anyhow::anyhow!("no lease id"))?;

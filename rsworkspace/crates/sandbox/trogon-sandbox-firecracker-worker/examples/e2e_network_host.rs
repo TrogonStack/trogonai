@@ -152,7 +152,7 @@ print('authenticated proxy passed; wrong credentials and direct host access deni
             &target_port.to_string(),
         ])
         .await?;
-        print!("{output}");
+        write!(std::io::stdout(), "{output}")?;
         Ok::<_, anyhow::Error>(())
     }
     .await;
