@@ -2,6 +2,7 @@
 //! for each reply.
 
 mod client_error;
+mod constants;
 mod credential_client;
 mod issue_params;
 mod registry_auth;

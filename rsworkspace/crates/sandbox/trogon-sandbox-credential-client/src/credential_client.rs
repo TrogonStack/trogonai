@@ -12,9 +12,8 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_protocol::subjects::{credential_issue, credential_revoke, credential_rotate};
 
+use crate::constants::DEFAULT_TIMEOUT;
 use crate::{ClientError, IssueParams};
-
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Requests tokens from the credential broker of one provider on behalf of one tenant.
 #[derive(Debug, Clone)]
