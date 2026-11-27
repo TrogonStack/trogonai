@@ -24,6 +24,6 @@ export HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 NO_PROXY=
 
 # The established proto:schedules-descriptor-set command, with its output kept
 # in TEST_TMPDIR rather than the Cargo target tree.
-(cd "$ws" && "$buf" build -o "$TEST_TMPDIR/reference.binpb" --as-file-descriptor-set --path proto/trogonai/scheduler/schedules)
+(cd "$ws" && "$buf" build proto -o "$TEST_TMPDIR/reference.binpb" --as-file-descriptor-set --path proto/trogonai/scheduler/schedules)
 cmp "$descriptor" "$TEST_TMPDIR/reference.binpb"
 echo "Schedules FileDescriptorSet matches proto:schedules-descriptor-set byte for byte"

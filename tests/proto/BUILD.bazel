@@ -14,8 +14,8 @@ py_test(
     data = [
         "connector_mcp/fixtures/discovery-pins.json",
         "validate.py",
-        "//:buf.lock",
-        "//:buf.yaml",
+        "//proto:buf.lock",
+        "//proto:buf.yaml",
         "//.config/bazel:buf",
         "//.config/mise:config.toml",
         "//proto:buf_cache",

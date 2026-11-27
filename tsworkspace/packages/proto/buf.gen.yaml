@@ -1,7 +1,7 @@
 version: v2
 clean: true
 inputs:
-  - directory: ../../..
+  - directory: ../../../proto
     paths:
       - ../../../proto/trogonai/model_access/provider_connections
       - ../../../proto/trogonai/platform/key_custody

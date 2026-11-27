@@ -38,7 +38,7 @@ class ValidatorTest(unittest.TestCase):
             subprocess.run(["tar", "-xf", str(Path(os.environ["VALIDATOR_TEST_BUF_CACHE"]).resolve()), "-C", str(cache)], check=True)
             cls.env.update(BUF_CACHE_DIR=str(cache), HTTPS_PROXY="http://127.0.0.1:9",
                            HTTP_PROXY="http://127.0.0.1:9", NO_PROXY="")
-        for name in ("buf.yaml", "buf.lock", ".config/mise/config.toml", "tests/proto/validate.py"):
+        for name in (".config/mise/config.toml", "tests/proto/validate.py"):
             target = cls.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)

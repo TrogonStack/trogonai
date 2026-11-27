@@ -14,10 +14,10 @@ trap 'rm -rf "$work"' EXIT
 # A module with one empty file still resolves every dependency in buf.lock, and
 # keeps the archive independent of the proto sources.
 mkdir -p "$work/module/proto/bufcache"
-cp "$buf_yaml" "$buf_lock" "$work/module/"
+cp "$buf_yaml" "$buf_lock" "$work/module/proto/"
 printf 'syntax = "proto3";\n\npackage bufcache;\n' >"$work/module/proto/bufcache/bufcache.proto"
 
 export HOME="$work"
 export BUF_CACHE_DIR="$work/cache"
-(cd "$work/module" && "$buf" build)
+(cd "$work/module" && "$buf" build proto)
 tar -cf "$archive" -C "$BUF_CACHE_DIR" .

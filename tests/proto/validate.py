@@ -209,7 +209,7 @@ def main():
             [
                 buf,
                 "build",
-                str(root),
+                str(root / "proto"),
                 "--as-file-descriptor-set",
                 "--exclude-source-info",
                 "-o",

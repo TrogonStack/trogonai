@@ -7,7 +7,7 @@ def _protowit_test_impl(ctx):
     buf_config = ctx.actions.declare_file(ctx.label.name + ".buf.yaml")
     # These fixture schemas have no imports. A scoped module keeps Buf offline
     # without pulling in unrelated repository dependencies from the BSR.
-    ctx.actions.write(buf_config, "version: v2\nmodules:\n  - path: proto\n")
+    ctx.actions.write(buf_config, "version: v2\n")
 
     launcher = ctx.actions.declare_file(ctx.label.name + ".sh")
     ctx.actions.write(
@@ -28,7 +28,7 @@ exec "%s" "$@"
 
     runfiles = ctx.runfiles(
         files = [ctx.executable.buf, ctx.executable.test_binary, ctx.file.go_mod] + ctx.files.schemas,
-        symlinks = {"buf.yaml": buf_config},
+        symlinks = {"proto/buf.yaml": buf_config},
     )
     runfiles = runfiles.merge(ctx.attr.buf[DefaultInfo].default_runfiles)
     runfiles = runfiles.merge(ctx.attr.test_binary[DefaultInfo].default_runfiles)

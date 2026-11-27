@@ -29,7 +29,7 @@ function selected(name, files) {
 test('canary and automation changes skip CodeQL', () => {
   const files = [
     '.config/mise/tasks/github/workflows/canary-container-images/canary-is-branch-tip',
-    'tests/github_actions/test_canary_is_branch_tip.py', 'buf.gen.yaml',
+    'tests/github_actions/test_canary_is_branch_tip.py', '.config/buf/buf.gen.yaml',
     '.github/workflows/codeql.yml', '.github/workflows/ci-selection.yml',
     '.github/filters/codeql.yml', 'tests/github_actions/test_ci_selection.mjs',
   ];

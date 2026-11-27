@@ -1,7 +1,7 @@
 version: v2
 clean: false
 inputs:
-  - directory: ../../..
+  - directory: ../../../proto
     paths:
       - ../../../proto/trogonai/platform/key_custody
 plugins:

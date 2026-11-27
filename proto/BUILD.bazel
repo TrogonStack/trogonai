@@ -16,8 +16,8 @@ filegroup(
 )
 
 _WORKSPACE = [
-    "//:buf.lock",
-    "//:buf.yaml",
+    ":buf.lock",
+    ":buf.yaml",
     ":sources",
 ]
 
@@ -28,7 +28,7 @@ genrule(
     cmd = "work=$$(mktemp -d) && trap 'rm -rf \"$$work\"' EXIT && " +
           "TEST_TMPDIR=$$work $(execpath buf_test.sh) $(execpath //.config/bazel:buf) " +
           "$(execpath :buf_cache) schedules-descriptor $$PWD/$@ -- " +
-          "$(execpath //:buf.lock) $(execpath //:buf.yaml) $(execpaths :sources)",
+          "$(execpath :buf.lock) $(execpath :buf.yaml) $(execpaths :sources)",
     tools = [
         "buf_test.sh",
         "//.config/bazel:buf",
@@ -41,11 +41,11 @@ genrule(
 genrule(
     name = "buf_cache",
     srcs = [
-        "//:buf.lock",
-        "//:buf.yaml",
+        ":buf.lock",
+        ":buf.yaml",
     ],
     outs = ["buf_cache.tar"],
-    cmd = "$(execpath buf_cache.sh) $(execpath //.config/bazel:buf) $(execpath //:buf.yaml) $(execpath //:buf.lock) $@",
+    cmd = "$(execpath buf_cache.sh) $(execpath //.config/bazel:buf) $(execpath :buf.yaml) $(execpath :buf.lock) $@",
     tags = ["requires-network"],
     tools = [
         "buf_cache.sh",
@@ -58,9 +58,18 @@ genrule(
     ],
 )
 
+# Every other package reads the module configuration through these labels.
 exports_files(
-    ["buf_test.sh"],
-    visibility = ["//tsworkspace/packages/proto:__pkg__"],
+    [
+        "buf.lock",
+        "buf.yaml",
+        "buf_test.sh",
+    ],
+    visibility = [
+        "//rsworkspace/wasm-components/trogon-schedules-decider:__pkg__",
+        "//tests/proto:__pkg__",
+        "//tsworkspace/packages/proto:__pkg__",
+    ],
 )
 
 [
@@ -72,8 +81,8 @@ exports_files(
             "$(rootpath :buf_cache)",
             check,
             "--",
-            "$(rootpaths //:buf.lock)",
-            "$(rootpaths //:buf.yaml)",
+            "$(rootpaths :buf.lock)",
+            "$(rootpaths :buf.yaml)",
             "$(rootpaths :sources)",
         ],
         data = _WORKSPACE + [
@@ -106,14 +115,14 @@ sh_test(
         "$(rootpath @mise_rust//:bin/rustfmt)",
         "$(rootpath //rsworkspace:rustfmt.toml)",
         "--",
-        "$(rootpaths //:buf.gen.yaml)",
-        "$(rootpaths //:buf.lock)",
-        "$(rootpaths //:buf.yaml)",
+        "$(rootpaths //.config/buf:buf.gen.yaml)",
+        "$(rootpaths :buf.lock)",
+        "$(rootpaths :buf.yaml)",
         "$(rootpaths :sources)",
     ],
     data = _WORKSPACE + [
         ":buf_cache",
-        "//:buf.gen.yaml",
+        "//.config/buf:buf.gen.yaml",
         "//.config/bazel:buf",
         "//%s:Cargo.toml" % _TROGONAI_PROTO,
         "//%s:generated" % _TROGONAI_PROTO,
@@ -144,14 +153,14 @@ sh_test(
         "$(rootpath @mise_rust//:bin/rustfmt)",
         "$(rootpath //rsworkspace:rustfmt.toml)",
         "--",
-        "$(rootpaths //:buf.session.gen.yaml)",
-        "$(rootpaths //:buf.lock)",
-        "$(rootpaths //:buf.yaml)",
+        "$(rootpaths //.config/buf:buf.session.gen.yaml)",
+        "$(rootpaths :buf.lock)",
+        "$(rootpaths :buf.yaml)",
         "$(rootpaths :sources)",
     ],
     data = _WORKSPACE + [
         ":buf_cache",
-        "//:buf.session.gen.yaml",
+        "//.config/buf:buf.session.gen.yaml",
         "//.config/bazel:buf",
         "//%s:Cargo.toml" % _TROGONAI_PROTO,
         "//%s:session_generated" % _TROGONAI_PROTO,
@@ -178,8 +187,8 @@ sh_test(
         "$(rootpath :run_contract_validator)",
         "--",
         "$(rootpaths //.config/mise:config.toml)",
-        "$(rootpaths //:buf.lock)",
-        "$(rootpaths //:buf.yaml)",
+        "$(rootpaths :buf.lock)",
+        "$(rootpaths :buf.yaml)",
         "$(rootpaths :sources)",
         "$(rootpaths //tests/proto:contracts)",
     ],

@@ -38,7 +38,7 @@ permanent; reviving the behavior requires provisioning another Agent.
 
 These contracts do not establish a complete Agent Registry or onboarding
 service. The `proto/trogonai/agents` package is excluded from codegen in
-`buf.gen.yaml` while the design is active, but the generator runs with
+`.config/buf/buf.gen.yaml` while the design is active, but the generator runs with
 `include_imports: true`, so any promoted package that imports it pulls the
 generated `trogonai.agents.*` types in. The configuration draft follows the runtime-owned settings boundary
 in draft
@@ -56,7 +56,7 @@ The repository has a broad `v1alpha1` Session event catalog under
 - parent and child facts such as `delegation_dispatched.proto` and
   `parent_linked.proto`.
 
-Session code generation is also excluded in `buf.gen.yaml` while the contract
+Session code generation is also excluded in `.config/buf/buf.gen.yaml` while the contract
 is being designed. The package remains `v1alpha1`, and
 [ADR#0035](../adr/0035-session-store-decider-aggregate.md) is still draft.
 Session commands, aggregate decisions, projections, the coordinator, and the
