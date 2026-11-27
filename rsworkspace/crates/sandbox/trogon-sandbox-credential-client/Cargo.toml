@@ -1,0 +1,25 @@
+[package]
+name = "trogon-sandbox-credential-client"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Typed NATS client for the sandbox credential broker"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+trogon-nats = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
+trogon-nats = { workspace = true, features = ["test-support"] }

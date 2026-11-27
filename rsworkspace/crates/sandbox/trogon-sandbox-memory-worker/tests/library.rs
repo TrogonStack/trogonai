@@ -1,0 +1,167 @@
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use tokio_util::sync::CancellationToken;
+use trogon_sandbox_contract::{CommandOutput, FileContentHashing, FileRecursion, ProviderKind, WorkerId};
+use trogon_sandbox_memory_worker::{
+    CommandCtx, CommandTable, LiveOutput, MemoryFs, PROFILE, build_heartbeat, build_heartbeat_in_regions, out, resolve,
+};
+
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+fn ctx(fs: &Arc<Mutex<MemoryFs>>, env: &[(&str, &str)]) -> CommandCtx {
+    CommandCtx {
+        args: Vec::new(),
+        cwd: "/".to_string(),
+        env: env
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect::<BTreeMap<_, _>>(),
+        fs: Arc::clone(fs),
+        cancel: CancellationToken::new(),
+        live: LiveOutput::default(),
+    }
+}
+
+async fn run(table: &CommandTable, command: &[&str], context: CommandCtx) -> CommandOutput {
+    let command: Vec<String> = command.iter().map(|s| s.to_string()).collect();
+    table.run(&command, context).await
+}
+
+#[test]
+fn resolve_collapses_relative_segments() {
+    assert_eq!(resolve("/a/b", "../c/./d"), "/a/c/d");
+    assert_eq!(resolve("/a", "/x//y"), "/x/y");
+    assert_eq!(resolve("/", ".."), "/");
+}
+
+#[test]
+fn the_file_map_resolves_paths_and_directories() -> TestResult {
+    let mut fs = MemoryFs::default();
+    assert!(fs.is_empty());
+    fs.write("/w/a/f", b"1".to_vec());
+    fs.write("/w/g", b"22".to_vec());
+    assert_eq!(fs.len(), 2);
+    assert_eq!(fs.read("w/g"), Some(&b"22"[..]));
+    assert!(fs.exists("/w/a/f") && !fs.exists("/w/a"));
+    assert!(fs.is_dir("/") && fs.is_dir("/tmp") && fs.is_dir("/w/a") && !fs.is_dir("/w/a/f") && !fs.is_dir("/zzz"));
+
+    let shallow = fs.manifest("/w", FileRecursion::Flat, FileContentHashing::Metadata)?;
+    assert_eq!(shallow.len(), 1);
+    let deep = fs.manifest("/w", FileRecursion::Recursive, FileContentHashing::Content)?;
+    assert_eq!(deep.len(), 2);
+    let root = fs.manifest("/", FileRecursion::Recursive, FileContentHashing::Metadata)?;
+    assert_eq!(root.len(), 2);
+    let single = fs.manifest("/w/g", FileRecursion::Flat, FileContentHashing::Metadata)?;
+    assert_eq!(single.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_default_commands_behave_like_their_namesakes() -> TestResult {
+    let table = CommandTable::default();
+    let fs = Arc::new(Mutex::new(MemoryFs::default()));
+    fs.lock().map_err(|e| e.to_string())?.write("/tmp/a", b"A".to_vec());
+
+    assert_eq!(run(&table, &["echo", "x", "y"], ctx(&fs, &[])).await.stdout, b"x y\n");
+    assert_eq!(run(&table, &["true"], ctx(&fs, &[])).await.exit_code, 0);
+    assert_eq!(run(&table, &["false"], ctx(&fs, &[])).await.exit_code, 1);
+    assert_eq!(run(&table, &["pwd"], ctx(&fs, &[])).await.stdout, b"/\n");
+    assert_eq!(
+        run(&table, &["printenv"], ctx(&fs, &[("A", "1"), ("B", "2")]))
+            .await
+            .stdout,
+        b"A=1\nB=2\n"
+    );
+    let found = run(&table, &["printenv", "A"], ctx(&fs, &[("A", "1")])).await;
+    assert_eq!((found.exit_code, found.stdout), (0, b"1\n".to_vec()));
+    assert_eq!(
+        run(&table, &["printenv", "A", "Z"], ctx(&fs, &[("A", "1")]))
+            .await
+            .exit_code,
+        1
+    );
+    assert_eq!(
+        run(&table, &["cat", "/tmp/a", "/tmp/a"], ctx(&fs, &[])).await.stdout,
+        b"AA"
+    );
+    let missing = run(&table, &["cat", "/tmp/a", "/tmp/none"], ctx(&fs, &[])).await;
+    assert_eq!((missing.exit_code, missing.stdout), (1, b"A".to_vec()));
+    assert!(missing.stderr.starts_with(b"cat: /tmp/none"));
+
+    assert_eq!(run(&table, &["nope"], ctx(&fs, &[])).await.exit_code, 127);
+    assert_eq!(run(&table, &[], ctx(&fs, &[])).await.stderr, b"empty command\n");
+    assert_eq!(run(&table, &["sh", "-c", "exit"], ctx(&fs, &[])).await.exit_code, 0);
+    assert_eq!(run(&table, &["sh", "-c", "exit 7"], ctx(&fs, &[])).await.exit_code, 7);
+    assert_eq!(run(&table, &["sh", "-c", "exit x"], ctx(&fs, &[])).await.exit_code, 2);
+    assert_eq!(
+        run(&table, &["sh", "-c", "echo hi"], ctx(&fs, &[])).await.stdout,
+        b"hi\n"
+    );
+
+    for argument in ["0", "NaN", "abc", "-5"] {
+        assert_eq!(run(&table, &["sleep", argument], ctx(&fs, &[])).await.exit_code, 0);
+    }
+    assert_eq!(run(&table, &["sleep"], ctx(&fs, &[])).await.exit_code, 0);
+    let cancelled = ctx(&fs, &[]);
+    cancelled.cancel.cancel();
+    assert_eq!(run(&table, &["sleep", "1e300"], cancelled).await.exit_code, 143);
+    Ok(())
+}
+
+#[tokio::test]
+async fn registered_commands_replace_the_defaults() {
+    let mut table = CommandTable::empty();
+    table.register_sync("echo", |_| out(5, "mine", "err"));
+    table.register_sync("sh", |_| out(9, "", ""));
+    let fs = Arc::new(Mutex::new(MemoryFs::default()));
+    assert_eq!(run(&table, &["echo"], ctx(&fs, &[])).await.exit_code, 5);
+    assert_eq!(run(&table, &["sh", "-c", "exit 1"], ctx(&fs, &[])).await.exit_code, 9);
+    assert_eq!(run(&table, &["true"], ctx(&fs, &[])).await.exit_code, 127);
+}
+
+#[tokio::test]
+async fn serve_announces_its_port_until_cancelled() {
+    let table = CommandTable::default();
+    let fs = Arc::new(Mutex::new(MemoryFs::default()));
+    for (arguments, listening) in [(vec!["serve", "8080"], true), (vec!["serve"], false)] {
+        let context = ctx(&fs, &[]);
+        let live = context.live.clone();
+        let cancel = context.cancel.clone();
+        let task = tokio::spawn({
+            let table = table.clone();
+            async move { run(&table, &arguments, context).await }
+        });
+        while !live.contains(b"listening on") {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(live.is_listening(8080), listening);
+        cancel.cancel();
+        assert!(matches!(task.await, Ok(output) if output.exit_code == 143));
+    }
+}
+
+#[test]
+fn live_output_never_matches_an_empty_needle() {
+    let live = LiveOutput::default();
+    live.emit("abc");
+    assert!(live.contains(b"bc") && !live.contains(b"") && !live.contains(b"abcd"));
+    assert!(!live.is_listening(1));
+    live.listen(1);
+    assert!(live.is_listening(1));
+}
+
+#[test]
+fn heartbeats_claim_the_declared_profile() -> TestResult {
+    let worker = WorkerId::new("w1")?;
+    let plain = build_heartbeat(ProviderKind::Mock, &worker, 8, 3);
+    assert_eq!(
+        (plain.capacity.max_concurrent_leases, plain.capacity.current_leases),
+        (8, 3)
+    );
+    assert!(plain.profile.placement.regions.is_empty());
+    let placed = build_heartbeat_in_regions(ProviderKind::Mock, &worker, 8, 0, &["eu-1".to_string()]);
+    assert_eq!(placed.profile.placement.regions, vec!["eu-1".to_string()]);
+    assert_eq!(PROFILE.provider, ProviderKind::Mock);
+    Ok(())
+}

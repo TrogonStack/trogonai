@@ -1,0 +1,1 @@
+pub const DEFAULT_NATS_PORT: u16 = 4222;
