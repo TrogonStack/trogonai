@@ -27,10 +27,6 @@ fn run_request(lease: &LeaseId, change: impl FnOnce(&mut Value)) -> Boxed<RunCom
     Ok(serde_json::from_value(wire)?)
 }
 
-fn pattern(length: usize) -> Vec<u8> {
-    (0..length).map(|index| (index % 256) as u8).collect()
-}
-
 fn argvs(env: &Env) -> Vec<Vec<String>> {
     env.fake
         .calls()

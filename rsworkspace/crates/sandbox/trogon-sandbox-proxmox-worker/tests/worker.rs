@@ -1,5 +1,7 @@
 mod support;
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::http::Method;
@@ -7,8 +9,11 @@ use base64::Engine as _;
 use futures::StreamExt;
 use serde_json::{Value, json};
 use support::*;
-use trogon_sandbox_contract::{LeaseId, ProviderKind, WorkerDispatchProtocol, WorkerHeartbeat};
-use trogon_sandbox_protocol::subjects;
+use trogon_sandbox_contract::{
+    LeaseId, ProviderDispatchPayload, ProviderKind, WorkerAuthorityRequest, WorkerAuthorityResponse,
+    WorkerDispatchProtocol, WorkerHeartbeat,
+};
+use trogon_sandbox_protocol::{AuthorityConfig, AuthorityMode, subjects};
 
 fn command_json(command: &[&str]) -> Value {
     json!({"command": command, "timeout_seconds": 10})
@@ -18,10 +23,6 @@ async fn grant(running: &Running, lease: &str, attempt: &str) -> TestResult {
     let reply = running.dispatch(lease, attempt, request_json()).await?;
     assert!(reply.get("sandbox_id").is_some(), "not granted: {reply}");
     Ok(())
-}
-
-fn pattern(length: usize) -> Vec<u8> {
-    (0..length).map(|index| (index % 256) as u8).collect()
 }
 
 #[tokio::test]
@@ -140,6 +141,16 @@ async fn write_files_and_read_file_roundtrip_large_content() -> TestResult {
         .await?;
     assert_eq!(read["outcome"], "content", "{}", read["outcome"]);
     assert_eq!(serde_json::from_value::<Vec<u8>>(read["data"].clone())?, bytes);
+    assert_eq!(running.env.fake.count(&Method::POST, "/clone"), 1);
+    let mut written = Vec::new();
+    for call in running.env.fake.calls() {
+        let argv = call.argv();
+        if call.path.ends_with("/agent/exec") && argv.iter().any(|arg| arg.contains("base64 -d >>")) {
+            let encoded = argv.last().ok_or("empty argv")?;
+            written.extend(base64::engine::general_purpose::STANDARD.decode(encoded)?);
+        }
+    }
+    assert_eq!(written, bytes);
     running.stop().await
 }
 
@@ -222,4 +233,79 @@ async fn stopping_the_worker_destroys_every_vm_it_holds() -> TestResult {
     assert!(running.env.fake.with(|host| host.extra_vms.is_empty()));
     assert_eq!(running.env.provider.current_leases().await, 0);
     Ok(())
+}
+
+#[tokio::test]
+async fn the_authority_check_reclaims_the_exact_vm_after_a_heartbeat_confirmed_it() -> TestResult {
+    let env = Env::start().await?;
+    let owner = env.provider.dispatch_ledger().worker_id().clone();
+    let lease = LeaseId::new("authority-reclaim");
+    let payload: ProviderDispatchPayload = serde_json::from_value(json!({
+        "lease_id": lease.as_str(),
+        "request": request_json(),
+        "target": {"worker_id": owner.as_str(), "attempt_id": "authority-reclaim-attempt", "epoch": 7},
+    }))?;
+    env.provider.lease_dispatch(&payload).await?;
+    let nats = Nats::start().await;
+    let client = nats.client().await?;
+    let mut heartbeats = client
+        .subscribe(subjects::worker_heartbeat(ProviderKind::Proxmox, &owner))
+        .await?;
+    let mut queries = client.subscribe(subjects::worker_authority_check(&owner)).await?;
+    client.flush().await?;
+    let checks = Arc::new(AtomicUsize::new(0));
+    let (confirm, confirmed) = tokio::sync::oneshot::channel::<()>();
+    let oracle = tokio::spawn({
+        let (client, owner, checks) = (client.clone(), owner.clone(), checks.clone());
+        async move {
+            if confirmed.await.is_err() {
+                return;
+            }
+            while let Some(message) = queries.next().await {
+                let Ok(query) = serde_json::from_slice::<WorkerAuthorityRequest>(&message.payload) else {
+                    continue;
+                };
+                if query.worker_id != owner {
+                    continue;
+                }
+                checks.fetch_add(1, Ordering::SeqCst);
+                let verdict = WorkerAuthorityResponse {
+                    owned: Vec::new(),
+                    not_assigned: query.lease_ids,
+                };
+                if let (Some(reply), Ok(body)) = (message.reply, serde_json::to_vec(&verdict)) {
+                    let _ = client.publish(reply, body.into()).await;
+                }
+            }
+        }
+    });
+    let mut authority = AuthorityConfig::new(AuthorityMode::Enforce);
+    authority.interval = Duration::from_millis(10);
+    authority.min_lease_age = Duration::ZERO;
+    authority.confirmations = 1;
+    authority.grace = Duration::ZERO;
+    authority.request_timeout = Duration::from_millis(500);
+    let mut running = Running::serve(env, nats, authority).await?;
+    let message = tokio::time::timeout(Duration::from_secs(20), heartbeats.next())
+        .await?
+        .ok_or("heartbeat feed closed")?;
+    let beat: WorkerHeartbeat = serde_json::from_slice(&message.payload)?;
+    assert_eq!(beat.worker_id, owner);
+    assert_eq!(
+        beat.capacity.current_leases, 1,
+        "the worker reports its allocation before any verdict"
+    );
+    let _ = confirm.send(());
+    let ledger = running.env.provider.dispatch_ledger().clone();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while running.env.provider.holds_lease(&lease).await || !ledger.try_states().await?.is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })
+    .await??;
+    assert!(checks.load(Ordering::SeqCst) > 0);
+    assert!(!running.env.fake.clone_exists());
+    oracle.abort();
+    running.stop().await
 }

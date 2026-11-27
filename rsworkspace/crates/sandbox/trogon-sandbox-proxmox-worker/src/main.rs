@@ -13,6 +13,10 @@ use trogon_std::env::SystemEnv;
 
 #[derive(Parser)]
 struct Args {
+    /// Leases one VM, checks command execution, file transfer and removal against the host, prints a JSON line per
+    /// phase and exits without connecting to NATS.
+    #[arg(long)]
+    spike: bool,
     #[arg(long, env = "TROGON_SANDBOX_NATS_URL", default_value = "nats://127.0.0.1:4222")]
     nats_url: String,
     #[arg(long, env = "TROGON_SANDBOX_PROXMOX_URL")]
@@ -110,6 +114,10 @@ async fn main() -> anyhow::Result<()> {
         args.worker_id.is_none_or(|configured| configured == worker_id),
         "configured worker id differs from its durable identity"
     );
+    if args.spike {
+        provider.spike(&mut std::io::stdout()).await?;
+        return Ok(());
+    }
     let client = nats_connect::connect(&args.nats_url)
         .await
         .context("connecting to NATS")?;

@@ -83,6 +83,13 @@ pub(crate) struct VmConfigBody<'a> {
     pub(crate) cpulimit: Option<f64>,
 }
 
+/// A snapshot that keeps the VM's memory, so a rollback resumes the running guest.
+#[derive(Serialize)]
+pub(crate) struct SnapshotBody<'a> {
+    pub(crate) snapname: &'a str,
+    pub(crate) vmstate: u8,
+}
+
 #[derive(Serialize)]
 pub(crate) struct ExecBody<'a> {
     pub(crate) command: &'a [String],

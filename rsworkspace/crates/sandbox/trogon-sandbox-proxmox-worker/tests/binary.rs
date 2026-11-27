@@ -228,3 +228,59 @@ async fn an_unreachable_nats_server_stops_the_worker() -> TestResult {
     let dir = tempfile::tempdir()?;
     rejected(worker(UNUSED_NATS, &fake.url(), dir.path()), "connecting to NATS").await
 }
+
+fn report_lines(output: &Output) -> Boxed<Vec<Value>> {
+    let mut lines = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        lines.push(serde_json::from_str(line)?);
+    }
+    Ok(lines)
+}
+
+#[tokio::test]
+async fn the_spike_flag_checks_the_host_and_exits_without_nats() -> TestResult {
+    let fake = Fake::start_with(spike_host()).await?;
+    let dir = tempfile::tempdir()?;
+    let mut command = worker(UNUSED_NATS, &fake.url(), dir.path());
+    command.arg("--spike");
+    let output = finish(command).await?;
+    assert!(
+        output.status.success(),
+        "spike failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let lines = report_lines(&output)?;
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["phase"], "granted");
+    assert_eq!(lines[1]["phase"], "released");
+    assert_eq!(lines[1]["destroy_verified"], true);
+    assert!(!fake.clone_exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_spike_against_a_guest_that_fails_its_checks_exits_with_an_error() -> TestResult {
+    let fake = Fake::start().await?;
+    let dir = tempfile::tempdir()?;
+    let mut command = worker(UNUSED_NATS, &fake.url(), dir.path());
+    command.arg("--spike");
+    rejected(command, "did not match").await?;
+    assert!(!fake.clone_exists());
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires a live Proxmox VE host and template; set the TROGON_SANDBOX_PROXMOX_* variables the worker reads"]
+async fn the_spike_passes_against_a_live_host() -> TestResult {
+    let mut command = Command::new(BINARY);
+    command.arg("--spike").kill_on_drop(true);
+    let output = finish(command).await?;
+    assert!(
+        output.status.success(),
+        "spike failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let lines = report_lines(&output)?;
+    assert!(lines.iter().any(|line| line["phase"] == "released"));
+    Ok(())
+}

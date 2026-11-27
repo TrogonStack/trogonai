@@ -2,7 +2,7 @@ use reqwest::{Method, StatusCode};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::api_bodies::CloneBody;
+use crate::api_bodies::{CloneBody, SnapshotBody};
 use crate::api_wire::{Envelope, VmIdResponse, decode_response};
 use crate::constants::TASK_POLL;
 use crate::{ProxmoxApi, ProxmoxApiError, VmId};
@@ -75,6 +75,12 @@ impl ProxmoxApi {
             .await
     }
 
+    /// Creates a linked clone of `template` and waits until the task that performs it succeeds.
+    pub async fn linked_clone(&self, template: VmId, vm: VmId, name: &str) -> Result<(), ProxmoxApiError> {
+        let upid = self.begin_linked_clone(template, vm, name).await?;
+        self.wait_task(&upid).await
+    }
+
     pub async fn update_config(&self, vm: VmId, config: &impl Serialize) -> Result<(), ProxmoxApiError> {
         let vm = vm.to_string();
         let _: Value = self
@@ -95,6 +101,30 @@ impl ProxmoxApi {
     pub async fn begin_destroy(&self, vm: VmId) -> Result<String, ProxmoxApiError> {
         let vm = vm.to_string();
         self.request(Method::DELETE, &self.vm_path(&vm, &[])).await
+    }
+
+    /// Deletes the VM and waits until the task that performs it succeeds.
+    pub async fn destroy(&self, vm: VmId) -> Result<(), ProxmoxApiError> {
+        let upid = self.begin_destroy(vm).await?;
+        self.wait_task(&upid).await
+    }
+
+    /// Takes a snapshot named `name` that includes the VM's memory, and waits until it is complete.
+    pub async fn snapshot(&self, vm: VmId, name: &str) -> Result<(), ProxmoxApiError> {
+        let vm = vm.to_string();
+        let body = SnapshotBody {
+            snapname: name,
+            vmstate: 1,
+        };
+        let upid: String = self
+            .request_with(Method::POST, &self.vm_path(&vm, &["snapshot"]), &body)
+            .await?;
+        self.wait_task(&upid).await
+    }
+
+    /// Returns the VM to the snapshot named `name` and waits until the rollback is complete.
+    pub async fn rollback(&self, vm: VmId, name: &str) -> Result<(), ProxmoxApiError> {
+        self.vm_task(Method::POST, vm, &["snapshot", name, "rollback"]).await
     }
 
     async fn vm_task(&self, method: Method, vm: VmId, suffix: &[&str]) -> Result<(), ProxmoxApiError> {
