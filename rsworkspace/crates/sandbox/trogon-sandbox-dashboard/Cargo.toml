@@ -1,0 +1,35 @@
+[package]
+name = "trogon-sandbox-dashboard"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Static single-page dashboard for sandbox lease, snapshot, worker, and tag observability"
+
+[lib]
+name = "trogon_sandbox_dashboard"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-dashboard"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal"] }
+tracing = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }

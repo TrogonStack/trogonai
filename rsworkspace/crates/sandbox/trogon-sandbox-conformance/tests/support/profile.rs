@@ -1,0 +1,110 @@
+//! A capability profile and heartbeat for the in-process worker.
+
+use std::time::SystemTime;
+
+use trogon_sandbox_contract::{
+    ArtifactType, CapabilitySupport, DormancyCapability, EgressCapability, EgressEnforcementLevel, IngressCapability,
+    IsolationCapability, IsolationTier, LifecycleCapability, PerformanceProfile, PlacementCapability,
+    ProviderCapabilityProfile, ProviderKind, ResourceCapability, ResourceLimitMechanism, SnapshotCapability,
+    VolumeCapability, WorkerCapacity, WorkerDispatchProtocol, WorkerHeartbeat, WorkerId,
+};
+
+fn profile(provider: ProviderKind) -> ProviderCapabilityProfile {
+    let unsupported = CapabilitySupport::Unsupported;
+    ProviderCapabilityProfile {
+        provider,
+        snapshot: SnapshotCapability {
+            can_snapshot: CapabilitySupport::Supported,
+            can_checkpoint_running: CapabilitySupport::Supported,
+            can_restore: CapabilitySupport::Supported,
+            supported_artifact_types: vec![ArtifactType::SandboxRootfsV1],
+            layered_deltas: unsupported,
+            max_snapshot_size_bytes: None,
+            supports_native_snapshots: unsupported,
+            supports_in_place_rollback: unsupported,
+        },
+        volume: VolumeCapability {
+            supported_modes: Vec::new(),
+            supports_s3_backend: unsupported,
+            supports_fuse_mounts: unsupported,
+        },
+        isolation: IsolationCapability {
+            default_tier: IsolationTier::Container,
+            supported_tiers: vec![IsolationTier::Container],
+            egress_enforcement: EgressEnforcementLevel::Mandatory,
+            supports_privileged: CapabilitySupport::Unsupported,
+            supports_sandbox_users: unsupported,
+            supports_interactive_stdin: unsupported,
+            supports_named_processes: unsupported,
+            supports_process_readiness: unsupported,
+            supports_graceful_stop: unsupported,
+            supports_command_restart: unsupported,
+            supports_command_cancellation: unsupported,
+            supports_command_launch_cancellation: unsupported,
+            supports_port_preview: unsupported,
+            supports_expose_after_create: unsupported,
+            supports_evidence_streaming: unsupported,
+            supports_output_streaming: unsupported,
+            supports_domain_allowlist: unsupported,
+            supports_tls_intercept: unsupported,
+            supports_secret_substitution: unsupported,
+            supports_secret_bindings: unsupported,
+            supports_masked_files: unsupported,
+            supports_fs_policy: unsupported,
+            supports_file_ops: unsupported,
+            supports_file_search: unsupported,
+            supports_file_archive: unsupported,
+            supports_output_redaction: unsupported,
+            supports_terminal: unsupported,
+            resource_limits: ResourceLimitMechanism::CgroupV2,
+            egress: EgressCapability::PROXIED,
+            supports_hardening_overrides: unsupported,
+            supports_change_tracking: unsupported,
+            supports_file_watch: unsupported,
+            supports_persistent_runtime: unsupported,
+            supports_dir_transfer: unsupported,
+            supports_browser: unsupported,
+            supports_network_policy_update: unsupported,
+            supports_sandbox_groups: unsupported,
+        },
+        lifecycle: LifecycleCapability {
+            supports_warm_pool: unsupported,
+            max_warm_pool_size: None,
+            supports_named_tags: unsupported,
+            supports_prewarm_per_tenant: unsupported,
+            supports_pause_resume: unsupported,
+            supports_native_auto_stop: unsupported,
+            max_lease_lifetime_seconds: None,
+            dormancy: DormancyCapability::FREEZE,
+        },
+        performance: PerformanceProfile {
+            cold_start_p50_ms: 1,
+            cold_restore_p50_ms: 1,
+            max_concurrent_sandboxes: None,
+        },
+        resources: ResourceCapability::default(),
+        placement: PlacementCapability::default(),
+        ingress: IngressCapability::default(),
+    }
+}
+
+/// What a worker of `kind` reports about itself.
+pub fn heartbeat(
+    kind: ProviderKind,
+    worker_id: &WorkerId,
+    dispatch_protocol: WorkerDispatchProtocol,
+    supports_lease_epoch: CapabilitySupport,
+) -> WorkerHeartbeat {
+    WorkerHeartbeat {
+        worker_id: worker_id.clone(),
+        dispatch_protocol,
+        native_volume_bindings: Vec::new(),
+        provider: kind,
+        capacity: WorkerCapacity::default(),
+        emitted_at: SystemTime::now(),
+        cached_digests: Vec::new(),
+        profile: profile(kind),
+        warm_pool_population: Default::default(),
+        supports_lease_epoch,
+    }
+}

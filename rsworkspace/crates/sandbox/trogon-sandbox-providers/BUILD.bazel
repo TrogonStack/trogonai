@@ -1,0 +1,8 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    integration_tests = {
+        # Starts a NATS server in a container through Docker.
+        "k8s_secrets_nats": {"tags": ["requires-network"]},
+    },
+)
