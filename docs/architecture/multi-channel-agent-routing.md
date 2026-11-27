@@ -2,9 +2,11 @@
 
 How a Telegram chat reaches an AI agent and gets a reply, and why the layer
 between them knows nothing about Telegram. "Multi-channel" names the contract of
-that middle layer, not a count of channels: Telegram is the only one
-implemented, and everything between the platform edge and the agent is
-channel-neutral so a second channel is a new edge, never a new brain.
+that middle layer, not a count of channels: Telegram is described here, and
+everything between the platform edge and the agent is channel-neutral so a
+second channel is a new edge, never a new brain. Discord is that second edge
+(`channel-bridge-discord`); the ACP side both bridges use lives in
+`channel-acp-port`. An agent CLI reaches the same subjects through `acp-host`.
 
 ## The shape in one paragraph
 
