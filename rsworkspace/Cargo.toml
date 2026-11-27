@@ -79,6 +79,7 @@ trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observabi
 trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
+trogon-sandbox-v8-wasm-worker = { path = "crates/sandbox/trogon-sandbox-v8-wasm-worker" }
 trogon-sandbox-volumes = { path = "crates/sandbox/trogon-sandbox-volumes" }
 trogon-sandbox-windows-fence = { path = "crates/sandbox/trogon-sandbox-windows-fence" }
 trogon-std = { path = "crates/platform/trogon-std" }
@@ -257,11 +258,13 @@ filetime = "=0.2.29"
 time = "=0.3.55"
 unicode-ident = "=1.0.24"
 url = "=2.5.8"
+deno_core = "=0.410.0"
 walkdir = "=2.5.0"
 uuid = { version = "=1.24.0", features = ["v4", "v7"] }
 prost-reflect = "=0.14.7"
 serde_yaml = "=0.9.34"
 wasmtime-wasi = "=47.0.3"
+wat = "=1.252.0"
 wit-bindgen = "=0.63.0"
 
 # Auth callout
