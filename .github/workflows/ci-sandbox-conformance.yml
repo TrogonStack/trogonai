@@ -1,0 +1,166 @@
+name: CI Sandbox Conformance
+
+# Runs the conformance suite the memory worker passes in `cargo test` against
+# the docker and subprocess workers, which need a real daemon or real processes
+# and so are ignored tests.
+on:
+  push:
+    branches: [main]
+    # The crates under test and their transitive workspace path dependencies.
+    paths:
+      - 'rsworkspace/Cargo.toml'
+      - 'rsworkspace/Cargo.lock'
+      - 'rsworkspace/crates/platform/sandbox-command-supervisor/**'
+      - 'rsworkspace/crates/platform/trogon-nats/**'
+      - 'rsworkspace/crates/platform/trogon-semconv/**'
+      - 'rsworkspace/crates/platform/trogon-std/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-actor-agent/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-auth/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-broker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-client/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-conformance/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-contract/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-cosign/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-credential-broker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-credential-client/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-docker-worker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-file-ops/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-memory-worker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-observability/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-oci/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-protocol/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-providers/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-ssh-gateway/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-subprocess-worker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-volumes/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-windows-fence/**'
+      - 'devops/docker/compose/sandbox/dispatch-keys.sh'
+      - '.config/mise/config.toml'
+      - '.config/mise/mise.lock'
+      - '.github/actions/setup-rust/**'
+      - '.config/mise/tasks/github/actions/setup-rust/**'
+      - '.config/mise/tasks/github/workflows/ci-sandbox-conformance/**'
+      - '.github/workflows/ci-sandbox-conformance.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'rsworkspace/Cargo.toml'
+      - 'rsworkspace/Cargo.lock'
+      - 'rsworkspace/crates/platform/sandbox-command-supervisor/**'
+      - 'rsworkspace/crates/platform/trogon-nats/**'
+      - 'rsworkspace/crates/platform/trogon-semconv/**'
+      - 'rsworkspace/crates/platform/trogon-std/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-actor-agent/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-auth/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-broker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-client/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-conformance/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-contract/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-cosign/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-credential-broker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-credential-client/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-docker-worker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-file-ops/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-memory-worker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-observability/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-oci/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-protocol/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-providers/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-ssh-gateway/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-subprocess-worker/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-volumes/**'
+      - 'rsworkspace/crates/sandbox/trogon-sandbox-windows-fence/**'
+      - 'devops/docker/compose/sandbox/dispatch-keys.sh'
+      - '.config/mise/config.toml'
+      - '.config/mise/mise.lock'
+      - '.github/actions/setup-rust/**'
+      - '.config/mise/tasks/github/actions/setup-rust/**'
+      - '.config/mise/tasks/github/workflows/ci-sandbox-conformance/**'
+      - '.github/workflows/ci-sandbox-conformance.yml'
+
+concurrency:
+  group: ci-sandbox-conformance-${{ github.ref }}
+  # main runs are the only ones that save the cache every PR restores.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+  CARGO_NET_RETRY: '10'
+  # Debug info is most of the test target; without it the cache stays small.
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    name: Conformance (docker worker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      WORKER: docker
+      CONFORMANCE_IMAGE: sandbox-conformance:local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          install-args: rust github:nats-io/nats-server
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-sandbox-conformance-docker
+          workspaces: rsworkspace -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the keep-alive image
+        run: mise run --skip-tools github:workflows:ci-sandbox-conformance:keep-alive-image
+
+      - name: Build the worker and the suite
+        run: mise run --skip-tools github:workflows:ci-sandbox-conformance:build
+
+      - name: Run the suite against the docker worker
+        run: mise run --skip-tools github:workflows:ci-sandbox-conformance:run
+
+  subprocess:
+    name: Conformance (subprocess worker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Not required yet: it has not passed on a hosted runner, and it runs with no
+    # isolation backend because the runner denies the user namespaces
+    # bubblewrap needs.
+    continue-on-error: true
+    env:
+      WORKER: subprocess
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          install-args: rust github:nats-io/nats-server
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-sandbox-conformance-subprocess
+          workspaces: rsworkspace -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the worker, its agent and the suite
+        run: mise run --skip-tools github:workflows:ci-sandbox-conformance:build
+
+      - name: Run the suite against the subprocess worker
+        run: mise run --skip-tools github:workflows:ci-sandbox-conformance:run
