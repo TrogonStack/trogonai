@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "zot.fullname" . }}-access-control
+  labels:
+    {{- include "zot.labels" . | nindent 4 }}
+data:
+  # Merged into http.accessControl in configmap.yaml at deploy time.
+  # Platform identity (sandbox-snapshot-builder) pushes snapshots/** only.
+  # Per-tenant service accounts pull their own snapshots/<tenant> repository only.
+  # Anonymous users: no anonymousPolicy entries (deny by default).
+  access-control.json: |
+    {{ include "zot.accessControlBlock" . | nindent 4 }}

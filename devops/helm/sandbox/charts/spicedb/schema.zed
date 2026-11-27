@@ -1,0 +1,11 @@
+definition user {}
+
+definition service_account {}
+
+// The broker checks `lease_sandbox` on the tenant for the calling service account.
+definition sandbox_tenant {
+  relation admin: user | service_account
+  relation operator: user | service_account
+
+  permission lease_sandbox = admin + operator
+}

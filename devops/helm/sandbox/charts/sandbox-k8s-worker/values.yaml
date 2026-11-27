@@ -1,0 +1,38 @@
+replicaCount: 1
+# Prometheus scrape port; the worker listens on it for the whole pod network.
+metricsPort: 9101
+# Deployment runs a single replica with no worker identity, so it recovers
+# every lease in the namespace. StatefulSet gives each replica its stable pod
+# name as SANDBOX_K8S_WORKER_IDENTITY, which is what lets more than one
+# replica share k8sNamespace. The chart refuses replicaCount above 1 with a
+# Deployment.
+workloadKind: Deployment
+# Name and label family the worker stamps on the objects it creates: sandbox or legacy.
+resourceNaming: sandbox
+# Whether a replica with an identity still adopts leases that carry no
+# identity label, such as ones launched by a Deployment before switching to a
+# StatefulSet. Set it to false once no unlabeled leases remain.
+recoverUnlabeledLeases: true
+# Keep an image's own non-root USER for leases that name no user instead of
+# forcing uid 65532. Images whose USER is root, unset or not a numeric id fall
+# back to uid 65532 with a warning.
+honorImageUser: false
+# Seconds a no-deadline lease's owning replica must stay absent from the
+# namespace before another replica reclaims the lease. Leave it unset to use
+# the worker's own default (3600); 0 turns the reclaim off. Sets
+# SANDBOX_K8S_ORPHAN_RECLAIM_GRACE_SECS.
+orphanReclaimGraceSecs: null
+k8sNamespace: sandbox-leases
+runtimeClass: kata-fc
+serviceAccountName: sandbox-k8s-worker
+image: busybox:latest
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+egressEnforcement: best-effort
+rbac:
+  create: true

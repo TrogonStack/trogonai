@@ -1,0 +1,20 @@
+replicaCount: 1
+# Prometheus scrape port; the worker listens on it for the whole pod network.
+metricsPort: 9106
+# Management endpoint of the Dynamic Sessions session pool and the pool's name. The worker
+# refuses to start without both (SANDBOX_ACA_POOL_MANAGEMENT_ENDPOINT,
+# SANDBOX_ACA_SESSION_POOL_NAME). The service principal comes from the credential broker.
+poolManagementEndpoint: ""
+sessionPoolName: ""
+# Image a lease boots when its own reference names none. Optional.
+defaultImage: ""
+# Azure region the worker advertises so leases can be placed by region. Optional.
+region: ""
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+egressEnforcement: none

@@ -1,0 +1,12 @@
+replicaCount: 1
+service:
+  port: 8080
+# Prometheus scrape port; the dashboard serves GET /metrics here.
+metricsPort: 9080
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sandbox-hyperlight-worker.fullname" . }}
+  labels:
+    {{- include "sandbox-hyperlight-worker.labels" . | nindent 4 }}
+    sandbox.trogonai.io/egress-enforcement: {{ .Values.egressEnforcement | quote }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-hyperlight-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "sandbox-hyperlight-worker.labels" . | nindent 8 }}
+        sandbox.trogonai.io/egress-enforcement: {{ .Values.egressEnforcement | quote }}
+    spec:
+      serviceAccountName: {{ include "sandbox-hyperlight-worker.fullname" . }}
+      containers:
+        - name: worker
+          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-hyperlight-worker:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "sandbox-hyperlight-worker.fullname" . }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          {{- with .Values.global.dispatchAuth }}
+          env:
+            - name: SANDBOX_DISPATCH_PUBLIC_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .publicKeysKey }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            privileged: {{ .Values.privileged }}
+          volumeMounts:
+            - name: kvm
+              mountPath: /dev/kvm
+          # The worker serves no health endpoint, so the probes only prove the binary runs.
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/trogon-sandbox-hyperlight-worker", "--help"]
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/trogon-sandbox-hyperlight-worker", "--help"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: kvm
+          hostPath:
+            path: /dev/kvm
+            type: CharDevice
