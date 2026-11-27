@@ -1,16 +1,35 @@
 #!/usr/bin/env bash
-#MISE description="Build a container image's release binary on the runner and stage it under OUTPUT_DIR/IMAGE_ARCH for the Dockerfile prebuilt target"
+#MISE description="Build a container image's release binaries on the runner and stage them under OUTPUT_DIR/IMAGE_ARCH for the Dockerfile prebuilt target"
 set -euo pipefail
 
 : "${SERVICE:?SERVICE is required}"
 : "${IMAGE_ARCH:?IMAGE_ARCH is required}"
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
+# Space-separated package:binary pairs. Most images ship one binary named
+# after both its package and the image.
+IMAGE_BINARIES="${IMAGE_BINARIES:-${SERVICE}:${SERVICE}}"
+
 ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 cd "$ROOT/rsworkspace"
 
+args=()
+binaries=()
+for pair in $IMAGE_BINARIES; do
+    package="${pair%%:*}"
+    binary="${pair#*:}"
+    if [ -z "$package" ] || [ -z "$binary" ] || [ "$package" = "$pair" ]; then
+        echo "IMAGE_BINARIES entry '$pair' is not package:binary" >&2
+        exit 1
+    fi
+    args+=(--package "$package" --bin "$binary")
+    binaries+=("$binary")
+done
+
 # Strip after linking: a strip profile override would change how every
 # dependency is fingerprinted and miss the shared release cache.
-cargo build --locked --release --package "$SERVICE" --bin "$SERVICE"
-install -D -m 0755 "target/release/$SERVICE" "$OUTPUT_DIR/$IMAGE_ARCH/$SERVICE"
-strip --strip-all "$OUTPUT_DIR/$IMAGE_ARCH/$SERVICE"
+cargo build --locked --release "${args[@]}"
+for binary in "${binaries[@]}"; do
+    install -D -m 0755 "target/release/$binary" "$OUTPUT_DIR/$IMAGE_ARCH/$binary"
+    strip --strip-all "$OUTPUT_DIR/$IMAGE_ARCH/$binary"
+done
