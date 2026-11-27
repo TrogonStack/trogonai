@@ -69,3 +69,14 @@ async fn main() {
     local.run_until(io_task).await.unwrap();
 }
 ```
+
+## Serving one client
+
+`AgentSideNatsConnection::with_jetstream_gated` puts every request to a
+`ClientGate` before the agent sees it. The gate gets the client named in the
+request's `X-Acp-Client` header, which the `acp-nats` bridge sets from its
+client's `initialize`, or `None` if there is no header. A refused request is
+answered with the gate's JSON-RPC error, and a refused notification is
+dropped. `acp-host` uses this to serve the one client that claimed it. The
+header is a label, not a credential, so the gate guards against a
+misconfigured prefix, not a hostile client.

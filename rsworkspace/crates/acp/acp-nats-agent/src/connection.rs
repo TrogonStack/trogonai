@@ -1,3 +1,4 @@
+use crate::client_gate::{AdmitAll, ClientGate};
 use crate::constants::SESSION_READY_SUFFIX;
 use acp_nats::jetstream::consumers::commands_observer;
 use acp_nats::jetstream::streams::commands_stream_name;
@@ -6,7 +7,7 @@ use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, 
 use acp_nats::wire::{
     encode_agent_error, encode_success, req_id_from_request_headers, response_id_from_request_headers,
 };
-use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ResponseSubject};
+use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ResponseSubject, requesting_client};
 use agent_client_protocol::v1::schema::{
     ArchiveSessionRequest, AuthStatusRequest, AuthenticateRequest, CancelNotification, CloseSessionRequest,
     DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
@@ -71,7 +72,7 @@ where
         let nats_for_serve = nats.clone();
         let prefix = acp_prefix.clone();
 
-        let io_task = async move { serve(agent, nats_for_serve, &prefix, spawn).await };
+        let io_task = async move { serve(agent, AdmitAll, nats_for_serve, &prefix, spawn).await };
 
         let conn = Self {
             nats,
@@ -92,6 +93,24 @@ where
         J: JetStreamGetStream + 'static,
         trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
     {
+        Self::with_jetstream_gated(agent, AdmitAll, nats, js, acp_prefix, spawn)
+    }
+
+    /// [`Self::with_jetstream`], with every request first put to `gate`: one
+    /// it refuses never reaches the agent. For an agent that serves one
+    /// client, such as `acp-host`.
+    pub fn with_jetstream_gated<J>(
+        agent: impl AgentHandler + Sync + 'static,
+        gate: impl ClientGate + 'static,
+        nats: N,
+        js: J,
+        acp_prefix: AcpPrefix,
+        spawn: impl Fn(LocalBoxFuture<'static, ()>) + Copy + 'static,
+    ) -> (Self, impl std::future::Future<Output = Result<(), ConnectionError>>)
+    where
+        J: JetStreamGetStream + 'static,
+        trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
+    {
         let nats_for_serve = nats.clone();
         let nats_for_js = nats.clone();
         let prefix = acp_prefix.clone();
@@ -99,9 +118,10 @@ where
 
         let io_task = async move {
             let agent = Rc::new(agent);
+            let gate = Rc::new(gate);
 
-            let core = serve_global(agent.clone(), nats_for_serve, &prefix, spawn);
-            let jetstream = serve_js(agent, nats_for_js, js, &prefix_js, spawn);
+            let core = serve_global(agent.clone(), gate.clone(), nats_for_serve, &prefix, spawn);
+            let jetstream = serve_js(agent, gate, nats_for_js, js, &prefix_js, spawn);
 
             tokio::select! {
                 result = core => result,
@@ -127,8 +147,9 @@ where
     }
 }
 
-async fn serve<N, A>(
+async fn serve<N, A, G>(
     agent: A,
+    gate: G,
     nats: N,
     prefix: &AcpPrefix,
     spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
@@ -136,6 +157,7 @@ async fn serve<N, A>(
 where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
     A: AgentHandler + Sync + 'static,
+    G: ClientGate + 'static,
 {
     let global_wildcard = GlobalAllSubject::new(prefix);
     let session_wildcard = AllAgentSubject::new(prefix);
@@ -159,13 +181,15 @@ where
     let mut subscriber = futures::stream::select(global_sub, session_sub);
 
     let agent = Rc::new(agent);
+    let gate = Rc::new(gate);
     let nats = Rc::new(nats);
 
     while let Some(msg) = subscriber.next().await {
         let agent = agent.clone();
+        let gate = gate.clone();
         let nats = nats.clone();
         spawn(Box::pin(async move {
-            dispatch_message(msg, agent.as_ref(), nats.as_ref()).await;
+            dispatch_message(msg, agent.as_ref(), gate.as_ref(), nats.as_ref()).await;
         }));
     }
 
@@ -173,8 +197,9 @@ where
     Ok(())
 }
 
-async fn serve_global<N, A>(
+async fn serve_global<N, A, G>(
     agent: Rc<A>,
+    gate: Rc<G>,
     nats: N,
     prefix: &AcpPrefix,
     spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
@@ -182,6 +207,7 @@ async fn serve_global<N, A>(
 where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
     A: AgentHandler + Sync + 'static,
+    G: ClientGate + 'static,
 {
     let global_wildcard = GlobalAllSubject::new(prefix);
     let ext_wildcard = AllAgentExtSubject::new(prefix);
@@ -208,9 +234,10 @@ where
 
     while let Some(msg) = subscriber.next().await {
         let agent = agent.clone();
+        let gate = gate.clone();
         let nats = nats.clone();
         spawn(Box::pin(async move {
-            dispatch_message(msg, agent.as_ref(), nats.as_ref()).await;
+            dispatch_message(msg, agent.as_ref(), gate.as_ref(), nats.as_ref()).await;
         }));
     }
 
@@ -231,7 +258,12 @@ fn is_session_ready_signal(subject: &str) -> bool {
         .is_some_and(|(head, _session_id)| head.ends_with(".session"))
 }
 
-async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync>(msg: Message, agent: &A, nats: &N) {
+async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync, G: ClientGate>(
+    msg: Message,
+    agent: &A,
+    gate: &G,
+    nats: &N,
+) {
     let subject = msg.subject.as_str();
 
     if is_session_ready_signal(subject) {
@@ -242,6 +274,11 @@ async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync
         Some(p) => p,
         None => return,
     };
+
+    if let Err(refusal) = gate.admit(requesting_client(msg.headers.as_ref())) {
+        refuse(&msg, &refusal, nats).await;
+        return;
+    }
 
     let (result, session_id) = match parsed {
         ParsedAgentSubject::Global(method) => {
@@ -449,6 +486,21 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync
     }
 }
 
+/// Answers a request the [`ClientGate`] refused with the refusal, so its
+/// sender sees why; a refused notification has no one to answer.
+async fn refuse<N: PublishClient + FlushClient>(msg: &Message, refusal: &agent_client_protocol::Error, nats: &N) {
+    let subject = msg.subject.as_str();
+    let client = requesting_client(msg.headers.as_ref());
+    warn!(subject, client, error = %refusal, "Refused a request from a client this agent does not serve");
+    let Some(reply_to) = msg.reply.as_deref() else {
+        return;
+    };
+    let id = response_id_from_request_headers(&msg.headers.clone().unwrap_or_default());
+    if let Err(error) = reply_wire(nats, reply_to, encode_agent_error(id, refusal)).await {
+        warn!(subject, error = %error, "Failed to send a refusal");
+    }
+}
+
 async fn reply_wire<N: PublishClient + FlushClient>(
     nats: &N,
     reply_to: &str,
@@ -602,8 +654,9 @@ where
     }
 }
 
-async fn serve_js<N, J, A>(
+async fn serve_js<N, J, A, G>(
     agent: Rc<A>,
+    gate: Rc<G>,
     nats: N,
     js: J,
     prefix: &AcpPrefix,
@@ -614,6 +667,7 @@ where
     J: JetStreamGetStream + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
     A: AgentHandler + Sync + 'static,
+    G: ClientGate + 'static,
 {
     let stream_name = commands_stream_name(prefix);
     let config = commands_observer();
@@ -643,10 +697,11 @@ where
         match msg_result {
             Ok(js_msg) => {
                 let agent = agent.clone();
+                let gate = gate.clone();
                 let nats = nats.clone();
                 let prefix = prefix.clone();
                 spawn(Box::pin(async move {
-                    dispatch_js_message(js_msg, agent.as_ref(), nats.as_ref(), &prefix).await;
+                    dispatch_js_message(js_msg, agent.as_ref(), gate.as_ref(), nats.as_ref(), &prefix).await;
                 }));
             }
             Err(e) => {
@@ -659,9 +714,15 @@ where
     Ok(())
 }
 
-async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + Sync, M: JsDispatchMessage>(
+async fn dispatch_js_message<
+    N: PublishClient + FlushClient,
+    A: AgentHandler + Sync,
+    G: ClientGate,
+    M: JsDispatchMessage,
+>(
     js_msg: M,
     agent: &A,
+    gate: &G,
     nats: &N,
     prefix: &AcpPrefix,
 ) {
@@ -706,6 +767,15 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
         length: inner.payload.len(),
     };
     let subject = msg.subject.as_str();
+
+    if let Err(refusal) = gate.admit(requesting_client(msg.headers.as_ref())) {
+        refuse(&msg, &refusal, nats).await;
+        // Consumed: redelivering it would only be refused again.
+        if let Err(e) = js_msg.ack().await {
+            warn!(subject, error = %e, "Failed to ack refused JetStream message");
+        }
+        return;
+    }
 
     let result = match method {
         SessionAgentMethod::Load => {
