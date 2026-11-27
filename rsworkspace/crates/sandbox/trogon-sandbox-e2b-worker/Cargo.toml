@@ -1,0 +1,54 @@
+[package]
+name = "trogon-sandbox-e2b-worker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "NATS-subscribed worker that fulfills sandbox lease requests through E2B"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-e2b-worker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+futures = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-file-ops = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-sandbox-ssh-gateway = { workspace = true }
+trogon-std = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+rusqlite = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
+wiremock = { workspace = true }
