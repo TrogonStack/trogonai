@@ -63,6 +63,7 @@ trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-sandbox-aca-worker = { path = "crates/sandbox/trogon-sandbox-aca-worker" }
 trogon-sandbox-actor-agent = { path = "crates/sandbox/trogon-sandbox-actor-agent", default-features = false }
+trogon-sandbox-admin = { path = "crates/sandbox/trogon-sandbox-admin" }
 trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-broker = { path = "crates/sandbox/trogon-sandbox-broker" }
 trogon-sandbox-client = { path = "crates/sandbox/trogon-sandbox-client" }
