@@ -1,0 +1,74 @@
+use super::domain::{MessageId, PeerId, TenantId};
+use super::{evolve_error::EvolveError, message_error::MessageError, message_rules, state_values};
+use crate::commands::state::PeerState;
+use trogonai_proto::peers::v1alpha1 as proto;
+#[derive(Debug, Clone)]
+pub struct AuthoritativeReceipt {
+    pub(crate) tenant: TenantId,
+    pub(crate) sender: PeerId,
+    pub(crate) receipt: proto::RecipientReceipt,
+}
+impl AuthoritativeReceipt {
+    pub fn from_recipient_history(state: &PeerState, id: &MessageId) -> Result<Self, MessageError> {
+        let receipt = state
+            .dispositions
+            .iter()
+            .find(|r| r.message_id.as_deref() == Some(id.as_str()))
+            .ok_or(MessageError::InvalidTransition)?;
+        let enrollment = state.enrollment.as_option().ok_or(EvolveError::MissingEnrollment)?;
+        state_values::parse_enrollment(enrollment)?;
+        message_rules::validate_receipt(receipt)?;
+        let position = state
+            .dispositions
+            .iter()
+            .position(|r| r.message_id == receipt.message_id)
+            .ok_or(MessageError::InvalidTransition)?;
+        if receipt.recipient_peer_id != enrollment.peer_id || receipt.recipient_revision != Some(position as u64 + 1) {
+            return Err(MessageError::InvalidTransition);
+        }
+        let entry = state.inbox.iter().find(|e| e.message.message_id == receipt.message_id);
+        if let Some(entry) = entry {
+            if entry.disposition.as_option() != Some(receipt) {
+                return Err(MessageError::InvalidTransition);
+            }
+            message_rules::receipt_matches_message(receipt, &entry.message)?;
+        }
+        if receipt.outcome.and_then(|o| o.as_known())
+            == Some(proto::PreparationOutcome::PREPARATION_OUTCOME_BATCH_PREPARED)
+        {
+            let batch = state
+                .batches
+                .iter()
+                .find(|b| b.batch_id == receipt.batch_id)
+                .ok_or(MessageError::InvalidTransition)?;
+            if !batch
+                .message_ids
+                .iter()
+                .any(|id| receipt.message_id.as_ref() == Some(id))
+                || batch.prepared_at != receipt.decided_at
+                || !state.inbox.iter().any(|e| e.message.message_id == receipt.message_id)
+            {
+                return Err(MessageError::InvalidTransition);
+            }
+        }
+        let sender = receipt
+            .sender_peer_id
+            .as_deref()
+            .or_else(|| entry.and_then(|entry| entry.message.sender_peer_id.as_deref()))
+            .ok_or(MessageError::InvalidTransition)?;
+        let sender = PeerId::parse(sender)?;
+        let mut receipt = receipt.clone();
+        receipt.sender_peer_id = Some(sender.to_string());
+        Ok(Self {
+            tenant: TenantId::new(state.enrollment.tenant_id.clone().unwrap_or_default())?,
+            sender,
+            receipt,
+        })
+    }
+    pub fn tenant(&self) -> &TenantId {
+        &self.tenant
+    }
+    pub fn receipt(&self) -> &proto::RecipientReceipt {
+        &self.receipt
+    }
+}
