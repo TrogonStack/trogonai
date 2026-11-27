@@ -44,6 +44,14 @@ impl MockAgent {
 
 #[async_trait::async_trait]
 impl AgentHandler for MockAgent {
+    async fn ext_notification(&self, args: ExtNotification) -> agent_client_protocol::Result<()> {
+        self.schema_calls
+            .lock()
+            .unwrap()
+            .push(("ext_notification".into(), serde_json::to_value(args).unwrap()));
+        Ok(())
+    }
+
     async fn auth_status(&self, args: AuthStatusRequest) -> agent_client_protocol::Result<AuthStatusResponse> {
         self.schema_calls
             .lock()
@@ -382,6 +390,30 @@ async fn dispatch_ext_without_reply_calls_ext_notification() {
     )
     .await;
     assert!(nats.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn the_bridges_session_ready_signal_never_reaches_the_agent() {
+    let ready = acp_nats::nats::ExtSessionReady::new(agent_client_protocol::v1::schema::SessionId::from("s1"));
+    let payload = serde_json::to_vec(&ready).unwrap();
+
+    let (nats, agent) = dispatch_raw("acp.v1.session.s1.agent.ext.ready", &payload, None).await;
+
+    assert!(nats.published_messages().is_empty());
+    assert!(agent.schema_calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn other_session_extension_notifications_still_reach_the_agent() {
+    let (_, agent) = dispatch_raw("acp.v1.session.s1.agent.ext.my_tool", b"{}", None).await;
+    assert_eq!(agent.schema_calls.lock().unwrap().len(), 1);
+
+    let (_, agent) = dispatch_raw("acp.v1.global.agent.ext.ready", b"{}", None).await;
+    assert_eq!(
+        agent.schema_calls.lock().unwrap().len(),
+        1,
+        "only the session-scoped signal is the bridge's"
+    );
 }
 
 async fn assert_dispatch_method_not_found<T: serde::Serialize>(subject: &str, args: &T) {

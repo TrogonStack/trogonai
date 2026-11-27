@@ -1,3 +1,4 @@
+use crate::constants::SESSION_READY_SUFFIX;
 use acp_nats::jetstream::consumers::commands_observer;
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
@@ -217,8 +218,25 @@ where
     Ok(())
 }
 
+/// Whether `subject` is the bridge's `session.ready` signal. The bridge
+/// publishes it on `{prefix}.v1.session.{id}.agent.ext.ready` once a session is
+/// set up, for its own clients to wait on. It falls inside the
+/// `session.*.agent.ext.>` space the agent serves, but it is no call to the
+/// agent: forwarding it would hand the agent a `_ready` notification on every
+/// new session and prompt.
+fn is_session_ready_signal(subject: &str) -> bool {
+    subject
+        .strip_suffix(SESSION_READY_SUFFIX)
+        .and_then(|rest| rest.rsplit_once('.'))
+        .is_some_and(|(head, _session_id)| head.ends_with(".session"))
+}
+
 async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync>(msg: Message, agent: &A, nats: &N) {
     let subject = msg.subject.as_str();
+
+    if is_session_ready_signal(subject) {
+        return;
+    }
 
     let parsed = match parse_agent_subject(subject) {
         Some(p) => p,
