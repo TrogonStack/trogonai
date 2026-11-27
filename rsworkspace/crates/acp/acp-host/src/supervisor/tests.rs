@@ -362,7 +362,7 @@ async fn a_launched_child_waits_for_the_client_instead_of_initializing_itself() 
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_relaunch_the_client_asks_for_happens_at_once() {
+async fn a_relaunch_the_client_asks_for_skips_the_restart_delay() {
     let launcher = InProcessLauncher::default();
     let runs = AtomicU32::new(0);
     let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
@@ -385,7 +385,7 @@ async fn a_relaunch_the_client_asks_for_happens_at_once() {
         RestartPolicy::DEFAULT,
         &shutdown,
     );
-    let _ = tokio::time::timeout(std::time::Duration::from_millis(100), supervised).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), supervised).await;
 
     assert_eq!(launcher.agent.initializes(), vec![discord("1"), discord("2")]);
 }
@@ -514,7 +514,8 @@ impl LaunchAgent for SilentLauncher {
 #[tokio::test(start_paused = true)]
 async fn a_relaunched_child_that_never_answers_initialize_fails_the_run_and_keeps_the_handshake() {
     let handshake = Arc::new(ClientHandshake::default());
-    handshake.remember(discord("1").into());
+    // The client asked for a relaunch with it.
+    let _pending = handshake.relaunch_with(discord("1").into());
     let serve = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
 
     let exit = run_once(
@@ -531,7 +532,7 @@ async fn a_relaunched_child_that_never_answers_initialize_fails_the_run_and_keep
         "got {exit}"
     );
     assert_eq!(
-        handshake.last(),
+        handshake.next(),
         Some(discord("1").into()),
         "the next child gets it too"
     );
@@ -540,7 +541,8 @@ async fn a_relaunched_child_that_never_answers_initialize_fails_the_run_and_keep
 #[tokio::test]
 async fn a_relaunched_child_that_exits_before_answering_keeps_the_handshake() {
     let handshake = Arc::new(ClientHandshake::default());
-    handshake.remember(discord("1").into());
+    // The client asked for a relaunch with it.
+    let _pending = handshake.relaunch_with(discord("1").into());
     let serve = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
 
     let exit = run_once(
@@ -556,5 +558,111 @@ async fn a_relaunched_child_that_exits_before_answering_keeps_the_handshake() {
         matches!(exit, RunExit::AgentExited | RunExit::AgentFailed(_)),
         "got {exit}"
     );
-    assert_eq!(handshake.last(), Some(discord("1").into()));
+    assert_eq!(handshake.next(), Some(discord("1").into()));
+}
+
+#[tokio::test]
+async fn concurrent_different_initializes_are_all_answered_by_one_relaunch() {
+    let launcher = InProcessLauncher::default();
+    let (answers_tx, mut answers) = tokio::sync::mpsc::unbounded_channel();
+    let runs = AtomicU32::new(0);
+    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+        if runs.fetch_add(1, Ordering::SeqCst) == 0 {
+            let agent = Arc::new(agent);
+            agent.initialize(discord("0")).await?;
+            // Ten initializes from the client at once, each with params of its own.
+            for i in 1..=10 {
+                let agent = agent.clone();
+                let answers = answers_tx.clone();
+                tokio::spawn(async move {
+                    let _ = answers.send(agent.initialize(discord(&i.to_string())).await);
+                });
+            }
+        }
+        std::future::pending().await
+    };
+    let shutdown = CancellationToken::new();
+    let supervised = supervise(
+        &launcher,
+        Arc::new(NoopClient),
+        Arc::default(),
+        serve,
+        RestartPolicy::DEFAULT,
+        &shutdown,
+    );
+
+    let collected = async {
+        let mut results = Vec::new();
+        while results.len() < 10 {
+            results.push(answers.recv().await.unwrap());
+        }
+        results
+    };
+    let results = tokio::select! {
+        results = collected => results,
+        () = supervised => panic!("supervision ended"),
+        () = tokio::time::sleep(std::time::Duration::from_secs(5)) => panic!("an initialize hung"),
+    };
+
+    // All ten reach the host before the running child is replaced, so the
+    // newest is the one relaunch and the other nine are superseded.
+    let answered = results.iter().filter(|result| result.is_ok()).count();
+    assert_eq!(answered, 1, "{results:?}");
+    for error in results.iter().filter_map(|result| result.as_ref().err()) {
+        assert!(
+            error.message.contains("newer one"),
+            "only superseded ones fail: {error:?}"
+        );
+    }
+    assert_eq!(
+        launcher.agent.initializes(),
+        vec![discord("0"), discord("10")],
+        "one relaunch, with the newest params"
+    );
+}
+
+#[tokio::test]
+async fn a_request_naming_a_client_before_any_initialize_does_not_lock_out_the_real_client() {
+    let launcher = InProcessLauncher::default();
+    let claim = Arc::new(ClientClaim::default());
+    let (answer_tx, answer) = tokio::sync::oneshot::channel();
+    let answer_tx = std::sync::Mutex::new(Some(answer_tx));
+    let runs = AtomicU32::new(0);
+    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+        if runs.fetch_add(1, Ordering::SeqCst) == 0 {
+            // A stray client's request comes first. The gate lets it through
+            // without claiming, and it initializes the child with defaults.
+            acp_nats_agent::ClientGate::admit(agent.claim().as_ref(), Some("squatter"))?;
+            agent.new_session(NewSessionRequest::new("/tmp")).await?;
+            // Then the real client initializes, relaunching the child.
+            let agent = Arc::new(agent);
+            let answer_tx = answer_tx.lock().unwrap().take().unwrap();
+            tokio::spawn(async move {
+                let _ = answer_tx.send(agent.initialize(discord("1")).await);
+            });
+        }
+        std::future::pending().await
+    };
+    let shutdown = CancellationToken::new();
+    let supervised = supervise(
+        &launcher,
+        Arc::new(NoopClient),
+        claim.clone(),
+        serve,
+        RestartPolicy::DEFAULT,
+        &shutdown,
+    );
+
+    let answer = tokio::select! {
+        answer = answer => answer.unwrap(),
+        () = supervised => panic!("supervision ended"),
+        () = tokio::time::sleep(std::time::Duration::from_secs(5)) => panic!("the real client's initialize hung"),
+    };
+
+    answer.expect("the real client initializes");
+    assert_eq!(
+        launcher.agent.initializes(),
+        vec![InitializeRequest::new(ProtocolVersion::V1), discord("1")]
+    );
+    acp_nats_agent::ClientGate::admit(claim.as_ref(), Some("squatter")).expect_err("the stray client is refused");
 }

@@ -1,5 +1,5 @@
 use crate::client_claim::ClientClaim;
-use crate::client_handshake::{ClientHandshake, ClientInitialize};
+use crate::client_handshake::{ClientHandshake, ClientInitialize, Handshake};
 use crate::constants::FALLBACK_PROTOCOL_VERSION;
 use acp_nats::AgentHandler;
 use agent_client_protocol::Result;
@@ -16,7 +16,7 @@ use agent_client_protocol::v1::schema::{
     UnarchiveSessionResponse,
 };
 use std::sync::Arc;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 /// The host's child agent, served to its one client on NATS, with the
@@ -40,7 +40,9 @@ use tracing::{info, warn};
 /// - A different one (the client restarted with new capabilities, a new
 ///   version, or new `_meta`) is not sent to this child a second time: the
 ///   host relaunches the child, initializes the new one with it, and answers
-///   with that child's reply.
+///   with that child's reply. Several different ones at once cost a single
+///   relaunch, with the newest params; the others fail at once as superseded
+///   (see [`ClientHandshake`]).
 /// - Any other request that reaches a child no client has initialized (the
 ///   host restarted and its client carried on without initializing again)
 ///   first initializes it with defaults at [`FALLBACK_PROTOCOL_VERSION`]; the
@@ -57,32 +59,22 @@ pub struct InitializedAgent<A> {
     handshake: Arc<ClientHandshake>,
     /// How this run's child was initialized, once it has been.
     child: Mutex<Option<Handshake>>,
-    relaunch: Arc<Notify>,
-}
-
-/// One `initialize` the child answered.
-#[derive(Debug, Clone)]
-pub struct Handshake {
-    pub request: ClientInitialize,
-    pub response: InitializeResponse,
 }
 
 impl<A> InitializedAgent<A> {
     /// `initialized` is the handshake the run already did with the child, if
-    /// any. `relaunch` is notified when a client asks for a new child.
+    /// any.
     pub fn new(
         inner: A,
         initialized: Option<Handshake>,
         claim: Arc<ClientClaim>,
         handshake: Arc<ClientHandshake>,
-        relaunch: Arc<Notify>,
     ) -> Self {
         Self {
             inner,
             claim,
             handshake,
             child: Mutex::new(initialized),
-            relaunch,
         }
     }
 
@@ -104,20 +96,19 @@ impl<A: AgentHandler + Send + Sync> InitializedAgent<A> {
             Some(done) if done.request == args => done.response.clone(),
             Some(_) => {
                 info!("the client initialized with different parameters; relaunching the agent with them");
-                let pending = self.handshake.listen();
-                self.handshake.remember(args.clone());
-                self.relaunch.notify_one();
+                let pending = self.handshake.relaunch_with(args.clone());
                 drop(child);
-                pending.answer(&args).await?
+                pending.answer().await?
             }
             None => {
                 let response = self.inner.initialize_raw(args.params().clone()).await?;
                 info!(agent = ?response.agent_info, "agent initialized by the client");
-                self.handshake.remember(args.clone());
-                *child = Some(Handshake {
+                let done = Handshake {
                     request: args.clone(),
                     response: response.clone(),
-                });
+                };
+                self.handshake.initialized(&done);
+                *child = Some(done);
                 response
             }
         };

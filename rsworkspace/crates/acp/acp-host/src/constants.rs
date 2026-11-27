@@ -35,6 +35,17 @@ pub const INITIALIZE_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// client gives up first and this only bounds a task nobody is waiting on.
 pub const REINITIALIZE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// How long the running child keeps serving after the client last asked for a
+/// relaunch (by initializing with different parameters), before it is
+/// replaced. A client that sends several `initialize`s at once has them all
+/// reach this child, which coalesces them into the one relaunch, instead of
+/// having the later ones arrive while nothing serves the prefix and time out.
+pub const RELAUNCH_COALESCE: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The longest a stream of `initialize`s, each within [`RELAUNCH_COALESCE`] of
+/// the last, can hold off the relaunch they ask for.
+pub const RELAUNCH_COALESCE_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// How long a shutting-down host waits for its agent run to hand back the
 /// COMMANDS messages it holds before it closes the NATS connection anyway.
 /// Handing them back is a nack each, so this only bounds a run that is stuck

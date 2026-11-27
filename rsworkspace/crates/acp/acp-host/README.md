@@ -69,10 +69,17 @@ than in the spec. `Debug` output of the spec prints env names, never values.
     without bothering the child;
   - an `initialize` with different parameters is not sent a second time on
     the same connection, which ACP does not allow for. The host relaunches the
-    child at once, initializes the new one with the new request, and answers
+    child once the client has sent no new `initialize` for 100ms
+    (`RELAUNCH_COALESCE`, at most 1s; the old child serves until then),
+    initializes the new one with the new request, and answers
     with that child's reply. **That relaunch ends every session the old child
     had open**: the client has to load or open its sessions again (see
-    [Relaunch on exit](#behavior) for which agents can load them);
+    [Relaunch on exit](#behavior) for which agents can load them). Several
+    different `initialize`s at once cost one relaunch, with the newest
+    params: each earlier one still waiting fails at once with `-32600 Invalid
+    Request` saying it was superseded, rather than hanging. Requests that
+    reach the host while the new child starts still find nothing serving the
+    prefix (see Relaunch on exit);
   - a child relaunched after a crash is initialized with the claiming
     client's last `initialize` before it serves anything, so it comes back with
     the same capabilities and `_meta`. It has 30 seconds to answer; a child that

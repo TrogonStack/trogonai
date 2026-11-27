@@ -13,7 +13,6 @@ use async_nats::{HeaderMap, Message};
 use futures::channel::mpsc::UnboundedSender;
 use jsonrpc_nats::RequestId;
 use std::sync::{Arc, Mutex};
-use tokio::sync::Notify;
 use trogon_nats::MockNatsClient;
 use trogon_nats::jetstream::{MockJetStreamConsumer, MockJetStreamConsumerFactory, MockJsMessage};
 
@@ -119,7 +118,6 @@ impl Host {
             None,
             Arc::new(ClientClaim::default()),
             Arc::new(ClientHandshake::default()),
-            Arc::new(Notify::new()),
         );
         tokio::task::spawn_local(serve(
             agent,

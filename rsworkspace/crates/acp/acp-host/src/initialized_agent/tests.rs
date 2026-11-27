@@ -54,24 +54,17 @@ impl AgentHandler for RecordingAgent {
 struct Harness {
     agent: Arc<InitializedAgent<RecordingAgent>>,
     handshake: Arc<ClientHandshake>,
-    relaunch: Arc<Notify>,
 }
 
 fn harness(initialized: Option<Handshake>) -> Harness {
     let handshake = Arc::new(ClientHandshake::default());
-    let relaunch = Arc::new(Notify::new());
     let agent = Arc::new(InitializedAgent::new(
         RecordingAgent::default(),
         initialized,
         Arc::default(),
         handshake.clone(),
-        relaunch.clone(),
     ));
-    Harness {
-        agent,
-        handshake,
-        relaunch,
-    }
+    Harness { agent, handshake }
 }
 
 fn meta(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
@@ -100,7 +93,7 @@ async fn the_first_initialize_reaches_the_child_as_sent_and_returns_its_answer()
 
     assert_eq!(h.agent.inner.initializes(), vec![discord("1")]);
     assert_eq!(answer, reply_to(&discord("1")));
-    assert_eq!(h.handshake.last(), Some(discord("1").into()), "kept for the next child");
+    assert_eq!(h.handshake.next(), Some(discord("1").into()), "kept for the next child");
 }
 
 #[tokio::test]
@@ -138,10 +131,10 @@ async fn a_different_initialize_relaunches_the_child_and_returns_the_new_childs_
 
     let agent = h.agent.clone();
     let reinitialize = tokio::spawn(async move { agent.initialize(discord("2")).await });
-    h.relaunch.notified().await;
+    h.handshake.relaunch_wanted().await;
 
     assert_eq!(
-        h.handshake.last(),
+        h.handshake.next(),
         Some(discord("2").into()),
         "the next child gets the new one"
     );
@@ -175,7 +168,7 @@ async fn a_request_before_any_initialize_initializes_the_child_with_defaults_fir
         vec![InitializeRequest::new(FALLBACK_PROTOCOL_VERSION)]
     );
     assert_eq!(h.agent.inner.prompts.load(Ordering::SeqCst), 2);
-    assert_eq!(h.handshake.last(), None, "defaults are not the client's to keep");
+    assert_eq!(h.handshake.next(), None, "defaults are not the client's to keep");
 }
 
 #[tokio::test]
@@ -188,7 +181,7 @@ async fn the_clients_initialize_after_defaults_relaunches_the_child_with_it() {
 
     let agent = h.agent.clone();
     let reinitialize = tokio::spawn(async move { agent.initialize(discord("1")).await });
-    h.relaunch.notified().await;
+    h.handshake.relaunch_wanted().await;
     h.handshake.settle(&discord("1").into(), &Ok(reply_to(&discord("1"))));
 
     assert_eq!(reinitialize.await.unwrap().expect("answered"), reply_to(&discord("1")));
@@ -213,7 +206,7 @@ async fn an_initialize_the_child_refuses_claims_nothing() {
         refuses_initialize: true,
         ..RecordingAgent::default()
     };
-    let agent = InitializedAgent::new(child, None, claim.clone(), Arc::default(), Arc::default());
+    let agent = InitializedAgent::new(child, None, claim.clone(), Arc::default());
     let squatter = InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("squatter", "1"));
 
     agent.initialize(squatter).await.expect_err("refused by the child");

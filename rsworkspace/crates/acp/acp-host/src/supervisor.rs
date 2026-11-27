@@ -1,8 +1,8 @@
 use crate::agent_launch::AgentLaunch;
 use crate::client_claim::ClientClaim;
-use crate::client_handshake::{ClientHandshake, ClientInitialize};
+use crate::client_handshake::{ClientHandshake, ClientInitialize, Handshake};
 use crate::constants::INITIALIZE_TIMEOUT;
-use crate::initialized_agent::{Handshake, InitializedAgent};
+use crate::initialized_agent::InitializedAgent;
 use crate::restart_policy::RestartPolicy;
 use acp_nats::boundary::{BoundaryExit, ConnectionAgent, connect_client_boundary_with};
 use acp_nats::{AgentHandler, ClientHandler};
@@ -11,7 +11,7 @@ use agent_client_protocol::{AcpAgent, Client, ConnectTo};
 use std::fmt::Display;
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::Notify;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -88,9 +88,16 @@ where
     S: Fn(InitializedAgent<ConnectionAgent>) -> F,
     F: Future<Output = Result<(), E>>,
 {
+    // Set once this run chose to make way for a relaunch. The SDK shuts the
+    // child down after that, and a child that exits abnormally on the way out
+    // turns the run's result into an error; the run still ended because the
+    // client asked for a relaunch, not because the child failed, so it must
+    // not wait out the crash backoff with nothing serving the prefix.
+    let reinitialize = Arc::new(AtomicBool::new(false));
+    let reinitializing = reinitialize.clone();
     let result = connect_client_boundary_with(client, launcher.launch(), async move |cx| {
         let agent = ConnectionAgent::new(cx);
-        let initialized = match handshake.last() {
+        let initialized = match handshake.next() {
             Some(request) => {
                 let response = initialize_relaunched(&agent, &handshake, &request).await?;
                 info!(agent = ?response.agent_info, "agent relaunched with the client's initialize");
@@ -98,20 +105,23 @@ where
             }
             None => None,
         };
-        let relaunch = Arc::new(Notify::new());
-        let agent = InitializedAgent::new(agent, initialized, claim, handshake, relaunch.clone());
+        let agent = InitializedAgent::new(agent, initialized, claim, handshake.clone());
         Ok(tokio::select! {
             result = serve(agent) => Served::Ended(result),
-            () = relaunch.notified() => Served::Reinitialize,
+            () = handshake.relaunch_requested() => {
+                reinitializing.store(true, Ordering::SeqCst);
+                Served::Reinitialize
+            }
         })
     })
     .await;
 
     match result {
+        Ok(BoundaryExit::Main(Served::Reinitialize)) => RunExit::Reinitialize,
+        _ if reinitialize.load(Ordering::SeqCst) => RunExit::Reinitialize,
         Ok(BoundaryExit::TransportClosed) => RunExit::AgentExited,
         Ok(BoundaryExit::Main(Served::Ended(Ok(())))) => RunExit::ServeEnded,
         Ok(BoundaryExit::Main(Served::Ended(Err(error)))) => RunExit::ServeFailed(error),
-        Ok(BoundaryExit::Main(Served::Reinitialize)) => RunExit::Reinitialize,
         Err(error) => RunExit::AgentFailed(error),
     }
 }
@@ -141,7 +151,9 @@ async fn initialize_relaunched(
 /// the same across relaunches, and so does the client's `initialize`: every
 /// child after the first is initialized with the claiming client's last one.
 /// A relaunch the client asked for by initializing with different parameters
-/// happens at once and does not count toward the backoff.
+/// happens once the client's burst of them is over (see
+/// [`ClientHandshake::relaunch_requested`]), not after the restart delay, and does not count
+/// toward the backoff.
 ///
 /// Whether a session survives a relaunch depends on the agent. One that keeps
 /// sessions on disk (fx does) reloads it when the client sends `session/load`;
