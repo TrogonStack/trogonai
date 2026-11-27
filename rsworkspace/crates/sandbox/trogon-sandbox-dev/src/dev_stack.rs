@@ -2,6 +2,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
+use trogon_std::env::SystemEnv;
+
 use crate::api_key_provisioning::{generate_api_key, register_api_key, write_api_key_file};
 use crate::readiness::{wait_for_broker, wait_for_tcp};
 use crate::running_process::{RunningProcess, first_exit, spawn};
@@ -50,7 +52,7 @@ async fn supervise(
 
     let bin_dir = args.bin_dir.clone();
     let plan = args.plan(worker, &store_dir, &workspace_root, |name| {
-        find_binary(name, bin_dir.as_deref())
+        find_binary(name, bin_dir.as_deref(), &SystemEnv)
     })?;
 
     let token = match args.bearer_token()? {

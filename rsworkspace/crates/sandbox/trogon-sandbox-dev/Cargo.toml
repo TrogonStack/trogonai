@@ -32,6 +32,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "
 trogon-sandbox-auth = { workspace = true }
 trogon-sandbox-contract = { workspace = true }
 trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
@@ -39,3 +40,4 @@ libc = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time", "net"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }

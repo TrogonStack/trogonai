@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
 
-/// Finds `name` in `bin_dir`, the directory of the running executable, then PATH.
-pub fn find_binary(name: &str, bin_dir: Option<&Path>) -> Option<PathBuf> {
+use trogon_std::env::ReadEnv;
+
+/// Finds `name` in `bin_dir`, the directory of the running executable, then the `PATH` of `env`.
+pub fn find_binary(name: &str, bin_dir: Option<&Path>, env: &impl ReadEnv) -> Option<PathBuf> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
-    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+    let path_dirs: Vec<PathBuf> = env
+        .var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).collect())
         .unwrap_or_default();
     bin_dir

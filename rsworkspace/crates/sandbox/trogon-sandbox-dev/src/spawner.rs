@@ -5,14 +5,15 @@
 
 use std::io;
 use std::sync::OnceLock;
-use std::sync::mpsc::{Sender, channel, sync_channel};
+use std::sync::mpsc::{SyncSender, sync_channel};
 
 type Job = Box<dyn FnOnce() + Send>;
 
-static JOBS: OnceLock<Option<Sender<Job>>> = OnceLock::new();
+static JOBS: OnceLock<Option<SyncSender<Job>>> = OnceLock::new();
 
-fn start() -> Option<Sender<Job>> {
-    let (sender, receiver) = channel::<Job>();
+fn start() -> Option<SyncSender<Job>> {
+    // Every caller waits for its job to finish, so at most one job per caller is ever queued.
+    let (sender, receiver) = sync_channel::<Job>(1);
     let spawned = std::thread::Builder::new()
         .name("trogon-sandbox-dev-spawner".into())
         .spawn(move || receiver.into_iter().for_each(|job| job()));
