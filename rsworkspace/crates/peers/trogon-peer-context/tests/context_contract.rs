@@ -127,6 +127,25 @@ fn recorded_assignment_must_match_complete_ordered_message_ids() {
 }
 
 #[test]
+fn matching_counts_still_reject_duplicate_or_reordered_assignments() {
+    for (ids, messages) in [
+        (
+            ["message_1", "message_1"],
+            [message("message_1", "data"), message("message_1", "duplicate")],
+        ),
+        (
+            ["message_1", "message_2"],
+            [message("message_2", "data"), message("message_1", "data")],
+        ),
+    ] {
+        assert!(matches!(
+            PeerContext::render(&batch(&ids), &messages),
+            Err(PeerContextError::ContractViolation)
+        ));
+    }
+}
+
+#[test]
 fn assigned_metadata_requires_complete_valid_provenance_and_exact_text_byte_count() {
     let original = message("message_1", "é");
     let mut malformed = Vec::new();
