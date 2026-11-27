@@ -80,6 +80,7 @@ trogon-sandbox-e2b-worker = { path = "crates/sandbox/trogon-sandbox-e2b-worker" 
 trogon-sandbox-egress-proxy = { path = "crates/sandbox/trogon-sandbox-egress-proxy" }
 trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-helper" }
 trogon-sandbox-file-ops = { path = "crates/sandbox/trogon-sandbox-file-ops" }
+trogon-sandbox-firecracker-worker = { path = "crates/sandbox/trogon-sandbox-firecracker-worker" }
 trogon-sandbox-fly-worker = { path = "crates/sandbox/trogon-sandbox-fly-worker" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-hyperlight-worker = { path = "crates/sandbox/trogon-sandbox-hyperlight-worker" }
@@ -232,6 +233,10 @@ object_store = { version = "=0.14.2", default-features = false, features = ["aws
 
 # Misc
 aes-gcm = "=0.11.0"
+fs2 = "=0.4.3"
+getrandom = "=0.4.3"
+goblin = { version = "=0.10.5", default-features = false, features = ["elf32", "elf64", "endian_fd", "std"] }
+httpmock = "=0.8.3"
 libc = "=0.2.186"
 nix = { version = "=0.31.2", default-features = false, features = ["fs", "signal", "term", "user"] }
 chrono = "=0.4.45"
