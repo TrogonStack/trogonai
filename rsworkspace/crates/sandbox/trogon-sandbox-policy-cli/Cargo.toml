@@ -1,0 +1,43 @@
+[package]
+name = "trogon-sandbox-policy-cli"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Command line front end of the policy exec crate: runs one command under a settings file"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_policy_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-policy"
+path = "src/main.rs"
+
+[[bin]]
+name = "trogon-sandbox-policy-proxy"
+path = "src/policy_proxy.rs"
+
+[dependencies]
+trogon-sandbox-windows-fence = { workspace = true }
+trogon-std = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+signal-hook-registry = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "io-util"] }
+trogon-sandbox-policy-exec = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util"] }
+trogon-sandbox-fence-helper = { workspace = true }
+trogon-sandbox-policy-exec = { workspace = true }
+
+[dev-dependencies]
+rcgen = { workspace = true }
+rustls = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }

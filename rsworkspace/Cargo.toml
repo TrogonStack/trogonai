@@ -93,6 +93,7 @@ trogon-sandbox-memory-worker = { path = "crates/sandbox/trogon-sandbox-memory-wo
 trogon-sandbox-modal-worker = { path = "crates/sandbox/trogon-sandbox-modal-worker" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
 trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
+trogon-sandbox-policy-cli = { path = "crates/sandbox/trogon-sandbox-policy-cli" }
 trogon-sandbox-policy-exec = { path = "crates/sandbox/trogon-sandbox-policy-exec" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-providers = { path = "crates/sandbox/trogon-sandbox-providers" }
@@ -241,6 +242,7 @@ getrandom = "=0.4.3"
 goblin = { version = "=0.10.5", default-features = false, features = ["elf32", "elf64", "endian_fd", "std"] }
 httpmock = "=0.8.3"
 libc = "=0.2.186"
+signal-hook-registry = "=1.4.8"
 nix = { version = "=0.31.2", default-features = false, features = ["fs", "signal", "term", "user"] }
 chrono = "=0.4.45"
 ipnet = "=2.12.1"
