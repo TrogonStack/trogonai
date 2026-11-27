@@ -10515,6 +10515,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-admin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "bytes",
+ "chrono",
+ "clap",
+ "futures",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "trogon-nats",
+ "trogon-sandbox-auth",
+ "trogon-sandbox-broker",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-credential-broker",
+ "trogon-sandbox-credential-client",
+ "trogon-sandbox-oci",
+ "trogon-sandbox-protocol",
+ "trogon-sandbox-substrate-worker",
+]
+
+[[package]]
 name = "trogon-sandbox-auth"
 version = "0.1.0"
 dependencies = [
