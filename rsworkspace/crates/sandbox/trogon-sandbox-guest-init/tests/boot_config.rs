@@ -9,9 +9,8 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
 fn reads_actor_and_port() -> TestResult {
-    let config = GuestBootConfig::from_kernel_command_line(
-        "console=ttyS0 ate.actor_id=actor-7 sandbox.agent_port=9000 quiet\n",
-    )?;
+    let line = "console=ttyS0 ate.actor_id=actor-7 sandbox.agent_port=9000 quiet\n";
+    let config = GuestBootConfig::from_kernel_command_line(line)?;
     assert_eq!(config.actor(), &GuestActor::Bound(GuestActorId::new("actor-7")?));
     assert_eq!(config.actor().as_str(), "actor-7");
     assert_eq!(config.agent_port().get(), 9000);
@@ -38,9 +37,8 @@ fn unbound_marker_means_unbound() -> TestResult {
 
 #[test]
 fn first_occurrence_wins() -> TestResult {
-    let config = GuestBootConfig::from_kernel_command_line(
-        "ate.actor_id=a sandbox.agent_port=1 ate.actor_id=b sandbox.agent_port=2",
-    )?;
+    let line = "ate.actor_id=a sandbox.agent_port=1 ate.actor_id=b sandbox.agent_port=2";
+    let config = GuestBootConfig::from_kernel_command_line(line)?;
     assert_eq!(config.actor().as_str(), "a");
     assert_eq!(config.agent_port().get(), 1);
     Ok(())
@@ -106,11 +104,10 @@ fn error_messages_name_the_problem() {
         GuestAgentPortError::Zero.to_string(),
         "guest agent port must be nonzero"
     );
-    assert!(
-        "x".parse::<GuestAgentPort>()
-            .err()
-            .is_some_and(|error| error.to_string().contains("'x'"))
-    );
+    assert!(matches!(
+        "x".parse::<GuestAgentPort>(),
+        Err(GuestAgentPortError::NotANumber { value, .. }) if value == "x"
+    ));
     assert_eq!(GuestActorIdError::Empty.to_string(), "guest actor id must not be empty");
     assert_eq!(
         GuestBootConfigError::Actor(GuestActorIdError::UnboundMarker).to_string(),

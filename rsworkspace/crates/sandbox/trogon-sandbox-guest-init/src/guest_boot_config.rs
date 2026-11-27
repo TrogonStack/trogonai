@@ -1,7 +1,5 @@
+use crate::constants::{ACTOR_ARGUMENT, AGENT_PORT_ARGUMENT};
 use crate::{GuestActor, GuestActorId, GuestAgentPort, GuestBootConfigError};
-
-const ACTOR_ARGUMENT: &str = "ate.actor_id=";
-const AGENT_PORT_ARGUMENT: &str = "sandbox.agent_port=";
 
 /// What a guest learns from its kernel command line: the actor it serves and the port its agent
 /// listens on.
