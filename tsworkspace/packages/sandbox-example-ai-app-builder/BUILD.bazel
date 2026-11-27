@@ -1,0 +1,69 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
+load("@npm_tsworkspace//tsworkspace:oxlint/package_json.bzl", oxlint_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(name = "package_metadata", srcs = ["package.json"])
+
+filegroup(
+    name = "sources",
+    srcs = glob(
+        ["*.ts", "app/**/*.ts", "app/**/*.tsx", "server/**/*.ts"],
+        exclude = ["**/*.test.ts", "next-env.d.ts"],
+    ),
+)
+filegroup(name = "unit_tests", srcs = glob(["app/**/*.test.ts", "server/**/*.test.ts"]))
+
+ts_project(
+    name = "typecheck",
+    srcs = [":sources", ":unit_tests"],
+    no_emit = True,
+    tsconfig = "tsconfig.json",
+    deps = [":node_modules", ":package_metadata"],
+)
+
+js_test(
+    name = "test",
+    args = [
+        "--test",
+        "app/api/chat/route.test.ts",
+        "app/api/preview/route.test.ts",
+        "server/model-config.test.ts",
+        "server/model.test.ts",
+        "server/sandbox.test.ts",
+    ],
+    chdir = package_name(),
+    data = ["package.json", ":node_modules", ":sources", ":unit_tests"],
+    entry_point = "run-typescript.mjs",
+)
+
+js_test(
+    name = "smoke_test",
+    args = ["smoke.ts"],
+    chdir = package_name(),
+    data = ["package.json", ":node_modules", ":sources"],
+    entry_point = "run-typescript.mjs",
+    env = {
+        "SANDBOX_EXAMPLE_MODEL": "scripted",
+        "SANDBOX_PROVIDER": "memory",
+    },
+)
+
+oxlint_bin.oxlint_test(
+    name = "lint",
+    args = ["--deny-warnings", "."],
+    chdir = package_name(),
+    data = ["run-typescript.mjs", ":sources", ":unit_tests"],
+)
+
+js_library(
+    name = "fmt_inputs",
+    srcs = glob(
+        ["**/*.json", "**/*.mjs", "**/*.ts", "**/*.tsx", "**/*.yaml"],
+        allow_empty = True,
+        exclude = [".next/**", "coverage/**", "dist/**", "next-env.d.ts"],
+    ),
+    visibility = ["//tsworkspace:__pkg__"],
+)

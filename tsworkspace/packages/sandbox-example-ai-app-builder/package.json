@@ -1,0 +1,39 @@
+{
+  "name": "@trogonai/sandbox-example-ai-app-builder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js example: chat with an agent that builds a small web app inside a sandbox and shows a live preview.",
+  "license": "Apache-2.0",
+  "author": "TrogonAI",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "smoke": "SANDBOX_EXAMPLE_MODEL=scripted SANDBOX_PROVIDER=memory node run-typescript.mjs smoke.ts",
+    "test": "node run-typescript.mjs --test server/*.test.ts app/api/*/route.test.ts",
+    "test:docker": "node run-typescript.mjs --test server/workspace.docker.ts",
+    "test:gateway": "SANDBOX_EXAMPLE_MODEL=scripted node run-typescript.mjs --env-file-if-exists=.env.local --test gateway-smoke.ts",
+    "lint": "oxlint --deny-warnings ."
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "2.0.81",
+    "@ai-sdk/react": "3.0.325",
+    "@trogonai/sandbox-agent-tools": "workspace:*",
+    "@trogonai/sandbox-ws-client": "workspace:*",
+    "ai": "6.0.300",
+    "next": "16.4.6",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=22.7"
+  }
+}
