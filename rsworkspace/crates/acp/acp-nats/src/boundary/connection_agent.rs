@@ -1,16 +1,17 @@
 use crate::agent_handler::AgentHandler;
+use crate::ext_method_name::ext_wire_method;
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::v1::schema::{
-    ArchiveSessionRequest, ArchiveSessionResponse, AuthStatusRequest, AuthStatusResponse, AuthenticateRequest,
-    AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse, DeleteSessionRequest,
-    DeleteSessionResponse, DisableProviderRequest, DisableProviderResponse, ExtNotification, ExtRequest, ExtResponse,
-    ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse, ListProvidersRequest,
-    ListProvidersResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
-    LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SessionStatusRequest, SessionStatusResponse, SetProviderRequest,
-    SetProviderResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionTitleRequest, SetSessionTitleResponse, UnarchiveSessionRequest,
-    UnarchiveSessionResponse,
+    AGENT_METHOD_NAMES, ArchiveSessionRequest, ArchiveSessionResponse, AuthStatusRequest, AuthStatusResponse,
+    AuthenticateRequest, AuthenticateResponse, CancelNotification, CloseSessionRequest, CloseSessionResponse,
+    DeleteSessionRequest, DeleteSessionResponse, DisableProviderRequest, DisableProviderResponse, ExtNotification,
+    ExtRequest, ExtResponse, ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse,
+    ListProvidersRequest, ListProvidersResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest,
+    PromptResponse, ResumeSessionRequest, ResumeSessionResponse, SessionStatusRequest, SessionStatusResponse,
+    SetProviderRequest, SetProviderResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
+    SetSessionModeRequest, SetSessionModeResponse, SetSessionTitleRequest, SetSessionTitleResponse,
+    UnarchiveSessionRequest, UnarchiveSessionResponse,
 };
 use agent_client_protocol::{Agent, Error, Result, UntypedMessage};
 
@@ -139,19 +140,6 @@ impl AgentHandler for ConnectionAgent {
 
     async fn disable_provider(&self, args: DisableProviderRequest) -> Result<DisableProviderResponse> {
         self.cx.send_request(args).block_task().await
-    }
-}
-
-/// The JSON-RPC method for an extension call: ACP extension methods start with
-/// `_`. The SDK hands a handler the name with its `_` already on, so a call
-/// relayed from one peer to another must not add a second one.
-// TODO(#1376): switch to `crate::ext_protocol_method` once
-// https://github.com/TrogonStack/trogonai/pull/1376 lands.
-fn ext_wire_method(method: &str) -> std::borrow::Cow<'_, str> {
-    if method.starts_with('_') {
-        std::borrow::Cow::Borrowed(method)
-    } else {
-        std::borrow::Cow::Owned(format!("_{method}"))
     }
 }
 

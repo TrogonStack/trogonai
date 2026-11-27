@@ -1,3 +1,6 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate()
+workspace_crate(
+    # The extension round trip starts a NATS server in a container through Docker.
+    unit_test_tags = ["requires-network"],
+)

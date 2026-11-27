@@ -14,6 +14,7 @@ agent-client-protocol = { workspace = true, features = ["process"] }
 anyhow = { workspace = true }
 async-nats = { workspace = true }
 async-trait = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "signal", "sync", "time"] }
@@ -27,7 +28,7 @@ async-compat = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 jsonrpc-nats = { workspace = true }
-serde = { workspace = true }
+opentelemetry = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "time", "test-util", "io-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

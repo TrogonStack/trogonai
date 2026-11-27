@@ -295,6 +295,7 @@ dependencies = [
  "bytes",
  "futures",
  "jsonrpc-nats",
+ "opentelemetry",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

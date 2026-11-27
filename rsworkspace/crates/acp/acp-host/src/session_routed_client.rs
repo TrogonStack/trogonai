@@ -1,11 +1,13 @@
 use acp_nats::{AcpPrefix, AcpSessionId, ClientHandler, FlushClient, NatsClientProxy, PublishClient, RequestClient};
 use agent_client_protocol::v1::schema::{
-    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest,
-    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest,
-    RequestPermissionResponse, SessionId, SessionNotification, TerminalOutputRequest, TerminalOutputResponse,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    CreateTerminalRequest, CreateTerminalResponse, ExtNotification, ExtRequest, ExtResponse, KillTerminalRequest,
+    KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionRequest, RequestPermissionResponse, SessionId, SessionNotification, TerminalOutputRequest,
+    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 use agent_client_protocol::{Error, Result};
+use serde_json::value::RawValue;
 use std::time::Duration;
 
 /// The client a spawned agent talks to, as seen from the host.
@@ -17,8 +19,16 @@ use std::time::Duration;
 /// session's `client.session.update` subject, and requests such as `session/request_permission` reach whichever
 /// client opened the session.
 ///
-/// Elicitation and extension callbacks carry no session, so they keep the
-/// trait's `method_not_found` defaults.
+/// Extension calls (`_vendor/...` requests and notifications) have no fixed
+/// shape, so they are routed by the `sessionId` member of their params, the
+/// way fx names the session of its `_libtrogonai/tool_call` and
+/// `_libtrogonai/hook`. They go out on `client.ext.{method}` with the method
+/// name exactly as the agent sent it, and a request's answer comes back to
+/// the agent. One without a `sessionId` is refused with invalid params:
+/// although a host has exactly one claimed client, the client bridges only
+/// listen on per-session subjects, so there is nowhere to deliver it.
+///
+/// Elicitation callbacks keep the trait's `method_not_found` defaults.
 pub struct SessionRoutedClient<N> {
     nats: N,
     prefix: AcpPrefix,
@@ -45,6 +55,27 @@ impl<N: Clone> SessionRoutedClient<N> {
             self.operation_timeout,
         ))
     }
+
+    fn for_ext(&self, method: &str, params: &RawValue) -> Result<NatsClientProxy<N>> {
+        let session = serde_json::from_str::<ExtSession<'_>>(params.get())
+            .ok()
+            .and_then(|params| params.session_id)
+            .map(SessionId::new)
+            .ok_or_else(|| {
+                Error::invalid_params().data(format!(
+                    "extension {method} names no sessionId, and the client is only reachable per session"
+                ))
+            })?;
+        self.for_session(&session)
+    }
+}
+
+/// The one member of an extension call's params the host reads; the rest is
+/// skipped without being parsed into values.
+#[derive(serde::Deserialize)]
+struct ExtSession<'a> {
+    #[serde(rename = "sessionId", borrow)]
+    session_id: Option<&'a str>,
 }
 
 #[async_trait::async_trait]
@@ -86,6 +117,14 @@ where
 
     async fn kill_terminal(&self, args: KillTerminalRequest) -> Result<KillTerminalResponse> {
         self.for_session(&args.session_id)?.kill_terminal(args).await
+    }
+
+    async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
+        self.for_ext(&args.method, &args.params)?.ext_method(args).await
+    }
+
+    async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
+        self.for_ext(&args.method, &args.params)?.ext_notification(args).await
     }
 }
 

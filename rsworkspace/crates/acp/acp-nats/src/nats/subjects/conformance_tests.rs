@@ -114,6 +114,7 @@ fn published(p: &AcpPrefix) -> Vec<(&'static str, String)> {
             "TerminalWaitForExitSubject",
             client_ops::TerminalWaitForExitSubject::new(p, &s).to_string(),
         ),
+        ("ClientExtSubject", client_ops::ExtSubject::new(p, &s, &m).to_string()),
     ]
 }
 

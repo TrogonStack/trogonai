@@ -204,3 +204,64 @@ fn to_acp_error_preserves_message() {
     assert_eq!(err.code, ErrorCode::INTERNAL_ERROR);
     assert_eq!(err.message, "something went wrong");
 }
+
+fn raw(json: &str) -> std::sync::Arc<serde_json::value::RawValue> {
+    serde_json::value::RawValue::from_string(json.to_string())
+        .unwrap()
+        .into()
+}
+
+#[tokio::test]
+async fn ext_method_requests_on_the_session_ext_subject_with_the_exact_name() {
+    let nats = AdvancedMockNatsClient::new();
+    set_wire_json_response(
+        &nats,
+        "acp.v1.session.s1.client.ext._vendor/x",
+        &serde_json::json!({"ok": true}),
+    );
+
+    let p = proxy(nats.clone());
+    let response = p
+        .ext_method(ExtRequest::new("_vendor/x", raw(r#"{"sessionId":"s1"}"#)))
+        .await
+        .unwrap();
+
+    assert_eq!(response.0.get(), r#"{"ok":true}"#);
+    let body: serde_json::Value = serde_json::from_slice(&nats.requested_payloads()[0]).unwrap();
+    assert_eq!(body["params"], serde_json::json!({"sessionId": "s1"}));
+}
+
+#[tokio::test]
+async fn ext_method_adds_the_leading_underscore_only_when_missing() {
+    let nats = AdvancedMockNatsClient::new();
+    set_wire_json_response(
+        &nats,
+        "acp.v1.session.s1.client.ext._vendor/x",
+        &serde_json::json!(null),
+    );
+
+    let p = proxy(nats.clone());
+    p.ext_method(ExtRequest::new("vendor/x", raw("{}"))).await.unwrap();
+}
+
+#[tokio::test]
+async fn ext_method_refuses_a_name_no_subject_can_carry() {
+    let p = proxy(AdvancedMockNatsClient::new());
+    let error = p.ext_method(ExtRequest::new("_bad name", raw("{}"))).await.unwrap_err();
+    assert_eq!(error.code, agent_client_protocol::ErrorCode::INVALID_PARAMS);
+}
+
+#[tokio::test]
+async fn ext_notification_publishes_on_the_session_ext_subject() {
+    let nats = AdvancedMockNatsClient::new();
+    let p = proxy(nats.clone());
+
+    p.ext_notification(ExtNotification::new("_vendor/x", raw(r#"{"sessionId":"s1"}"#)))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        nats.published_messages(),
+        vec!["acp.v1.session.s1.client.ext._vendor/x"]
+    );
+}

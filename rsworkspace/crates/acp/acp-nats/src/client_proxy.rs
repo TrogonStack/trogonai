@@ -1,15 +1,18 @@
 use crate::acp_prefix::AcpPrefix;
 use crate::client_handler::ClientHandler;
+use crate::ext_method_name::{ExtMethodName, ext_wire_method};
+use crate::nats::ClientMethod;
 use crate::nats::client_ops;
 use crate::nats::{FlushClient, PublishClient, RequestClient, headers_with_trace_context};
 use crate::session_id::AcpSessionId;
 use crate::wire::{encode_notification, merge_jsonrpc_headers};
 use agent_client_protocol::v1::schema::{
     CompleteElicitationNotification, CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest,
-    CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionRequest, RequestPermissionResponse,
-    SessionNotification, TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    CreateTerminalResponse, ExtNotification, ExtRequest, ExtResponse, KillTerminalRequest, KillTerminalResponse,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionRequest, RequestPermissionResponse, SessionNotification, TerminalOutputRequest,
+    TerminalOutputResponse, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 use agent_client_protocol::{Error, ErrorCode, Result};
 use std::time::Duration;
@@ -74,6 +77,20 @@ impl<N: RequestClient + PublishClient + FlushClient> NatsClientProxy<N> {
         self.nats.flush().await.map_err(to_acp_error)?;
         Ok(())
     }
+
+    /// The subject an extension call goes out on, and the JSON-RPC method its
+    /// body carries. The subject keeps the name exactly as the agent sent it;
+    /// the body method is the one the client side's dispatch expects for that
+    /// subject, so the two always agree.
+    fn ext_route(&self, method: &str) -> Result<(client_ops::ExtSubject, String)> {
+        let name =
+            ExtMethodName::new(ext_wire_method(method)).map_err(|e| Error::invalid_params().data(e.to_string()))?;
+        let body_method = ClientMethod::Ext(name.to_string()).protocol_method();
+        Ok((
+            client_ops::ExtSubject::new(self.prefix(), self.session_id(), &name),
+            body_method,
+        ))
+    }
 }
 
 #[async_trait::async_trait]
@@ -131,6 +148,18 @@ impl<N: RequestClient + PublishClient + FlushClient + Sync> ClientHandler for Na
     async fn elicitation_complete(&self, args: CompleteElicitationNotification) -> Result<()> {
         let s = client_ops::ElicitationCompleteSubject::new(self.prefix(), self.session_id());
         self.notify(&s, "elicitation/complete", &args).await
+    }
+
+    async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
+        let (s, method) = self.ext_route(&args.method)?;
+        let result: serde_json::Value = self.request(&s, &method, &&*args.params).await?;
+        let raw = serde_json::value::to_raw_value(&result).map_err(Error::into_internal_error)?;
+        Ok(ExtResponse::new(raw.into()))
+    }
+
+    async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
+        let (s, method) = self.ext_route(&args.method)?;
+        self.notify(&s, &method, &&*args.params).await
     }
 }
 
