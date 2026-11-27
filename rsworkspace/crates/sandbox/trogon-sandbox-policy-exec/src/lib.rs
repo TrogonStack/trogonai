@@ -32,6 +32,8 @@ mod runtime;
 mod settings;
 #[cfg(unix)]
 mod spawn;
+#[cfg(any(unix, windows))]
+mod tls_intercept;
 #[cfg(any(windows, test))]
 mod windows;
 #[cfg(windows)]

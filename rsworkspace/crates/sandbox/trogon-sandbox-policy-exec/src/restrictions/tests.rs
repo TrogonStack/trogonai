@@ -1,5 +1,6 @@
 use super::*;
 use trogon_sandbox_contract::{DeniedDomain, DomainPattern, DomainRule, DomainRuleAction, GlobPattern};
+#[cfg(unix)]
 use trogon_std::env::ReadEnv;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;

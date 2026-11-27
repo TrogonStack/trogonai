@@ -21,7 +21,9 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex as StdMutex, Weak};
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+use std::sync::Weak;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -273,17 +275,20 @@ impl LeasePreview {
         self.stop.cancel();
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos", test))]
     pub(crate) fn is_revoked(&self) -> bool {
         self.stop.is_cancelled()
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) struct PreviewMembership {
     candidates: Weak<StdMutex<PreviewCandidates>>,
     id: u64,
     stop: CancellationToken,
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 impl Drop for PreviewMembership {
     fn drop(&mut self) {
         self.stop.cancel();

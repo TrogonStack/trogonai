@@ -10,8 +10,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use trogon_sandbox_contract::{
     AllowRange, DomainPattern, DomainRule, DomainRuleAction, EgressViolation, EgressViolationReason, LeaseId,
-    MatchRule, MitmUnixSocket, NetworkPolicy, RequestForward, StringMatcher,
+    MatchRule, NetworkPolicy, RequestForward, StringMatcher,
 };
+#[cfg(unix)]
+use trogon_sandbox_contract::MitmUnixSocket;
 use trogon_sandbox_contract::{
     AllowedTlsTermination, DeniedDomainReasons, DenyReason, LoopbackNames, NetworkOptions, NoProxy, ParentProxy,
     ParentProxyUrl, TunnelCap, UpstreamCaCertificates,

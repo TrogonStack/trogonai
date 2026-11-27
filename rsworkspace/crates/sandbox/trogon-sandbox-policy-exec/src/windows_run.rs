@@ -24,6 +24,7 @@ use crate::config::PolicyExecConfig;
 use crate::credentials::PreparedCredentials;
 use crate::error::RuntimeError;
 use crate::settings::{EffectiveCredentials, SandboxSettings};
+use crate::tls_intercept::requires_tls_intercept;
 use crate::windows::{SessionStamp, WindowsLaunch, masked_file_denies, session_access, session_request};
 use crate::windows_run_handle::WindowsRunHandle;
 use trogon_sandbox_egress_proxy::CommandId;
@@ -77,7 +78,7 @@ fn session_ca(
     masking: bool,
 ) -> Result<Option<SessionCa>, RuntimeError> {
     let options = config.configured_network_options();
-    if !masking && !settings.tls_terminates() && !config.policy().network.requires_tls_intercept() {
+    if !masking && !settings.tls_terminates() && !requires_tls_intercept(&config.policy().network) {
         return Ok(None);
     }
     let ca = match &options.ca_files {

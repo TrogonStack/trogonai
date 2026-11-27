@@ -26,6 +26,7 @@ use trogon_sandbox_contract::{EgressViolationReason, LeaseId, LiveFlowResweep, L
 
 use crate::decider::DeciderLimits;
 use crate::denial::Denial;
+#[cfg(unix)]
 use crate::ingress::ListenAddress;
 use crate::live_flows::FlowFacts;
 use crate::tls_intercept_error::TlsInterceptError;

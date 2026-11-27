@@ -20,7 +20,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::net::{UnixListener, UnixStream};
 
 mod constants;
-use constants::{UNIX_PREFIX, UNIX_SOCKET_MODE};
+use constants::UNIX_PREFIX;
+#[cfg(unix)]
+use constants::UNIX_SOCKET_MODE;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ListenAddress {

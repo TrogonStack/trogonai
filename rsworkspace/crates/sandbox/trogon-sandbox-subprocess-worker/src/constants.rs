@@ -1,4 +1,5 @@
 use std::sync::LazyLock;
+#[cfg(unix)]
 use std::time::Duration;
 
 use trogon_sandbox_contract::ProviderCapabilityProfile;
@@ -46,10 +47,14 @@ pub(crate) const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_
 pub(crate) const READY_POLL: std::time::Duration = std::time::Duration::from_millis(20);
 pub(crate) const TOKEN_BYTES: usize = 16;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const INPUT_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// How long a hung-up command gets to exit before it is killed.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const HANGUP_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const DEFAULT_SHELL: &str = "/bin/sh";
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const DEFAULT_TERM: &str = "xterm-256color";
 
 pub(crate) const BASE_USER: &str = "sandbox";

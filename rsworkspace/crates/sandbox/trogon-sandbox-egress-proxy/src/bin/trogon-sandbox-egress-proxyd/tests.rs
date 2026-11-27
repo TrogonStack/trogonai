@@ -971,6 +971,7 @@ async fn serving_exits_with_failure_when_the_proxy_cannot_start() -> TestResult 
     Ok(())
 }
 
+#[cfg(unix)]
 async fn crl_is_served<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(mut stream: S) -> io::Result<bool> {
     stream
         .write_all(b"GET /ca.crl HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
@@ -1196,6 +1197,7 @@ async fn a_secret_handoff_is_loaded_before_serving() -> TestResult {
     serves(&[(SECRETS_FD_ENV_VAR, &fd)], r#""allow_all""#).await
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_secret_handoff_that_does_not_decode_stops_the_proxy() -> TestResult {
     let _logs = sink_logs();

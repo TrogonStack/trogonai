@@ -14,6 +14,7 @@ pub mod default_writes;
 mod diagnostics;
 #[cfg(target_os = "macos")]
 mod exit_cleanup;
+#[cfg(unix)]
 mod factory;
 #[cfg(any(windows, all(test, target_os = "macos")))]
 pub mod fenced;

@@ -146,6 +146,6 @@ fn windows(specs: &[Spec<Flag>], help: &str, name: &str, unknown: &[String]) -> 
 mod constants;
 #[cfg(test)]
 mod tests;
-use constants::{
-    NOT_WINDOWS, ROOT, ROOT_HELP, WINDOWS_INSTALL, WINDOWS_INSTALL_HELP, WINDOWS_UNINSTALL, WINDOWS_UNINSTALL_HELP,
-};
+#[cfg(not(windows))]
+use constants::NOT_WINDOWS;
+use constants::{ROOT, ROOT_HELP, WINDOWS_INSTALL, WINDOWS_INSTALL_HELP, WINDOWS_UNINSTALL, WINDOWS_UNINSTALL_HELP};

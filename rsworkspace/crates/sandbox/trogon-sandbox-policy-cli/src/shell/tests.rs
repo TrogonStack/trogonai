@@ -1,7 +1,9 @@
+#[cfg(unix)]
 use trogon_std::env::{ReadEnv, SystemEnv};
 
 use super::*;
 
+#[cfg(unix)]
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]

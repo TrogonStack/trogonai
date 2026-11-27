@@ -90,10 +90,11 @@ fn peers_display_as_an_address_or_unix() -> Result<(), Box<dyn std::error::Error
 #[tokio::test]
 async fn a_tcp_listener_binds_and_accepts() -> Result<(), Box<dyn std::error::Error>> {
     let listener = Listener::bind(&ListenAddress::Tcp("127.0.0.1:0".to_string())).await?;
-    let Listener::Tcp(inner) = &listener else {
-        return Err("expected a tcp listener".into());
+    let addr = match &listener {
+        Listener::Tcp(inner) => inner.local_addr()?,
+        #[cfg(unix)]
+        Listener::Unix(_) => return Err("expected a tcp listener".into()),
     };
-    let addr = inner.local_addr()?;
     let client = tokio::spawn(async move { TcpStream::connect(addr).await });
     let (_, peer) = listener.accept().await?;
     assert!(matches!(peer, PeerAddr::Tcp(_)));
