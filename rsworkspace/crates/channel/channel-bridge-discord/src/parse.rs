@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests;
 
-use trogon_channel::{
-    ChannelAccount, CommandTriggers, Endpoint, InboundEvent, MessageRef, PlatformUserId, SafeToken, Sender,
-};
+use channel_acp_port::DecodeInbound;
+use tracing::warn;
+use trogon_channel::{ChannelAccount, CommandTriggers, InboundEvent, MessageRef, PlatformUserId, SafeToken, Sender};
 use twilight_model::channel::Message;
 use twilight_model::id::Id;
 use twilight_model::id::marker::{ChannelMarker, UserMarker};
@@ -92,9 +92,26 @@ fn strip_mentions_of(content: &str, bot: Id<UserMarker>) -> String {
         .to_string()
 }
 
-/// The endpoint of whoever sent a message, which is not the conversation's
-/// endpoint in a guild channel: authorizing the channel says nothing about
-/// authorizing the speaker.
-pub fn sender_endpoint(account: &ChannelAccount, sender: &Sender) -> Endpoint {
-    account.endpoint_for(sender.platform_user_id.token())
+/// The bridge's [`DecodeInbound`]: a raw `MESSAGE_CREATE` in, the event and the
+/// channel to answer in out.
+pub struct DiscordDecoder<'a> {
+    pub bot: Id<UserMarker>,
+    pub account: &'a ChannelAccount,
+    pub triggers: &'a CommandTriggers,
+}
+
+impl DecodeInbound for DiscordDecoder<'_> {
+    type ReplyTo = Id<ChannelMarker>;
+
+    fn decode(&self, body: &[u8]) -> Option<(InboundEvent, Id<ChannelMarker>)> {
+        let message = match serde_json::from_slice::<Message>(body) {
+            Ok(message) => message,
+            Err(e) => {
+                warn!(error = %e, body_len = body.len(), "Unparseable Discord message; dropping");
+                return None;
+            }
+        };
+        let DiscordInbound { event, reply_to } = inbound(&message, self.bot, self.account, self.triggers)?;
+        Some((event, reply_to))
+    }
 }

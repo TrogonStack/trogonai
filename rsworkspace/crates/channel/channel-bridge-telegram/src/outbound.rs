@@ -1,29 +1,12 @@
+use crate::constants::TEXT_CHUNK_LIMIT;
+use crate::render::chunk_text;
+use channel_acp_port::{SendText, SendTyping};
 use teloxide::Bot;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatAction, ChatId, Message, True};
 
 #[cfg(test)]
 mod tests;
-
-/// Show the typing indicator in a chat. One trait per outbound operation;
-/// never carries agent concepts.
-#[allow(async_fn_in_trait)]
-pub trait SendTyping {
-    type Error: std::error::Error + 'static;
-    type Output;
-
-    async fn typing(&self, chat_id: i64) -> Result<Self::Output, Self::Error>;
-}
-
-/// Send a text message to a chat. One trait per outbound operation; never
-/// carries agent concepts.
-#[allow(async_fn_in_trait)]
-pub trait SendText {
-    type Error: std::error::Error + 'static;
-    type Message;
-
-    async fn send_text(&self, chat_id: i64, text: String) -> Result<Self::Message, Self::Error>;
-}
 
 pub struct TelegramOutbound {
     bot: Bot,
@@ -35,7 +18,7 @@ impl TelegramOutbound {
     }
 }
 
-impl SendTyping for TelegramOutbound {
+impl SendTyping<i64> for TelegramOutbound {
     type Error = teloxide::RequestError;
     type Output = True;
 
@@ -44,11 +27,15 @@ impl SendTyping for TelegramOutbound {
     }
 }
 
-impl SendText for TelegramOutbound {
+impl SendText<i64> for TelegramOutbound {
     type Error = teloxide::RequestError;
     type Message = Message;
 
-    async fn send_text(&self, chat_id: i64, text: String) -> Result<Self::Message, Self::Error> {
+    async fn send_text(&self, chat_id: i64, text: &str) -> Result<Self::Message, Self::Error> {
         self.bot.send_message(ChatId(chat_id), text).await
+    }
+
+    fn chunks<'t>(&self, text: &'t str) -> Vec<&'t str> {
+        chunk_text(text, TEXT_CHUNK_LIMIT)
     }
 }

@@ -14,11 +14,12 @@ mod config;
 mod constants;
 mod outbound;
 mod parse;
-mod pipeline;
 mod render;
 
 #[cfg(test)]
 mod main_tests;
+#[cfg(test)]
+mod pipeline_tests;
 
 use {
     acp_nats::AgentHandler,
@@ -26,11 +27,10 @@ use {
     agent_client_protocol::v1::schema::InitializeRequest,
     anyhow::Context as _,
     async_nats::jetstream::consumer::DeliverPolicy,
-    channel_acp_port::{AcpBridge, AcpPort, BufferedRenderClient, SessionMethods},
+    channel_acp_port::{AcpBridge, AcpPort, BufferedRenderClient, Pipeline, SessionMethods},
     config::BridgeConfig,
     futures::StreamExt,
     outbound::TelegramOutbound,
-    pipeline::Pipeline,
     std::sync::Arc,
     teloxide::Bot,
     tracing::{error, info, warn},
@@ -150,7 +150,7 @@ where
         > + Unpin,
     S: std::future::Future<Output = ()>,
 {
-    let meter = trogon_telemetry::meter("channel-bridge-telegram");
+    let meter = trogon_telemetry::meter(ServiceName::ChannelBridgeTelegram.as_str());
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats_client.clone()));
     let bridge: Arc<AcpBridge> = Arc::new(acp_nats::Bridge::new(
         nats_client.clone(),
@@ -183,11 +183,14 @@ where
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &parse::TelegramDecoder {
+            account: &config.account,
+            triggers: &config.command_triggers,
+        },
         outbound: &telegram,
         claims: &claims,
         account: &config.account,
         agent_id: &config.agent_id,
-        triggers: &config.command_triggers,
         ids: &UuidV7Generator,
     };
 

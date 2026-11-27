@@ -11,10 +11,16 @@
 //!   `Bridge`.
 //! - [`BufferedRenderClient`] is the ACP client half: it collects a session's
 //!   streamed text until the turn ends and the bridge sends it.
+//! - [`Pipeline`] carries one inbound message to the agent and its reply back;
+//!   a bridge plugs in only its decoder and its outbound API.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
 mod acp_port;
 mod buffered_render_client;
+mod pipeline;
 
 pub use acp_port::{AcpBridge, AcpPort, AcpPortError, SessionMethod, SessionMethods};
 pub use buffered_render_client::BufferedRenderClient;
+pub use pipeline::{
+    DecodeInbound, NEW_SESSION_ACKNOWLEDGEMENT, Pipeline, PipelineError, SendText, SendTyping, sender_endpoint,
+};

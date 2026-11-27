@@ -1,16 +1,18 @@
-use super::*;
-use crate::outbound::{SendText, SendTyping};
+use crate::constants::TEXT_CHUNK_LIMIT;
+use crate::parse::TelegramDecoder;
+use crate::render::chunk_text;
 use acp_nats::ClientHandler;
 use agent_client_protocol::v1::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate, TextContent};
+use channel_acp_port::{BufferedRenderClient, Pipeline, PipelineError, SendText, SendTyping};
 use futures::StreamExt;
 use std::cell::RefCell;
 use std::rc::Rc;
 use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{
-    AgentPortError, AgentSessionId, ChannelAccount, Endpoint, InboundEvent, PrincipalId, PromptOutcome, ReleaseReason,
-    ReleaseStep, SessionRelease,
+    AgentId, AgentPortError, AgentSessionId, ChannelAccount, ChannelStore, CommandTriggers, Endpoint, InboundEvent,
+    PrincipalId, PromptOutcome, ReleaseReason, ReleaseStep, SessionRelease,
 };
-use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding, MockObjectStore};
+use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding, ClaimResolver, MockObjectStore};
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_std::UuidV7Generator;
 
@@ -207,7 +209,7 @@ struct FakeOutbound {
     sent: RefCell<Vec<(i64, String)>>,
 }
 
-impl SendTyping for FakeOutbound {
+impl SendTyping<i64> for FakeOutbound {
     type Error = std::convert::Infallible;
     type Output = ();
 
@@ -217,13 +219,17 @@ impl SendTyping for FakeOutbound {
     }
 }
 
-impl SendText for FakeOutbound {
+impl SendText<i64> for FakeOutbound {
     type Error = std::convert::Infallible;
     type Message = ();
 
-    async fn send_text(&self, chat_id: i64, text: String) -> Result<Self::Message, Self::Error> {
-        self.sent.borrow_mut().push((chat_id, text));
+    async fn send_text(&self, chat_id: i64, text: &str) -> Result<Self::Message, Self::Error> {
+        self.sent.borrow_mut().push((chat_id, text.to_string()));
         Ok(())
+    }
+
+    fn chunks<'t>(&self, text: &'t str) -> Vec<&'t str> {
+        chunk_text(text, TEXT_CHUNK_LIMIT)
     }
 }
 
@@ -393,11 +399,14 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -534,11 +543,14 @@ async fn pipeline_redeems_a_claim_checked_update() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -628,11 +640,14 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -708,11 +723,14 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -877,11 +895,14 @@ async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -981,11 +1002,14 @@ async fn pipeline_hands_back_a_first_session_it_could_not_record() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -1092,11 +1116,14 @@ async fn pipeline_acks_and_drops_what_no_redelivery_would_fix() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -1194,11 +1221,14 @@ async fn pipeline_leaves_no_partial_reply_behind_when_a_turn_fails() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 

@@ -14,7 +14,6 @@ mod config;
 mod constants;
 mod outbound;
 mod parse;
-mod pipeline;
 mod render;
 
 use {
@@ -23,11 +22,10 @@ use {
     agent_client_protocol::v1::schema::InitializeRequest,
     anyhow::Context as _,
     async_nats::jetstream::consumer::DeliverPolicy,
-    channel_acp_port::{AcpBridge, AcpPort, BufferedRenderClient, SessionMethods},
+    channel_acp_port::{AcpBridge, AcpPort, BufferedRenderClient, Pipeline, SessionMethods},
     config::BridgeConfig,
     futures::StreamExt,
     outbound::DiscordOutbound,
-    pipeline::Pipeline,
     std::sync::Arc,
     tracing::{error, info, warn},
     trogon_channel::store::PrincipalRecord,
@@ -192,12 +190,15 @@ where
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &parse::DiscordDecoder {
+            bot,
+            account: &config.account,
+            triggers: &config.command_triggers,
+        },
         outbound: &discord,
         claims: &claims,
         account: &config.account,
-        bot,
         agent_id: &config.agent_id,
-        triggers: &config.command_triggers,
         ids: &UuidV7Generator,
     };
 
