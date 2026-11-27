@@ -3,17 +3,12 @@ use std::sync::Arc;
 
 use hyperlight_wasm::{OciTag, SandboxBuilder, Snapshot, WasmSandbox, is_hypervisor_present};
 
+use crate::constants::{DEFAULT_GUEST_HEAP_BYTES, DEFAULT_GUEST_INPUT_BUFFER_BYTES, DEFAULT_GUEST_OUTPUT_BUFFER_BYTES};
 use crate::{Hypervisor, HypervisorError, WasmGuest, WasmHypervisorError};
 
 /// The tag a snapshot carries inside the layout directory the worker ships. The registry
 /// addresses the artifact by digest, so this name only has to agree between save and load.
 const LAYOUT_TAG: &str = "snapshot";
-
-const DEFAULT_GUEST_INPUT_BUFFER_BYTES: usize = 256 * 1024;
-/// What a guest hands back through: return values and host-call arguments. Hyperlight's own
-/// default is 16 KiB, so a guest returning more aborts; this matches the input buffer instead.
-const DEFAULT_GUEST_OUTPUT_BUFFER_BYTES: usize = 256 * 1024;
-const DEFAULT_GUEST_HEAP_BYTES: u64 = 1280 * 1024;
 
 /// The Hyperlight backend: every guest is a hyperlight-wasm sandbox on KVM, MSHV or WHP.
 ///

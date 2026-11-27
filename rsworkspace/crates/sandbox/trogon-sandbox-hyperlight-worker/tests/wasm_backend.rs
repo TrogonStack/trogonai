@@ -66,13 +66,25 @@ fn a_loaded_module_runs_and_hands_its_runtime_back() -> TestResult {
 #[test]
 #[ignore = "needs a hypervisor and HYPERLIGHT_TEST_MODULE"]
 fn a_guest_returns_more_than_hyperlights_default_output_buffer() -> TestResult {
-    // Hyperlight's default output buffer is 16 KiB; a guest returning 64 KiB aborted before the
-    // backend sized the buffer itself.
+    // Hyperlight's default output buffer is 16 KiB; the backend sizes its own.
     let hypervisor = available()?;
     let mut guest = hypervisor.load_module(hypervisor.build_warm()?, &module()?)?;
-    let bytes = fill(&mut guest, 64 * 1024)?;
-    assert_eq!(bytes.len(), 64 * 1024);
-    assert!(bytes.iter().all(|&byte| byte == 7));
+    let len = 64 * 1024;
+    assert_eq!(fill(&mut guest, len)?, vec![7; len as usize]);
+    Ok(())
+}
+
+#[test]
+#[ignore = "needs a hypervisor and HYPERLIGHT_TEST_MODULE"]
+fn a_result_larger_than_the_output_buffer_fails_and_the_guest_resets() -> TestResult {
+    let hypervisor = available()?;
+    let mut guest = hypervisor.load_module(hypervisor.build_warm()?, &module()?)?;
+    assert!(
+        fill(&mut guest, 320 * 1024).is_err(),
+        "320 KiB fit a 256 KiB output buffer"
+    );
+    guest.reset()?;
+    assert_eq!(echo_double(&mut guest, 21)?, 42);
     Ok(())
 }
 

@@ -16,7 +16,7 @@ pub extern "C" fn fill(len: i32) -> *mut u8 {
     let len = len.max(0) as usize;
     let out = malloc(4 + len);
     unsafe {
-        out.cast::<[u8; 4]>().write_unaligned((len as u32).to_le_bytes());
+        out.cast::<u32>().write(len as u32);
         out.add(4).write_bytes(7, len);
     }
     out
