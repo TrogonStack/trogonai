@@ -1,0 +1,29 @@
+[package]
+name = "trogon-sandbox-observability"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "OTLP tracing and Prometheus /metrics helpers shared by sandbox binaries"
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = ["http-json", "reqwest-rustls"] }
+opentelemetry_sdk = { workspace = true, features = ["rt-tokio"] }
+prometheus = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt-multi-thread"] }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+trogon-std = { workspace = true, features = ["test-support"] }

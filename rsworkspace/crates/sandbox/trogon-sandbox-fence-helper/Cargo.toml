@@ -1,0 +1,30 @@
+[package]
+name = "trogon-sandbox-fence-helper"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Windows network fence helper: the elevated install, the sandbox account, WFP filters, ACL grants and the fenced launch behind the host side of the fence"
+
+[lib]
+name = "trogon_sandbox_fence_helper"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-fence-helper"
+path = "src/main.rs"
+
+[features]
+# Test-only CI smoke hooks (`probe token` and `probe parent-access`); off by default and never enabled for a shipped binary.
+test-hooks = []
+
+[lints]
+workspace = true
+
+[target.'cfg(windows)'.dependencies]
+clap = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+windows = { workspace = true }
