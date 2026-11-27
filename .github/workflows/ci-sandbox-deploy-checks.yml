@@ -1,0 +1,47 @@
+name: CI Sandbox Deploy Checks
+
+# Lints and renders the sandbox Helm charts and checks and unit-tests the
+# Prometheus alert rules they ship, so a chart change that breaks a render or
+# an alert fails before it reaches a cluster.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'devops/helm/sandbox/**'
+      - '.config/mise/tasks/github/workflows/ci-sandbox-deploy-checks/**'
+      - '.github/workflows/ci-sandbox-deploy-checks.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'devops/helm/sandbox/**'
+      - '.config/mise/tasks/github/workflows/ci-sandbox-deploy-checks/**'
+      - '.github/workflows/ci-sandbox-deploy-checks.yml'
+
+concurrency:
+  group: ci-sandbox-deploy-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  check-charts:
+    name: Helm lint, helm template, promtool
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install chart tools
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install_args: aqua:helm/helm aqua:mikefarah/yq aqua:prometheus/prometheus
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Lint, render and check the alert rules
+        run: mise run --skip-tools github:workflows:ci-sandbox-deploy-checks:check-charts
