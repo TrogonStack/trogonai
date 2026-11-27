@@ -420,3 +420,55 @@ async fn a_lone_client_without_the_header_still_works() {
         })
         .await;
 }
+
+#[tokio::test]
+async fn a_request_naming_a_client_before_any_initialize_does_not_lock_out_the_real_client() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let host = Host::start();
+            let zed = Some("zed");
+
+            // One stray request naming a client, and failing, arrives before
+            // the real client initializes.
+            let error = host
+                .request::<_, InitializeResponse>(
+                    zed,
+                    "acp.v1.global.agent.initialize",
+                    "initialize",
+                    &serde_json::json!({"clientInfo": 7}),
+                )
+                .await
+                .expect_err("not an initialize");
+            assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+
+            let _: InitializeResponse = host
+                .request(
+                    Some("discord"),
+                    "acp.v1.global.agent.initialize",
+                    "initialize",
+                    &initialize("discord"),
+                )
+                .await
+                .expect("the real client initializes");
+            let _: NewSessionResponse = host
+                .request(
+                    Some("discord"),
+                    "acp.v1.global.agent.session.new",
+                    "session/new",
+                    &NewSessionRequest::new("/tmp"),
+                )
+                .await
+                .expect("and is served");
+            assert_refused(
+                host.request::<_, NewSessionResponse>(
+                    zed,
+                    "acp.v1.global.agent.session.new",
+                    "session/new",
+                    &NewSessionRequest::new("/tmp"),
+                )
+                .await,
+                "the stray client, once the real one has claimed the host",
+            );
+        })
+        .await;
+}

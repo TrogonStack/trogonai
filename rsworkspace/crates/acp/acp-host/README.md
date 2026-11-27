@@ -32,11 +32,18 @@ than in the spec. `Debug` output of the spec prints env names, never values.
   `session/request_permission` to every client listening on the host's prefix,
   without filtering by session, so two clients on one prefix would each see
   the other's turns and could answer the other's permission requests. The
-  first client to identify itself claims the host, and the claim lasts until
-  the host exits. A client identifies itself by the `clientInfo.name` in its
-  `initialize`, and the `acp-nats` bridge then stamps that name as the
-  `X-Acp-Client` header on everything the client sends (`initialize`
-  included). Any request that names a different client is refused with
+  first client whose `initialize` the child answers claims the host, and the
+  claim lasts until the host exits. A client identifies itself by the
+  `clientInfo.name` in its `initialize`, and the `acp-nats` bridge then stamps
+  that name as the `X-Acp-Client` header on everything the client sends
+  (`initialize` included). Only a successful `initialize` claims: a request
+  that just carries the header (one that fails, or names a method that does
+  not exist) is checked against the claim but never makes one, so a stray
+  request sent before the real client initializes cannot lock it out. Before
+  any client has claimed the host, every request is served without claiming
+  it, so a client that carries on across a host restart without initializing
+  again keeps working. Once claimed, any request that names a different
+  client is refused with
   JSON-RPC `-32600 Invalid Request` naming both clients, before it reaches the
   child: `initialize`, `session/new`, `session/prompt`, `session/load`,
   `session/cancel` and every other global or session method. So a refused

@@ -476,8 +476,9 @@ them change the topology above.
   with no session filter, so two clients sharing a host's prefix would see each
   other's turns and could approve each other's tool calls. The rule is one
   client per `acp-host`: run a host per client, each on its own `ACP_PREFIX`,
-  and give the client the same prefix. The first client to identify itself
-  claims the host, by the `clientInfo.name` in its `initialize`. The `acp-nats`
+  and give the client the same prefix. The first client whose `initialize`
+  the child answers claims the host, by the `clientInfo.name` in it; a request
+  that only carries a header never claims. The `acp-nats`
   bridge then stamps that name as an `X-Acp-Client` header on every request
   and notification it sends, and the host refuses, before the child sees it,
   any request that names a different client: `initialize`, `session/new`,

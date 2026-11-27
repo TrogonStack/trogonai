@@ -49,7 +49,8 @@ use tracing::{info, warn};
 /// A second, different client is refused by the [`ClientClaim`] before
 /// anything reaches the child: here for `initialize`, which names its client
 /// in `clientInfo`, and on the NATS side for everything else, which names it
-/// in a header (see [`Self::claim`]).
+/// in a header (see [`Self::claim`]). Only an `initialize` the child answered
+/// claims the host.
 pub struct InitializedAgent<A> {
     inner: A,
     claim: Arc<ClientClaim>,
@@ -99,27 +100,32 @@ impl<A: AgentHandler + Send + Sync> InitializedAgent<A> {
             return Err(refusal);
         }
         let mut child = self.child.lock().await;
-        match child.as_ref() {
-            Some(done) if done.request == args => Ok(done.response.clone()),
+        let response = match child.as_ref() {
+            Some(done) if done.request == args => done.response.clone(),
             Some(_) => {
                 info!("the client initialized with different parameters; relaunching the agent with them");
                 let pending = self.handshake.listen();
                 self.handshake.remember(args.clone());
                 self.relaunch.notify_one();
                 drop(child);
-                pending.answer(&args).await
+                pending.answer(&args).await?
             }
             None => {
                 let response = self.inner.initialize_raw(args.params().clone()).await?;
                 info!(agent = ?response.agent_info, "agent initialized by the client");
                 self.handshake.remember(args.clone());
                 *child = Some(Handshake {
-                    request: args,
+                    request: args.clone(),
                     response: response.clone(),
                 });
-                Ok(response)
+                response
             }
+        };
+        if let Err(refusal) = self.claim.claim(args.typed()) {
+            warn!(error = %refusal, "another client claimed the host while this initialize was answered");
+            return Err(refusal);
         }
+        Ok(response)
     }
 
     /// Makes sure the child is initialized before it gets any other request.

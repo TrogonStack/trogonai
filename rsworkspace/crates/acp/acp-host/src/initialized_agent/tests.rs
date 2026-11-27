@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 struct RecordingAgent {
     initializes: std::sync::Mutex<Vec<InitializeRequest>>,
     prompts: AtomicU32,
+    refuses_initialize: bool,
 }
 
 impl RecordingAgent {
@@ -24,6 +25,9 @@ fn reply_to(args: &InitializeRequest) -> InitializeResponse {
 #[async_trait::async_trait]
 impl AgentHandler for RecordingAgent {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
+        if self.refuses_initialize {
+            return Err(agent_client_protocol::Error::invalid_params());
+        }
         let reply = reply_to(&args);
         self.initializes.lock().unwrap().push(args);
         Ok(reply)
@@ -200,6 +204,21 @@ async fn a_second_client_is_refused_before_the_child_sees_it() {
 
     assert_eq!(refusal.code, agent_client_protocol::ErrorCode::INVALID_REQUEST);
     assert_eq!(h.agent.inner.initializes().len(), 1);
+}
+
+#[tokio::test]
+async fn an_initialize_the_child_refuses_claims_nothing() {
+    let claim = Arc::new(ClientClaim::default());
+    let child = RecordingAgent {
+        refuses_initialize: true,
+        ..RecordingAgent::default()
+    };
+    let agent = InitializedAgent::new(child, None, claim.clone(), Arc::default(), Arc::default());
+    let squatter = InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("squatter", "1"));
+
+    agent.initialize(squatter).await.expect_err("refused by the child");
+
+    claim.claim(&discord("1")).expect("the real client is not locked out");
 }
 
 #[tokio::test]
