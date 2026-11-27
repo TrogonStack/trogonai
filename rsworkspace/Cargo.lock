@@ -11218,6 +11218,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-proxmox-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "axum",
+ "base64 0.23.1",
+ "bytes",
+ "clap",
+ "futures",
+ "ipnet",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-egress-proxy",
+ "trogon-sandbox-protocol",
+ "trogon-std",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-sandbox-space-worker"
 version = "0.1.0"
 dependencies = [

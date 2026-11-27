@@ -91,6 +91,7 @@ trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observabi
 trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-providers = { path = "crates/sandbox/trogon-sandbox-providers" }
+trogon-sandbox-proxmox-worker = { path = "crates/sandbox/trogon-sandbox-proxmox-worker" }
 trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
 trogon-sandbox-ssh-gateway = { path = "crates/sandbox/trogon-sandbox-ssh-gateway" }
 trogon-sandbox-substrate-worker = { path = "crates/sandbox/trogon-sandbox-substrate-worker" }
