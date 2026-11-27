@@ -13,6 +13,9 @@ use trogon_peer_context::{PeerContext, PeerContextError};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 use crate::connector_config::ConnectorConfig;
+use crate::model_operation::ModelOperation;
+use crate::model_tool_definitions::model_tool;
+use crate::model_tools;
 use crate::native_binding::NativeBinding;
 use crate::peer_mcp_error_content::PeerMcpErrorContent;
 use crate::prompt_hook_context::PromptHookContext;
@@ -20,7 +23,10 @@ use crate::prompt_hook_event::PromptHookEvent;
 use crate::prompt_hook_input::PromptHookInput;
 use crate::prompt_hook_output::PromptHookOutput;
 use crate::prompt_tool::prompt_tool;
-use crate::{ConnectorConfigInput, EnrollPeer, PeerMcpError, PreparePeerBatch};
+use crate::{
+    AcknowledgePeerBatch, ConnectorConfigInput, EnrollPeer, PeerMcpError, PreparePeerBatch, ReadPeerMessageStatus,
+    ReadPeerRoster, SendPeerMessage,
+};
 
 pub struct PeerMcp<B> {
     backend: B,
@@ -34,7 +40,10 @@ impl<B> fmt::Debug for PeerMcp<B> {
     }
 }
 
-impl<B: EnrollPeer + PreparePeerBatch> PeerMcp<B> {
+impl<B> PeerMcp<B>
+where
+    B: EnrollPeer + PreparePeerBatch + ReadPeerRoster + SendPeerMessage + ReadPeerMessageStatus + AcknowledgePeerBatch,
+{
     pub fn new(backend: B, config: ConnectorConfigInput) -> Result<Self, PeerMcpError> {
         let config = ConnectorConfig::try_from(config).map_err(PeerMcpError::InvalidConfig)?;
         Ok(Self {
@@ -45,7 +54,7 @@ impl<B: EnrollPeer + PreparePeerBatch> PeerMcp<B> {
     }
 
     pub async fn invoke(&self, request: CallToolRequestParams) -> Result<CallToolResult, PeerMcpError> {
-        match request.name.as_ref() {
+        let operation = match request.name.as_ref() {
             "peer_prompt_hook" => {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
                 let result = tokio::time::timeout_at(deadline, self.prompt_hook(request, deadline))
@@ -54,15 +63,24 @@ impl<B: EnrollPeer + PreparePeerBatch> PeerMcp<B> {
                 if tokio::time::Instant::now() > deadline {
                     return Err(PeerMcpError::PromptDeadline);
                 }
-                result
+                return result;
             }
-            "peer_roster" | "peer_send" | "peer_status" | "peer_acknowledge_batch" => {
-                let binding = self.binding.lock().await;
-                let current = binding.as_ref().ok_or(PeerMcpError::Unbound)?;
-                current.attachment().ok_or(PeerMcpError::EnrollmentUncertain)?;
-                Err(PeerMcpError::UnsupportedTool)
-            }
-            _ => Err(PeerMcpError::UnsupportedTool),
+            "peer_roster" => ModelOperation::Roster,
+            "peer_send" => ModelOperation::Send,
+            "peer_status" => ModelOperation::Status,
+            "peer_acknowledge_batch" => ModelOperation::Acknowledge,
+            _ => return Err(PeerMcpError::UnsupportedTool),
+        };
+        let attachment = {
+            let binding = self.binding.lock().await;
+            let current = binding.as_ref().ok_or(PeerMcpError::Unbound)?;
+            current.attachment().cloned().ok_or(PeerMcpError::EnrollmentUncertain)?
+        };
+        match operation {
+            ModelOperation::Roster => model_tools::roster(&self.backend, request, &attachment).await,
+            ModelOperation::Send => model_tools::send(&self.backend, request, &attachment, &self.config).await,
+            ModelOperation::Status => model_tools::status(&self.backend, request, &attachment, &self.config).await,
+            ModelOperation::Acknowledge => model_tools::acknowledge(&self.backend, request, &attachment).await,
         }
     }
 
@@ -167,13 +185,20 @@ fn contract_error() -> PeerMcpError {
     PeerMcpError::InvalidBatch(PeerContextError::ContractViolation)
 }
 
-impl<B: EnrollPeer + PreparePeerBatch> ServerHandler for PeerMcp<B> {
+impl<B> ServerHandler for PeerMcp<B>
+where
+    B: EnrollPeer + PreparePeerBatch + ReadPeerRoster + SendPeerMessage + ReadPeerMessageStatus + AcknowledgePeerBatch,
+{
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        (name == "peer_prompt_hook").then(prompt_tool)
+        if name == "peer_prompt_hook" {
+            Some(prompt_tool())
+        } else {
+            model_tool(name)
+        }
     }
 
     async fn list_tools(
@@ -181,7 +206,13 @@ impl<B: EnrollPeer + PreparePeerBatch> ServerHandler for PeerMcp<B> {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(vec![prompt_tool()]))
+        let mut tools = vec![prompt_tool()];
+        tools.extend(
+            ["peer_roster", "peer_send", "peer_status", "peer_acknowledge_batch"]
+                .into_iter()
+                .filter_map(model_tool),
+        );
+        Ok(ListToolsResult::with_all_items(tools))
     }
 
     async fn call_tool(
