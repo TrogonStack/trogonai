@@ -29,6 +29,10 @@ output still render but notify no one, since the agent's text is untrusted. A
 long reply is split into messages of at most 2000 UTF-16 code units, which fits
 Discord's limit however it counts.
 
+The bridge exits with an error if its ACP client task or the inbound consumer
+stream ends, so its supervisor restarts it; only a shutdown signal exits
+cleanly.
+
 ## Configuration
 
 | Variable | Default | Meaning |

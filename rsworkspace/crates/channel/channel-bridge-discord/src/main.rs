@@ -210,20 +210,21 @@ where
     };
 
     tokio::pin!(shutdown);
-    loop {
+    // Only the shutdown signal is a clean exit. The other ways out leave the
+    // bridge unable to serve, so they fail the process for its supervisor to
+    // restart.
+    let outcome = loop {
         tokio::select! {
             () = &mut shutdown => {
                 info!("Shutting down");
-                break;
+                break Ok(());
             }
             result = &mut client_task => {
-                error!(?result, "ACP client task ended; agent responses can no longer be rendered");
-                break;
+                break Err(anyhow::anyhow!("ACP client task ended; agent responses can no longer be rendered: {result:?}"));
             }
             next = messages.next() => {
                 let Some(next) = next else {
-                    warn!("Inbound consumer stream ended");
-                    break;
+                    break Err(anyhow::anyhow!("inbound consumer stream ended"));
                 };
                 match next {
                     Ok(msg) => {
@@ -237,8 +238,8 @@ where
                 }
             }
         }
-    }
+    };
 
     client_task.abort();
-    Ok(())
+    outcome
 }
