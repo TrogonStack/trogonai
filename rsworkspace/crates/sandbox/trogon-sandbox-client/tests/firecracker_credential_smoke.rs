@@ -53,7 +53,7 @@ fn request(network_policy: NetworkPolicy) -> Fallible<LeaseRequest> {
 }
 
 #[tokio::test]
-#[ignore = "requires a networked firecracker worker with a credential broker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires a networked firecracker worker with a credential broker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_transform_rule_injects_the_credential_upstream_and_the_guest_never_sees_it() -> TestResult {
     let client = &stack_support::connect().await?;
     let host = stack_support::env_or("SANDBOX_SMOKE_FIRECRACKER_ECHO_HOST", "postman-echo.com");

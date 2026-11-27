@@ -72,9 +72,9 @@ In `require` a refused request with a reply subject gets an error reply (`dispat
 
 | Where | How |
 | --- | --- |
-| Helm chart (`devops/helm/sandbox`) | `global.dispatchAuth.verify: require`. The broker reads `SANDBOX_DISPATCH_SIGNING_KEY` and every worker reads `SANDBOX_DISPATCH_PUBLIC_KEYS` from the Secret named by `global.dispatchAuth.secretName` (default `sandbox-dispatch-auth`, keys `signing-key` and `public-keys`). |
+| Helm chart (`devops/helm/charts/trogon-sandbox`) | `global.dispatchAuth.verify: require`. The broker reads `SANDBOX_DISPATCH_SIGNING_KEY` and every worker reads `SANDBOX_DISPATCH_PUBLIC_KEYS` from the Secret named by `global.dispatchAuth.secretName` (default `sandbox-dispatch-auth`, keys `signing-key` and `public-keys`). |
 | `trogon-sandbox-dev` | Generates a throwaway key on each run, gives the broker the seed and the worker the public key, and sets `require`. |
-| Compose stack (`devops/docker/compose/sandbox/compose.yml`) and the smoke scripts | `devops/docker/compose/sandbox/dispatch-keys.sh` generates a key and exports the broker and worker variables. |
+| Compose stack (`devops/docker/compose/sandbox/compose.yaml`) and the smoke scripts | `.config/mise/lib/sandbox-dispatch-keys.sh` generates a key and exports the broker and worker variables. |
 
 Create the Helm Secret before installing, because pods that reference a missing Secret do not start:
 

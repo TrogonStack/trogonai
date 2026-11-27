@@ -3,7 +3,7 @@
 //! and a policy update changes that live.
 //!
 //! Prereqs: everything `firecracker_stack_smoke` needs, with a worker that sets up lease networking, and a host that
-//! can reach `ALLOWED_HOST` and `OTHER_HOST` over HTTPS. See `devops/docker/compose/sandbox/smoke-firecracker.sh`
+//! can reach `ALLOWED_HOST` and `OTHER_HOST` over HTTPS. See `mise run sandbox:smoke-firecracker`
 //! (`SANDBOX_SMOKE_FIRECRACKER_NETWORK=1`).
 
 mod common;
@@ -98,7 +98,7 @@ async fn assert_no_direct_egress(client: &SandboxClient, lease_id: &LeaseId) -> 
 }
 
 #[tokio::test]
-#[ignore = "requires a networked firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh with SANDBOX_SMOKE_FIRECRACKER_NETWORK=1"]
+#[ignore = "requires a networked firecracker worker; run `mise run sandbox:smoke-firecracker` with SANDBOX_SMOKE_FIRECRACKER_NETWORK=1"]
 async fn a_lease_without_an_egress_policy_still_boots_with_no_network_device() -> TestResult {
     let client = &stack_support::connect().await?;
     for policy in [None, Some(NetworkPolicy::DenyAll)] {
@@ -125,7 +125,7 @@ async fn a_lease_without_an_egress_policy_still_boots_with_no_network_device() -
 }
 
 #[tokio::test]
-#[ignore = "requires a networked firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh with SANDBOX_SMOKE_FIRECRACKER_NETWORK=1"]
+#[ignore = "requires a networked firecracker worker; run `mise run sandbox:smoke-firecracker` with SANDBOX_SMOKE_FIRECRACKER_NETWORK=1"]
 async fn an_allow_listed_destination_is_reachable_and_nothing_else_is() -> TestResult {
     let client = &stack_support::connect().await?;
     let req = request(Some(allow(&[ALLOWED_HOST])?))?;
@@ -140,7 +140,7 @@ async fn an_allow_listed_destination_is_reachable_and_nothing_else_is() -> TestR
 }
 
 #[tokio::test]
-#[ignore = "requires a networked firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh with SANDBOX_SMOKE_FIRECRACKER_NETWORK=1"]
+#[ignore = "requires a networked firecracker worker; run `mise run sandbox:smoke-firecracker` with SANDBOX_SMOKE_FIRECRACKER_NETWORK=1"]
 async fn a_policy_update_applies_to_the_running_lease() -> TestResult {
     let client = &stack_support::connect().await?;
     let req = request(Some(allow(&[ALLOWED_HOST])?))?;
@@ -165,7 +165,7 @@ async fn a_policy_update_applies_to_the_running_lease() -> TestResult {
 }
 
 #[tokio::test]
-#[ignore = "requires a networked firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh with SANDBOX_SMOKE_FIRECRACKER_NETWORK=1"]
+#[ignore = "requires a networked firecracker worker; run `mise run sandbox:smoke-firecracker` with SANDBOX_SMOKE_FIRECRACKER_NETWORK=1"]
 async fn allow_all_still_goes_through_the_proxy() -> TestResult {
     let client = &stack_support::connect().await?;
     with_lease(client, request(Some(NetworkPolicy::AllowAll))?, |granted| async move {

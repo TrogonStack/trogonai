@@ -1,7 +1,7 @@
 # Sandbox platform manifests
 
 Cluster-side setup the sandbox workers need beyond their Helm charts in
-`devops/helm/sandbox`: RuntimeClasses, node preparation and example
+`devops/helm/charts/trogon-sandbox`: RuntimeClasses, node preparation and example
 deployments for workers the charts do not cover.
 
 Each worker gets a directory, and each platform it supports gets one below

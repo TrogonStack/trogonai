@@ -15,7 +15,7 @@ fn layout(values: &str) -> Fallible<(TempDir, PathBuf)> {
     let root = tempfile::tempdir()?;
     let manifest_dir = root.path().join("rsworkspace/crates/sandbox/worker");
     fs::create_dir_all(&manifest_dir)?;
-    let chart = root.path().join("devops/helm/sandbox/charts/worker");
+    let chart = root.path().join("devops/helm/charts/worker");
     fs::create_dir_all(&chart)?;
     fs::write(chart.join("values.yaml"), values)?;
     Ok((root, manifest_dir))

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 : "${RUNNER_TEMP:?}"
-compose_file=devops/docker/compose/sandbox/compose.yml
+compose_file=devops/docker/compose/sandbox/compose.yaml
 
 if [[ -f "$RUNNER_TEMP/worker.pid" ]]; then
   pid="$(cat "$RUNNER_TEMP/worker.pid")"

@@ -3,7 +3,7 @@
 //!
 //! These kill host processes by pid, so they need `SANDBOX_FIRECRACKER_STATE_DIR` (to find each lease's VMM) and, for
 //! the restart case, `SANDBOX_SMOKE_FIRECRACKER_WORKER_PIDFILE` with something that restarts the worker.
-//! `devops/docker/compose/sandbox/smoke-firecracker.sh` sets both and runs this file one test at a time, since
+//! `mise run sandbox:smoke-firecracker` sets both and runs this file one test at a time, since
 //! killing the worker takes every lease it holds with it.
 
 mod common;
@@ -85,7 +85,7 @@ async fn finish(client: &SandboxClient, lease_id: &LeaseId, outcome: Fallible<()
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a supervised firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a supervised firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_vmm_killed_mid_lease_releases_the_lease_and_its_host_resources() -> TestResult {
     let client = &stack_support::connect().await?;
     let granted = lease(client).await?;
@@ -103,7 +103,7 @@ async fn a_vmm_killed_mid_lease_releases_the_lease_and_its_host_resources() -> T
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a supervised firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a supervised firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_frozen_vmm_fails_calls_within_their_timeout_and_recovers_when_thawed() -> TestResult {
     let client = &stack_support::connect().await?;
     let granted = lease(client).await?;
@@ -129,7 +129,7 @@ async fn a_frozen_vmm_fails_calls_within_their_timeout_and_recovers_when_thawed(
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a supervised firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a supervised firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_frozen_guest_agent_fails_calls_within_their_timeout_and_recovers_when_thawed() -> TestResult {
     let client = &stack_support::connect().await?;
     let granted = lease(client).await?;
@@ -173,7 +173,7 @@ async fn a_frozen_guest_agent_fails_calls_within_their_timeout_and_recovers_when
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a supervised firecracker worker; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a supervised firecracker worker; run `mise run sandbox:smoke-firecracker`"]
 async fn a_worker_killed_with_live_leases_reclaims_them_when_it_restarts() -> TestResult {
     let client = &stack_support::connect().await?;
     let granted = lease(client).await?;

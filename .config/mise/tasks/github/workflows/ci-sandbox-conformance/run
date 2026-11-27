@@ -90,8 +90,8 @@ wait_until NATS "$nats_pid" 30 \
 
 # Runs the worker the way a deployment does: it refuses unsigned requests and
 # holds only the public key, while the suite signs with the broker's key.
-# shellcheck source=devops/docker/compose/sandbox/dispatch-keys.sh
-source "$ROOT/devops/docker/compose/sandbox/dispatch-keys.sh"
+# shellcheck source=.config/mise/lib/sandbox-dispatch-keys.sh
+source "$ROOT/.config/mise/lib/sandbox-dispatch-keys.sh"
 
 env -u SANDBOX_DISPATCH_SIGNING_KEY SANDBOX_NATS_URL="$nats_url" "${worker_env[@]}" \
     "$target_dir/debug/trogon-sandbox-${WORKER}-worker" >"$work/worker.log" 2>&1 &

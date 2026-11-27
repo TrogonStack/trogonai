@@ -8,9 +8,9 @@ Wire these rules into the selector labels of your Prometheus Operator `Prometheu
 
 | Alert | Subchart | Template |
 |-------|----------|----------|
-| `SnapshotBuilderFailureRateHigh` | `sandbox-snapshot-builder` | `devops/helm/sandbox/charts/sandbox-snapshot-builder/templates/prometheus-rules.yaml` |
-| `BrokerUnsettledFreezes` | `sandbox-broker` | `devops/helm/sandbox/charts/sandbox-broker/templates/prometheus-rules.yaml` |
-| `BrokerDigestPinMismatch` | `sandbox-broker` | `devops/helm/sandbox/charts/sandbox-broker/templates/prometheus-rules.yaml` |
+| `SnapshotBuilderFailureRateHigh` | `trogon-sandbox-snapshot-builder` | `devops/helm/charts/trogon-sandbox-snapshot-builder/templates/prometheus-rules.yaml` |
+| `BrokerUnsettledFreezes` | `trogon-sandbox-broker` | `devops/helm/charts/trogon-sandbox-broker/templates/prometheus-rules.yaml` |
+| `BrokerDigestPinMismatch` | `trogon-sandbox-broker` | `devops/helm/charts/trogon-sandbox-broker/templates/prometheus-rules.yaml` |
 
 All three carry the label `severity: warning`.
 

@@ -25,7 +25,7 @@ SANDBOX_POD_RUNTIME_CLASS=gvisor
 SANDBOX_POD_RUNTIME_CLASS_USER_SPACE_KERNEL=gvisor
 ```
 
-With the `sandbox-k8s-worker` chart, pass `--set runtimeClass=gvisor`.
+With the `trogon-sandbox-k8s-worker` chart, pass `--set runtimeClass=gvisor`.
 Leaving `SANDBOX_POD_RUNTIME_CLASS_MICRO_VM` unset makes microVM-tier leases
 fall back to `gvisor` too, so they get user-space kernel isolation rather
 than a microVM.

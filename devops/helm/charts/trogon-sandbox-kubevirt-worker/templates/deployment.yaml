@@ -1,0 +1,72 @@
+{{- if ne (int .Values.replicaCount) 1 }}
+{{- fail "KubeVirt requires one replica per stable worker identity and custody volume" }}
+{{- end }}
+{{- $claim := required "KubeVirt requires persistence.existingClaim for durable custody" .Values.persistence.existingClaim }}
+{{- $mount := clean .Values.persistence.mountPath }}
+{{- $state := clean .Values.stateDir }}
+{{- if or (not (hasPrefix "/" $mount)) (eq $mount "/") (not (hasPrefix (printf "%s/" $mount) $state)) }}
+{{- fail "KubeVirt stateDir must be a private subdirectory of persistence.mountPath" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trogon-sandbox-kubevirt-worker.fullname" . }}
+  labels:
+    {{- include "trogon-sandbox-kubevirt-worker.labels" . | nindent 4 }}
+    sandbox.trogonai.io/egress-enforcement: {{ .Values.egressEnforcement | quote }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-kubevirt-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "trogon-sandbox-kubevirt-worker.labels" . | nindent 8 }}
+        sandbox.trogonai.io/egress-enforcement: {{ .Values.egressEnforcement | quote }}
+    spec:
+      serviceAccountName: {{ include "trogon-sandbox-kubevirt-worker.fullname" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: worker
+          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-kubevirt-worker:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: custody
+              mountPath: {{ $mount | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "trogon-sandbox-kubevirt-worker.fullname" . }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          {{- with .Values.global.dispatchAuth }}
+          env:
+            - name: SANDBOX_DISPATCH_PUBLIC_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .publicKeysKey }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/trogon-sandbox-kubevirt-worker", "--help"]
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/trogon-sandbox-kubevirt-worker", "--help"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: custody
+          persistentVolumeClaim:
+            claimName: {{ $claim | quote }}

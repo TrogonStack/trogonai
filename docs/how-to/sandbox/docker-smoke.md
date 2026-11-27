@@ -26,13 +26,13 @@ cargo --version
 From the repository root:
 
 ```sh
-devops/docker/compose/sandbox/smoke-docker.sh
+mise run sandbox:smoke-docker
 ```
 
 The script does the following:
 
-1. Generates a dispatch signing key with `devops/docker/compose/sandbox/dispatch-keys.sh`, so the worker runs in the `require` posture described in [Sign lease dispatches and verify them on workers](./sign-worker-dispatches.md).
-2. Starts NATS with JetStream and the broker through `devops/docker/compose/sandbox/compose.yml`. The NATS client port on the host is 24222 and the monitoring port is 28222.
+1. Generates a dispatch signing key with `.config/mise/lib/sandbox-dispatch-keys.sh`, so the worker runs in the `require` posture described in [Sign lease dispatches and verify them on workers](./sign-worker-dispatches.md).
+2. Starts NATS with JetStream and the broker through `devops/docker/compose/sandbox/compose.yaml`. The NATS client port on the host is 24222 and the monitoring port is 28222.
 3. Waits for NATS to report healthy.
 4. Builds `trogon-sandbox-docker-worker` in release mode.
 5. Starts the worker on the host with its own temporary state directory.
@@ -46,7 +46,7 @@ Set `SANDBOX_NATS_PORT` and `SANDBOX_NATS_MONITOR_PORT` to change the host ports
 
 ```sh
 SANDBOX_NATS_PORT=24222 SANDBOX_IMAGE='sandbox-agent:dev' \
-  devops/docker/compose/sandbox/smoke-docker.sh
+  mise run sandbox:smoke-docker
 ```
 
 ## Start the pieces by hand
@@ -54,15 +54,14 @@ SANDBOX_NATS_PORT=24222 SANDBOX_IMAGE='sandbox-agent:dev' \
 1. Start NATS and the broker. Source the key script first, because the Compose file refuses to start the broker without a signing key:
 
    ```sh
-   cd devops/docker/compose/sandbox
-   source ./dispatch-keys.sh
-   docker compose -f compose.yml up -d --build
+   source .config/mise/lib/sandbox-dispatch-keys.sh
+   mise run compose:up sandbox --build
    ```
 
 2. Build the Docker worker from `rsworkspace`:
 
    ```sh
-   cd ../../../../rsworkspace
+   cd rsworkspace
    cargo build -p trogon-sandbox-docker-worker --release
    ```
 
@@ -91,7 +90,7 @@ The worker keeps an owner id in `SANDBOX_DOCKER_STATE_DIR` (default `/var/lib/sa
 |--------|------------------|
 | Port already in use | Another NATS or service on 24222 or 28222. Set `SANDBOX_NATS_PORT` and `SANDBOX_NATS_MONITOR_PORT`, or stop the conflicting process. |
 | The worker exited during startup | Docker daemon running? The worker runs on the host and needs the Docker socket. Check the worker output for the cause. |
-| The broker exited during startup | The script prints the last broker log lines. Confirm `dispatch-keys.sh` was sourced so the broker has a signing key. |
+| The broker exited during startup | The script prints the last broker log lines. Confirm `.config/mise/lib/sandbox-dispatch-keys.sh` was sourced so the broker has a signing key. |
 | Fewer than two NATS connections | The worker or the broker did not connect. Check that both use the host-forwarded URL `nats://127.0.0.1:24222`. |
 
 The NATS monitoring endpoint is on host port 28222 if you need health or connection data.
@@ -99,7 +98,7 @@ The NATS monitoring endpoint is on host port 28222 if you need health or connect
 ## Tear down
 
 ```sh
-docker compose -f devops/docker/compose/sandbox/compose.yml down --remove-orphans
+mise run compose:down sandbox
 ```
 
 Stop the host worker with Ctrl+C if you started it by hand.

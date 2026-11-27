@@ -1,0 +1,6 @@
+# SpiceDB runs outside the release.
+spicedb:
+  enabled: false
+global:
+  spicedb:
+    endpoint: authz.example:50051

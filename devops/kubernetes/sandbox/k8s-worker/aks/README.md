@@ -28,7 +28,7 @@ SANDBOX_POD_RUNTIME_CLASS=kata-vm-isolation
 SANDBOX_POD_RUNTIME_CLASS_MICRO_VM=kata-vm-isolation
 ```
 
-With the `sandbox-k8s-worker` chart, pass `--set runtimeClass=kata-vm-isolation`.
+With the `trogon-sandbox-k8s-worker` chart, pass `--set runtimeClass=kata-vm-isolation`.
 
 The managed class does not pin pods to the sandbox pool. If the cluster has
 other pools, either create your own RuntimeClass under a different name

@@ -24,4 +24,4 @@ Doctests are not run by nextest; run `cargo test --doc` for them.
 
 ## Charts and alert rules
 
-`devops/helm/sandbox/ci/check-charts.sh` runs `helm lint` on the umbrella chart and every subchart, `helm template` with the default values and with the authorization settings the chart requires, `promtool check rules` on the rendered PrometheusRule resources, and `promtool test rules` on the files in `devops/helm/sandbox/ci/rule-tests/`. It needs `helm`, `yq` and `promtool` on the path. Add a `*.test.yaml` beside the others when you add an alert.
+The `mise run github:workflows:ci-sandbox-deploy-checks:check-charts` task runs `helm lint` on the umbrella chart and every subchart, `helm template` with the default values and with the authorization settings the chart requires, `promtool check rules` on the rendered PrometheusRule resources, and `promtool test rules` on the files in `devops/helm/charts/trogon-sandbox/ci/rule-tests/`. It needs `helm`, `yq` and `promtool` on the path. Add a `*.test.yaml` beside the others when you add an alert.

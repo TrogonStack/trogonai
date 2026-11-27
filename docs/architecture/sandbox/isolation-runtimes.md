@@ -66,7 +66,7 @@ The cluster must define each named `RuntimeClass` with a handler that the node's
 - Guest is a WASM component and latency matters: `WasmMicroVm` (Hyperlight).
 - A long-lived sandbox that should resume with its state rather than boot, at either of the first two virtualized tiers: Agent Substrate, provided the workload needs no SSH, no exported snapshot and no more than one exposed port.
 
-Kubernetes egress policy is configured separately from the RuntimeClass. The shared provider builds per-lease policies in `rsworkspace/crates/sandbox/trogon-sandbox-providers/src/k8s_network_policy.rs`. Deployment-level policies live in `devops/helm/sandbox/templates/networkpolicies.yaml`. Those policies require a CNI that enforces NetworkPolicy. Selecting an isolation tier alone does not establish egress enforcement.
+Kubernetes egress policy is configured separately from the RuntimeClass. The shared provider builds per-lease policies in `rsworkspace/crates/sandbox/trogon-sandbox-providers/src/k8s_network_policy.rs`. Deployment-level policies live in `devops/helm/charts/trogon-sandbox/templates/networkpolicies.yaml`. Those policies require a CNI that enforces NetworkPolicy. Selecting an isolation tier alone does not establish egress enforcement.
 
 ## Guest network anti-spoofing and residual risk
 

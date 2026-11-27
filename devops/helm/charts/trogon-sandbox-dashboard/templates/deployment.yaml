@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "trogon-sandbox-dashboard.fullname" . }}
+  labels:
+    {{- include "trogon-sandbox-dashboard.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-dashboard
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "trogon-sandbox-dashboard.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "trogon-sandbox-dashboard.fullname" . }}
+      containers:
+        - name: sandbox-dashboard
+          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-dashboard:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - --listen=0.0.0.0:{{ .Values.service.port }}
+            - --ws-gateway-url=ws://{{ .Release.Name }}-sandbox-ws-gateway:8443/v1/ws
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          env:
+            - name: SANDBOX_METRICS_ADDR
+              value: "0.0.0.0:{{ .Values.metricsPort }}"
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15

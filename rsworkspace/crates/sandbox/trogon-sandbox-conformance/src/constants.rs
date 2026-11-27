@@ -94,4 +94,4 @@ pub(crate) const LATENCY_DELETE_POLL: Duration = Duration::from_millis(5);
 pub(crate) const REDISPATCH_REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Where the sandbox charts live, relative to a crate under `rsworkspace/crates/<group>/<crate>`.
-pub(crate) const SANDBOX_CHARTS: &str = "../../../../devops/helm/sandbox/charts";
+pub(crate) const SANDBOX_CHARTS: &str = "../../../../devops/helm/charts";

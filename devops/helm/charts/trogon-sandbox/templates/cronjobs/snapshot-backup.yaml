@@ -1,0 +1,63 @@
+{{- if and .Values.backup.enabled .Values.backup.repositories }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.backup.storage.pvcName }}
+  labels:
+    {{- include "trogon-sandbox.stackLabels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.backup.storage.size }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-snapshot-backup
+  labels:
+    {{- include "trogon-sandbox.stackLabels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{ .Values.global.stackLabel }}: {{ .Values.global.stackLabelValue | quote }}
+            {{ .Values.global.componentLabel }}: snapshot-backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: oras-backup
+              image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag }}"
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: REGISTRY
+                  value: {{ include "trogon-sandbox.registryUrl" . | quote }}
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  set -eu
+                  STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+                  OUT="/backup/snapshot-backup-${STAMP}.tar"
+                  mkdir -p /backup
+                  {{- range .Values.backup.repositories }}
+                  echo "Backing up {{ . }} ..."
+                  oras backup {{ if $.Values.backup.plainHttp }}--plain-http {{ end }}--output "${OUT}.{{ . | replace "/" "-" }}.partial" "${REGISTRY}/{{ . }}"
+                  mv "${OUT}.{{ . | replace "/" "-" }}.partial" "${OUT}.{{ . | replace "/" "-" }}"
+                  {{- end }}
+                  echo "Backup complete."
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ .Values.backup.storage.pvcName }}
+{{- end }}

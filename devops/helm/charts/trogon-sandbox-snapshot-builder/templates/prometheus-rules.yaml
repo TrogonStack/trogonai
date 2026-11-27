@@ -1,0 +1,20 @@
+{{- if .Values.metrics.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "trogon-sandbox-snapshot-builder.fullname" . }}-alerts
+  labels:
+    {{- include "trogon-sandbox-snapshot-builder.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: sandbox.snapshot-builder
+      rules:
+        - alert: SnapshotBuilderFailureRateHigh
+          expr: rate(snapshot_builder_failed_total[10m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Snapshot builder failures above 0.1 per second"
+            description: "The snapshot builder is failing exports or registry pushes at an elevated rate."
+{{- end }}

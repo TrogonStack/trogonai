@@ -1,0 +1,22 @@
+replicaCount: 1
+# Prometheus scrape port; the broker serves GET /metrics here.
+metricsPort: 9090
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+quotaBackend: nats-kv
+idempotencyBackend: nats-kv
+# The broker enforces bearer auth, the image allow-list and the worker registry unless this is
+# true. It then needs SpiceDB: the endpoint and preshared key come from global.spicedb. Set it
+# only for a local stack (see values.dev.yaml).
+insecureDev: false
+metrics:
+  prometheusRule:
+    enabled: true
+# Write the committed credential policy per lease into the NATS KV bucket the credential
+# broker and workers fence against. Only effective with quotaBackend nats-kv.
+commitCredentialPolicies: true

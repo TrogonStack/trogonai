@@ -81,3 +81,7 @@ tmp
 
 # Python
 __pycache__
+
+# Packaged chart dependencies that `helm dependency update` writes.
+devops/helm/charts/*/charts/
+devops/helm/charts/*/Chart.lock

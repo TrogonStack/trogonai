@@ -1,0 +1,10 @@
+# Every subchart that ships a PrometheusRule gates it on
+# metrics.prometheusRule.enabled; turn them all on.
+trogon-sandbox-broker:
+  metrics:
+    prometheusRule:
+      enabled: true
+trogon-sandbox-snapshot-builder:
+  metrics:
+    prometheusRule:
+      enabled: true

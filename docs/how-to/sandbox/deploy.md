@@ -1,6 +1,6 @@
 # Deploy the sandbox stack with Helm
 
-This guide installs the sandbox control plane from the umbrella chart at `devops/helm/sandbox`: NATS JetStream, the Zot snapshot store, SpiceDB, the broker, the snapshot builder, the credential broker, the gateways, the dashboard and the workers. It also covers the operator tasks that come after the install.
+This guide installs the sandbox control plane from the umbrella chart at `devops/helm/charts/trogon-sandbox`: NATS JetStream, the Zot snapshot store, SpiceDB, the broker, the snapshot builder, the credential broker, the gateways, the dashboard and the workers. It also covers the operator tasks that come after the install.
 
 ## Prerequisites
 
@@ -14,17 +14,17 @@ This guide installs the sandbox control plane from the umbrella chart at `devops
 From the repository root:
 
 ```bash
-helm lint devops/helm/sandbox
-helm template sandbox ./devops/helm/sandbox --debug > /tmp/sandbox-render.yaml
+helm lint devops/helm/charts/trogon-sandbox
+helm template sandbox ./devops/helm/charts/trogon-sandbox --debug > /tmp/sandbox-render.yaml
 
 kubectl create namespace sandbox --dry-run=client -o yaml | kubectl apply -f -
 
-helm install sandbox ./devops/helm/sandbox \
+helm install sandbox ./devops/helm/charts/trogon-sandbox \
   --namespace sandbox \
   --set global.imageTag=<your-tag>
 ```
 
-The chart runs the broker with authorization enforced (`sandbox-broker.insecureDev: false`): bearer authentication, the image allow-list and the worker registry are on, and the broker reads `SPICEDB_ENDPOINT` and `SPICEDB_TOKEN`. The `spicedb` subchart deploys SpiceDB and writes the schema at every start.
+The chart runs the broker with authorization enforced (`trogon-sandbox-broker.insecureDev: false`): bearer authentication, the image allow-list and the worker registry are on, and the broker reads `SPICEDB_ENDPOINT` and `SPICEDB_TOKEN`. The `spicedb` subchart deploys SpiceDB and writes the schema at every start.
 
 ### Create the Secrets first
 
@@ -45,9 +45,9 @@ The dispatch signing material, under `global.dispatchAuth.secretName` (default `
 - Grant access with `spicedb.bootstrapRelationships`, for example `sandbox_tenant:acme#admin@service_account:ci-runner`, or write relationships to SpiceDB yourself.
 - To use an external SpiceDB set `spicedb.enabled=false` and `global.spicedb.endpoint=host:port`.
 - Before upgrading an existing deployment, follow [Migrate sandbox identities](./migrate-sandbox-identities.md).
-- For a local stack without authorization install with `-f devops/helm/sandbox/values-dev.yaml`, which sets `sandbox-broker.insecureDev=true` and skips SpiceDB.
+- For a local stack without authorization install with `-f devops/helm/charts/trogon-sandbox/values.dev.yaml`, which sets `trogon-sandbox-broker.insecureDev=true` and skips SpiceDB.
 
-`devops/helm/sandbox/ci/check-charts.sh` fails if the default render turns authorization off or lacks `SPICEDB_TOKEN`.
+The `mise run github:workflows:ci-sandbox-deploy-checks:check-charts` task fails if the default render turns authorization off or lacks `SPICEDB_TOKEN`.
 
 ### In-cluster endpoints
 
@@ -64,7 +64,7 @@ Release name `sandbox` yields these endpoints:
 Override the URLs when using another release name:
 
 ```bash
-helm install mysandbox ./devops/helm/sandbox \
+helm install mysandbox ./devops/helm/charts/trogon-sandbox \
   --set global.natsUrl=nats://mysandbox-nats:4222 \
   --set global.registryUrl=mysandbox-zot:5000
 ```
@@ -74,10 +74,10 @@ helm install mysandbox ./devops/helm/sandbox \
 The Docker, KubeVirt, Daytona, ACA, Modal and subprocess workers are disabled by default because they need a host socket or cloud credentials. Enable them per provider:
 
 ```bash
-helm upgrade sandbox ./devops/helm/sandbox \
+helm upgrade sandbox ./devops/helm/charts/trogon-sandbox \
   --reuse-values \
-  --set sandbox-docker-worker.enabled=true \
-  --set sandbox-kubevirt-worker.enabled=true
+  --set trogon-sandbox-docker-worker.enabled=true \
+  --set trogon-sandbox-kubevirt-worker.enabled=true
 ```
 
 The subprocess worker chart exposes the egress proxy options under `egressProxy` (`bindingTtlSeconds`, `revalidateIntervalSeconds`, `resweepLiveFlows`, `requireTerminationForNameOnlyAllows`, `tlsExemptHosts`, `tlsExemptAddresses`). All are off by default. See [Egress: name to address attribution](../../architecture/sandbox/egress-dns-binding.md#configuring-the-daemon).
@@ -89,7 +89,7 @@ A Kubernetes worker recovers lease Jobs and claimed warm pods only when their wo
 The chart runs a single-replica Deployment by default and refuses `replicaCount` above 1 with it. To scale out, run the worker as a StatefulSet:
 
 ```yaml
-sandbox-k8s-worker:
+trogon-sandbox-k8s-worker:
   workloadKind: StatefulSet
   replicaCount: 3
   recoverUnlabeledLeases: false
@@ -133,7 +133,7 @@ Keep the state directory (`stateDir`, `SANDBOX_KUBEVIRT_STATE_DIR`) on persisten
 The chart requires an existing persistent volume claim and uses a single replica with the `Recreate` strategy:
 
 ```yaml
-sandbox-kubevirt-worker:
+trogon-sandbox-kubevirt-worker:
   enabled: true
   workerId: sandbox-kubevirt-a
   image: <disk image a lease boots when it names none>
@@ -149,7 +149,7 @@ Drain active leases before upgrading a worker that predates durable custody, bec
 
 ## Fence credential requests with committed policies
 
-The chart values turn the committed-policy fence on: `sandbox-broker` `commitCredentialPolicies`, `sandbox-subprocess-worker` `requireCommittedPolicy` and `sandbox-credential-broker` `fenceMode: required`. The broker needs the `nats-kv` quota backend, which the chart uses by default, to write the shared bucket.
+The chart values turn the committed-policy fence on: `trogon-sandbox-broker` `commitCredentialPolicies`, `trogon-sandbox-subprocess-worker` `requireCommittedPolicy` and `trogon-sandbox-credential-broker` `fenceMode: required`. The broker needs the `nats-kv` quota backend, which the chart uses by default, to write the shared bucket.
 
 On an existing install, upgrade in order: broker first, workers second, credential broker last. Set the worker value to `false` and the credential broker value to `optional` until leases created before the upgrade have ended. A worker that runs outside this chart, such as the Firecracker worker, needs `SANDBOX_REQUIRE_COMMITTED_POLICY=true` in its environment.
 
@@ -251,7 +251,7 @@ When `global.networkPolicy.enabled=true` (the default):
 
 ## Garbage collection
 
-Zot garbage collection is enabled by default in the Zot subchart (`devops/helm/sandbox/charts/zot/values.yaml`):
+Zot garbage collection is enabled by default in the Zot subchart (`devops/helm/charts/zot/values.yaml`):
 
 | Value | Default | Zot field |
 |-------|---------|-----------|
@@ -277,7 +277,7 @@ The drill script tears down Zot, restores from the latest backup and verifies th
 
 ```bash
 RELEASE=sandbox NAMESPACE=sandbox TEST_REPO=snapshots/acme \
-  ./devops/helm/sandbox/scripts/dr-drill.sh
+  mise run sandbox:dr-drill
 ```
 
 ## Uninstall
@@ -293,4 +293,4 @@ kubectl delete pvc -n sandbox -l app.kubernetes.io/part-of=sandbox-stack
 
 - [Registry RBAC](../../architecture/sandbox/registry-rbac.md)
 - [Alerts](../../reference/sandbox/alerts.md)
-- Chart values: `devops/helm/sandbox/values.yaml`
+- Chart values: `devops/helm/charts/trogon-sandbox/values.yaml`

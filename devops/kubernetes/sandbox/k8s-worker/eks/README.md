@@ -40,7 +40,7 @@ SANDBOX_POD_RUNTIME_CLASS=kata-fc
 SANDBOX_POD_RUNTIME_CLASS_MICRO_VM=kata-fc
 ```
 
-The `sandbox-k8s-worker` chart's `runtimeClass` value sets
+The `trogon-sandbox-k8s-worker` chart's `runtimeClass` value sets
 `SANDBOX_POD_RUNTIME_CLASS` and already defaults to `kata-fc`; use
 `--set runtimeClass=kata-qemu` on nodes without devmapper. For the
 user-space kernel tier, install gVisor on a node group, add a `gvisor`

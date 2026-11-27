@@ -125,7 +125,7 @@ The second form applies to tenant ids that contain `:` or `/`. See [KV key layou
 
 Runtime lookups use the `sha256:` digest recorded in the `sandbox-broker-kv-snapshot` bucket, never a mutable tag. Tags exist for operator navigation and retention only. Referrer artifacts attach to the primary manifest digest and do not occupy separate top-level repositories.
 
-The bundled Zot registry chart sets the root prefix through `repositoryLayout.conventions.snapshotPrefix` (default `snapshots`) in `devops/helm/sandbox/charts/zot/values.yaml`. Tenant access is limited to pull on the tenant's own repository. See [Tenant-scoped snapshot registry RBAC](../../architecture/sandbox/registry-rbac.md).
+The bundled Zot registry chart sets the root prefix through `repositoryLayout.conventions.snapshotPrefix` (default `snapshots`) in `devops/helm/charts/zot/values.yaml`. Tenant access is limited to pull on the tenant's own repository. See [Tenant-scoped snapshot registry RBAC](../../architecture/sandbox/registry-rbac.md).
 
 ## Providers without a registry snapshot
 

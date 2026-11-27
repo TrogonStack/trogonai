@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#MISE description="Start a local compose stack from devops/docker/compose, or one named environment such as sandbox"
+# Usage: mise run compose:up [environment] [docker compose arguments...]
+# The first argument selects devops/docker/compose/<environment>/compose.yaml
+# when that file exists; otherwise the stack at devops/docker/compose/compose.yaml
+# runs and every argument goes to docker compose.
+set -euo pipefail
+
+root="${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+compose_dir="${root}/devops/docker/compose"
+if [[ $# -gt 0 && -f "${compose_dir}/$1/compose.yaml" ]]; then
+  compose_dir="${compose_dir}/$1"
+  shift
+fi
+exec docker compose -f "${compose_dir}/compose.yaml" up -d "$@"

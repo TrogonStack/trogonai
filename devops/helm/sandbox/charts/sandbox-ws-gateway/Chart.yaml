@@ -1,6 +1,0 @@
-apiVersion: v2
-name: sandbox-ws-gateway
-description: Helm subchart for sandbox-ws-gateway
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

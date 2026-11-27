@@ -60,7 +60,7 @@ The workspace declares no `aes-gcm`, `chacha20poly1305`, `zeroize`, `secrecy` or
 on aws-lc-rs 1.18.1 (`:187`, `trogon-std/src/tls.rs:24-28`), which has
 AES-256-GCM with random nonces, HKDF and HMAC but no HPKE; zeroize 1.8.2 is
 locked transitively. The dev compose runs OpenBao 2.6.2
-(`devops/docker/compose/compose.yml:101`), whose bootstrap enables Transit with
+(`devops/docker/compose/compose.yaml:101`), whose bootstrap enables Transit with
 upsert disabled and creates one key, `local-dev-kek`, that every caller shares
 (`devops/docker/compose/services/openbao/bootstrap.sh:16-17`, `:51-62`).
 

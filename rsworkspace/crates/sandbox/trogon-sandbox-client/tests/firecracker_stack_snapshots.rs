@@ -1,5 +1,5 @@
 //! Forking a running Firecracker lease: the broker checkpoints the source without stopping it and restores the
-//! checkpoint into a new lease. Run it with `devops/docker/compose/sandbox/smoke-firecracker.sh`, whose worker keeps
+//! checkpoint into a new lease. Run it with `mise run sandbox:smoke-firecracker`, whose worker keeps
 //! snapshots.
 
 mod common;
@@ -77,7 +77,7 @@ async fn fork_once(client: &SandboxClient, source: &LeaseId, pid: &str) -> Falli
 }
 
 #[tokio::test]
-#[ignore = "requires /dev/kvm, the broker and a firecracker worker that keeps snapshots; run devops/docker/compose/sandbox/smoke-firecracker.sh"]
+#[ignore = "requires /dev/kvm, the broker and a firecracker worker that keeps snapshots; run `mise run sandbox:smoke-firecracker`"]
 async fn a_forked_lease_keeps_the_files_and_processes_of_its_source() -> TestResult {
     let client = &stack_support::connect().await?;
     let request = lease_request(TENANT, spec_parts(60, 256)?, 300, "snapshots-source")?;
