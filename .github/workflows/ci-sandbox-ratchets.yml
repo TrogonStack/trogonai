@@ -1,0 +1,50 @@
+name: CI Sandbox Ratchets
+
+# Engineering ratchets on the sandbox crates: a Rust source file may not grow
+# past its line ceiling, and an #[ignore] test must be listed in the quarantine
+# inventory with a reason, so neither kind of debt grows without review.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rsworkspace/crates/sandbox/**'
+      - '.config/mise/tasks/github/workflows/ci-sandbox-ratchets/**'
+      - '.github/workflows/ci-sandbox-ratchets.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'rsworkspace/crates/sandbox/**'
+      - '.config/mise/tasks/github/workflows/ci-sandbox-ratchets/**'
+      - '.github/workflows/ci-sandbox-ratchets.yml'
+
+concurrency:
+  group: ci-sandbox-ratchets-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  ratchets:
+    name: File size and ignored-test ratchets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Python
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install_args: python
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: File size ratchet
+        run: mise run --skip-tools github:workflows:ci-sandbox-ratchets:file-sizes
+
+      - name: Ignored-test inventory is current
+        run: mise run --skip-tools github:workflows:ci-sandbox-ratchets:ignored-tests
