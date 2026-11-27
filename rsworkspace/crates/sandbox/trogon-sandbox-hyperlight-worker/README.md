@@ -55,9 +55,18 @@ crate, so the first build with the cfg rebuilds the dependency tree. The cfg is 
 | `--snapshot-registry` | `SANDBOX_SNAPSHOT_REGISTRY` | `127.0.0.1:5000` |
 | `--insecure-registries` | `SANDBOX_OCI_INSECURE_REGISTRIES` | none |
 | `--dispatch-fence-file` | `SANDBOX_DISPATCH_FENCE_FILE` | in memory |
+| `--guest-input-buffer-bytes` | `SANDBOX_HYPERLIGHT_GUEST_INPUT_BUFFER_BYTES` | `262144` (256 KiB) |
+| `--guest-output-buffer-bytes` | `SANDBOX_HYPERLIGHT_GUEST_OUTPUT_BUFFER_BYTES` | `262144` (256 KiB) |
+| `--guest-heap-bytes` | `SANDBOX_HYPERLIGHT_GUEST_HEAP_BYTES` | `1310720` (1.25 MiB) |
 
 The image of a lease is a logical name that resolves to a `.wasm` file under the component root. Names
 that are absolute or contain `..` are refused.
+
+The output buffer bounds what a guest can hand back in one return value or host-call argument;
+Hyperlight's own default is 16 KiB. A guest's Wasm linear memory, stack included, comes out of its
+heap, so a Rust guest built with the default 1 MiB stack barely fits 1.25 MiB. Link guests with a
+small stack and initial memory, as `tests/fixtures/passthrough-guest/build.rs` does
+(`-zstack-size=65536`, `--initial-memory=131072`), or raise `--guest-heap-bytes`.
 
 ## What a lease may ask for
 

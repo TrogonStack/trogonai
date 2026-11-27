@@ -8,16 +8,22 @@ use trogon_sandbox_hyperlight_worker::WasmHypervisor;
 use trogon_sandbox_hyperlight_worker::{WorkerArgs, serve};
 
 #[cfg(all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows")))]
-fn backend() -> WasmHypervisor {
-    WasmHypervisor::default()
+fn backend(args: &WorkerArgs) -> WasmHypervisor {
+    WasmHypervisor::new(
+        args.guest_input_buffer_bytes,
+        args.guest_output_buffer_bytes,
+        args.guest_heap_bytes,
+    )
 }
 
 #[cfg(not(all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows"))))]
-fn backend() -> UnsupportedHypervisor {
+fn backend(_args: &WorkerArgs) -> UnsupportedHypervisor {
     UnsupportedHypervisor
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    serve(WorkerArgs::parse(), backend()).await
+    let args = WorkerArgs::parse();
+    let backend = backend(&args);
+    serve(args, backend).await
 }
