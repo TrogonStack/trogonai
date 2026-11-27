@@ -18,6 +18,8 @@ use trogon_sandbox_egress_proxy::{
 use trogon_sandbox_protocol::CappedOutput;
 use trogon_sandbox_subprocess_worker::attribution::CommandAttribution;
 #[cfg(target_os = "linux")]
+use trogon_sandbox_subprocess_worker::fs_violation::{FsDenial, FsDenialSink};
+#[cfg(target_os = "linux")]
 use trogon_sandbox_subprocess_worker::isolation::BubblewrapBackend;
 #[cfg(target_os = "macos")]
 use trogon_sandbox_subprocess_worker::isolation::SeatbeltBackend;
@@ -1205,10 +1207,10 @@ impl PolicyExec {
                         .map(|launched| (launched, None))
                         .map_err(RuntimeError::launch);
                 }
-                let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+                let (sink, receiver) = FsDenialSink::channel();
                 let denials = KernelDenials::record(receiver, self.shared.violations.clone(), command.clone(), filter);
                 let observed = LaunchSpec {
-                    fs_denials: Some(sender),
+                    fs_denials: Some(sink),
                     ..spec.clone()
                 };
                 match backend.launch(&observed).await {
@@ -1361,7 +1363,7 @@ struct KernelDenials {
 #[cfg(target_os = "linux")]
 impl KernelDenials {
     fn record(
-        mut receiver: tokio::sync::mpsc::UnboundedReceiver<trogon_sandbox_subprocess_worker::fs_violation::FsDenial>,
+        mut receiver: tokio::sync::mpsc::Receiver<FsDenial>,
         store: ViolationStore,
         command: CommandId,
         filter: ViolationFilter,
