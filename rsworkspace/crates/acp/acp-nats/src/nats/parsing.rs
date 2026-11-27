@@ -1,5 +1,5 @@
 use crate::constants::{EXT_SUBJECT_PREFIX, SESSION_AGENT_MARKER, SESSION_CLIENT_MARKER, SESSION_PREFIX};
-use crate::ext_method_name::{ExtMethodName, ext_protocol_method};
+use crate::ext_method_name::ExtMethodName;
 use crate::session_id::AcpSessionId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,7 +193,7 @@ pub enum ClientMethod {
     TerminalWaitForExit,
     ElicitationCreate,
     ElicitationComplete,
-    Ext(String),
+    Ext(ExtMethodName),
 }
 
 impl ClientMethod {
@@ -215,7 +215,7 @@ impl ClientMethod {
             Self::TerminalWaitForExit => "terminal/wait_for_exit".to_string(),
             Self::ElicitationCreate => "elicitation/create".to_string(),
             Self::ElicitationComplete => "elicitation/complete".to_string(),
-            Self::Ext(name) => ext_protocol_method(name).into_owned(),
+            Self::Ext(name) => name.protocol_method().into_owned(),
         }
     }
 
@@ -234,8 +234,7 @@ impl ClientMethod {
             "elicitation.complete" => Some(Self::ElicitationComplete),
             other => {
                 let ext_name = other.strip_prefix(EXT_SUBJECT_PREFIX)?;
-                ExtMethodName::new(ext_name).ok()?;
-                Some(Self::Ext(ext_name.to_string()))
+                ExtMethodName::new(ext_name).ok().map(Self::Ext)
             }
         }
     }
