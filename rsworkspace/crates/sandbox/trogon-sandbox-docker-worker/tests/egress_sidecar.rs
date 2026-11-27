@@ -18,7 +18,7 @@ use std::time::Duration;
 use docker_support::{ALPINE_IMAGE, TestResult, fresh_id, fresh_lease_id};
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_sandbox_contract::{
-    BootMode, CommandEnv, DeniedDomain, DomainPattern, DomainRule, DomainRuleAction, IpRange, LeaseId, LeaseRequest,
+    AllowRange, BootMode, CommandEnv, DeniedDomain, DomainPattern, DomainRule, DomainRuleAction, LeaseId, LeaseRequest,
     LeaseRequestKey, NetworkPolicy, OciImageRef, OpaqueTunnelPolicy, ProviderKind, ProxyUid, SandboxImage, SandboxSpec,
     SandboxSpecParts, SandboxTags, StreamedOutput, TenantId, WorkspaceSource,
 };
@@ -109,7 +109,7 @@ fn lease_request(stub_ip: &str) -> TestResult<LeaseRequest> {
         }],
         // The proxy refuses private destinations unless an allow range names them. The range admits every port on
         // the stub, so the second port is denied by name.
-        allow_ranges: vec![IpRange::new(format!("{stub_ip}/32"))?],
+        allow_ranges: vec![AllowRange::new(format!("{stub_ip}/32"))?],
         deny_ranges: vec![],
         denied_domains: vec![DeniedDomain::new(&format!("{stub_ip}:{DENIED_PORT}"))?],
         opaque_tunnels: OpaqueTunnelPolicy::Allow,

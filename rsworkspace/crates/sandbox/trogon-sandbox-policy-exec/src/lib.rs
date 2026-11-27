@@ -80,12 +80,12 @@ pub use nix::sys::signal::Signal;
 #[cfg(unix)]
 pub use tokio_util::sync::CancellationToken;
 #[cfg(unix)]
+pub use trogon_sandbox_contract::{AllowRange, IpRange, NetworkPolicy};
+#[cfg(unix)]
 pub use trogon_sandbox_contract::{
     AwsCredentialPairBinding, ClaimName, DomainPattern, EnvVarName, Extract, ExtractNoMatch, ExtractPattern,
     FsPathEntry, FsPolicy, JwtMasking, LiteralPath, SecretBinding, SecretMode, SecretName, SecretTarget,
 };
-#[cfg(unix)]
-pub use trogon_sandbox_contract::{IpRange, NetworkPolicy};
 #[cfg(unix)]
 pub use trogon_sandbox_egress_proxy::{
     AskCallback, AskQuestion, AskVerdict, BodyRead, BodyUnavailableError, CommandId, CredentialPlacement,

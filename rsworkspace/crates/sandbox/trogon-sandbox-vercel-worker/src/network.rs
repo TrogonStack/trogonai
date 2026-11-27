@@ -72,7 +72,14 @@ pub fn translate_network_policy(policy: Option<&NetworkPolicy>) -> Result<Option
     }
     domains.sort();
     domains.dedup();
-    let allow = sorted_ranges(allow_ranges);
+    let mut allow_cidrs: Vec<IpRange> = Vec::new();
+    for range in allow_ranges {
+        if range.port().is_some() {
+            return Err(invalid(format!("Vercel cannot restrict by port: {range}")));
+        }
+        allow_cidrs.push(range.cidr().clone());
+    }
+    let allow = sorted_ranges(&allow_cidrs);
     let deny = sorted_ranges(deny_ranges);
 
     if domains.is_empty() && allow.is_empty() {

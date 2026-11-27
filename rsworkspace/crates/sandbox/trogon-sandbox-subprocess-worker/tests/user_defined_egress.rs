@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use trogon_sandbox_contract::{DeniedDomain, DomainPattern};
 use trogon_sandbox_contract::{
-    DomainRule, DomainRuleAction, HostMountAccess, IpRange, LeaseId, LeaseRequest, LeaseRequestKey, NetworkPolicy,
+    AllowRange, DomainRule, DomainRuleAction, HostMountAccess, LeaseId, LeaseRequest, LeaseRequestKey, NetworkPolicy,
     OciImageRef, ProviderKind, SandboxImage, SandboxSpec, SandboxSpecParts, SandboxTags, TenantId, WorkspaceSource,
 };
+use trogon_sandbox_contract::{DeniedDomain, DomainPattern};
 use trogon_sandbox_subprocess_worker::{FuseConfig, IsolationBackendKind, SubprocessWorker, WorkerConfig};
 use trogon_std::env::{ReadEnv as _, SystemEnv};
 
@@ -134,7 +134,7 @@ fn policy(marker: &str) -> Result<NetworkPolicy, Box<dyn std::error::Error>> {
             domain: DomainPattern::new(ALLOWED_HOST)?,
             action: DomainRuleAction::PassThrough,
         }],
-        allow_ranges: vec![IpRange::new("127.0.0.1/32")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.1/32")?],
         deny_ranges: vec![],
         denied_domains: vec![DeniedDomain::new(DENIED_HOST)?, DeniedDomain::new(marker)?],
         opaque_tunnels: Default::default(),

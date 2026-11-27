@@ -5,8 +5,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use trogon_sandbox_contract::{AllowRange, NetworkPolicy};
 use trogon_sandbox_contract::{DomainPattern, InjectHosts, SecretName};
-use trogon_sandbox_contract::{IpRange, NetworkPolicy};
 use trogon_sandbox_egress_proxy::SecretSubstitution;
 use trogon_sandbox_egress_proxy::ingress::{ListenAddress, Listener, ProxyToken};
 use trogon_sandbox_egress_proxy::server::{BoundAddress, ProxyServer, ProxyServerBuilder};
@@ -21,7 +21,7 @@ type Captured = Arc<Mutex<Vec<Vec<u8>>>>;
 fn policy() -> TestResult<NetworkPolicy> {
     Ok(NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("127.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

@@ -32,10 +32,13 @@ use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, ConfigMapVolumeSource, Container, EnvVar, SecurityContext, Volume, VolumeMount,
 };
 use k8s_openapi::api::networking::v1::{
-    IPBlock, NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyPeer, NetworkPolicySpec,
+    IPBlock, NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyPeer, NetworkPolicyPort, NetworkPolicySpec,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta};
-use trogon_sandbox_contract::{DomainRuleAction, IpRange, NetworkPolicy as ContractNetworkPolicy, ProxyUid};
+use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
+use trogon_sandbox_contract::{
+    AllowRange, DomainRuleAction, IpRange, NetworkPolicy as ContractNetworkPolicy, ProxyUid,
+};
 
 use crate::{
     EgressSidecarResources, EgressViolationEvents, K8sNetworkPolicyError, egress_redirect_command, exempt_uid_env_pair,
@@ -67,8 +70,9 @@ pub fn egress_proxy_configmap_name(job_name: &str) -> String {
 ///   level.
 /// - `UserDefined` gives `Some`, always (even when everything is empty), because it is deny-by-default: one
 ///   `NetworkPolicyEgressRule` is emitted per `allow_ranges` entry, each carved out by any `deny_ranges` entries
-///   that are a genuine CIDR subset of that specific allow range. Domain-based `rules` do not change what this
-///   function returns; see [`build_egress_sidecar`] for how those are enforced.
+///   that are a genuine CIDR subset of that specific allow range. An entry scoped to one port allows TCP to that
+///   port only. Domain-based `rules` do not change what this function returns; see [`build_egress_sidecar`] for how
+///   those are enforced.
 pub fn build_network_policy_manifest(
     sandbox_pod_labels: &BTreeMap<String, String>,
     policy: &ContractNetworkPolicy,
@@ -106,20 +110,26 @@ pub fn build_network_policy_manifest(
 /// Builds one `NetworkPolicyEgressRule` per `allow_ranges` entry, excluding any `deny_ranges` entries that are a
 /// genuine CIDR subset of that specific allow range. If `allow_ranges` is empty, returns an empty rule list (deny
 /// all, since `UserDefined` is deny-by-default).
-fn build_egress_rules(allow_ranges: &[IpRange], deny_ranges: &[IpRange]) -> Vec<NetworkPolicyEgressRule> {
+fn build_egress_rules(allow_ranges: &[AllowRange], deny_ranges: &[IpRange]) -> Vec<NetworkPolicyEgressRule> {
     allow_ranges
         .iter()
         .map(|allow| {
-            let except = except_list_for(allow, deny_ranges);
+            let except = except_list_for(allow.cidr(), deny_ranges);
             NetworkPolicyEgressRule {
                 to: Some(vec![NetworkPolicyPeer {
                     ip_block: Some(IPBlock {
-                        cidr: allow.as_str().to_string(),
+                        cidr: allow.cidr().as_str().to_string(),
                         except: (!except.is_empty()).then_some(except),
                     }),
                     ..Default::default()
                 }]),
-                ports: None,
+                ports: allow.port().map(|port| {
+                    vec![NetworkPolicyPort {
+                        port: Some(IntOrString::Int(i32::from(port.get()))),
+                        protocol: Some("TCP".to_string()),
+                        ..Default::default()
+                    }]
+                }),
             }
         })
         .collect()

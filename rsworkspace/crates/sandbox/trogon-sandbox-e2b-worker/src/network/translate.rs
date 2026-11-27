@@ -53,7 +53,12 @@ pub fn translate_network_policy(policy: Option<&NetworkPolicy>) -> Result<E2bNet
         }
         allow.push(rule.domain.to_string());
     }
-    allow.extend(allow_ranges.iter().map(|range| range.as_str().to_owned()));
+    for range in allow_ranges {
+        if range.port().is_some() {
+            return Err(invalid(format!("E2B cannot restrict by port: {range}")));
+        }
+        allow.push(range.cidr().as_str().to_owned());
+    }
     allow.sort();
     allow.dedup();
 

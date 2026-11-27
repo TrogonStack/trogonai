@@ -9,8 +9,8 @@ use std::os::fd::RawFd;
 use crate::constants::{LISTEN_BACKLOG, PROXY_ONLY_SHUTDOWN_GRACE};
 use tokio::io::{AsyncRead, AsyncWrite};
 use trogon_sandbox_contract::NetworkOptions;
+use trogon_sandbox_contract::{AllowRange, DomainRule, DomainRuleAction, IpRange, NetworkPolicy, OpaqueTunnelPolicy};
 use trogon_sandbox_contract::{AllowedTlsTermination, DeniedDomain, DomainPattern, PatternTarget};
-use trogon_sandbox_contract::{DomainRule, DomainRuleAction, IpRange, NetworkPolicy, OpaqueTunnelPolicy};
 use trogon_sandbox_contract::{ResponseHeaderStrip, StrippedHeader};
 use trogon_sandbox_egress_proxy::decider_stream::{DeciderOptions, FramedDecider};
 use trogon_sandbox_egress_proxy::deny_header_style::DenyHeaderStyle;
@@ -243,7 +243,9 @@ fn policy_of(hello: &trogon_sandbox_egress_proxy::decider_stream::DeciderHello) 
             })
             .map(|address| {
                 let prefix = if address.is_ipv4() { 32 } else { 128 };
-                IpRange::new(format!("{address}/{prefix}")).map_err(|err| err.to_string())
+                IpRange::new(format!("{address}/{prefix}"))
+                    .map(AllowRange::from)
+                    .map_err(|err| err.to_string())
             })
             .collect::<Result<Vec<_>, _>>()?,
         rules: allowed

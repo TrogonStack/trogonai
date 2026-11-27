@@ -16,6 +16,7 @@ use ipnet::IpNet;
 use serde::Deserialize;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 use trogon_sandbox_contract::Port;
+use trogon_sandbox_contract::{AllowRange, DomainRule, DomainRuleAction, IpRange, NetworkPolicy, OpaqueTunnelPolicy};
 use trogon_sandbox_contract::{
     AllowedTlsTermination, CaFiles, DeniedDomainReasons, DenyReason, ExternalProxy, ExtraCaCertPaths, LoopbackNames,
     MitmUnixSocket, NamesMatchedByName, NetworkOptions, NoProxy, ParentProxy, ParentProxyUrl, PatternTarget,
@@ -25,7 +26,6 @@ use trogon_sandbox_contract::{
     DeniedDomain, DomainPattern, FsPathEntry, FsPolicy, GlobPattern, LiteralPath, MachServiceName,
     MandatoryDenySearchDepth, PlatformOptions, ProtectedNamesAnchor, ResponseHeaderStrip, StrippedHeader,
 };
-use trogon_sandbox_contract::{DomainRule, DomainRuleAction, IpRange, NetworkPolicy, OpaqueTunnelPolicy};
 use trogon_sandbox_egress_proxy::IgnoreViolations;
 use trogon_sandbox_protocol::HostMatch;
 use trogon_std::env::{ReadEnv, SystemEnv};
@@ -1103,7 +1103,7 @@ impl SandboxSettings {
                     };
                     let address = host.as_ip()?;
                     let prefix = if address.is_ipv4() { 32 } else { 128 };
-                    IpRange::new(format!("{address}/{prefix}")).ok()
+                    IpRange::new(format!("{address}/{prefix}")).ok().map(AllowRange::from)
                 })
                 .collect(),
             deny_ranges: Vec::new(),

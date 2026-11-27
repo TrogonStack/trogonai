@@ -1,10 +1,10 @@
 use super::*;
 
 use trogon_sandbox_contract::{
-    CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, CredentialTransform, DomainPattern,
-    DomainRule, DomainRuleAction, ForwardUrl, HeaderName, IpRange, IsolationTier, MatchRule, MountAccess,
-    NetworkPolicy, PullSecretId, RemoteMount, RemoteMountSource, RequestForward, S3BucketName, SandboxSpecError,
-    SetSnapshotTagRequest, SnapshotTagName, StringMatcher,
+    AllowRange, CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, CredentialTransform,
+    DomainPattern, DomainRule, DomainRuleAction, ForwardUrl, HeaderName, IpRange, IsolationTier, MatchRule,
+    MountAccess, NetworkPolicy, PullSecretId, RemoteMount, RemoteMountSource, RequestForward, S3BucketName,
+    SandboxSpecError, SetSnapshotTagRequest, SnapshotTagName, StringMatcher,
 };
 
 fn s3_mount(bucket: &str, path: &str, access: MountAccess) -> anyhow::Result<RemoteMount> {
@@ -142,7 +142,7 @@ async fn network_policy_user_defined_with_valid_fields_is_granted() -> TestResul
                 }),
             },
         ],
-        allow_ranges: vec![IpRange::new("10.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![IpRange::new("10.1.0.0/24")?],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

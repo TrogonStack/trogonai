@@ -12,8 +12,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use trogon_sandbox_contract::Port;
 use trogon_sandbox_contract::{
-    DomainRule, DomainRuleAction, EgressViolation, EgressViolationReason, IpRange, LeaseId, NetworkPolicy, SandboxId,
-    TenantId,
+    AllowRange, DomainRule, DomainRuleAction, EgressViolation, EgressViolationReason, IpRange, LeaseId, NetworkPolicy,
+    SandboxId, TenantId,
 };
 use trogon_sandbox_contract::{NetworkOptions, UnlistedDestinations};
 use trogon_sandbox_egress_proxy::credential_source::UnconfiguredCredentialSource;
@@ -113,7 +113,7 @@ fn policy() -> TestResult<NetworkPolicy> {
             domain: "allowed.test".parse()?,
             action: DomainRuleAction::PassThrough,
         }],
-        allow_ranges: vec![IpRange::new("127.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![IpRange::new("10.0.0.0/8")?],
         denied_domains: vec!["blocked.test".parse()?],
         opaque_tunnels: Default::default(),

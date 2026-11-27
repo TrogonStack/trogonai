@@ -1,6 +1,6 @@
 use serde_json::json;
 use trogon_sandbox_contract::{
-    DomainPattern, DomainRule, DomainRuleAction, IpRange, LeaseError, NetworkPolicy, OpaqueTunnelPolicy,
+    AllowRange, DomainPattern, DomainRule, DomainRuleAction, IpRange, LeaseError, NetworkPolicy, OpaqueTunnelPolicy,
 };
 
 use super::*;
@@ -11,7 +11,7 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 fn user_defined(rules: Vec<DomainRule>, allow: Vec<IpRange>, deny: Vec<IpRange>) -> NetworkPolicy {
     NetworkPolicy::UserDefined {
         rules,
-        allow_ranges: allow,
+        allow_ranges: allow.into_iter().map(AllowRange::from).collect(),
         deny_ranges: deny,
         denied_domains: vec![],
         opaque_tunnels: OpaqueTunnelPolicy::Allow,
@@ -99,6 +99,25 @@ fn what_e2b_cannot_express_is_refused() -> TestResult {
         "user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": [], "request_rules": [{"action": "deny", "domains": ["example.com"]}]}
     }))?;
     assert!(translate_network_policy(Some(&requests)).is_err());
+    let scoped: NetworkPolicy = serde_json::from_value(json!({
+        "user_defined": {"rules": [], "allow_ranges": ["10.0.0.5:8080"], "deny_ranges": []}
+    }))?;
+    assert!(matches!(
+        translate_network_policy(Some(&scoped)),
+        Err(LeaseError::InvalidNetworkPolicy { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn a_single_address_allow_range_is_sent_as_a_one_address_block() -> TestResult {
+    let policy: NetworkPolicy = serde_json::from_value(json!({
+        "user_defined": {"rules": [], "allow_ranges": ["10.0.0.6"], "deny_ranges": []}
+    }))?;
+    let network = translate_network_policy(Some(&policy))?
+        .network
+        .ok_or("network rules")?;
+    assert_eq!(network.allow_out, vec!["10.0.0.6/32".to_owned()]);
     Ok(())
 }
 

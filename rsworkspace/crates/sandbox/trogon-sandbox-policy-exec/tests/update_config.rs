@@ -8,8 +8,8 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use trogon_sandbox_contract::{AllowRange, DomainRule, DomainRuleAction};
 use trogon_sandbox_contract::{DeniedDomain, DomainPattern};
-use trogon_sandbox_contract::{DomainRule, DomainRuleAction, IpRange};
 use trogon_sandbox_policy_exec::{
     AskQuestion, AskVerdict, CommandId, CommandNetworkLists, CommandSpec, NetworkPolicy, PolicyExec, PolicyExecConfig,
 };
@@ -57,7 +57,7 @@ fn policy(allowed: &[String], denied: &[String]) -> Result<NetworkPolicy, Box<dy
     }
     Ok(NetworkPolicy::UserDefined {
         rules,
-        allow_ranges: vec![IpRange::new("127.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains,
         opaque_tunnels: Default::default(),

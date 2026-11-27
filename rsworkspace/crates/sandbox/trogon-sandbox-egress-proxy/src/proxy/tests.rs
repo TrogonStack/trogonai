@@ -12,8 +12,8 @@ use tokio::io::duplex;
 use tokio::net::TcpListener;
 use trogon_sandbox_contract::NetworkPolicy;
 use trogon_sandbox_contract::{
-    CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, ForwardUrl, HeaderName, IpRange,
-    PullSecretId, TlsExclusions,
+    AllowRange, CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, ForwardUrl, HeaderName,
+    IpRange, PullSecretId, TlsExclusions,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -21,6 +21,10 @@ type TaskError = io::Error;
 
 fn range(text: &str) -> Result<IpRange, Box<dyn std::error::Error>> {
     Ok(IpRange::new(text)?)
+}
+
+fn allow_range(text: &str) -> Result<AllowRange, Box<dyn std::error::Error>> {
+    Ok(AllowRange::new(text)?)
 }
 
 #[tokio::test]
@@ -666,7 +670,7 @@ async fn postgres_plaintext_declined_is_always_denied() -> TestResult {
     // when an IP-range rule would otherwise have allowed the destination -
     // otherwise a client could bypass all domain rules just by declining
     // TLS.
-    for allow_ranges in [vec![], vec![range("127.0.0.0/8")?]] {
+    for allow_ranges in [vec![], vec![allow_range("127.0.0.0/8")?]] {
         let upstream_listener = TcpListener::bind("127.0.0.1:0").await?;
         let upstream_addr = upstream_listener.local_addr()?;
 
@@ -745,7 +749,7 @@ async fn postgres_gss_enc_request_is_denied_without_contacting_upstream() -> Tes
 
     let policy = NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![range("127.0.0.0/8")?],
+        allow_ranges: vec![allow_range("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),
@@ -862,7 +866,10 @@ fn rule_policy(allow_ranges: &[&str]) -> Result<NetworkPolicy, Box<dyn std::erro
             domain: "*.example.com".parse()?,
             action: trogon_sandbox_contract::DomainRuleAction::PassThrough,
         }],
-        allow_ranges: allow_ranges.iter().map(|r| range(r)).collect::<Result<Vec<_>, _>>()?,
+        allow_ranges: allow_ranges
+            .iter()
+            .map(|r| allow_range(r))
+            .collect::<Result<Vec<_>, _>>()?,
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),
@@ -2003,7 +2010,7 @@ async fn proxy_one(
 fn loopback_ranges_policy() -> Result<NetworkPolicy, Box<dyn std::error::Error>> {
     Ok(NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![range("127.0.0.0/8")?],
+        allow_ranges: vec![allow_range("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),
@@ -2051,7 +2058,7 @@ async fn a_client_that_resets_after_a_partial_hello_fails_the_sniff() -> TestRes
 async fn a_postgres_probe_is_refused_when_opaque_tunnels_are_refused() -> TestResult {
     let policy = NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![range("127.0.0.0/8")?],
+        allow_ranges: vec![allow_range("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: OpaqueTunnelPolicy::Refuse,

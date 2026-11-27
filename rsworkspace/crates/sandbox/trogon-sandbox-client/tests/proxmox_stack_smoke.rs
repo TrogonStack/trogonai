@@ -27,8 +27,8 @@ use common::TestResult;
 use futures::StreamExt;
 use trogon_sandbox_client::{CommandOptions, SandboxClient};
 use trogon_sandbox_contract::{
-    CommandOutput, DeniedDomain, DomainPattern, DomainRule, DomainRuleAction, IpRange, LeaseGranted, LeaseId,
-    LeasePersistence, LeaseReleased, LeaseReleasedReason, LeaseRequest, NetworkPolicy, OpaqueTunnelPolicy,
+    AllowRange, CommandOutput, DeniedDomain, DomainPattern, DomainRule, DomainRuleAction, IpRange, LeaseGranted,
+    LeaseId, LeasePersistence, LeaseReleased, LeaseReleasedReason, LeaseRequest, NetworkPolicy, OpaqueTunnelPolicy,
     ProviderKind, SandboxFileWrite, SandboxSpec, TenantId,
 };
 
@@ -315,7 +315,7 @@ async fn broker_proxy_allows_one_destination_denies_another_and_blocks_direct_tc
             domain,
             action: DomainRuleAction::PassThrough,
         }],
-        allow_ranges,
+        allow_ranges: allow_ranges.into_iter().map(AllowRange::from).collect(),
         deny_ranges: Vec::new(),
         denied_domains: vec![denied_domain],
         opaque_tunnels: OpaqueTunnelPolicy::default(),
