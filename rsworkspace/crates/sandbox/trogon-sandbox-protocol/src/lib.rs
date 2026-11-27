@@ -26,6 +26,7 @@ mod classify_subject;
 mod cleanup_state;
 mod command_exit;
 mod command_exit_error;
+mod command_reply_fit;
 mod compiled_fs_entry;
 mod constants;
 mod context_verified_subscriber;
@@ -200,14 +201,15 @@ pub use command_exit::{
     DETACHED_EXIT_POLL_FAILURES, DETACHED_EXIT_POLL_INTERVAL, await_detached_exit, publish_command_exit,
 };
 pub use command_exit_error::CommandExitError;
+pub use command_reply_fit::{fit_poll_command_response, fit_run_command_response};
 pub use compiled_fs_entry::CompiledFsEntry;
 pub use constants::{
     AUTH_FIELD, AUTH_HEADER, ENV_FENCE_EPOCH, ENV_FENCE_FILE, ENV_PUBLIC_KEYS, ENV_PUBLIC_KEYS_FILE, ENV_SIGNING_KEY,
     ENV_SIGNING_KEY_FILE, ENV_SIGNING_KEY_ID, ENV_SIGNING_TTL_SECS, ENV_VERIFY_MODE, OP_LEASE_DISPATCH,
 };
 pub use constants::{
-    CONFIRMATIONS, DEFAULT_CHECK_INTERVAL, DEFAULT_GRACE, DEFAULT_PARTITION_AFTER, ENV_WORKER_AUTHORITY,
-    MAX_LEASES_PER_REQUEST, MIN_LEASE_AGE,
+    COMMAND_REPLY_MARKER_ROOM, CONFIRMATIONS, DEFAULT_CHECK_INTERVAL, DEFAULT_GRACE, DEFAULT_PARTITION_AFTER,
+    ENV_WORKER_AUTHORITY, MAX_LEASES_PER_REQUEST, MIN_LEASE_AGE,
 };
 pub use context_verified_subscriber::ContextVerifiedSubscriber;
 pub use conventional_aws_pair::ConventionalAwsPair;
@@ -326,7 +328,7 @@ pub use proxy_routing::{
 };
 pub use purge_outcome::PurgeOutcome;
 pub use read_file_error::ReadFileError;
-pub use read_file_response::read_file_response;
+pub use read_file_response::{encode_read_file_response_within, read_file_response};
 pub use real_value::RealValue;
 pub use redaction_set::{MIN_REDACTABLE_LEN, REDACTION_MARKER, RedactionSet};
 pub use redispatch_guard::RedispatchGuard;

@@ -12,7 +12,6 @@ mod collected;
 mod constants;
 mod drain;
 mod execution;
-mod fit_output;
 mod heartbeat;
 mod json_object;
 mod launch;

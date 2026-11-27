@@ -3,8 +3,8 @@ use crate::command_launch::{
     CancellationAuthorityClaim, CancellationCustodySupport, CommandCancellationAuthority, CommandLaunchError,
 };
 use crate::profile_satisfaction::ProfileSatisfies;
-use crate::run_command_reply_fit::fit_run_command_response;
 use trogon_sandbox_contract::{CapabilityNeed, CommandExecution, LaunchKey};
+use trogon_sandbox_protocol::fit_run_command_response;
 
 mod cancel_launch;
 mod poll_kill;

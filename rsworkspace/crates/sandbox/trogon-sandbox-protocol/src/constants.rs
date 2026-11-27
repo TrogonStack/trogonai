@@ -156,6 +156,9 @@ pub(crate) const METADATA_RESERVE: usize = 1024;
 pub const DEFAULT_TUNNEL_CAP: u32 = 256;
 /// Per-stream retention applied when a request carries no `max_output_bytes`.
 pub const DEFAULT_MAX_OUTPUT_BYTES: usize = 1024 * 1024;
+/// Encoding room a command reply reserves for both streams' truncation markers: a marker is under 64 bytes, and the
+/// number-array encoding costs up to four bytes per byte.
+pub const COMMAND_REPLY_MARKER_ROOM: usize = 2 * 64 * 4;
 /// What replaces every redacted occurrence.
 pub const REDACTION_MARKER: &str = "[REDACTED]";
 /// Shortest registered value, in bytes, that is redacted. Shorter values are dropped when a `RedactionSet` is built.

@@ -2,7 +2,6 @@ mod cancel_dispatch;
 mod command_launches;
 mod constants;
 mod e2b_worker_error;
-mod fit_output;
 mod lease_dispatch;
 mod lease_ref;
 mod lease_verbs;

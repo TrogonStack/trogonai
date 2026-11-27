@@ -7,10 +7,11 @@ use trogon_sandbox_contract::{
     FileOpRequest, LeaseId, ReadFileRequest, RunCommandRequest, RunCommandResponse, WriteFilesRequest,
     WriteFilesResponse,
 };
-use trogon_sandbox_protocol::{nats_transfer, read_file_response, unsupported_file_op_response};
+use trogon_sandbox_protocol::{
+    fit_run_command_response, nats_transfer, read_file_response, unsupported_file_op_response,
+};
 
 use crate::denied_body::DeniedBody;
-use crate::fit_output::fit_reply;
 use crate::provider_edge::denial;
 use crate::{ProxmoxProvider, ProxmoxWorkerError};
 
@@ -63,7 +64,9 @@ async fn respond_to(
         "run_command" => {
             let request: RunCommandRequest = decode(payload)?;
             let reply = match provider.run_command(&request).await {
-                Ok(output) => fit_reply(output, client.server_info().max_payload),
+                Ok(output) => {
+                    fit_run_command_response(RunCommandResponse::Completed(output), client.server_info().max_payload)
+                }
                 Err(error) => RunCommandResponse::Denied(denial(lease, &error)),
             };
             encode(&reply)

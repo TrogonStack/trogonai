@@ -2,7 +2,6 @@ mod check;
 mod constants;
 mod create_requests;
 mod exec_output;
-mod fit_output;
 mod fly_api;
 mod fly_api_error;
 mod fly_api_token;

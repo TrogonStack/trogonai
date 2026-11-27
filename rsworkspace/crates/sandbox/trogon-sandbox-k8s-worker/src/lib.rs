@@ -13,7 +13,6 @@ mod execution_status;
 mod execution_task;
 mod execution_tracker;
 mod file_verbs;
-mod fit_output;
 mod image_user;
 mod inbound;
 mod k8s_authority_host;
