@@ -17,6 +17,13 @@ fn path() -> PathBuf {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn every_transport_error_names_what_failed() -> TestResult {
     let table: Vec<(TransportError, &str)> = vec![
         (

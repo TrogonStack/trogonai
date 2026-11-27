@@ -37,7 +37,6 @@ mod lease_lifecycle;
 mod lease_operations;
 mod lease_release_wait;
 mod lease_snapshots;
-mod lease_timeouts;
 mod lease_usage;
 mod log_follow_event;
 mod logs_follow;

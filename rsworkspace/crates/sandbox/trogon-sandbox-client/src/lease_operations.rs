@@ -5,7 +5,7 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_protocol::subjects;
 
-use crate::lease_timeouts::SLOW_VERB_TIMEOUT;
+use crate::constants::SLOW_VERB_TIMEOUT;
 use crate::sandbox_client::decode;
 use crate::{ClientError, SandboxClient, TransportError};
 

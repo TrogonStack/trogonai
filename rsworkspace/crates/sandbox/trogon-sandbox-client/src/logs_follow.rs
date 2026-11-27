@@ -7,14 +7,8 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_protocol::subjects;
 
+use crate::constants::{FOLLOW_LOGS_RECONNECT_BACKOFF, FOLLOW_LOGS_RECONNECT_BACKOFF_MAX, FOLLOW_LOGS_WAIT};
 use crate::{ClientError, FOLLOW_LOGS_MAX_RECONNECTS, LogFollowEvent, SandboxClient};
-
-/// How long each [`SandboxClient::follow_logs`] read parks at the broker. Output and the worker's exit marker wake
-/// it at once, so `End` follows the exit directly. The bound only matters when no marker arrives (an older worker or
-/// broker): it is then how long a silent command's exit can go unnoticed before the follower polls for it.
-const FOLLOW_LOGS_WAIT: Duration = Duration::from_secs(1);
-const FOLLOW_LOGS_RECONNECT_BACKOFF: Duration = Duration::from_millis(200);
-const FOLLOW_LOGS_RECONNECT_BACKOFF_MAX: Duration = Duration::from_secs(3);
 
 struct FollowState<'a> {
     client: &'a SandboxClient,

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use trogon_sandbox_contract::{
     DeleteNamedSandboxRequest, DeleteNamedSandboxResponse, DeleteSnapshotTagRequest, DeleteSnapshotTagResponse, Digest,
     LeaseName, SetSnapshotTagRequest, SetSnapshotTagResponse, SnapshotGetRequest, SnapshotGetResponse,
@@ -8,9 +6,8 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_protocol::subjects;
 
+use crate::constants::DELETE_NAMED_TIMEOUT;
 use crate::{ClientError, SandboxClient};
-
-const DELETE_NAMED_TIMEOUT: Duration = Duration::from_secs(20);
 
 impl SandboxClient {
     /// Looks up a single snapshot by digest. Not scoped by lease id: snapshots are tenant-owned, not lease-owned.

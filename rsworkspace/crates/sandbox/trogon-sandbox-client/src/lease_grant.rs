@@ -8,7 +8,7 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_protocol::subjects;
 
-use crate::lease_timeouts::QUICK_VERB_TIMEOUT;
+use crate::constants::QUICK_VERB_TIMEOUT;
 use crate::{ClientError, SandboxClient};
 
 impl SandboxClient {

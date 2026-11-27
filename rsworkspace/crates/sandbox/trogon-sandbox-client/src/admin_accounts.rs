@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use trogon_sandbox_contract::{
     CreateSandboxGroupRequest, CreateSandboxGroupResponse, CreateSandboxUserRequest, CreateSandboxUserResponse,
     GroupMembershipAction, LeaseId, ModifyGroupMembershipRequest, ModifyGroupMembershipResponse, SandboxGroupName,
@@ -7,9 +5,8 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_protocol::subjects;
 
+use crate::constants::ACCOUNT_TIMEOUT;
 use crate::{ClientError, SandboxClient, TransportError};
-
-const ACCOUNT_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl SandboxClient {
     /// Creates a per-sandbox Linux user inside `lease_id`'s already-running sandbox.

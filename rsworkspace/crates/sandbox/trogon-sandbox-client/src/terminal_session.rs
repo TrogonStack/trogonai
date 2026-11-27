@@ -1,13 +1,10 @@
-use std::time::Duration;
-
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use trogon_sandbox_contract::{LeaseId, TerminalId, TerminalOp, TerminalOutput, TerminalRequest, TerminalResponse};
 use trogon_sandbox_protocol::subjects;
 
+use crate::constants::TERMINAL_TIMEOUT;
 use crate::{ClientError, SandboxClient};
-
-const TERMINAL_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl SandboxClient {
     /// Sends one terminal operation for `terminal_id` on the lease. Subscribe with [`Self::terminal_output`] before

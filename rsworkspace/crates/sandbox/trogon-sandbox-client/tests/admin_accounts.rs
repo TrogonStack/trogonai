@@ -91,6 +91,13 @@ async fn modify_group_membership_applies_and_sends_the_action() -> TestResult {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 async fn modify_group_membership_maps_missing_dependency_and_denial() -> TestResult {
     let (client, _) = client_replying(&ModifyGroupMembershipResponse::MissingDependency { tool: "gpasswd".into() })?;
     let missing = client

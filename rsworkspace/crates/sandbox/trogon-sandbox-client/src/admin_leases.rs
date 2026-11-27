@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use trogon_sandbox_contract::{
     CapabilityProfile, GetLeaseByNameRequest, GetLeaseByNameResponse, GetSandboxDomainRequest,
     GetSandboxDomainResponse, LeaseForkRequest, LeaseGranted, LeaseId, LeaseName, LeaseResponse,
@@ -9,11 +7,8 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_protocol::subjects;
 
+use crate::constants::{FORK_TIMEOUT, LISTING_TIMEOUT, REAP_TIMEOUT};
 use crate::{ClientError, SandboxClient};
-
-const FORK_TIMEOUT: Duration = Duration::from_secs(30);
-const REAP_TIMEOUT: Duration = Duration::from_secs(30);
-const LISTING_TIMEOUT: Duration = Duration::from_secs(2);
 
 impl SandboxClient {
     /// Forks a currently running lease into a brand-new, independent lease seeded from its live state. The source

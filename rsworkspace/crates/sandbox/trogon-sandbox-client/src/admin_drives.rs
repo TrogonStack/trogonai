@@ -1,14 +1,11 @@
-use std::time::Duration;
-
 use trogon_sandbox_contract::{
     CreateDriveRequest, CreateDriveResponse, DeleteDriveRequest, DeleteDriveResponse, DriveId, DriveRecord,
     DriveStorage, ListDrivesRequest, ListDrivesResponse, TenantId,
 };
 use trogon_sandbox_protocol::subjects;
 
+use crate::constants::DRIVE_TIMEOUT;
 use crate::{ClientError, SandboxClient};
-
-const DRIVE_TIMEOUT: Duration = Duration::from_secs(2);
 
 impl SandboxClient {
     /// Creates a drive backed by the S3 `bucket`.

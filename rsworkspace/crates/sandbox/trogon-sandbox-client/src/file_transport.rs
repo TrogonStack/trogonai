@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use trogon_sandbox_contract::{
     FileOp, FileOpRequest, FileOpResponse, LeaseError, LeaseId, ReadFileRequest, ReadFileResponse, SandboxFileWrite,
     SandboxUserName, WriteFilesRequest, WriteFilesResponse,
@@ -7,10 +5,8 @@ use trogon_sandbox_contract::{
 use trogon_sandbox_protocol::nats_transfer::MAX_TRANSFER_BYTES;
 use trogon_sandbox_protocol::subjects;
 
+use crate::constants::{FILE_OP_TIMEOUT, FILE_TRANSFER_TIMEOUT};
 use crate::{ClientError, SandboxClient, TransportError};
-
-const FILE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(30);
-const FILE_OP_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl SandboxClient {
     /// Writes `files` into `lease_id`'s already-running sandbox filesystem.

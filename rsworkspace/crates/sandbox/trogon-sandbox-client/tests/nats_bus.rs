@@ -91,6 +91,13 @@ async fn a_silent_responder_is_a_timeout_not_an_error() -> TestResult {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 async fn a_request_nobody_serves_is_a_bus_error() -> TestResult {
     let (_server, client) = started().await?;
     let bus = NatsBus::new(client);
@@ -118,6 +125,13 @@ async fn a_subscription_streams_published_messages() -> TestResult {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 async fn an_invalid_subscription_subject_is_a_bus_error() -> TestResult {
     let (_server, client) = started().await?;
     let bus = NatsBus::new(client);
@@ -187,6 +201,13 @@ async fn a_silent_file_responder_is_a_timeout_not_an_error() -> TestResult {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 async fn a_file_request_nobody_serves_is_a_transfer_error() -> TestResult {
     let (_server, client) = started().await?;
     let bus = NatsBus::new(client);

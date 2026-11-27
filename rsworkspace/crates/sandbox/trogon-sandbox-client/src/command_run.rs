@@ -8,11 +8,9 @@ use trogon_sandbox_protocol::subjects;
 use uuid::Uuid;
 
 use crate::command_control::invalid_spec;
+use crate::constants::DETACHED_START_TIMEOUT;
 use crate::sandbox_client::decode;
 use crate::{ClientError, CommandOptions, SandboxClient, TransportError};
-
-/// How long the client waits for a detached command to start.
-const DETACHED_START_TIMEOUT: Duration = Duration::from_secs(40);
 
 impl SandboxClient {
     /// Runs `command` inside `lease_id`'s already-running sandbox and returns its output.

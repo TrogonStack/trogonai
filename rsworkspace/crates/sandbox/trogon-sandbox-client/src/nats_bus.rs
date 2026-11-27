@@ -6,13 +6,8 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use trogon_sandbox_protocol::{NatsTransferError, nats_transfer};
 
+use crate::constants::CHUNKED_SUBJECT_PREFIXES;
 use crate::{Bus, BusError, BusMessage};
-
-const CHUNKED_SUBJECT_PREFIXES: [&str; 3] = [
-    "sandbox.lease.write_files.",
-    "sandbox.lease.read_file.",
-    "sandbox.lease.file_op.",
-];
 
 /// The [`Bus`] backed by a NATS connection.
 ///
