@@ -26,13 +26,9 @@ The result is one MCP text item containing native hook JSON with
 `hookSpecificOutput.additionalContext`. The adapter returns the backend's same
 unacknowledged assignment on retry and records no acknowledgment of its own.
 
-Prompt hooks have one total two-second budget covering lock acquisition,
-enrollment, preparation and rendering. A deadline does not confirm whether a
-remote operation completed. Retry with the same native session and prompt
-identifiers; the reserved identity and any existing preparation remain intact.
-The budget is cooperative: `PreparePeerBatch` and `EnrollPeer` futures must
-yield, because a backend that blocks the executor cannot be interrupted by any
-timeout. A reply that completes only after the deadline is reported as a
+Prompt hook backends must yield: the two-second budget is cooperative, so a
+`PreparePeerBatch` or `EnrollPeer` future that blocks the executor cannot be
+interrupted. A reply that completes only after the deadline is reported as a
 deadline, never as a delivery.
 
 Tool failures become MCP application error results with bounded static messages
