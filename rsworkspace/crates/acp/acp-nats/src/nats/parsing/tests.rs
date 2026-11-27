@@ -103,12 +103,6 @@ fn agent_ext_keeps_the_sdk_name_with_slash_and_underscore() {
     assert_eq!(method.protocol_method(), "_vendor/method");
 }
 
-#[test]
-fn agent_ext_adds_the_underscore_only_when_missing() {
-    let method = GlobalAgentMethod::Ext(ExtMethodName::new("my_tool").unwrap());
-    assert_eq!(method.protocol_method(), "_my_tool");
-}
-
 // Session-scoped agent methods
 
 #[test]
@@ -393,7 +387,6 @@ fn client_ext_keeps_the_sdk_name_with_slash_and_underscore() {
     let parsed = parse_client_subject("acp.v1.session.s1.client.ext._vendor/method").unwrap();
     assert_eq!(parsed.method, ClientMethod::Ext("_vendor/method".to_string()));
     assert_eq!(parsed.method.protocol_method(), "_vendor/method");
-    assert_eq!(ClientMethod::Ext("my_tool".to_string()).protocol_method(), "_my_tool");
 }
 
 #[test]

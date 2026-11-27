@@ -5,11 +5,7 @@
 //! rejects `*`, `>`, whitespace; allows dotted namespaces (e.g. `vendor.operation`) but rejects
 //! malformed dots (consecutive, leading, trailing). Validity is guaranteed at construction.
 //!
-//! The name is carried exactly as the ACP SDK hands it over. The SDK keeps the
-//! leading `_` that marks an extension method in `ExtRequest::method`, so a
-//! client call to `_vendor/method` travels as the subject token `ext._vendor/method`
-//! and reaches the agent as `_vendor/method` again. [`ext_protocol_method`] adds
-//! the `_` only for names that were built without it.
+//! The name is carried exactly as the ACP SDK hands it over, see [`ext_protocol_method`].
 
 use std::borrow::Cow;
 
@@ -62,17 +58,15 @@ impl ExtMethodName {
 /// already starts with `_`, otherwise the name with `_` in front.
 ///
 /// The SDK keeps the `_` in `ExtRequest::method` and `ExtNotification::method`,
-/// so adding it unconditionally would turn `_vendor/method` into `__vendor/method`.
-pub fn ext_protocol_method(name: &str) -> Cow<'_, str> {
-    if name.starts_with(EXT_METHOD_MARKER) {
+/// so a client call to `_vendor/method` travels as the subject token
+/// `ext._vendor/method` and must not become `__vendor/method` on the way back.
+pub(crate) fn ext_protocol_method(name: &str) -> Cow<'_, str> {
+    if name.starts_with('_') {
         Cow::Borrowed(name)
     } else {
-        Cow::Owned(format!("{EXT_METHOD_MARKER}{name}"))
+        Cow::Owned(format!("_{name}"))
     }
 }
-
-/// Leading character that marks an ACP extension method.
-const EXT_METHOD_MARKER: char = '_';
 
 impl std::fmt::Display for ExtMethodName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
