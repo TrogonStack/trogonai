@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+#MISE description="Fail when a Rust source file in the sandbox crates grows past its line ceiling"
+"""Structural ratchet on Rust source file length in the sandbox crates.
+
+A file may be at most max(LIMIT, its baseline) lines. The baseline lists the
+files that already exceed LIMIT with their length when they were recorded, so
+those files may not grow, and no other file may cross LIMIT.
+
+    file-sizes              fail when a file is over its ceiling; warn when a
+                            baseline entry is stale (the file shrank, moved or
+                            is gone)
+    file-sizes --update     lower baseline entries to the current size and
+                            drop entries at or under LIMIT; never raises or
+                            adds an entry
+
+The baseline only goes down. Splitting a big file is the way to make room.
+"""
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+LIMIT = 1000
+ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+SCAN = ROOT / "rsworkspace" / "crates" / "sandbox"
+BASELINE = SCAN / "file-size-baseline.json"
+TASK = "mise run github:workflows:ci-sandbox-ratchets:file-sizes"
+
+
+def line_counts():
+    listed = subprocess.check_output(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ":(glob)rsworkspace/crates/sandbox/**/*.rs"],
+        cwd=ROOT,
+        text=True,
+    )
+    counts = {}
+    for name in sorted(n for n in listed.split("\0") if n):
+        path = ROOT / name
+        if path.is_file():
+            with path.open("rb") as f:
+                counts[name] = sum(1 for _ in f)
+    return counts
+
+
+def load_baseline():
+    if not BASELINE.exists():
+        return {}
+    return json.loads(BASELINE.read_text(encoding="utf-8"))["files"]
+
+
+def write_baseline(files):
+    doc = {
+        "limit": LIMIT,
+        "note": f"Ceiling per file, in lines, for files over the limit. Only ever lowered, with `{TASK} -- --update`.",
+        "files": dict(sorted(files.items())),
+    }
+    BASELINE.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--update", action="store_true", help="lower the baseline to the current sizes")
+    args = ap.parse_args()
+
+    counts = line_counts()
+    baseline = load_baseline()
+
+    if args.update:
+        kept = {p: min(b, counts[p]) for p, b in baseline.items() if p in counts and counts[p] > LIMIT}
+        write_baseline(kept)
+        print(f"baseline now lists {len(kept)} files (was {len(baseline)})")
+        return 0
+
+    failed = False
+    for path, n in counts.items():
+        ceiling = max(LIMIT, baseline.get(path, 0))
+        if n > ceiling:
+            failed = True
+            print(f"::error file={path}::{n} lines, the ceiling is {ceiling}. Split the file; the ceiling does not go up.")
+    for path, b in baseline.items():
+        n = counts.get(path)
+        if n is None or n < b:
+            print(f"::warning::baseline entry {path} is {b} but the file is {n if n is not None else 'gone'}; run `{TASK} -- --update` and commit the lower baseline")
+    if failed:
+        return 1
+    print(f"file sizes are within the ratchet ({len(baseline)} files over {LIMIT} lines)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
