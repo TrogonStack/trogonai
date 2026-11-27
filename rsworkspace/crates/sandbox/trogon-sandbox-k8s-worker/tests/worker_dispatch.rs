@@ -53,7 +53,8 @@ async fn a_redispatch_after_a_failed_cancel_is_answered_with_the_original_grant(
 
     let cancel = subjects::provider_cancel(ProviderKind::K8sMicroVm, &LeaseId::new("lease-stuck"));
     running.publish(cancel, &serde_json::json!({})).await?;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let cluster = &running.world.cluster;
+    until(|| cluster.state().fail_deletes < 100).await?;
     let second = running
         .dispatch("lease-stuck", serde_json::to_value(lease_request()?)?)
         .await?;
