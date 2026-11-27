@@ -80,6 +80,7 @@ trogon-sandbox-modal-worker = { path = "crates/sandbox/trogon-sandbox-modal-work
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
 trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
+trogon-sandbox-providers = { path = "crates/sandbox/trogon-sandbox-providers" }
 trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
 trogon-sandbox-v8-wasm-worker = { path = "crates/sandbox/trogon-sandbox-v8-wasm-worker" }
 trogon-sandbox-vercel-worker = { path = "crates/sandbox/trogon-sandbox-vercel-worker" }
@@ -138,6 +139,7 @@ async-compat = "=0.2.6"
 async-nats = { version = "=0.51.0", default-features = false, features = ["aws-lc-rs"] }
 async-trait = "=0.1.92"
 axum = { version = "=0.8.9", features = ["ws"] }
+bollard = { version = "=0.20.2", default-features = false, features = ["pipe"] }
 bytes = "=1.12.1"
 base64 = "=0.23.1"
 bs58 = "=0.5.1"
@@ -146,7 +148,10 @@ buffa-types = { version = "=0.9.2", features = ["json"] }
 buffa-descriptor = { version = "=0.9.2" }
 futures = "=0.3.34"
 futures-util = "=0.3.34"
+http-body-util = "=0.1.4"
+hyper = { version = "=1.12.0", default-features = false }
 hyper-util = { version = "=0.1.20", default-features = false, features = ["client", "client-legacy", "http1", "tokio"] }
+hyperlocal = { version = "=0.9.1", default-features = false, features = ["client"] }
 tokio = "=1.54.1"
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs"] }
 tokio-stream = "=0.1.18"
@@ -209,6 +214,9 @@ aes-gcm = "=0.11.0"
 libc = "=0.2.186"
 nix = { version = "=0.31.2", default-features = false, features = ["fs", "signal", "term", "user"] }
 chrono = "=0.4.45"
+ipnet = "=2.12.1"
+k8s-openapi = { version = "=0.28.0", features = ["latest"] }
+kube = { version = "=4.2.0", default-features = false, features = ["aws-lc-rs", "client", "runtime", "rustls-tls", "ws"] }
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 flate2 = "=1.1.10"
@@ -266,6 +274,7 @@ deno_core = "=0.410.0"
 walkdir = "=2.5.0"
 uuid = { version = "=1.24.0", features = ["v4", "v7"] }
 prost-reflect = "=0.14.7"
+serde_urlencoded = "=0.7.1"
 serde_yaml = "=0.9.34"
 wasmtime-wasi = "=47.0.3"
 wat = "=1.252.0"
