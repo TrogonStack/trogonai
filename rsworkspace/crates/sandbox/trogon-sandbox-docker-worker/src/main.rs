@@ -383,3 +383,6 @@ async fn main() -> anyhow::Result<()> {
     }
     result
 }
+
+#[cfg(test)]
+mod main_tests;

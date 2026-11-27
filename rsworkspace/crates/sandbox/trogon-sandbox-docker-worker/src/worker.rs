@@ -1615,6 +1615,27 @@ pub(crate) async fn process_lease_request(
     provider.lease(&req, &lease_id).await
 }
 
+/// Runs one `run_command` message as an unsigned request, the way the subscription sees it when dispatch
+/// signing is off.
+#[cfg(test)]
+async fn handle_run_command_msg(
+    msg: async_nats::Message,
+    client: Client,
+    provider: Arc<DockerWorkerProvider>,
+    active: ActiveLeases,
+) -> anyhow::Result<()> {
+    handle_run_command_verified(
+        VerifiedRequest {
+            message: msg,
+            scope: None,
+        },
+        client,
+        provider,
+        active,
+    )
+    .await
+}
+
 async fn publish_lifecycle(js: &jetstream::Context, subject: &str, event: &LifecycleEvent) {
     match serde_json::to_vec(event) {
         Ok(payload) => {

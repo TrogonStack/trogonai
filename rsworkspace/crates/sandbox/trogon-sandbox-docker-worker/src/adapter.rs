@@ -134,4 +134,7 @@ pub use trogon_sandbox_providers::translate_lease_request_to_sandbox_spec as tra
 mod deadline_tests;
 
 #[cfg(test)]
+mod native_supervisor_tests;
+
+#[cfg(test)]
 mod tests;

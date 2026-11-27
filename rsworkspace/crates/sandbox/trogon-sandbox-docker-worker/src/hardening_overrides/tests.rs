@@ -46,6 +46,17 @@ fn a_forbidden_capability_cannot_be_parsed_into_an_override() {
     assert!(ExtraCapability::new("ALL").is_err());
 }
 
+/// A payload that never passed the broker still cannot carry a forbidden capability to the worker.
+#[test]
+fn a_forbidden_capability_is_refused_when_an_override_is_decoded() {
+    for forbidden in ["SYS_ADMIN", "ALL"] {
+        let decoded = serde_json::from_value::<ContainerOverrides>(serde_json::json!({
+            "extra_capabilities": [forbidden],
+        }));
+        assert!(decoded.is_err(), "{forbidden} decoded into an override: {decoded:?}");
+    }
+}
+
 #[test]
 fn a_capability_already_retained_is_not_added_twice() -> TestResult {
     let overrides = ContainerOverrides {

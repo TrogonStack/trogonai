@@ -11055,6 +11055,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "trogon-nats",
+ "trogon-sandbox-client",
  "trogon-sandbox-conformance",
  "trogon-sandbox-contract",
  "trogon-sandbox-cosign",

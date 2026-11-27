@@ -1,6 +1,8 @@
 use super::{Architecture, CommandRuntime, RuntimeMount, elf_architecture, labels};
 use crate::adapter::constants::{DIGEST_LABEL, NONCE_LABEL, OWNER_LABEL};
 
+mod seed_writer_tests;
+
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const MACHINE_X86_64: u16 = 62;
