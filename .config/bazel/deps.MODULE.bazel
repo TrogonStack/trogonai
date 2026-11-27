@@ -258,6 +258,7 @@ npm.npm_translate_lock(
         "//tsworkspace/packages/sandbox-cli:package.json",
         "//tsworkspace/packages/sandbox-example-hono:package.json",
         "//tsworkspace/packages/sandbox-example-nextjs:package.json",
+        "//tsworkspace/packages/sandbox-examples:package.json",
         "//tsworkspace/packages/sandbox-ws-client:package.json",
         "//tsworkspace/packages/slack-bolt-fixtures:package.json",
     ],

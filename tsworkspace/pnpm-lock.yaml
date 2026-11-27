@@ -134,7 +134,7 @@ importers:
         version: 8.3.5(@types/node@22.20.0)(jiti@2.7.0)
       vitest:
         specifier: 5.0.0
-        version: 5.0.0(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
+        version: 5.0.0(@opentelemetry/api@1.10.0)(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
 
   packages/proto:
     dependencies:
@@ -169,7 +169,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 5.0.0
-        version: 5.0.0(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
+        version: 5.0.0(@opentelemetry/api@1.10.0)(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
 
   packages/sandbox-cli:
     dependencies:
@@ -194,7 +194,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 5.0.0
-        version: 5.0.0(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
+        version: 5.0.0(@opentelemetry/api@1.10.0)(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
       ws:
         specifier: 8.22.2
         version: 8.22.2
@@ -228,7 +228,7 @@ importers:
         version: link:../sandbox-ws-client
       next:
         specifier: 16.4.6
-        version: 16.4.6(@types/node@22.20.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 16.4.6(@opentelemetry/api@1.10.0)(@types/node@22.20.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react:
         specifier: 19.2.7
         version: 19.2.7
@@ -248,6 +248,31 @@ importers:
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.17)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
+  packages/sandbox-examples:
+    dependencies:
+      '@ai-sdk/openai-compatible':
+        specifier: 2.0.81
+        version: 2.0.81(zod@4.6.7)
+      '@trogonai/sandbox-agent-tools':
+        specifier: workspace:*
+        version: link:../sandbox-agent-tools
+      '@trogonai/sandbox-ws-client':
+        specifier: workspace:*
+        version: link:../sandbox-ws-client
+      ai:
+        specifier: 6.0.300
+        version: 6.0.300(zod@4.6.7)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.0
+        version: 22.20.0
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -275,7 +300,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 5.0.0
-        version: 5.0.0(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
+        version: 5.0.0(@opentelemetry/api@1.10.0)(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
 
   packages/slack-bolt-fixtures:
     dependencies:
@@ -297,7 +322,7 @@ importers:
         version: 1.0.2
       vitest:
         specifier: 5.0.0
-        version: 5.0.0(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
+        version: 5.0.0(@opentelemetry/api@1.10.0)(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
 
 packages:
 
@@ -306,6 +331,28 @@ packages:
 
   '@adobe/css-tools@4.5.0':
     resolution: {integrity: sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q==}
+
+  '@ai-sdk/gateway@3.0.209':
+    resolution: {integrity: sha512-CjCBzC35lRZ0LnUYLDfTB92p0Fr1Fu9Wrivc+LI0u3ox/DyZ0wPOHjt8DKBKHD/R4aZ86+JCFFuD9f8MFjAQFg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/openai-compatible@2.0.81':
+    resolution: {integrity: sha512-L14Jd0lAFKNM42l9TxlpwkNiyMlSvSvGySLc9GN4FB0qOo4/WmYOeLyn/CPhghIr0K4O6vH1y0nChxGljq2ccg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@4.0.57':
+    resolution: {integrity: sha512-89a7sPvZqXsP3PigcAQLWntu/duIVEcN/RyChAB+j6p3C7NwW767sVttvL8r0+BetTg63uAXQoYHCZZueQKBSw==}
+    engines: {node: '>=18.17'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider@3.0.18':
+    resolution: {integrity: sha512-IpefF5ssZVOZCD4Wu7zxt6PwZoGT2HLVjxpJ10Bjx6EAmRfLYJPjyrfxb0RYDlwvXnDb9nkQ7Do/oJVDuRFzew==}
+    engines: {node: '>=18'}
 
   '@asamuzakjp/css-color@5.1.11':
     resolution: {integrity: sha512-KVw6qIiCTUQhByfTd78h2yD1/00waTmm9uy/R7Ck/ctUyAPj+AEDLkQIdJW0T8+qGgj3j5bpNKK7Q3G+LedJWg==}
@@ -866,6 +913,10 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
+  '@opentelemetry/api@1.10.0':
+    resolution: {integrity: sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==}
+    engines: {node: '>=8.0.0'}
+
   '@oxc-parser/binding-android-arm-eabi@0.120.0':
     resolution: {integrity: sha512-WU3qtINx802wOl8RxAF1v0VvmC2O4D9M8Sv486nLeQ7iPHVmncYZrtBhB4SYyX+XZxj2PNnCcN+PW21jHgiOxg==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -1379,6 +1430,9 @@ packages:
     peerDependencies:
       solid-js: ^1.6.12
 
+  '@standard-schema/spec@1.1.0':
+    resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
   '@swc/helpers@0.5.23':
     resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
 
@@ -1757,6 +1811,10 @@ packages:
     peerDependencies:
       typescript: '*'
 
+  '@vercel/oidc@3.2.0':
+    resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
+    engines: {node: '>= 20'}
+
   '@vitejs/plugin-react@6.0.3':
     resolution: {integrity: sha512-vmFvco5/QuC2f9Oj+wTk0+9XeDFkHxSamwZKYc7MxYwKICfvUvlMhqKI0VuICPltGqh1neqBKDvO4kes1ya8vg==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -1808,6 +1866,12 @@ packages:
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
+
+  ai@6.0.300:
+    resolution: {integrity: sha512-ZBT30eQTy6exP+EWJJxm3DMb34m9td8STy+hfnvKdjhyEQoM8vQN5YfFLTRVVTCONHoM+y5K+Tudb6PTFrpikA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   ajv-formats@2.1.1:
     resolution: {integrity: sha512-Wx0Kx52hxE7C18hkMEggYlEifqWZtYaRgouJor+WMdPnQyEK13vgEWyVNup7SoeeoLMsr4kf5h6dOW11I15MUA==}
@@ -2557,6 +2621,9 @@ packages:
 
   json-schema-typed@8.0.2:
     resolution: {integrity: sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==}
+
+  json-schema@0.4.0:
+    resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
 
   json5@2.2.3:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
@@ -3427,6 +3494,10 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
+  undici@6.29.1:
+    resolution: {integrity: sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==}
+    engines: {node: '>=18.17'}
+
   undici@7.28.0:
     resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
     engines: {node: '>=20.18.1'}
@@ -3688,6 +3759,31 @@ snapshots:
   '@acemir/cssom@0.9.31': {}
 
   '@adobe/css-tools@4.5.0': {}
+
+  '@ai-sdk/gateway@3.0.209(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.18
+      '@ai-sdk/provider-utils': 4.0.57(zod@4.6.7)
+      '@vercel/oidc': 3.2.0
+      zod: 4.6.7
+
+  '@ai-sdk/openai-compatible@2.0.81(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.18
+      '@ai-sdk/provider-utils': 4.0.57(zod@4.6.7)
+      zod: 4.6.7
+
+  '@ai-sdk/provider-utils@4.0.57(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.18
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.1.0
+      undici: 6.29.1
+      zod: 4.6.7
+
+  '@ai-sdk/provider@3.0.18':
+    dependencies:
+      json-schema: 0.4.0
 
   '@asamuzakjp/css-color@5.1.11':
     dependencies:
@@ -4235,6 +4331,8 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
 
+  '@opentelemetry/api@1.10.0': {}
+
   '@oxc-parser/binding-android-arm-eabi@0.120.0':
     optional: true
 
@@ -4502,6 +4600,8 @@ snapshots:
   '@solid-primitives/utils@6.4.1(solid-js@1.9.14)':
     dependencies:
       solid-js: 1.9.14
+
+  '@standard-schema/spec@1.1.0': {}
 
   '@swc/helpers@0.5.23':
     dependencies:
@@ -4893,6 +4993,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@vercel/oidc@3.2.0': {}
+
   '@vitejs/plugin-react@6.0.3(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
@@ -4908,7 +5010,7 @@ snapshots:
       obug: 2.2.1
       std-env: 4.2.0
       tinyrainbow: 3.2.0
-      vitest: 5.0.0(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
+      vitest: 5.0.0(@opentelemetry/api@1.10.0)(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
 
   '@vitest/istanbul-lib-coverage@1.0.2': {}
 
@@ -4933,6 +5035,14 @@ snapshots:
       negotiator: 1.0.0
 
   agent-base@7.1.4: {}
+
+  ai@6.0.300(zod@4.6.7):
+    dependencies:
+      '@ai-sdk/gateway': 3.0.209(zod@4.6.7)
+      '@ai-sdk/provider': 3.0.18
+      '@ai-sdk/provider-utils': 4.0.57(zod@4.6.7)
+      '@opentelemetry/api': 1.10.0
+      zod: 4.6.7
 
   ajv-formats@2.1.1(ajv@8.20.0):
     optionalDependencies:
@@ -5615,6 +5725,8 @@ snapshots:
 
   json-schema-typed@8.0.2: {}
 
+  json-schema@0.4.0: {}
+
   json5@2.2.3: {}
 
   jsonfile@6.2.1:
@@ -5813,7 +5925,7 @@ snapshots:
 
   negotiator@1.0.0: {}
 
-  next@16.4.6(@types/node@22.20.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
+  next@16.4.6(@opentelemetry/api@1.10.0)(@types/node@22.20.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
       '@next/env': 16.4.6
       '@swc/helpers': 0.5.23
@@ -5832,6 +5944,7 @@ snapshots:
       '@next/swc-linux-x64-musl': 16.4.6
       '@next/swc-win32-arm64-msvc': 16.4.6
       '@next/swc-win32-x64-msvc': 16.4.6
+      '@opentelemetry/api': 1.10.0
       sharp: 0.35.5(@types/node@22.20.0)
     transitivePeerDependencies:
       - '@babel/core'
@@ -6489,6 +6602,8 @@ snapshots:
 
   undici-types@6.21.0: {}
 
+  undici@6.29.1: {}
+
   undici@7.28.0: {}
 
   unicorn-magic@0.3.0: {}
@@ -6534,7 +6649,7 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.7.0
 
-  vitest@5.0.0(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0)):
+  vitest@5.0.0(@opentelemetry/api@1.10.0)(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0)):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/mocker': 5.0.0(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
@@ -6551,6 +6666,7 @@ snapshots:
       vite: 8.3.5(@types/node@22.20.0)(jiti@2.7.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
+      '@opentelemetry/api': 1.10.0
       '@types/node': 22.20.0
       '@vitest/coverage-v8': 5.0.0(vitest@5.0.0)
       jsdom: 28.1.0
