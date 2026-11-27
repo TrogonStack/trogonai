@@ -150,7 +150,8 @@ pub enum SeclogonState {
 /// the status unreadable, a Disabled start type is `CannotRead`.
 fn classify_seclogon(start: SERVICE_START_TYPE, current: Option<SERVICE_STATUS_CURRENT_STATE>) -> SeclogonState {
     match (start == SERVICE_DISABLED, current) {
-        (true, Some(SERVICE_RUNNING)) | (false, _) => SeclogonState::Ok,
+        (false, _) => SeclogonState::Ok,
+        (true, Some(state)) if state == SERVICE_RUNNING => SeclogonState::Ok,
         (true, Some(_)) => SeclogonState::Disabled,
         (true, None) => SeclogonState::CannotRead,
     }

@@ -4,6 +4,9 @@
 //! `argv[1] == DISPATCH_ARG1` without shipping a separate executable. See
 //! `cli.rs` for why dispatch keys on `argv[1]`, not `argv[0]`, on Windows.
 
+#[cfg(not(windows))]
+use std::io::Write;
+
 #[cfg(windows)]
 fn main() {
     std::process::exit(trogon_sandbox_fence_helper::run_from_args(std::env::args_os()));
@@ -11,6 +14,6 @@ fn main() {
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!("trogon-sandbox-fence-helper: Windows only");
+    let _ = writeln!(std::io::stderr(), "trogon-sandbox-fence-helper: Windows only");
     std::process::exit(2);
 }

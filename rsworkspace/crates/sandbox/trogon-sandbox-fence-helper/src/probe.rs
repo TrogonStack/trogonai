@@ -403,7 +403,7 @@ unsafe fn token_info<'a, T>(
             size_of_val(buf) as u32,
             &mut len,
         )
-        .with_context(|| format!("GetTokenInformation({what})"))?;
+        .with_context(|| ["GetTokenInformation(", what, ")"].concat())?;
         Ok(&*(buf.as_ptr() as *const T))
     }
 }

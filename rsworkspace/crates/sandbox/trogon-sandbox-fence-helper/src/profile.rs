@@ -1481,7 +1481,11 @@ fn exclusion_as_it_is(path: &str, ids: &Ids, why: &str) -> Probe {
 /// so that a session read deny that cannot be written there is already
 /// satisfied. `false` whenever that cannot be established.
 pub fn closed_to_sandbox(path: &str) -> bool {
-    Ids::load().is_ok_and(|ids| matches!(own_access(path, &ids), Ok(Some(Access { reads: false, .. }))))
+    let Ok(ids) = Ids::load() else {
+        return false;
+    };
+    let access = own_access(path, &ids);
+    matches!(access, Ok(Some(Access { reads: false, .. })))
 }
 
 /// Whether the object at `path` carries no entry of ours, read with

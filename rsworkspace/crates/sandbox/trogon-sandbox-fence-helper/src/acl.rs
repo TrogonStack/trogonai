@@ -728,15 +728,16 @@ pub(crate) fn filter_aces(acl: *const ACL, mut keep: impl FnMut(&ACE_HEADER, &[u
     let mut kept: Vec<(*const c_void, u16)> = Vec::new();
     let mut kept_sz = 0usize;
     for i in 0..info.AceCount {
-        let mut ace: *mut c_void = std::ptr::null_mut();
-        unsafe { GetAce(acl, i, &mut ace) }.map_err(|e| FenceHelperError::msg(format!("GetAce({i}): {e}")))?;
-        if ace.is_null() {
+        let mut out = std::mem::MaybeUninit::<*mut c_void>::uninit();
+        unsafe { GetAce(acl, i, out.as_mut_ptr()) }.map_err(|e| FenceHelperError::msg(format!("GetAce({i}): {e}")))?;
+        // GetAce succeeded, so it wrote the ACE pointer.
+        let Some(ace) = std::ptr::NonNull::new(unsafe { out.assume_init() }) else {
             return Err(FenceHelperError::msg(format!("GetAce({i}) returned null")));
-        }
-        let hdr = unsafe { &*(ace as *const ACE_HEADER) };
-        let body = unsafe { std::slice::from_raw_parts(ace as *const u8, hdr.AceSize as usize) };
+        };
+        let hdr = unsafe { ace.cast::<ACE_HEADER>().as_ref() };
+        let body = unsafe { std::slice::from_raw_parts(ace.cast::<u8>().as_ptr(), hdr.AceSize as usize) };
         if keep(hdr, body) {
-            kept.push((ace as *const c_void, hdr.AceSize));
+            kept.push((ace.as_ptr().cast_const(), hdr.AceSize));
             kept_sz += hdr.AceSize as usize;
         }
     }
