@@ -57,6 +57,14 @@ fn agent_session_list() {
 }
 
 #[test]
+fn agent_session_options() {
+    assert_eq!(
+        global::SessionOptionsSubject::new(&p("acp")).to_string(),
+        "acp.v1.global.agent.session.options"
+    );
+}
+
+#[test]
 fn agent_providers_list() {
     assert_eq!(
         global::ProvidersListSubject::new(&p("acp")).to_string(),
@@ -419,6 +427,7 @@ fn stream_assignments() {
     assert_eq!(global::LogoutSubject::STREAM, Some(AcpStream::Global));
     assert_eq!(global::SessionNewSubject::STREAM, Some(AcpStream::Global));
     assert_eq!(global::SessionListSubject::STREAM, None);
+    assert_eq!(global::SessionOptionsSubject::STREAM, None);
     assert_eq!(global::ProvidersListSubject::STREAM, None);
     assert_eq!(global::ProvidersSetSubject::STREAM, None);
     assert_eq!(global::ProvidersDisableSubject::STREAM, None);

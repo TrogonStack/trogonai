@@ -9,6 +9,7 @@ mod providers_list;
 mod providers_set;
 mod session_list;
 mod session_new;
+mod session_options;
 
 pub use auth_status::AuthStatusSubject;
 pub use authenticate::AuthenticateSubject;
@@ -21,3 +22,4 @@ pub use providers_list::ProvidersListSubject;
 pub use providers_set::ProvidersSetSubject;
 pub use session_list::SessionListSubject;
 pub use session_new::SessionNewSubject;
+pub use session_options::SessionOptionsSubject;

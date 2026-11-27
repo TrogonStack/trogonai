@@ -106,6 +106,9 @@ async fn handle_client_dispatch<A: AgentHandler + Send + Sync + 'static>(
                 Some(ClientRequest::SessionStatusRequest(req)) => {
                     respond_in_task(&cx, responder, async move { agent.session_status(req).await })
                 }
+                Some(ClientRequest::SessionOptionsRequest(req)) => {
+                    respond_in_task(&cx, responder, async move { agent.session_options(req).await })
+                }
                 Some(ClientRequest::SetSessionTitleRequest(req)) => {
                     respond_in_task(&cx, responder, async move { agent.set_session_title(req).await })
                 }

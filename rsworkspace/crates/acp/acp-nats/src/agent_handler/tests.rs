@@ -45,6 +45,7 @@ async fn optional_methods_default_to_method_not_found() {
 
     assert_method_not_found(agent.auth_status(AuthStatusRequest::new()).await);
     assert_method_not_found(agent.session_status(SessionStatusRequest::new("s1")).await);
+    assert_method_not_found(agent.session_options(SessionOptionsRequest::new("/workspace")).await);
     assert_method_not_found(
         agent
             .set_session_title(SetSessionTitleRequest::new("s1", "Renamed"))

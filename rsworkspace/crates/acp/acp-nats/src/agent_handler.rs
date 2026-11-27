@@ -5,10 +5,10 @@ use agent_client_protocol::v1::schema::{
     ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse, ListProvidersRequest,
     ListProvidersResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SessionStatusRequest, SessionStatusResponse, SetProviderRequest,
-    SetProviderResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest,
-    SetSessionModeResponse, SetSessionTitleRequest, SetSessionTitleResponse, UnarchiveSessionRequest,
-    UnarchiveSessionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SessionOptionsRequest, SessionOptionsResponse, SessionStatusRequest,
+    SessionStatusResponse, SetProviderRequest, SetProviderResponse, SetSessionConfigOptionRequest,
+    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse, SetSessionTitleRequest,
+    SetSessionTitleResponse, UnarchiveSessionRequest, UnarchiveSessionResponse,
 };
 use agent_client_protocol::{Error, Result};
 
@@ -30,6 +30,10 @@ pub trait AgentHandler {
     }
 
     async fn session_status(&self, _args: SessionStatusRequest) -> Result<SessionStatusResponse> {
+        Err(Error::method_not_found())
+    }
+
+    async fn session_options(&self, _args: SessionOptionsRequest) -> Result<SessionOptionsResponse> {
         Err(Error::method_not_found())
     }
 

@@ -3,8 +3,8 @@ use acp_nats::nats::{ParsedAgentSubject, parse_agent_subject};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
     ArchiveSessionResponse, AuthState, AuthStatusResponse, AuthenticateResponse, InitializeResponse, LogoutResponse,
-    NewSessionResponse, PromptResponse, SessionStatus, SessionStatusResponse, SetSessionTitleResponse, StopReason,
-    UnarchiveSessionResponse,
+    NewSessionResponse, PromptResponse, SessionOptionsResponse, SessionStatus, SessionStatusResponse,
+    SetSessionTitleResponse, StopReason, UnarchiveSessionResponse,
 };
 use agent_client_protocol::{Error as AcpError, ErrorCode};
 use std::sync::Mutex;
@@ -50,6 +50,17 @@ impl AgentHandler for MockAgent {
             .unwrap()
             .push(("auth/status".into(), serde_json::to_value(args).unwrap()));
         Ok(AuthStatusResponse::new(AuthState::Unauthenticated))
+    }
+
+    async fn session_options(
+        &self,
+        args: SessionOptionsRequest,
+    ) -> agent_client_protocol::Result<SessionOptionsResponse> {
+        self.schema_calls
+            .lock()
+            .unwrap()
+            .push(("session/options".into(), serde_json::to_value(args).unwrap()));
+        Ok(SessionOptionsResponse::new().meta(serde_json::json!({"handled":true}).as_object().unwrap().clone()))
     }
 
     async fn archive_session(
@@ -1437,6 +1448,26 @@ async fn schema_1_15_core_dispatch_preserves_request_and_response() {
         assert_eq!(published_response::<serde_json::Value>(&nats), result);
         assert_eq!(nats.published_messages(), vec!["_INBOX.schema-upgrade"]);
     }
+}
+
+#[tokio::test]
+async fn session_options_dispatch_preserves_request_and_response() {
+    let params = serde_json::json!({
+        "cwd": "/workspace",
+        "additionalDirectories": ["/workspace/shared"],
+        "sessionId": "s1",
+        "_meta": {"probe":"options"}
+    });
+    let (nats, agent) = dispatch("acp.v1.global.agent.session.options", &params, Some("_INBOX.options")).await;
+    assert_eq!(
+        *agent.schema_calls.lock().unwrap(),
+        vec![("session/options".to_owned(), params)]
+    );
+    assert_eq!(
+        published_response::<serde_json::Value>(&nats),
+        serde_json::json!({"_meta":{"handled":true}})
+    );
+    assert_eq!(nats.published_messages(), vec!["_INBOX.options"]);
 }
 
 #[tokio::test]

@@ -50,6 +50,14 @@ fn parse_agent_session_list() {
 }
 
 #[test]
+fn parse_agent_session_options() {
+    assert_eq!(
+        parse_agent_subject("acp.v1.global.agent.session.options").unwrap(),
+        ParsedAgentSubject::Global(GlobalAgentMethod::SessionOptions)
+    );
+}
+
+#[test]
 fn parse_agent_providers_list() {
     assert_eq!(
         parse_agent_subject("acp.v1.global.agent.providers.list").unwrap(),
@@ -376,6 +384,7 @@ fn global_agent_methods_round_trip_through_subject_terminal() {
         GlobalAgentMethod::Logout,
         GlobalAgentMethod::SessionNew,
         GlobalAgentMethod::SessionList,
+        GlobalAgentMethod::SessionOptions,
         GlobalAgentMethod::ProvidersList,
         GlobalAgentMethod::ProvidersSet,
         GlobalAgentMethod::ProvidersDisable,
@@ -391,6 +400,7 @@ fn global_agent_methods_round_trip_through_subject_terminal() {
 fn global_agent_protocol_methods_match_acp_vocabulary() {
     assert_eq!(GlobalAgentMethod::SessionNew.protocol_method(), "session/new");
     assert_eq!(GlobalAgentMethod::SessionList.protocol_method(), "session/list");
+    assert_eq!(GlobalAgentMethod::SessionOptions.protocol_method(), "session/options");
     assert_eq!(GlobalAgentMethod::ProvidersList.protocol_method(), "providers/list");
     assert_eq!(GlobalAgentMethod::ProvidersSet.protocol_method(), "providers/set");
     assert_eq!(

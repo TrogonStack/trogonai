@@ -43,6 +43,10 @@ fn published(p: &AcpPrefix) -> Vec<(&'static str, String)> {
         ("AuthStatusSubject", global::AuthStatusSubject::new(p).to_string()),
         ("SessionNewSubject", global::SessionNewSubject::new(p).to_string()),
         ("SessionListSubject", global::SessionListSubject::new(p).to_string()),
+        (
+            "SessionOptionsSubject",
+            global::SessionOptionsSubject::new(p).to_string(),
+        ),
         ("ProvidersListSubject", global::ProvidersListSubject::new(p).to_string()),
         ("ProvidersSetSubject", global::ProvidersSetSubject::new(p).to_string()),
         (

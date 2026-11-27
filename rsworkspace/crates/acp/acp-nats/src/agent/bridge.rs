@@ -15,10 +15,10 @@ use agent_client_protocol::v1::schema::{
     ForkSessionRequest, ForkSessionResponse, InitializeRequest, InitializeResponse, ListProvidersRequest,
     ListProvidersResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     LogoutRequest, LogoutResponse, NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionStatusRequest, SessionStatusResponse,
-    SetProviderRequest, SetProviderResponse, SetSessionConfigOptionRequest, SetSessionConfigOptionResponse,
-    SetSessionModeRequest, SetSessionModeResponse, SetSessionTitleRequest, SetSessionTitleResponse,
-    UnarchiveSessionRequest, UnarchiveSessionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SessionId, SessionOptionsRequest, SessionOptionsResponse,
+    SessionStatusRequest, SessionStatusResponse, SetProviderRequest, SetProviderResponse,
+    SetSessionConfigOptionRequest, SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse,
+    SetSessionTitleRequest, SetSessionTitleResponse, UnarchiveSessionRequest, UnarchiveSessionResponse,
 };
 use opentelemetry::metrics::Meter;
 use tokio::task::JoinHandle;
@@ -29,8 +29,8 @@ use trogon_std::time::GetElapsed;
 use super::{
     archive_session, auth_status, authenticate, cancel, close_session, delete_session, ext_method, ext_notification,
     fork_session, initialize, js_request, list_sessions, load_session, logout, new_session, prompt, providers_disable,
-    providers_list, providers_set, resume_session, session_status, set_session_config_option, set_session_mode,
-    set_session_title, unarchive_session,
+    providers_list, providers_set, resume_session, session_options, session_status, set_session_config_option,
+    set_session_mode, set_session_title, unarchive_session,
 };
 
 use crate::constants::SESSION_READY_DELAY;
@@ -190,6 +190,10 @@ where
 
     async fn session_status(&self, args: SessionStatusRequest) -> Result<SessionStatusResponse> {
         session_status::handle(self, args).await
+    }
+
+    async fn session_options(&self, args: SessionOptionsRequest) -> Result<SessionOptionsResponse> {
+        session_options::handle(self, args).await
     }
 
     async fn set_session_title(&self, args: SetSessionTitleRequest) -> Result<SetSessionTitleResponse> {

@@ -30,6 +30,9 @@ mod resume_session;
 pub(crate) mod rpc_call;
 #[cfg(test)]
 mod schema_1_15_tests;
+#[cfg(test)]
+mod schema_1_19_tests;
+mod session_options;
 mod session_status;
 mod set_session_config_option;
 mod set_session_mode;

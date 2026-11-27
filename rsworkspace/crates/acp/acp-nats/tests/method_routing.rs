@@ -41,6 +41,7 @@ fn schema_1_15_methods_have_canonical_nats_routes() {
         ("acp.v1.session.s1.agent.set_title", "session/set_title"),
         ("acp.v1.session.s1.agent.archive", "session/archive"),
         ("acp.v1.session.s1.agent.unarchive", "session/unarchive"),
+        ("acp.v1.global.agent.session.options", "session/options"),
     ];
     let missing: Vec<_> = cases
         .into_iter()

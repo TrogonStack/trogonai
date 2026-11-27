@@ -7,35 +7,35 @@ This document is the single source of truth for where this repository stands rel
 | Fact | Value |
 | --- | --- |
 | Wire protocol | v1 |
-| Pinned Rust SDK | `agent-client-protocol` 5.0.0 (`rsworkspace/Cargo.toml`) |
-| Bundled schema (effective spec level) | 1.15.1; the direct schema dependency matches the SDK pin |
-| Latest upstream SDK at last review | 5.0.0 (2026-11-02) |
-| Latest upstream schema at last review | 1.16.0 (2026-11-09) |
-| Highest adoptable schema | 1.15.1; the SDK pins `agent-client-protocol-schema` at exactly `=1.15.1` |
-| Last reviewed | 2026-11-09 |
+| Pinned Rust SDK | `agent-client-protocol` 5.4.0 (`rsworkspace/Cargo.toml`) |
+| Bundled schema (effective spec level) | 1.19.0; the direct schema dependency matches the SDK pin |
+| Latest upstream SDK at last review | 5.6.1 (2026-11-25) |
+| Latest upstream schema at last review | 1.22.0 (2026-11-23) |
+| Highest adoptable schema | 1.19.0 at the 5.4.0 pin; SDK 5.6.1 pins `agent-client-protocol-schema` at exactly `=1.22.0` |
+| Last reviewed | 2026-11-26 |
 
 Upstream repositories: [spec/schema](https://github.com/agentclientprotocol/agent-client-protocol), [Rust SDK](https://github.com/agentclientprotocol/rust-sdk).
 
-The SDK's exact schema pin caps our effective spec level. The direct schema dependency must match that pin so Cargo feature unification applies to the same types. SDK 5.0.0 forwards every v1 opt-in flag used here; proxy-chain schema types are enabled by the SDK itself. Pinning it past the SDK's requirement would put two schema crates in the graph, at which point the flags no longer apply to the types the SDK actually re-exports, so schema releases above the SDK's pin are tracked as gaps here rather than adopted early.
+The SDK's exact schema pin caps our effective spec level. The direct schema dependency must match that pin so Cargo feature unification applies to the same types. SDK 5.4.0 forwards every v1 opt-in flag used here; proxy-chain schema types are enabled by the SDK itself. Pinning it past the SDK's requirement would put two schema crates in the graph, at which point the flags no longer apply to the types the SDK actually re-exports, so schema releases above the SDK's pin are tracked as gaps here rather than adopted early.
 
 ## Companion crates
 
 The Rust SDK repository publishes more than the core crate, so tracking only `agent-client-protocol` hides capability that upstream already ships. The freshness task reads the recorded versions straight out of this table, so it stays the one place they live.
 
-Most companions release in lockstep with the core crate: `-http`, `-conductor`, `-polyfill`, `-derive`, and `-trace-viewer` have carried the core's exact version number on the same day since 1.0.0, so a core bump is a reliable signal that they moved too. The schema lives in the spec repository and versions independently (the SDK pins it exactly, see above). `-rmcp` is now aligned at 5.0.0 but has an independent history, and `-tokio` has not released since 2026-04-21. The cookbook is also published; the upstream test harness and `yopo` workspace package were not on crates.io at this review.
+Most companions release in lockstep with the core crate: `-http`, `-conductor`, `-polyfill`, `-derive`, and `-trace-viewer` have carried the core's exact version number on the same day since 1.0.0, so a core bump is a reliable signal that they moved too. The schema lives in the spec repository and versions independently (the SDK pins it exactly, see above). `-rmcp` is aligned with the core crate's major version but has an independent history (it skips patch releases the core takes), and `-tokio` has not released since 2026-04-21. The cookbook is also published; the upstream test harness and `yopo` workspace package were not on crates.io at this review.
 
 | Crate | Latest | Adopted | Position |
 | --- | --- | --- | --- |
-| `agent-client-protocol` | 5.0.0 | yes | The core dependency this document tracks. |
-| `agent-client-protocol-schema` | 1.16.0 | yes (1.15.1) | Capped by the SDK's exact pin, see above. |
-| `agent-client-protocol-derive` | 5.0.0 | transitive | Pulled in by the core crate; no direct dependency. |
-| `agent-client-protocol-http` | 5.0.0 | yes (`server` feature) | Official axum-based Streamable HTTP + WebSocket transport. It now serves all remote traffic: `main` builds `AcpHttpServer` over a per-connection `NatsAgentComponent` (`acp-nats-server/src/component.rs`), which retired the hand-rolled `transport.rs` and `connection.rs` (3,052 lines with their tests). `compat.rs` layers back the three behaviors upstream omits: `Origin` enforcement on every verb (upstream checks it server-side only on the WebSocket upgrade), `Acp-Protocol-Version` validation against the negotiated version (the transport spec says clients SHOULD send it and upstream never reads it), and `X-Accel-Buffering: no` on SSE. Drain is handled inside the component, which selects on a shutdown watch. Client feature deliberately not enabled: it wants reqwest 0.13 against the workspace's `=0.12.28`. See "Remote transport behavior changes" below. |
-| `agent-client-protocol-polyfill` | 5.0.0 | no | Re-evaluated at 5.0.0: a conductor-chain proxy exposing request-scoped native MCP servers through loopback HTTP to agents supporting MCP 2026-07-28. This bridge does not host a conductor chain or route native MCP requests, so adopting the polyfill does not close its routing gap. |
-| `agent-client-protocol-rmcp` | 5.0.0 | no | Re-evaluated at 5.0.0: the default feature set contains no rmcp integration; `rmcp_3` opts into rmcp 3.4.0 server adapters. The workspace already uses rmcp 3.x, but the ACP bridge does not host native SDK MCP servers, so this adapter has no runtime role here. |
-| `agent-client-protocol-conductor` | 5.0.0 | no | Re-evaluated at 5.0.0: binary and library for stdio proxy chains using `proxy/initialize` and `proxy/successor`. Chain construction and successor handoff remain a different problem from the subject-routed NATS bridge. |
+| `agent-client-protocol` | 5.6.1 | yes (5.4.0) | The core dependency this document tracks. This review adopted 5.4.0; 5.5.0 through 5.6.1 (schema 1.20.0 through 1.22.0) remain a follow-up bump. |
+| `agent-client-protocol-schema` | 1.22.0 | yes (1.19.0) | Capped by the SDK's exact pin, see above. |
+| `agent-client-protocol-derive` | 5.6.1 | transitive | Pulled in by the core crate; no direct dependency. |
+| `agent-client-protocol-http` | 5.6.1 | yes (5.4.0, `server` feature) | Official axum-based Streamable HTTP + WebSocket transport. It now serves all remote traffic: `main` builds `AcpHttpServer` over a per-connection `NatsAgentComponent` (`acp-nats-server/src/component.rs`), which retired the hand-rolled `transport.rs` and `connection.rs` (3,052 lines with their tests). `compat.rs` layers back the three behaviors upstream omits: `Origin` enforcement on every verb (upstream checks it server-side only on the WebSocket upgrade), `Acp-Protocol-Version` validation against the negotiated version (the transport spec says clients SHOULD send it and upstream never reads it), and `X-Accel-Buffering: no` on SSE. Drain is handled inside the component, which selects on a shutdown watch. Client feature deliberately not enabled: it wants reqwest 0.13 against the workspace's `=0.12.28`. Re-evaluated at 5.6.1: no transport behavior changed between 5.0.0 and 5.6.1 (5.5.0 only enforced API documentation). See "Remote transport behavior changes" below. |
+| `agent-client-protocol-polyfill` | 5.6.1 | no | Re-evaluated at 5.6.1: 5.5.0 preserves request-scoped elicitation IDs and 5.6.0 lets MCP servers admit or reject a request by session, neither of which gives the bridge a conductor chain. Earlier position (5.0.0): a conductor-chain proxy exposing request-scoped native MCP servers through loopback HTTP to agents supporting MCP 2026-07-28. This bridge does not host a conductor chain or route native MCP requests, so adopting the polyfill does not close its routing gap. |
+| `agent-client-protocol-rmcp` | 5.6.1 | no | Re-evaluated at 5.6.1: 5.6.0 adds per-session request admission for hosted MCP servers, which still presumes a native SDK MCP host. Earlier position (5.0.0): the default feature set contains no rmcp integration; `rmcp_3` opts into rmcp 3.4.0 server adapters. The workspace already uses rmcp 3.x, but the ACP bridge does not host native SDK MCP servers, so this adapter has no runtime role here. |
+| `agent-client-protocol-conductor` | 5.6.1 | no | Re-evaluated at 5.6.1: releases since 5.0.0 track schema adoption and request-scoped elicitation IDs only. Earlier position (5.0.0): binary and library for stdio proxy chains using `proxy/initialize` and `proxy/successor`. Chain construction and successor handoff remain a different problem from the subject-routed NATS bridge. |
 | `agent-client-protocol-tokio` | 0.11.1 | no | Not updated since 2026-04-21 and superseded by the core crate's own runtime-agnostic surface. Treated as dormant; a release would be worth investigating. |
-| `agent-client-protocol-trace-viewer` | 5.0.0 | no | Re-evaluated at 5.0.0: protocol trace inspection remains developer tooling, with no runtime role in the bridge. |
-| `agent-client-protocol-cookbook` | 5.0.0 | no | Published examples and recipes, re-evaluated at 5.0.0. Reference material rather than a bridge runtime dependency. |
+| `agent-client-protocol-trace-viewer` | 5.6.1 | no | Re-evaluated at 5.6.1 (5.5.0 renders trace labels as plain text): protocol trace inspection remains developer tooling, with no runtime role in the bridge. |
+| `agent-client-protocol-cookbook` | 5.6.1 | no | Published examples and recipes, re-evaluated at 5.6.1. Reference material rather than a bridge runtime dependency. |
 
 ### Remote transport behavior changes
 
@@ -72,7 +72,7 @@ A green test suite does not earn a status of `implemented`. `half-wired` exists 
 
 ### Agent-side methods (client to agent)
 
-| Spec surface | Spec stage (schema 1.15.1) | Our status | Notes |
+| Spec surface | Spec stage (schema 1.19.0) | Our status | Notes |
 | --- | --- | --- | --- |
 | `initialize` | stable | implemented | |
 | `authenticate` | stable | implemented | terminal authentication shapes are stable |
@@ -98,6 +98,7 @@ A green test suite does not earn a status of `implemented`. `half-wired` exists 
 | `session/status` | unstable (1.15.0) | implemented | Session-scoped status request. |
 | `session/set_title` | unstable (1.15.0) | implemented | Session-scoped title update. |
 | `session/archive`, `session/unarchive` | unstable (1.15.0) | implemented | Session-scoped archive operations; list filtering and returned archive metadata also survive typed transport. |
+| `session/options` | unstable (1.17.0) | implemented | `unstable_session_options`. Routed on the global NATS subject `session.options` because `sessionId` is optional (omitted means "a new session"); core request/reply, no JetStream stream, since the method must not create or change a session. Boundary dispatch, bridge handler, and runner dispatch are tested; the request and response round-trip. |
 | `proxy/initialize`, `proxy/successor` | unstable (1.15.0) | not supported | These install proxy-chain topology and successor handoff. The bridge is an Agent endpoint with per-connection NATS dispatch, not an SDK proxy endpoint; forwarding the requests alone cannot establish a chain. |
 | `ext/*` (extension methods) | stable | implemented | passthrough |
 
@@ -132,17 +133,27 @@ A green test suite does not earn a status of `implemented`. `half-wired` exists 
 | Session config options | stable | implemented | 1.4.0 shape, `ConfigOptionUpdate` round-trip tested |
 | Boolean config options | stable (1.3.0) | implemented | stabilized shape, round-trip tested |
 | `model_config` option category | stable (1.1.0) | implemented | round-trip tested |
-| NES (next edit suggestions) | removed (1.12.0) | removed | Upstream removed the types and flag. Existing elicitation capability coverage remains; there is no NES payload to preserve in schema 1.15.1. |
-| Plan operations | unstable (0.13.4) | implemented | `PlanUpdate`/`PlanRemoved` round-trip tested with `unstable_plan_operations` |
+| NES (next edit suggestions) | removed (1.12.0) | removed | Upstream removed the types and flag. Existing elicitation capability coverage remains; there is no NES payload to preserve in schema 1.19.0. |
+| Plan operations | unstable (0.13.4, revised 1.18.0) | implemented | `PlanUpdate`/`PlanRemoved` round-trip tested with `unstable_plan_operations`. Schema 1.18.0 removed the `file` plan type in favor of an optional `path` on `markdown` plans; the bridge never constructed `PlanFile`, and `path` round-trips. |
 | Providers | unstable (0.11.7) | implemented | Capability payloads and `providers/list`, `providers/set`, `providers/disable` are representable and routed with `unstable_llm_providers`. |
 | MCP-over-ACP message types | unstable (1.10.0 request-scoped revision) | capabilities implemented | `McpServer::Acp`, capability payloads, and request-scoped `requestId`/`serverId` message envelopes survive typed transport. `mcp/message` requests and notifications remain deliberately unrouted: the bridge has no request-lifetime MCP binding or native MCP server host. Schema 1.10 removed `mcp/connect` and `mcp/disconnect` together with connection IDs. Enabling the flag alone does not implement that lifecycle. |
 | Elicitation enum option descriptions | stable (1.7.0) | implemented | `EnumOption` descriptions on `StringPropertySchema.one_of` round-trip tested |
 | Tool call `name` | stable (1.8.0) | implemented | Nonempty names on `tool_call` and `tool_call_update` survive public wire decode and re-encode. |
 | Session notices and compaction | stable (1.11.0) | implemented | Client `session.notices`/`session.compaction` capabilities and `notice`, `compaction_update`, `compaction_summary_chunk` updates round-trip. |
-| Subagents and session message views | unstable (1.10.0, revised 1.13.0/1.14.0) | implemented | `unstable_subagents` preserves subagent identity, working directories, message references, and the `subagent_update`, `session_message`, `session_message_chunk` variants. |
-| Client system prompt | unstable (1.12.0) | implemented | `unstable_session_system_prompt` preserves `systemPrompt` on new/load/fork/resume and its capability. Stabilized in schema 1.16.0, which remains above the SDK exact pin. |
+| Subagents and session message views | unstable (1.10.0, revised 1.13.0/1.14.0/1.17.0) | implemented | `unstable_subagents` preserves subagent identity, working directories, message references, and the `subagent_update`, `session_message`, `session_message_chunk` variants. Schema 1.17.0 added `session` tool-call content (a `SessionReference` to a child session), which round-trips. |
+| Client system prompt | stable (1.16.0) | implemented | Preserves `systemPrompt` on new/load/fork/resume and its capability. Stabilized in schema 1.16.0, so the `unstable_session_system_prompt` flag no longer exists and was dropped from the workspace feature list. |
 | Archive and status metadata | unstable (1.15.0) | implemented | Archive list filters/metadata and auth/session lifecycle capabilities round-trip. |
-| Protocol v2 | unstable, heavy churn | watch-only | the SDK still gates it behind `unstable_protocol_v2`; the freshness workflow surfaces releases, and this migration keeps the existing v1-only boundary |
+| Auth account descriptions | unstable (1.17.0) | implemented | `AuthAccount.description` round-trips on `auth/status`. |
+| Initial session config options | unstable (1.17.0, fork 1.18.0) | implemented | `unstable_session_options` preserves `configOptions` on `session/new`, `session/load`, `session/resume`, and `session/fork`, plus the agent's `sessionCapabilities.options`. |
+| Prompt suggestions | unstable (1.18.0) | implemented | `unstable_prompt_suggestions` preserves the `prompt_suggestions_update` variant and the client `session.promptSuggestions` capability with its image, audio, and embedded-context sub-capabilities. |
+| `speed` config option category | unstable (1.18.0) | implemented | `unstable_speed_config_category` round-trips the category on setup responses and `session/options`. |
+| Session cursors | unstable (1.19.0) | implemented | `unstable_session_cursors` preserves `cursor_update` (every anchor type, capabilities, and an ID-only update) and `cursorId` on `session/fork`. The client `session.cursors` capability round-trips, but upstream models it as an empty struct, so `_meta` inside it is dropped by the schema itself, not by the bridge (pinned by a test). |
+| Agent skills | unstable (1.18.0) | watch-only | `unstable_agent_skills` is enabled per policy, but skill command entries and skill content blocks exist only in the v2 schema module. Nothing reaches the v1 wire. |
+| Protocol v2 | unstable, heavy churn | watch-only | the SDK still gates it behind `unstable_protocol_v2`; the freshness workflow surfaces releases, and the boundary stays v1-only. Schema 1.17.0 through 1.19.0 added v2-only surfaces (`replay_complete`, `idempotencyKey` on `session/prompt`, skills, diff and elicitation tightening) that are tracked here and not adopted. |
+
+## SDK 5.4 review
+
+The [schema changelog](https://github.com/agentclientprotocol/agent-client-protocol/blob/v1.19.0/CHANGELOG.md) was reviewed from 1.15.1 through 1.19.0 alongside the [SDK changelog](https://github.com/agentclientprotocol/rust-sdk/blob/v5.4.0/src/agent-client-protocol/CHANGELOG.md) (5.1.0 through 5.4.0, each adopting one schema release). For v1: 1.16 stabilized client system prompts; 1.17 added `session/options`, initial config option values, `AuthAccount.description`, and session tool-call content; 1.18 added prompt suggestions, the `speed` category, initial config options on fork, and replaced the `file` plan type with `path` on markdown plans; 1.19 added session cursors and `cursorId` on fork, plus method-aware payload dispatch inside the schema crate (the SDK now delegates its aggregate dispatch to it). The only new v1 method is `session/options`. The new flags (`unstable_agent_skills`, `unstable_prompt_suggestions`, `unstable_session_cursors`, `unstable_session_options`, `unstable_speed_config_category`) are enabled per the opt-in policy. Every other entry in those releases is v2-only. SDK 5.4.0 also keeps a connection open when an incoming line is not valid UTF-8.
 
 ## SDK 5.0 review
 

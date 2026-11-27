@@ -10,8 +10,8 @@ use agent_client_protocol::v1::schema::{
     ArchiveSessionRequest, AuthStatusRequest, AuthenticateRequest, CancelNotification, CloseSessionRequest,
     DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
     ListProvidersRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest,
-    ResumeSessionRequest, SessionStatusRequest, SetProviderRequest, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, SetSessionTitleRequest, UnarchiveSessionRequest,
+    ResumeSessionRequest, SessionOptionsRequest, SessionStatusRequest, SetProviderRequest,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionTitleRequest, UnarchiveSessionRequest,
 };
 use async_nats::Message;
 use async_nats::jetstream::AckKind;
@@ -297,6 +297,15 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
                 method.protocol_method().as_str(),
                 nats,
                 |req: ListSessionsRequest| agent.list_sessions(req),
+            )
+            .await
+        }
+        GlobalAgentMethod::SessionOptions => {
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method().as_str(),
+                nats,
+                |req: SessionOptionsRequest| agent.session_options(req),
             )
             .await
         }

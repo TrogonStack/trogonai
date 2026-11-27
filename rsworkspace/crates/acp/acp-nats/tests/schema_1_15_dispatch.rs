@@ -7,9 +7,9 @@ use agent_client_protocol::v1::schema::{
     ArchiveSessionRequest, ArchiveSessionResponse, AuthStatusRequest, AuthStatusResponse, AuthenticateRequest,
     AuthenticateResponse, CancelNotification, DisableProviderRequest, DisableProviderResponse, InitializeRequest,
     InitializeResponse, ListProvidersRequest, ListProvidersResponse, NewSessionRequest, NewSessionResponse,
-    PromptRequest, PromptResponse, SessionStatusRequest, SessionStatusResponse, SetProviderRequest,
-    SetProviderResponse, SetSessionTitleRequest, SetSessionTitleResponse, StopReason, UnarchiveSessionRequest,
-    UnarchiveSessionResponse,
+    PromptRequest, PromptResponse, SessionOptionsRequest, SessionOptionsResponse, SessionStatusRequest,
+    SessionStatusResponse, SetProviderRequest, SetProviderResponse, SetSessionTitleRequest, SetSessionTitleResponse,
+    StopReason, UnarchiveSessionRequest, UnarchiveSessionResponse,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -76,6 +76,10 @@ impl AgentHandler for RecordingAgent {
         self.respond("session/status", args)
     }
 
+    async fn session_options(&self, args: SessionOptionsRequest) -> Result<SessionOptionsResponse> {
+        self.respond("session/options", args)
+    }
+
     async fn set_session_title(&self, args: SetSessionTitleRequest) -> Result<SetSessionTitleResponse> {
         self.respond("session/set_title", args)
     }
@@ -109,6 +113,12 @@ fn response_fixture(method: &str) -> Value {
         }),
         "session/status" => json!({ "status": "open" }),
         "session/set_title" => json!({ "title": "Normalized title" }),
+        "session/options" => json!({
+            "configOptions": [{
+                "type": "select", "id": "speed", "name": "Speed", "category": "speed",
+                "currentValue": "fast", "options": [{ "value": "fast", "name": "Fast" }]
+            }]
+        }),
         "providers/list" => json!({
             "providers": [{
                 "providerId": "provider-1",
@@ -139,6 +149,15 @@ fn method_fixtures() -> Vec<Call> {
                 "sessionId": "session-1",
                 "title": "  Requested title  ",
                 "_meta": { "request": "set-title" }
+            }),
+        },
+        Call {
+            method: "session/options",
+            params: json!({
+                "cwd": "/workspace",
+                "additionalDirectories": ["/workspace/shared"],
+                "sessionId": "session-1",
+                "_meta": { "request": "session-options" }
             }),
         },
         Call {
