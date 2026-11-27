@@ -83,6 +83,7 @@ trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-providers = { path = "crates/sandbox/trogon-sandbox-providers" }
 trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
+trogon-sandbox-ssh-gateway = { path = "crates/sandbox/trogon-sandbox-ssh-gateway" }
 trogon-sandbox-v8-wasm-worker = { path = "crates/sandbox/trogon-sandbox-v8-wasm-worker" }
 trogon-sandbox-vercel-worker = { path = "crates/sandbox/trogon-sandbox-vercel-worker" }
 trogon-sandbox-volumes = { path = "crates/sandbox/trogon-sandbox-volumes" }
@@ -232,6 +233,7 @@ regress = { version = "=0.12.0", features = ["utf16"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rrule = "=0.14.0"
 rustix = { version = "=1.1.4", default-features = false, features = ["fs", "std"] }
+russh = { version = "=0.61.2", default-features = false, features = ["aws-lc-rs", "flate2"] }
 sha2 = "=0.11.1"
 wiremock = "=0.6.5"
 windows = { version = "=0.62.2", features = [
