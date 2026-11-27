@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+#MISE description="Check RELEASE_TAG names a published trogon-sandbox-dev release whose tree has these tasks, and write its tag and version to GITHUB_OUTPUT"
+set -euo pipefail
+
+: "${RELEASE_TAG:?RELEASE_TAG is required}"
+: "${GH_REPO:?GH_REPO is required}"
+: "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+
+prefix="trogon-sandbox-dev@v"
+version="${RELEASE_TAG#"$prefix"}"
+semver='^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$'
+if [[ "$version" == "$RELEASE_TAG" || ! "$version" =~ $semver ]]; then
+    echo "::error::'$RELEASE_TAG' is not a ${prefix}<version> tag" >&2
+    exit 1
+fi
+
+# Attaching to a draft or a missing release would publish nothing users can find.
+if ! draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"; then
+    echo "::error::no release exists for $RELEASE_TAG; publish it first" >&2
+    exit 1
+fi
+if [[ "$draft" != "false" ]]; then
+    echo "::error::the $RELEASE_TAG release is a draft; publish it first" >&2
+    exit 1
+fi
+
+# The build jobs run the tasks from the tagged tree, so an older tag cannot build.
+tasks=".config/mise/tasks/github/workflows/release-sandbox-dev"
+if ! gh api "repos/${GH_REPO}/contents/${tasks}?ref=${RELEASE_TAG}" --silent; then
+    echo "::error::$RELEASE_TAG predates $tasks, so its tree cannot build these archives" >&2
+    exit 1
+fi
+
+{
+    echo "tag=$RELEASE_TAG"
+    echo "version=$version"
+} >>"$GITHUB_OUTPUT"
