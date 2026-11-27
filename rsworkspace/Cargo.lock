@@ -10829,6 +10829,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-docker-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "base64 0.23.1",
+ "bollard",
+ "bytes",
+ "clap",
+ "flate2",
+ "futures",
+ "reqwest 0.12.28",
+ "sandbox-command-supervisor",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-conformance",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-cosign",
+ "trogon-sandbox-credential-client",
+ "trogon-sandbox-file-ops",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-oci",
+ "trogon-sandbox-protocol",
+ "trogon-sandbox-providers",
+ "trogon-sandbox-ssh-gateway",
+ "trogon-sandbox-volumes",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-sandbox-e2b-worker"
 version = "0.1.0"
 dependencies = [

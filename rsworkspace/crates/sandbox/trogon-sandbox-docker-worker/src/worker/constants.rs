@@ -1,0 +1,36 @@
+pub(super) const LEASE_SUBJECT: &str = "sandbox.provider.local_docker.lease";
+pub(super) const LEASE_QUEUE: &str = "sandbox-provider-local_docker";
+pub(super) const CANCEL_SUBJECT: &str = "sandbox.provider.local_docker.cancel.>";
+pub(super) const CHECKPOINT_RUNNING_SUBJECT: &str = "sandbox.provider.local_docker.checkpoint_running.>";
+pub(super) const NETWORK_POLICY_UPDATE_SUBJECT: &str = "sandbox.provider.local_docker.network_policy_update.>";
+pub(super) const RUN_COMMAND_SUBJECT: &str = "sandbox.provider.local_docker.run_command.>";
+pub(super) const CANCEL_COMMAND_LAUNCH_SUBJECT: &str = "sandbox.provider.local_docker.cancel_command_launch.>";
+pub(super) const POLL_COMMAND_SUBJECT: &str = "sandbox.provider.local_docker.poll_command.>";
+pub(super) const KILL_COMMAND_SUBJECT: &str = "sandbox.provider.local_docker.kill_command.>";
+pub(super) const STOP_COMMAND_SUBJECT: &str = "sandbox.provider.local_docker.stop_command.>";
+pub(super) const RESTART_COMMAND_SUBJECT: &str = "sandbox.provider.local_docker.restart_command.>";
+pub(super) const LIST_PROCESSES_SUBJECT: &str = "sandbox.provider.local_docker.list_processes.>";
+pub(super) const WAIT_READY_SUBJECT: &str = "sandbox.provider.local_docker.wait_ready.>";
+pub(super) const WRITE_STDIN_SUBJECT: &str = "sandbox.provider.local_docker.write_stdin.>";
+pub(super) const WRITE_FILES_SUBJECT: &str = "sandbox.provider.local_docker.write_files.>";
+pub(super) const READ_FILE_SUBJECT: &str = "sandbox.provider.local_docker.read_file.>";
+pub(super) const FILE_OP_SUBJECT: &str = "sandbox.provider.local_docker.file_op.>";
+pub(super) const CREATE_USER_SUBJECT: &str = "sandbox.provider.local_docker.create_user.>";
+pub(super) const CREATE_GROUP_SUBJECT: &str = "sandbox.provider.local_docker.create_group.>";
+pub(super) const MODIFY_GROUP_MEMBERSHIP_SUBJECT: &str = "sandbox.provider.local_docker.modify_group_membership.>";
+pub(super) const SSH_ATTACH_SUBJECT: &str = "sandbox.ssh.attach.>";
+pub(super) const SSH_DETACH_SUBJECT: &str = "sandbox.ssh.detach.>";
+pub(super) const GET_DOMAIN_SUBJECT: &str = "sandbox.provider.local_docker.get_domain.>";
+pub(super) const TERMINAL_SUBJECT: &str = "sandbox.provider.local_docker.terminal.>";
+pub(super) const PAUSE_SUBJECT: &str = "sandbox.provider.local_docker.pause.>";
+pub(super) const ROLLBACK_SUBJECT: &str = "sandbox.provider.local_docker.rollback.>";
+pub(super) const RESUME_SUBJECT: &str = "sandbox.provider.local_docker.resume.>";
+pub(super) const RESOURCE_USAGE_SUBJECT: &str = "sandbox.provider.local_docker.resource_usage.>";
+pub(super) const NATIVE_HANDLE_SUBJECT: &str = "sandbox.provider.local_docker.native_handle.>";
+
+/// Encoding room reserved for both streams' truncation markers: a marker is under 64 bytes, and
+/// the number-array encoding costs up to four bytes per byte.
+pub(super) const MARKER_ROOM: usize = 2 * 64 * 4;
+
+/// Span field recorded once the lease id is known.
+pub(super) const LEASE_ID_FIELD: &str = "lease_id";
