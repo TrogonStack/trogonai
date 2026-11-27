@@ -429,7 +429,7 @@ async fn executable_sigterm_detaches_bound_generation_without_durable_erasure() 
     let output = tokio::time::timeout(Duration::from_secs(3), peer.child.wait_with_output()).await??;
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    peer.client.cancel().await?;
+    tokio::time::timeout(Duration::from_secs(3), peer.client.cancel()).await??;
     let sender = PeerId::parse(fixture.a.peer_id.clone().ok_or("peer")?)?;
     let state = history(&store, &sender).await?;
     assert!(state.enrollment.is_set());
