@@ -156,6 +156,14 @@ fn rejects_whitespace_and_partial_wildcards() {
         })
     );
     assert_eq!(
+        validate_published_subject("acp.v1.session.a\0b.agent.prompt"),
+        Err(SubjectViolationError::Token {
+            index: 3,
+            token: "a\0b".to_owned(),
+            source: SubjectTokenViolationError::InvalidCharacter('\0')
+        })
+    );
+    assert_eq!(
         validate_subject_pattern("acp.v1.session.a*.agent.prompt"),
         Err(SubjectViolationError::PartialWildcard {
             index: 3,

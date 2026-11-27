@@ -204,7 +204,7 @@ fn validate_token(
         };
     }
 
-    if let Some(ch) = crate::token::has_wildcards_or_whitespace(token) {
+    if let Some(ch) = crate::token::first_unsafe_char(token) {
         return Err(if ch == '*' || ch == '>' {
             SubjectViolationError::PartialWildcard {
                 index,

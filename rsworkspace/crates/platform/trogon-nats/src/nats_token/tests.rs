@@ -42,6 +42,18 @@ fn single_rejects_whitespace() {
 }
 
 #[test]
+fn single_rejects_control_characters() {
+    for token in ["_m\0n", "a\x07", "a\x1b", "a\x7f"] {
+        let control = token.chars().find(|ch| ch.is_control()).unwrap();
+        assert_eq!(
+            NatsToken::new(token),
+            Err(SubjectTokenViolationError::InvalidCharacter(control)),
+            "{token:?}"
+        );
+    }
+}
+
+#[test]
 fn single_rejects_non_ascii() {
     assert_eq!(
         NatsToken::new("séssion"),
@@ -88,6 +100,18 @@ fn dotted_rejects_whitespace() {
     assert!(DottedNatsToken::new("acp prefix").is_err());
     assert!(DottedNatsToken::new("acp\t").is_err());
     assert!(DottedNatsToken::new("acp\n").is_err());
+}
+
+#[test]
+fn dotted_rejects_control_characters() {
+    for token in ["acp.m\0n", "acp\x07", "acp.\x1b", "acp\x7f", "acp\u{85}"] {
+        let control = token.chars().find(|ch| ch.is_control()).unwrap();
+        assert_eq!(
+            DottedNatsToken::new(token),
+            Err(SubjectTokenViolationError::InvalidCharacter(control)),
+            "{token:?}"
+        );
+    }
 }
 
 #[test]

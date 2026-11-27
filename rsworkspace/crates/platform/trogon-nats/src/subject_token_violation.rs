@@ -3,7 +3,7 @@
 pub enum SubjectTokenViolationError {
     #[error("subject token is empty")]
     Empty,
-    #[error("subject token contains invalid character '{0}'")]
+    #[error("subject token contains invalid character {0:?}")]
     InvalidCharacter(char),
     #[error("subject token exceeds maximum length: {0}")]
     TooLong(usize),

@@ -8,6 +8,10 @@ fn display_formats_each_variant() {
         "subject token contains invalid character '*'"
     );
     assert_eq!(
+        SubjectTokenViolationError::InvalidCharacter('\0').to_string(),
+        "subject token contains invalid character '\\0'"
+    );
+    assert_eq!(
         SubjectTokenViolationError::TooLong(129).to_string(),
         "subject token exceeds maximum length: 129"
     );
