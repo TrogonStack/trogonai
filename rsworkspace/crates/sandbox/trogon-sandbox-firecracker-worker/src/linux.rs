@@ -422,6 +422,9 @@ pub async fn main() -> anyhow::Result<()> {
         }
     });
 
+    let health = args.observability.health();
+    health.started_with_nats(&nats);
+    health.shutdown_when(cancel.clone().cancelled_owned());
     info!(%worker_id, "trogon-sandbox-firecracker-worker starting");
     let result = worker::run(
         nats,

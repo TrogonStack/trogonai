@@ -68,6 +68,9 @@ pub async fn serve_worker(args: &WorkerArgs, cancel: CancellationToken) -> Resul
         }
     });
 
+    let health = args.observability.health();
+    health.started_with_nats(&nats);
+    health.shutdown_when(cancel.clone().cancelled_owned());
     let authority = AuthorityConfig::new(AuthorityMode::from_env(&SystemEnv)?);
     info!("sandbox-kubevirt-worker starting");
     KubeVirtWorker::new(nats, provider, terminals, worker_id, authority)

@@ -24,6 +24,9 @@ pub async fn serve(
     let config = args.builder_config(dispatch_signer)?;
     let metrics = SnapshotBuilderMetrics::register(registry)?;
     let builder = SnapshotBuilder::connect(config, metrics).await?;
+    let health = args.observability.health();
+    health.started_with_nats(builder.nats());
+    health.shutdown_when(cancel.clone().cancelled_owned());
     info!(nats_url = %args.nats_url, "snapshot builder starting");
     Ok(builder.run(cancel).await?)
 }

@@ -246,6 +246,9 @@ async fn serve() -> anyhow::Result<()> {
             cancel_clone.cancel();
         }
     });
+    let health = args.observability.health();
+    health.started_with_nats(&nats);
+    health.shutdown_when(cancel.clone().cancelled_owned());
 
     let ssh_bridge = trogon_sandbox_ssh_gateway::SshStreamBridge::new(
         Arc::new(trogon_sandbox_subprocess_worker::ssh_bridge::SubprocessSshHost(

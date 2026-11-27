@@ -4,8 +4,10 @@ use clap::Parser;
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use trogon_sandbox_dashboard::{
-    DashboardArgs, DashboardConfig, DashboardError, WsGatewayUrl, WsGatewayUrlError, run, serve_with_shutdown,
+    DashboardArgs, DashboardConfig, DashboardError, WsGatewayUrl, WsGatewayUrlError, router, run,
+    serve_app_with_shutdown, serve_with_shutdown,
 };
+use trogon_sandbox_observability::Health;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -164,5 +166,35 @@ async fn run_reports_bind_failure() -> TestResult {
     let err = run(args, async { Ok(()) }).await.err().ok_or("expected bind failure")?;
     assert!(matches!(err, DashboardError::Bind(_)));
     assert!(!format!("{err}").is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn public_listener_serves_the_operational_paths() -> TestResult {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let health = Health::new();
+    let config = DashboardConfig {
+        ws_gateway_url: WsGatewayUrl::parse("ws://127.0.0.1:8443/v1/ws")?,
+    };
+    let (stop, stopped) = oneshot::channel::<()>();
+    let task = tokio::spawn(serve_app_with_shutdown(
+        listener,
+        router(config).merge(health.router()),
+        async move {
+            let _ = stopped.await;
+            Ok(())
+        },
+    ));
+
+    let ready = format!("http://{addr}/-/readiness");
+    assert_eq!(reqwest::get(&ready).await?.status(), 503);
+    health.mark_started();
+    assert_eq!(reqwest::get(&ready).await?.status(), 200);
+    assert_eq!(reqwest::get(format!("http://{addr}/-/liveness")).await?.status(), 200);
+    assert_eq!(reqwest::get(format!("http://{addr}/")).await?.status(), 200);
+
+    let _ = stop.send(());
+    task.await??;
     Ok(())
 }

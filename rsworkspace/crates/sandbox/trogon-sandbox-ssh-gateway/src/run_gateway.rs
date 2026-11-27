@@ -23,6 +23,8 @@ where
 
     let nats = async_nats::connect(&args.nats_url).await?;
     info!(url = %args.nats_url, "connected to NATS");
+    let health = args.observability.health().clone();
+    health.require_nats(&nats);
 
     let api_keys = Arc::new(
         NatsKvApiKeyStore::new_with_bucket(async_nats::jetstream::new(nats.clone()), &args.api_key_bucket).await?,
@@ -54,12 +56,14 @@ where
         max_connections: args.max_connections,
     }));
 
+    health.mark_started();
     let cancel = CancellationToken::new();
     let serve = run_server(listener, host_key, state, cancel.clone());
     tokio::pin!(serve);
     tokio::select! {
         result = &mut serve => result?,
         outcome = shutdown => {
+            health.begin_shutdown();
             cancel.cancel();
             outcome?;
             serve.await?;

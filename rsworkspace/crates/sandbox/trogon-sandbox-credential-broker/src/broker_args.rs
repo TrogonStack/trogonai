@@ -52,14 +52,23 @@ impl BrokerArgs {
             self.fence_mode,
         )
         .await?;
+        let health_client = client.clone();
         let subscriptions = Arc::new(BrokerService::new(Arc::new(broker))).subscribe(client).await?;
+        self.observability.health().started_with_nats(&health_client);
         info!(nats_url = %self.nats_url, "credential broker subscribed");
         Ok(subscriptions)
     }
 
     /// Serves credential requests until `shutdown` completes.
     pub async fn serve(&self, shutdown: impl Future<Output = ()>) -> Result<(), BrokerRunError> {
-        self.connect().await?.run(shutdown).await;
+        let health = self.observability.health().clone();
+        self.connect()
+            .await?
+            .run(async move {
+                shutdown.await;
+                health.begin_shutdown();
+            })
+            .await;
         Ok(())
     }
 }

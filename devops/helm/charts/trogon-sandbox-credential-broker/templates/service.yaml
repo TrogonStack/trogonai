@@ -10,6 +10,6 @@ spec:
     app.kubernetes.io/name: sandbox-credential-broker
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
-    - name: metrics
+    - name: private
       port: {{ .Values.metricsPort }}
-      targetPort: metrics
+      targetPort: private

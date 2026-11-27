@@ -87,6 +87,9 @@ pub async fn serve() -> anyhow::Result<()> {
         cancel.clone(),
     );
     spawn_shutdown_listener(cancel.clone())?;
+    let health = args.observability.health();
+    health.started_with_nats(&nats);
+    health.shutdown_when(cancel.clone().cancelled_owned());
 
     let provider: Arc<dyn trogon_sandbox_protocol::Provider> = Arc::new(worker);
     info!("sandbox-subprocess-worker starting");

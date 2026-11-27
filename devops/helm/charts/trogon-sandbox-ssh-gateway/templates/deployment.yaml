@@ -34,28 +34,34 @@ spec:
                   name: {{ .secretName }}
                   key: {{ .signingKeyKey }}
           {{- end }}
+          # Audience: public serves clients; private serves /-/liveness, /-/readiness and /metrics to the cluster only.
           ports:
-            - name: ssh
+            - name: public
               containerPort: {{ .Values.service.port }}
-            - name: metrics
+            - name: private
               containerPort: {{ .Values.metricsPort }}
           volumeMounts:
             - name: host-key
               mountPath: /data
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /-/liveness
+              port: private
+            periodSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
-              path: /metrics
-              port: metrics
-            initialDelaySeconds: 15
+              path: /-/liveness
+              port: private
             periodSeconds: 30
+            failureThreshold: 6
           readinessProbe:
             httpGet:
-              path: /metrics
-              port: metrics
-            initialDelaySeconds: 5
-            periodSeconds: 15
+              path: /-/readiness
+              port: private
+            periodSeconds: 10
       volumes:
         - name: host-key
           persistentVolumeClaim:

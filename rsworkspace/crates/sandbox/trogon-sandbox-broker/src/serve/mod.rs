@@ -70,6 +70,7 @@ pub async fn run(cli: Cli, env: &impl ReadEnv, shutdown: CancellationToken) -> R
         cli.observability
             .resolve_metrics_addr(trogon_sandbox_observability::BROKER),
         metrics.registry().clone(),
+        cli.observability.health().clone(),
     );
     let nats = trogon_sandbox_protocol::nats_connect::connect(&cli.nats_url).await?;
     info!(nats_url = %cli.nats_url, "broker starting");
@@ -108,7 +109,11 @@ pub async fn run(cli: Cli, env: &impl ReadEnv, shutdown: CancellationToken) -> R
     event_routes::register(&router).await?;
     watch_digest_pins(&services, &context, &loops);
 
+    let health = cli.observability.health();
+    health.require_nats(&services.nats);
+    health.mark_started();
     shutdown.cancelled().await;
+    health.begin_shutdown();
     background.cancel();
     tasks.close();
     tasks.wait().await;

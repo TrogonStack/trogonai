@@ -10,9 +10,9 @@ spec:
     app.kubernetes.io/name: sandbox-ws-gateway
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
-    - name: http
+    - name: public
       port: {{ .Values.service.port }}
-      targetPort: http
-    - name: metrics
+      targetPort: public
+    - name: private
       port: {{ .Values.metricsPort }}
-      targetPort: metrics
+      targetPort: private

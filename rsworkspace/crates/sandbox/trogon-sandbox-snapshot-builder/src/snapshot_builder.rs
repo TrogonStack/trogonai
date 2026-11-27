@@ -58,6 +58,11 @@ impl SnapshotBuilder {
         })
     }
 
+    /// The NATS connection the builder serves on.
+    pub fn nats(&self) -> &async_nats::Client {
+        &self.processor.nats
+    }
+
     pub fn metrics(&self) -> SnapshotBuilderMetrics {
         self.metrics.clone()
     }
