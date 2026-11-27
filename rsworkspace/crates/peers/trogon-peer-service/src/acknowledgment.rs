@@ -25,8 +25,12 @@ where
         let reference = attachment(request.attachment_ref.as_option().ok_or(PeerApplicationError::Input)?)?;
         let batch_id = BatchId::new(request.batch_id.ok_or(PeerApplicationError::Input)?)?;
         self.authorize(owner, reference.peer_id(), PeerOperation::Acknowledge)?;
-        let command = AcknowledgeBatch::new(owner.clone(), reference, batch_id.clone(), self.clock.now());
-        let batch = match self.execute_message(owner, &command).await {
+        let batch = match self
+            .execute_message_with_builder(owner, self.clock.now(), |now| {
+                AcknowledgeBatch::new(owner.clone(), reference.clone(), batch_id.clone(), now)
+            })
+            .await
+        {
             Ok(state) => state
                 .batches
                 .iter()
