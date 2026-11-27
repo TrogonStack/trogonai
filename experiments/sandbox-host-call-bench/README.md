@@ -20,10 +20,38 @@ boundary, not marshalling. The harness (`host/`) reports p50/p99/mean for:
   only), the copy a protocol wrapper pays per message,
 - for Hyperlight, snapshot and restore-to-clean.
 
-`hluk.sh` is a second, separate bench: a Python hello world as a Linux binary in a Hyperlight
-micro-VM through hyperlight-unikraft's `hluk` (first run, then restored from its snapshot), against
-native `python3` and `docker run`. It answers whether stateless Linux tool calls could leave the
-microVM tier.
+`hluk.sh` and `firecracker.sh` are a second, separate bench: whether stateless Linux tool calls
+could leave the microVM tier. They share `lib.sh` (row format, timing loops, a failure becomes a
+"failed" row) and run in one CI job, so their rows come from the same runner.
+
+`hluk.sh` runs Linux binaries in a Hyperlight micro-VM through hyperlight-unikraft's `hluk` (first
+run, which boots and saves the warm snapshot, then restored from it) against native and `docker run`,
+one table per workload. Each hluk sample is a whole `hluk run` process: CLI start, snapshot restore,
+running the script, exit.
+
+- Python `print("ok")`, as a `hluk init` project and through `--runtime python` (the two share one
+  snapshot, so the latter's "first run" is already a restore).
+- 21 standard-library imports (one list in `hluk.sh`): imported per run, and imported once by `warm_exec` before the
+  snapshot.
+- `import numpy, pandas` on the `agent` image, whose driver imports them before the snapshot;
+  native uses a venv. No Docker row: the slim image has no numpy.
+- Node.js `console.log("ok")`.
+- 8 concurrent Python hello worlds, 5 batches: per-run latency under that load and throughput
+  (barrier waits between batches included).
+
+`firecracker.sh` is the tier hluk would replace: Firecracker v1.17.0 with the kernel (6.1.155) and
+Ubuntu 24.04 rootfs that `trogon-sandbox-firecracker-worker/scripts/build-guest-rootfs.sh` pins,
+1 vCPU and 256 MiB (hluk's python size). Instead of systemd and `sandbox-actor-agent`, the guest's
+init is `firecracker/agent.py`, a Python vsock listener, so "ready" means Python is up; the worker's
+own boot is slower. The host reaches it over hybrid vsock (`CONNECT 5000`) as the worker does.
+`firecracker/drive.py` times, per sample with a new `firecracker` process, a total and its parts:
+
+- cold boot: process start to API socket, five configuration calls and `InstanceStart`, kernel boot
+  until the agent accepts on vsock, then a round trip in which the guest runs `python3 /hello.py`;
+- restore from a Full snapshot taken after both modes ran once (so the interpreter and python3's
+  pages are in guest memory): process start, `PUT /snapshot/load` with resume (memory file mapped,
+  not copied), vsock connect, then either `python3 hello.py` as a new guest process or the same code
+  `exec`'d in the warm agent interpreter, the closer match to hluk's restored driver.
 
 The Hyperlight sandbox uses the `trogon-sandbox-hyperlight-worker` defaults (256 KiB input buffer,
 1.25 MiB heap) and the same pinned `hyperlight-wasm` revision. The guest links with a 64 KiB stack and 128 KiB initial

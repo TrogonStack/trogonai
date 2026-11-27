@@ -3,6 +3,7 @@
 
 runs=${RUNS:-30}
 lib_tmp=$(mktemp -d)
+trap 'rm -rf "$lib_tmp"' EXIT
 
 table_header() { # title
   printf '\n#### %s\n\n| host | metric | n | p50 | p99 | mean |\n|---|---|---|---|---|---|\n' "$1"
@@ -59,10 +60,10 @@ parallel_series() { # host metric cmd...
     wait
   done
   end=${EPOCHREALTIME/./}
-  local total=$((par_n * par_rounds)) done
-  done=$(find "$dir" -name 't.*' | wc -l)
-  if [ "$done" -ne "$total" ]; then
-    failed "$host" "$metric, $par_n concurrent" "$done/$total ok: $(cat "$dir"/err.* | head -c 400)"
+  local total=$((par_n * par_rounds)) ok
+  ok=$(find "$dir" -name 't.*' | wc -l)
+  if [ "$ok" -ne "$total" ]; then
+    failed "$host" "$metric, $par_n concurrent" "$ok/$total ok: $(cat "$dir"/err.* | head -c 400)"
     return
   fi
   row "$host" "$metric, per run with $par_n concurrent" $(cat "$dir"/t.*)

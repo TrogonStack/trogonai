@@ -25,25 +25,31 @@ fetch() { # url sha256 out
 }
 
 # The guest is the CI rootfs with agent.py as init and the hello world, as a read-only ext4 drive.
-setup() {
+setup() (
+  set -e
   fetch "https://github.com/firecracker-microvm/firecracker/releases/download/$fc_version/firecracker-$fc_version-x86_64.tgz" \
-    "$fc_sha256" fc.tgz || return 1
-  tar -xzf fc.tgz && mv "release-$fc_version-x86_64/firecracker-$fc_version-x86_64" firecracker || return 1
-  fetch "$ci_base/vmlinux-6.1.155" "$kernel_sha256" vmlinux || return 1
-  fetch "$ci_base/ubuntu-24.04.squashfs" "$squashfs_sha256" rootfs.squashfs || return 1
-  command -v unsquashfs >/dev/null || sudo apt-get install -y -q squashfs-tools >&2 || return 1
-  sudo unsquashfs -q -d root rootfs.squashfs >&2 || return 1
-  [ -x root/usr/bin/python3 ] || { echo "the CI rootfs has no /usr/bin/python3" >&2; return 1; }
-  sudo install -m 0755 "$here/firecracker/agent.py" root/fc-agent &&
-    echo 'print("ok")' | sudo tee root/hello.py >/dev/null &&
-    truncate -s 2G rootfs.ext4 &&
-    sudo mkfs.ext4 -q -F -d root rootfs.ext4 >&2 &&
-    sudo chown "$(id -u)" rootfs.ext4 && sudo rm -rf root rootfs.squashfs
-}
+    "$fc_sha256" fc.tgz &
+  fetch "$ci_base/vmlinux-6.1.155" "$kernel_sha256" vmlinux &
+  fetch "$ci_base/ubuntu-24.04.squashfs" "$squashfs_sha256" rootfs.squashfs &
+  for job in $(jobs -p); do wait "$job"; done
+  tar -xzf fc.tgz
+  mv "release-$fc_version-x86_64/firecracker-$fc_version-x86_64" firecracker
+  command -v unsquashfs >/dev/null || sudo apt-get install -y -q squashfs-tools
+  sudo unsquashfs -q -d root rootfs.squashfs
+  [ -x root/usr/bin/python3 ] || { echo "the CI rootfs has no /usr/bin/python3"; exit 1; }
+  sudo install -m 0755 "$here/firecracker/agent.py" root/fc-agent
+  echo 'print("ok")' | sudo tee root/hello.py >/dev/null
+  truncate -s 2G rootfs.ext4
+  sudo mkfs.ext4 -q -F -d root rootfs.ext4
+  sudo chown "$(id -u)" rootfs.ext4
+  sudo rm -rf root rootfs.squashfs
+)
 
 table_header "Python hello world in Firecracker ($fc_version, 1 vCPU, 256 MiB, kernel 6.1.155, Ubuntu 24.04 rootfs)"
-if ! setup >&2 2>"$lib_tmp/setup.err"; then
-  failed "$host" "setup" "$(tail -c 300 "$lib_tmp/setup.err")"
+# Not `if ! setup`: a condition would switch off setup's `set -e`.
+setup >&2
+if [ $? -ne 0 ]; then
+  failed "$host" "setup" "see job log"
   exit 0
 fi
 "$work/firecracker" --version >&2
