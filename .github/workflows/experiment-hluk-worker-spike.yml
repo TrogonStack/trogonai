@@ -1,0 +1,52 @@
+# Experiment: builds trogon-sandbox-hluk-worker and measures it on a KVM-capable GitHub runner.
+# Triggers only on pushes to its own branch and is not meant to merge, so it calls the
+# experiment's script directly rather than a mise task.
+name: Experiment hluk worker spike
+
+on:
+  push:
+    branches: [experiments/hluk-worker-spike]
+
+permissions:
+  contents: read
+
+# `bash` (not the default shell) adds pipefail, so a failing step is not hidden by `| tee`.
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+  CARGO_NET_RETRY: '10'
+  CARGO_PROFILE_RELEASE_DEBUG: '0'
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Open /dev/kvm to the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: hluk CLI semantics
+        run: experiments/hluk-worker-spike/run.sh probe | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          install-args: rust github:nats-io/nats-server
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-hluk-worker-spike
+          workspaces: rsworkspace -> target
+      - name: Build
+        run: experiments/hluk-worker-spike/run.sh build
+      - name: Measure
+        run: experiments/hluk-worker-spike/run.sh measure | tee -a "$GITHUB_STEP_SUMMARY"

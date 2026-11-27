@@ -179,3 +179,30 @@ async fn subprocess_worker_conforms() -> Result<(), Box<dyn Error>> {
     assert_conforms(&target).await?;
     Ok(())
 }
+
+/// Spike: prints every check's verdict before asserting, so one run shows the whole fit of the hluk worker.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a running hluk worker on a KVM host and SANDBOX_CONFORMANCE_NATS_URL, see experiments/hluk-worker-spike"]
+async fn hluk_worker_conforms() -> Result<(), Box<dyn Error>> {
+    let mut target = external_target(ProviderKind::Hluk).await?;
+    // The first lease pulls the runtime image and saves its warm snapshot.
+    target.timeout = Duration::from_secs(120);
+    target.strict_unknown_command_exit = true;
+    target.checkpoint_running_unsupported = true;
+    target.redispatch_idempotent = true;
+    target.denied_connect_fails = true;
+    let failures = run_suite(&target).await;
+    let mut report = String::new();
+    for (name, _) in checks_for_target(&target) {
+        match failures.iter().find(|failure| failure.name == name) {
+            Some(failure) => {
+                let why = failure.failure.to_string().replace(['\n', '|'], " ");
+                report.push_str(&format!("| {name} | fail | {why} |\n"));
+            }
+            None => report.push_str(&format!("| {name} | pass | |\n")),
+        }
+    }
+    std::io::Write::write_all(&mut std::io::stdout(), report.as_bytes())?;
+    assert!(failures.is_empty(), "{} checks failed", failures.len());
+    Ok(())
+}

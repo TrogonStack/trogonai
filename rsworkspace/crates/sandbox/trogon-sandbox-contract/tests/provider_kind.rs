@@ -22,6 +22,7 @@ fn every_provider_kind_preserves_its_json_spelling() -> Result<(), Box<dyn std::
         (ProviderKind::E2b, "e2b"),
         (ProviderKind::Vercel, "vercel"),
         (ProviderKind::Space, "space"),
+        (ProviderKind::Hluk, "hluk"),
         (ProviderKind::Mock, "mock"),
     ];
     let mut unique = HashSet::new();
@@ -101,6 +102,7 @@ fn provider_and_tier_mappings_are_bidirectional() {
                 ProviderKind::E2b,
                 ProviderKind::Vercel,
                 ProviderKind::Space,
+                ProviderKind::Hluk,
             ][..],
         ),
         (

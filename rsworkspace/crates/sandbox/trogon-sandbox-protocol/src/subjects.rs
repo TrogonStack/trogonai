@@ -106,6 +106,7 @@ pub fn provider_token(kind: ProviderKind) -> &'static str {
         ProviderKind::E2b => "e2b",
         ProviderKind::Vercel => "vercel",
         ProviderKind::Space => "space",
+        ProviderKind::Hluk => "hluk",
         ProviderKind::Mock => "mock",
     }
 }
@@ -751,6 +752,7 @@ pub fn parse_provider_kind(s: &str) -> Result<ProviderKind, UnknownProviderKindE
         "e2b" | "e2b-dev" => Ok(ProviderKind::E2b),
         "vercel" | "vercel-sandbox" => Ok(ProviderKind::Vercel),
         "space" | "perplexity-space" => Ok(ProviderKind::Space),
+        "hluk" => Ok(ProviderKind::Hluk),
         "mock" => Ok(ProviderKind::Mock),
         other => Err(UnknownProviderKindError::new(other)),
     }

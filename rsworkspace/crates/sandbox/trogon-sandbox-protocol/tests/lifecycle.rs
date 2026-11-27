@@ -85,6 +85,7 @@ fn restore_snapshot_is_only_advertised_by_snapshot_restoring_providers() {
         ProviderKind::Hyperlight,
         ProviderKind::Substrate,
         ProviderKind::Firecracker,
+        ProviderKind::Hluk,
     ] {
         assert!(
             phases_supported_by(kind).contains(&SandboxPhase::RestoreSnapshot),

@@ -37,6 +37,13 @@ pub fn phases_supported_by(provider: ProviderKind) -> &'static [SandboxPhase] {
             SandboxPhase::Snapshotting,
             SandboxPhase::Reclaim,
         ],
+        ProviderKind::Hluk => &[
+            SandboxPhase::Allocate,
+            SandboxPhase::PrepareWorkspace,
+            SandboxPhase::RestoreSnapshot,
+            SandboxPhase::Execute,
+            SandboxPhase::Reclaim,
+        ],
         ProviderKind::V8Wasm => &[
             SandboxPhase::Allocate,
             SandboxPhase::BootRuntime,

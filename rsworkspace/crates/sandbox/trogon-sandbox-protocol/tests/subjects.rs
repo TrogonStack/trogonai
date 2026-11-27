@@ -303,6 +303,7 @@ fn provider_tokens_are_distinct_and_cover_every_kind() {
         (ProviderKind::E2b, "e2b"),
         (ProviderKind::Vercel, "vercel"),
         (ProviderKind::Space, "space"),
+        (ProviderKind::Hluk, "hluk"),
         (ProviderKind::Mock, "mock"),
     ];
     for (kind, token) in kinds {

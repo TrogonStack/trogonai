@@ -28,6 +28,7 @@ const PROVIDER_KINDS: ProviderKind[] = [
   'azure_container_apps',
   'substrate',
   'firecracker',
+  'hluk',
   'mock',
 ];
 

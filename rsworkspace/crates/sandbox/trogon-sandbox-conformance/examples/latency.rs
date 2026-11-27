@@ -16,7 +16,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use trogon_nats::test_support::CoreTestServer;
-use trogon_sandbox_conformance::{Target, measure_latency, render_latency, snapshot_push_target};
+use trogon_sandbox_conformance::{Target, measure_latency, percentile, render_latency, snapshot_push_target};
 use trogon_sandbox_contract::ProviderKind;
 use trogon_sandbox_memory_worker::{MemoryWorker, MemoryWorkerConfig};
 
@@ -121,7 +121,15 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
         .as_deref()
         .map(|registry| snapshot_push_target(registry, &args.repository));
     let report = measure_latency(&target, args.iterations, push.as_ref()).await;
-    writeln!(std::io::stdout(), "{}", render_latency(&[report]))?;
+    writeln!(std::io::stdout(), "{}", render_latency(std::slice::from_ref(&report)))?;
+    // The tail the table leaves out, for comparisons that need it.
+    for step in &report.steps {
+        let mut sorted = step.samples.clone();
+        sorted.sort();
+        if let Some(p99) = percentile(&sorted, 99.0) {
+            writeln!(std::io::stdout(), "p99 {}: {:.1} ms", step.step, p99.as_secs_f64() * 1000.0)?;
+        }
+    }
     if let Some(worker) = worker {
         worker.shutdown().await;
     }

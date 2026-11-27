@@ -19,6 +19,7 @@ export const providerKindSchema = z.enum([
   'azure_container_apps',
   'substrate',
   'firecracker',
+  'hluk',
   'mock',
 ]);
 

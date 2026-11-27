@@ -169,5 +169,6 @@ pub(crate) const PROVIDER_KINDS: &[ProviderKind] = &[
     ProviderKind::E2b,
     ProviderKind::Vercel,
     ProviderKind::Space,
+    ProviderKind::Hluk,
     ProviderKind::Mock,
 ];

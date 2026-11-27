@@ -20,6 +20,8 @@ pub enum ProviderKind {
     E2b,
     Vercel,
     Space,
+    /// hyperlight-unikraft's `hluk`: unmodified Linux binaries in a Hyperlight micro-VM restored from a snapshot.
+    Hluk,
     Mock,
 }
 
@@ -54,6 +56,7 @@ impl IsolationTier {
                 ProviderKind::E2b,
                 ProviderKind::Vercel,
                 ProviderKind::Space,
+                ProviderKind::Hluk,
             ],
             Self::FullVm => &[ProviderKind::KubeVirt, ProviderKind::Proxmox],
             Self::WasmMicroVm => &[ProviderKind::V8Wasm, ProviderKind::Hyperlight],
@@ -71,7 +74,7 @@ impl ProviderKind {
             Self::AzureContainerApps => &[IsolationTier::MicroVm],
             Self::Substrate => &[IsolationTier::UserSpaceKernel, IsolationTier::MicroVm],
             Self::Firecracker => &[IsolationTier::MicroVm],
-            Self::Fly | Self::E2b | Self::Vercel | Self::Space => &[IsolationTier::MicroVm],
+            Self::Fly | Self::E2b | Self::Vercel | Self::Space | Self::Hluk => &[IsolationTier::MicroVm],
             Self::Proxmox => &[IsolationTier::MicroVm, IsolationTier::FullVm],
             Self::KubeVirt => &[IsolationTier::FullVm],
             Self::Hyperlight | Self::V8Wasm => &[IsolationTier::WasmMicroVm],
