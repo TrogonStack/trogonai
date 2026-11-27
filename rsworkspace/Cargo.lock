@@ -10697,6 +10697,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-lsp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-sandbox-client",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-protocol",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-sandbox-memory-worker"
 version = "0.1.0"
 dependencies = [
