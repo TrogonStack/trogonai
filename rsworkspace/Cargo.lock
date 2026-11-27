@@ -10029,6 +10029,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-conformance"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "base64 0.23.1",
+ "bytes",
+ "futures",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-protocol",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-sandbox-contract"
 version = "0.1.0"
 dependencies = [

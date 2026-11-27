@@ -65,6 +65,7 @@ trogon-sandbox-aca-worker = { path = "crates/sandbox/trogon-sandbox-aca-worker" 
 trogon-sandbox-actor-agent = { path = "crates/sandbox/trogon-sandbox-actor-agent" }
 trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-client = { path = "crates/sandbox/trogon-sandbox-client" }
+trogon-sandbox-conformance = { path = "crates/sandbox/trogon-sandbox-conformance" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-sandbox-cosign = { path = "crates/sandbox/trogon-sandbox-cosign" }
 trogon-sandbox-credential-broker = { path = "crates/sandbox/trogon-sandbox-credential-broker" }
