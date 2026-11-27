@@ -20,13 +20,13 @@ impl Fake {
     fn new(script: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let dir = tempfile::tempdir()?;
         let exe = dir.path().join("fence-helper");
-        fs::write(
-            &exe,
-            format!(
-                "#!/bin/sh\n[ \"$1\" = __probe ] && exit 0\nprintf '%s\\n' \"$@\" > \"{d}/argv\"\ncat > \"{d}/stdin\"\nshift\n{script}\n",
-                d = dir.path().display()
-            ),
-        )?;
+        let mut body = format!(
+            "#!/bin/sh\n[ \"$1\" = __probe ] && exit 0\nprintf '%s\\n' \"$@\" > \"{d}/argv\"\ncat > \"{d}/stdin\"\nshift\n",
+            d = dir.path().display()
+        );
+        body.push_str(script);
+        body.push('\n');
+        fs::write(&exe, body)?;
         fs::set_permissions(&exe, fs::Permissions::from_mode(0o755))?;
         wait_until_executable(&exe)?;
         let fence = WindowsFence::new(FenceHelper::new(&exe)?);

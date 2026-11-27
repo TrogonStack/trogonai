@@ -1,8 +1,7 @@
+use crate::constants::HOLDERS_SHOWN;
 use crate::exit_code::ExitCode;
 use crate::windows_sandbox_error::WindowsSandboxError;
 use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;
-
-const HOLDERS_SHOWN: usize = 8;
 
 fn describe_holder(h: &serde_json::Value) -> String {
     let field = |k: &str| match h.get(k) {

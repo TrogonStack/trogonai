@@ -11,6 +11,8 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::constants::DISPATCH_ARG1;
+use crate::constants::OUTPUT_CHANNEL_CAPACITY;
+use crate::constants::POLL;
 use crate::refusal::refusal_beside_others;
 use crate::run_output::RunOutput;
 use crate::windows_sandbox_error::WindowsSandboxError;
@@ -19,8 +21,7 @@ use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;
 /// Keeps the helper from opening a console window of its own.
 #[cfg(windows)]
 fn without_window(command: &mut Command) {
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    command.creation_flags(CREATE_NO_WINDOW);
+    command.creation_flags(crate::constants::CREATE_NO_WINDOW);
 }
 
 #[cfg(not(windows))]
@@ -33,8 +34,6 @@ fn spawn_failed(subcommand: &str, error: &std::io::Error) -> WindowsSandboxError
         subcommand,
     )
 }
-
-const POLL: Duration = Duration::from_millis(20);
 
 enum Chunk {
     Stdout(String),
@@ -125,7 +124,7 @@ impl FenceHelper {
                 let _ = pipe.write_all(&bytes);
             });
         }
-        let (tx, rx) = mpsc::channel::<Chunk>();
+        let (tx, rx) = mpsc::sync_channel::<Chunk>(OUTPUT_CHANNEL_CAPACITY);
         let _ = child.stdout.take().map(|mut out| {
             let tx = tx.clone();
             thread::spawn(move || {

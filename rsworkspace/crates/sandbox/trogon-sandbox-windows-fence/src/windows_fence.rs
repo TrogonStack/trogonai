@@ -3,9 +3,14 @@ use crate::sublayer_guid::SublayerGuid;
 use std::path::Path;
 use std::time::Duration;
 
+use trogon_std::env::ReadEnv;
+
 use crate::constants::DEFAULT_PROXY_PORT_RANGE;
+use crate::constants::DEFAULT_TIMEOUT;
 use crate::constants::INSTALL_TIMEOUT_MS;
 use crate::constants::PROFILE_GRANT_TIMEOUT_MS;
+use crate::constants::TRUST_CA_TIMEOUT;
+use crate::constants::VERIFY_TIMEOUT;
 use crate::exit_code::ExitCode;
 use crate::fence_helper::FenceHelper;
 use crate::install_args::install_args;
@@ -35,20 +40,14 @@ use crate::wfp_verify_result::WfpVerifyResult;
 use crate::windows_sandbox_error::WindowsSandboxError;
 use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
-
-const VERIFY_TIMEOUT: Duration = Duration::from_secs(30);
-
-const TRUST_CA_TIMEOUT: Duration = Duration::from_secs(60);
-
 fn millis(ms: u64) -> Duration {
     Duration::from_millis(ms)
 }
 
-fn home_display() -> String {
+fn home_display(env: &impl ReadEnv) -> String {
     ["USERPROFILE", "HOME"]
         .iter()
-        .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+        .find_map(|k| env.var(k).ok().filter(|v| !v.is_empty()))
         .unwrap_or_else(|| "your user profile".to_string())
 }
 
@@ -87,6 +86,7 @@ impl WindowsFence {
         &self,
         opts: &InstallOptions,
         progress: &mut dyn InstallProgress,
+        env: &impl ReadEnv,
     ) -> Result<InstallOutcome, WindowsSandboxError> {
         let args = install_args(opts);
         let timeout = millis(opts.timeout_ms.unwrap_or(INSTALL_TIMEOUT_MS));
@@ -102,7 +102,7 @@ impl WindowsFence {
                 profile_grant: InstallProfileGrant::Skipped { reason },
             });
         }
-        progress.profile_grant_start(&profile_grant_notice(&home_display()));
+        progress.profile_grant_start(&profile_grant_notice(&home_display(env)));
         let result = self
             .profile_grant(
                 &opts.profile_exclude,

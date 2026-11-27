@@ -1,9 +1,5 @@
 use serde::Deserialize;
 
-/// The version of `fence-helper profile status`'s record format this crate reads.
-/// Any other version is not read: its lists decide what may be granted.
-pub(crate) const RECORD_VERSION: u64 = 1;
-
 #[derive(Deserialize)]
 pub(crate) struct ProfileReadStatusWire {
     pub(crate) state: Option<String>,

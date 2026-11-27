@@ -1,13 +1,10 @@
-use std::time::Duration;
-
+use crate::constants::STATUS_TIMEOUT;
 use crate::profile_read_status::ProfileReadStatus;
 use crate::profile_read_status_parse::parse_profile_read_status;
 use crate::profile_read_status_wire::ProfileReadStatusWire;
 use crate::windows_fence::WindowsFence;
 use crate::windows_sandbox_error::WindowsSandboxError;
 use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;
-
-const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl WindowsFence {
     /// `fence-helper profile status`: the recorded profile read grant. A grant or

@@ -6,18 +6,14 @@ use crate::acl_revoke::AclRevoke;
 use crate::acl_revoke::flatten_restore;
 use crate::acl_revoke::judge_revoke;
 use crate::acl_revoke::path_is_gone;
+use crate::constants::GRANT_TIMEOUT;
+use crate::constants::PARTIAL;
+use crate::constants::RELEASE_TIMEOUT;
+use crate::constants::STAMP_TIMEOUT;
 use crate::fs_access_set::FsAccessSet;
 use crate::windows_fence::WindowsFence;
 use crate::windows_sandbox_error::WindowsSandboxError;
 use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;
-
-const GRANT_TIMEOUT: Duration = Duration::from_secs(600);
-
-const STAMP_TIMEOUT: Duration = Duration::from_secs(60);
-
-const RELEASE_TIMEOUT: Duration = Duration::from_secs(60);
-
-const PARTIAL: i32 = 2;
 
 fn holder_args(verb: &str, holder_pid: u32, sandbox_user_sid: &str) -> Vec<String> {
     vec![

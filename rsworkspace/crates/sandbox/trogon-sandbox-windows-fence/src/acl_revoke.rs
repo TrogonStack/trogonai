@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::path::Path;
 
 use crate::acl_outcome::AclOutcome;
+use crate::constants::RELEASED;
 
 /// What a release of the session's grants came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,16 +15,6 @@ pub struct AclRevoke {
     pub pending: Vec<String>,
     pub detail: Option<String>,
 }
-
-const RELEASED: [&str; 7] = [
-    "revoked",
-    "stillHeld",
-    "downgraded",
-    "relocated",
-    "noRow",
-    "gone",
-    "missing",
-];
 
 fn released(outcome: &AclOutcome, gone: &dyn Fn(&str) -> bool) -> bool {
     if !RELEASED.contains(&outcome.status.as_str()) {

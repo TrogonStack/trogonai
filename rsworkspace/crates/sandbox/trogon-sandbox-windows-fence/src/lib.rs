@@ -66,6 +66,7 @@ mod profile_read_status_wire;
 mod profile_read_var;
 mod proxy_port_range;
 mod proxy_port_range_error;
+mod proxy_port_range_value;
 mod rank_fs_access;
 mod refusal;
 mod relation;

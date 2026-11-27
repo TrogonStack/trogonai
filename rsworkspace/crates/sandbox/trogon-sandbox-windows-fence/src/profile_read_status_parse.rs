@@ -1,3 +1,4 @@
+use crate::constants::RECORD_VERSION;
 use crate::profile_exclusions::ProfileExclusions;
 use crate::profile_grant_counts::ProfileGrantCounts;
 use crate::profile_grant_item::items;
@@ -6,7 +7,6 @@ use crate::profile_grant_path_kind::ProfileGrantPathKind;
 use crate::profile_read_state::ProfileReadState;
 use crate::profile_read_status::ProfileReadStatus;
 use crate::profile_read_status_wire::ProfileReadStatusWire;
-use crate::profile_read_status_wire::RECORD_VERSION;
 use crate::profile_read_var::ProfileReadVar;
 use crate::windows_sandbox_error::WindowsSandboxError;
 use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;

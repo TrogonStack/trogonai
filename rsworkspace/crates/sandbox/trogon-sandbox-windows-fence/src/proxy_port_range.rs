@@ -1,21 +1,11 @@
-use std::fmt;
 use std::io;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
 use crate::constants::DEFAULT_PROXY_PORT_RANGE;
+use crate::constants::MAX_WIDTH;
 use crate::proxy_port_range_error::ProxyPortRangeError;
-
-/// The widest range fence-helper accepts, in ports beyond the first.
-const MAX_WIDTH: u16 = 64;
-
-/// The loopback ports the fence permits the sandbox account to reach, which
-/// is where the lease proxy listens on Windows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ProxyPortRange {
-    low: u16,
-    high: u16,
-}
+pub use crate::proxy_port_range_value::ProxyPortRange;
 
 impl ProxyPortRange {
     pub fn new(low: u16, high: u16) -> Result<Self, ProxyPortRangeError> {
@@ -32,22 +22,6 @@ impl ProxyPortRange {
             });
         }
         Ok(Self { low, high })
-    }
-
-    pub(crate) const fn reported(low: u16, high: u16) -> Self {
-        Self { low, high }
-    }
-
-    pub fn low(&self) -> u16 {
-        self.low
-    }
-
-    pub fn high(&self) -> u16 {
-        self.high
-    }
-
-    pub fn contains(&self, port: u16) -> bool {
-        (self.low..=self.high).contains(&port)
     }
 
     /// Binds a loopback listener on the first free port of the range and
@@ -84,12 +58,6 @@ impl ProxyPortRange {
 impl Default for ProxyPortRange {
     fn default() -> Self {
         DEFAULT_PROXY_PORT_RANGE
-    }
-}
-
-impl fmt::Display for ProxyPortRange {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}-{}", self.low, self.high)
     }
 }
 

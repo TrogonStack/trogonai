@@ -1,12 +1,9 @@
 use crate::bin_shell::BinShell;
+use crate::constants::ARGV_BUDGET;
 use crate::constants::WINDOWS_LOOPBACK_NO_PROXY;
 use crate::windows_env::merge_windows_env;
 use crate::windows_sandbox_error::WindowsSandboxError;
 use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;
-
-/// CreateProcessW caps the command line at 32 767 characters; the estimate
-/// does not model quoting overhead, so the budget leaves headroom.
-const ARGV_BUDGET: usize = 30_000;
 
 /// Everything the argv of one `fence-helper exec` launch is built from.
 #[derive(Debug, Clone)]

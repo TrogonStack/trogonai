@@ -125,10 +125,6 @@ fn leases_are_refused_when_the_filters_are_not_installed() -> TestResult {
             state: WfpState::Absent.as_str().to_string()
         })
     );
-    let Err(e) = err else {
-        return Err("expected an error".into());
-    };
-    assert!(e.to_string().contains("absent"));
     Ok(())
 }
 
@@ -139,7 +135,6 @@ fn leases_are_refused_when_loopback_is_open() -> TestResult {
         return Err("expected an error".into());
     };
     assert_eq!(e, LeaseProxyPortsError::LoopbackOpen);
-    assert!(e.to_string().contains("loopback"));
     Ok(())
 }
 

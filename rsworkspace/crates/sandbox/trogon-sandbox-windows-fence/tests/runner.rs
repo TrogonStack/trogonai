@@ -5,6 +5,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
+use trogon_std::env::InMemoryEnv;
+
 use trogon_sandbox_windows_fence::{
     DEFAULT_PROXY_PORT_RANGE, FenceHelper, InstallOptions, InstallOutcome, InstallProfileGrant, InstallProgress,
     NoProgress, SublayerGuid, UninstallOptions, UninstallOutcome, VerifyOptions, WindowsFence,
@@ -139,7 +141,9 @@ fn a_timeout_of_zero_is_no_limit() -> TestResult {
 fn install_applies_profile_grant_and_streams_progress() -> TestResult {
     let fake = Fake::new(&script_for_install(0))?;
     let mut rec = Recorder::default();
-    let outcome = fake.fence.install(&InstallOptions::default(), &mut rec)?;
+    let outcome = fake
+        .fence
+        .install(&InstallOptions::default(), &mut rec, &InMemoryEnv::new())?;
     let InstallOutcome::Installed { status, profile_grant } = outcome else {
         return Err("expected an install".into());
     };
@@ -158,7 +162,7 @@ fn install_can_skip_the_grant() -> TestResult {
         skip_profile_grant: true,
         ..InstallOptions::default()
     };
-    let outcome = fake.fence.install(&opts, &mut NoProgress)?;
+    let outcome = fake.fence.install(&opts, &mut NoProgress, &InMemoryEnv::new())?;
     assert!(matches!(
         outcome,
         InstallOutcome::Installed { profile_grant: InstallProfileGrant::Skipped { ref reason }, .. }
@@ -171,7 +175,9 @@ fn install_can_skip_the_grant() -> TestResult {
 #[test]
 fn install_cancelled_at_uac() -> TestResult {
     let fake = Fake::new(&script_for_install(10))?;
-    let outcome = fake.fence.install(&InstallOptions::default(), &mut NoProgress)?;
+    let outcome = fake
+        .fence
+        .install(&InstallOptions::default(), &mut NoProgress, &InMemoryEnv::new())?;
     assert_eq!(outcome, InstallOutcome::Cancelled);
     Ok(())
 }
@@ -179,7 +185,10 @@ fn install_cancelled_at_uac() -> TestResult {
 #[test]
 fn install_failure_exit_is_mapped() -> TestResult {
     let fake = Fake::new(&script_for_install(13))?;
-    let Err(e) = fake.fence.install(&InstallOptions::default(), &mut NoProgress) else {
+    let Err(e) = fake
+        .fence
+        .install(&InstallOptions::default(), &mut NoProgress, &InMemoryEnv::new())
+    else {
         return Err("expected an error".into());
     };
     assert_eq!(e.code(), Code::InstallConfigConflict);
@@ -194,7 +203,7 @@ fn install_timeout_is_remapped() -> TestResult {
         timeout_ms: Some(150),
         ..InstallOptions::default()
     };
-    let Err(e) = fake.fence.install(&opts, &mut NoProgress) else {
+    let Err(e) = fake.fence.install(&opts, &mut NoProgress, &InMemoryEnv::new()) else {
         return Err("expected an error".into());
     };
     assert_eq!(e.code(), Code::InstallTimeout);
@@ -207,7 +216,10 @@ fn profile_grant_failure_keeps_install_message() -> TestResult {
         "case \"$1\" in\n install) exit 0;;\n status) echo '{STATUS_JSON}';;\n profile) echo 'denied' >&2; exit 1;;\nesac"
     );
     let fake = Fake::new(&script)?;
-    let Err(e) = fake.fence.install(&InstallOptions::default(), &mut NoProgress) else {
+    let Err(e) = fake
+        .fence
+        .install(&InstallOptions::default(), &mut NoProgress, &InMemoryEnv::new())
+    else {
         return Err("expected an error".into());
     };
     assert_eq!(e.code(), Code::ProfileGrantFailed);

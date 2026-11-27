@@ -5,11 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use crate::constants::LISTENER_BIND_ATTEMPTS;
 use crate::proxy_port_range::ProxyPortRange;
 use crate::windows_sandbox_error::WindowsSandboxError;
 use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;
-
-const LISTENER_BIND_ATTEMPTS: usize = 5;
 
 /// A bound, non-blocking loopback listener whose port is outside `range`.
 fn candidate(range: ProxyPortRange) -> Option<(TcpListener, SocketAddr)> {

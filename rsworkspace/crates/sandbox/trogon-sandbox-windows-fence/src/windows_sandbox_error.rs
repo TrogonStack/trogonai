@@ -1,10 +1,9 @@
-use std::fmt;
-
 use crate::windows_sandbox_error_code::WindowsSandboxErrorCode;
 
 /// An error of the Windows sandbox backend. `subcommand` names the first
 /// `fence-helper` argument on errors raised where `fence-helper` is spawned.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct WindowsSandboxError {
     code: WindowsSandboxErrorCode,
     message: String,
@@ -71,11 +70,3 @@ impl WindowsSandboxError {
         self.subcommand.as_deref()
     }
 }
-
-impl fmt::Display for WindowsSandboxError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for WindowsSandboxError {}

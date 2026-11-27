@@ -2,7 +2,7 @@
 //! `/`-separated. A drive path `C:\a\b` is `/C:/a/b`, and a network path
 //! `\\server\share\a` is `/UNC/server/share/a`.
 
-const UNC_ROOT: &str = "UNC";
+use crate::constants::UNC_ROOT;
 
 fn is_separator(ch: char) -> bool {
     ch == '/' || ch == '\\'

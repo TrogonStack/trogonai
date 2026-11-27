@@ -1,14 +1,4 @@
-/// The one spelling each proxy variable has in a sandboxed command's
-/// environment.
-const PROXY_NAME_SPELLING: [&str; 7] = [
-    "http_proxy",
-    "https_proxy",
-    "ftp_proxy",
-    "all_proxy",
-    "no_proxy",
-    "grpc_proxy",
-    "RSYNC_PROXY",
-];
+use crate::constants::PROXY_NAME_SPELLING;
 
 /// Merge environment layers ignoring case, as Windows reads names: a later
 /// layer's entry replaces an earlier one, name and value, keeping the place of

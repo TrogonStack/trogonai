@@ -1,7 +1,5 @@
+use crate::constants::SERVICE_ACCOUNT_SIDS;
 use crate::sandbox_user_status::SandboxUserStatus;
-
-/// LocalSystem, LocalService, NetworkService: accounts no one runs sessions as.
-const SERVICE_ACCOUNT_SIDS: [&str; 3] = ["S-1-5-18", "S-1-5-19", "S-1-5-20"];
 
 /// Why an install leaves the profile read grant unapplied (`None`: it applies
 /// it): asked to skip, a service account, or not running as the owner of the
