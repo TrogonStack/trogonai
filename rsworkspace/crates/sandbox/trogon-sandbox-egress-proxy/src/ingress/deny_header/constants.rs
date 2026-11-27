@@ -1,0 +1,9 @@
+pub const NAME: &str = "X-Proxy-Error";
+pub const UNAUTHENTICATED: &str = "unauthenticated";
+pub const BLOCKED: &str = "blocked-by-allowlist";
+pub const OPAQUE_TUNNEL: &str = "blocked-by-egress-proxy";
+pub const ADDRESS_DENIED: &str = "address-denied";
+pub const BAD_REQUEST: &str = "bad-request";
+pub const UNREACHABLE: &str = "upstream-unreachable";
+pub const BAD_UPSTREAM: &str = "invalid-upstream-response";
+pub const TOO_MANY_TUNNELS: &str = "too-many-tunnels";
