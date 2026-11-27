@@ -1,0 +1,32 @@
+{
+  "name": "@trogonai/sandbox-examples",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runnable examples for @trogonai/sandbox-ws-client.",
+  "license": "Apache-2.0",
+  "author": "TrogonAI",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "smoke": "SANDBOX_EXAMPLE_MODEL=scripted SANDBOX_PROVIDER=memory node run-typescript.mjs examples/multi-provider/index.ts && SANDBOX_EXAMPLE_MODEL=scripted SANDBOX_PROVIDER=memory node run-typescript.mjs examples/coding-agent/index.ts \"Greet the world\" --repo https://example.invalid/demo.git",
+    "coding-agent": "node run-typescript.mjs examples/coding-agent/index.ts",
+    "test:coding-agent": "node run-typescript.mjs --test examples/coding-agent/*.test.ts",
+    "test:gateway:coding-agent": "node run-typescript.mjs --test examples/coding-agent/gateway-smoke.ts",
+    "test": "node run-typescript.mjs --test examples/coding-agent/*.test.ts",
+    "lint": "oxlint --deny-warnings ."
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "2.0.81",
+    "@trogonai/sandbox-agent-tools": "workspace:*",
+    "@trogonai/sandbox-ws-client": "workspace:*",
+    "ai": "6.0.300",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=22.7"
+  }
+}

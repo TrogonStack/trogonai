@@ -1,0 +1,74 @@
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
+load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm_tsworkspace//:defs.bzl", "npm_link_all_packages")
+load("@npm_tsworkspace//tsworkspace:oxlint/package_json.bzl", oxlint_bin = "bin")
+
+npm_link_all_packages(name = "node_modules")
+
+js_library(name = "package_metadata", srcs = ["package.json"])
+
+filegroup(name = "sources", srcs = glob(["examples/**/*.ts"], exclude = ["examples/**/*.test.ts"]))
+filegroup(name = "unit_tests", srcs = glob(["examples/**/*.test.ts"]))
+
+ts_project(
+    name = "typecheck",
+    srcs = [":sources", ":unit_tests"],
+    no_emit = True,
+    tsconfig = "tsconfig.json",
+    deps = [":node_modules", ":package_metadata"],
+)
+
+js_test(
+    name = "test",
+    args = [
+        "--test",
+        "examples/coding-agent/cli.test.ts",
+        "examples/coding-agent/git-fixture.test.ts",
+        "examples/coding-agent/model.test.ts",
+    ],
+    chdir = package_name(),
+    data = ["package.json", ":node_modules", ":sources", ":unit_tests"],
+    entry_point = "run-typescript.mjs",
+)
+
+js_test(
+    name = "smoke_test",
+    args = ["examples/multi-provider/index.ts"],
+    chdir = package_name(),
+    data = ["package.json", ":node_modules", ":sources"],
+    entry_point = "run-typescript.mjs",
+    env = {
+        "SANDBOX_EXAMPLE_MODEL": "scripted",
+        "SANDBOX_PROVIDER": "memory",
+    },
+)
+
+js_test(
+    name = "coding_agent_smoke_test",
+    args = [
+        "examples/coding-agent/index.ts",
+        "Greet the world",
+        "--repo",
+        "https://example.invalid/demo.git",
+    ],
+    chdir = package_name(),
+    data = ["package.json", ":node_modules", ":sources"],
+    entry_point = "run-typescript.mjs",
+    env = {
+        "SANDBOX_EXAMPLE_MODEL": "scripted",
+        "SANDBOX_PROVIDER": "memory",
+    },
+)
+
+oxlint_bin.oxlint_test(
+    name = "lint",
+    args = ["--deny-warnings", "."],
+    chdir = package_name(),
+    data = ["run-typescript.mjs", ":sources", ":unit_tests"],
+)
+
+js_library(
+    name = "fmt_inputs",
+    srcs = glob(["**/*.json", "**/*.mjs", "**/*.ts", "**/*.yaml"], allow_empty = True, exclude = ["coverage/**", "dist/**"]),
+    visibility = ["//tsworkspace:__pkg__"],
+)
