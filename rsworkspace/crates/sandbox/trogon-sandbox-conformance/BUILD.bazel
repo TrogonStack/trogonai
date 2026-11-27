@@ -7,7 +7,22 @@ workspace_crate(
         "*": {"compile_data": ["tests/*/*.rs"]},
         # These start a NATS server in a container through Docker.
         "assigned": {"tags": ["requires-network"]},
+        "assigned_release": {"tags": ["requires-network"]},
+        "assigned_transport": {"tags": ["requires-network"]},
+        "bench_lease": {"tags": ["requires-network"]},
+        "command_output_transport": {"tags": ["requires-network"]},
+        "conformance": {"tags": ["requires-network"]},
+        "dedicated_tls_egress": {"tags": ["requires-network"]},
+        "egress_probe_refusals": {"tags": ["requires-network"]},
+        "entity": {"tags": ["requires-network"]},
         "fake_worker": {"tags": ["requires-network"]},
+        "grant_ledger": {"tags": ["requires-network"]},
+        "hosted_cleanup_authority": {"tags": ["requires-network"]},
+        "redispatch": {"tags": ["requires-network"]},
         "refusals": {"tags": ["requires-network"]},
+        "selected_worker_refusals": {"tags": ["requires-network"]},
+        "signed_dispatch": {"tags": ["requires-network"]},
+        # Scans the sources of sibling crates, so it runs only under Cargo.
+        "spec_field_coverage": {"tags": ["manual"]},
     },
 )

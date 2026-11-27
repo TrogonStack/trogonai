@@ -5,9 +5,16 @@
 
 #![allow(dead_code, unused_imports)]
 
+pub mod cleanup;
+pub mod egress_probe;
+pub mod entity;
 mod files;
+pub mod memory;
 mod process;
 mod profile;
+pub mod request;
+pub mod tls_egress;
+pub mod wire;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -28,7 +35,8 @@ use trogon_sandbox_protocol::{
 };
 
 pub use process::LISTEN;
-use process::{Proc, locked};
+use process::Proc;
+pub use process::locked;
 pub use profile::heartbeat;
 
 /// A target that declares everything the shell worker serves.
