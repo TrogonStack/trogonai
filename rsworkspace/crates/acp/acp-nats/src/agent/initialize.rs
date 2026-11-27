@@ -22,6 +22,13 @@ pub async fn handle<N: RequestClient, C: GetElapsed, J>(
 
     info!(client = %client_name, "Initialize request");
 
+    // Before the request goes out, so the initialize itself carries the name:
+    // an agent side that refuses this client then refuses every later request
+    // from it as well, not just the initialize.
+    bridge
+        .client
+        .set(args.client_info.as_ref().map(|info| info.name.as_str()));
+
     let subject = global::InitializeSubject::new(bridge.config.acp_prefix_ref());
 
     let result = jsonrpc_call(

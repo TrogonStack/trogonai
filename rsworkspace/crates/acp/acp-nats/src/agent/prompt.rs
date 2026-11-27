@@ -54,9 +54,9 @@ where
     result
 }
 
-async fn handle_js<N, C, J>(
+async fn handle_js<N, C, J, JS>(
     bridge: &Bridge<N, C, J>,
-    js: &J,
+    js: &JS,
     args: &PromptRequest,
     session_id: &AcpSessionId,
     prefix: &crate::acp_prefix::AcpPrefix,
@@ -64,8 +64,8 @@ async fn handle_js<N, C, J>(
 ) -> agent_client_protocol::Result<PromptResponse>
 where
     C: trogon_std::time::GetElapsed,
-    J: JetStreamPublisher + JetStreamGetStream,
-    trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
+    JS: JetStreamPublisher + JetStreamGetStream,
+    trogon_nats::jetstream::JsMessageOf<JS>: JsRequestMessage,
 {
     // Create the consumer BEFORE publishing — same principle as subscribe-before-publish.
     // It is session-scoped and delivers only new messages, so creating it first is what

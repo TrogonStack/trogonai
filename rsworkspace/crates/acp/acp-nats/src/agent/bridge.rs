@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 
 use crate::agent_handler::AgentHandler;
+use crate::client_identity::{ClientIdentity, ClientStamped};
 use crate::config::Config;
 use crate::nats::{
     self, ExtSessionReady, FlushClient, FlushPolicy, PublishClient, PublishOptions, RequestClient, RetryPolicy,
@@ -36,8 +37,11 @@ use super::{
 use crate::constants::SESSION_READY_DELAY;
 
 pub struct Bridge<N, C: GetElapsed, J> {
-    pub(crate) nats: N,
-    pub(crate) js: J,
+    /// Both clients stamp the requesting client's name on what they send; see
+    /// [`crate::client_identity`].
+    pub(crate) nats: ClientStamped<N>,
+    pub(crate) js: ClientStamped<J>,
+    pub(crate) client: ClientIdentity,
     pub(crate) clock: C,
     pub(crate) config: Config,
     pub(crate) metrics: Metrics,
@@ -46,9 +50,11 @@ pub struct Bridge<N, C: GetElapsed, J> {
 
 impl<N, C: GetElapsed, J> Bridge<N, C, J> {
     pub fn new(nats: N, js: J, clock: C, meter: &Meter, config: Config) -> Self {
+        let client = ClientIdentity::default();
         Self {
-            nats,
-            js,
+            nats: ClientStamped::new(nats, client.clone()),
+            js: ClientStamped::new(js, client.clone()),
+            client,
             clock,
             config,
             metrics: Metrics::new(meter),
@@ -56,11 +62,11 @@ impl<N, C: GetElapsed, J> Bridge<N, C, J> {
         }
     }
 
-    pub(crate) fn nats(&self) -> &N {
+    pub(crate) fn nats(&self) -> &ClientStamped<N> {
         &self.nats
     }
 
-    pub(crate) fn js(&self) -> &J {
+    pub(crate) fn js(&self) -> &ClientStamped<J> {
         &self.js
     }
 
@@ -152,7 +158,7 @@ where
     {
         let subject_str = subject.to_string();
         let req_id = crate::req_id::ReqId::new();
-        js_request::js_request::<J, _, Res>(
+        js_request::js_request::<ClientStamped<J>, _, Res>(
             self.js(),
             &subject_str,
             method,

@@ -113,3 +113,59 @@ async fn handlers_use_custom_prefix() {
     let result = bridge.initialize(request).await;
     assert!(result.is_ok());
 }
+
+#[tokio::test]
+async fn the_initialize_and_every_later_request_name_the_client() {
+    use crate::agent::test_support::set_js_response;
+    use agent_client_protocol::v1::schema::{
+        LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse,
+    };
+
+    let (mock, js, bridge) = mock_bridge();
+    set_json_response(
+        &mock,
+        "acp.v1.global.agent.initialize",
+        &InitializeResponse::new(ProtocolVersion::LATEST),
+    );
+    set_json_response(&mock, "acp.v1.global.agent.session.new", &NewSessionResponse::new("s1"));
+    set_js_response(&js, &LoadSessionResponse::new());
+
+    bridge
+        .initialize(
+            InitializeRequest::new(ProtocolVersion::LATEST).client_info(Implementation::new("discord", "1.0.0")),
+        )
+        .await
+        .expect("initialize");
+    bridge
+        .new_session(NewSessionRequest::new("."))
+        .await
+        .expect("session/new");
+    bridge
+        .load_session(LoadSessionRequest::new("s1", "."))
+        .await
+        .expect("session/load");
+
+    let requested = mock.requested_headers();
+    assert_eq!(requested.len(), 2);
+    for headers in &requested {
+        assert_eq!(crate::requesting_client(Some(headers)), Some("discord"));
+    }
+    let commands = js.publisher.published_messages();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(crate::requesting_client(Some(&commands[0].headers)), Some("discord"));
+}
+
+#[tokio::test]
+async fn a_client_that_never_initializes_sends_no_name() {
+    use agent_client_protocol::v1::schema::{NewSessionRequest, NewSessionResponse};
+
+    let (mock, _js, bridge) = mock_bridge();
+    set_json_response(&mock, "acp.v1.global.agent.session.new", &NewSessionResponse::new("s1"));
+
+    bridge
+        .new_session(NewSessionRequest::new("."))
+        .await
+        .expect("session/new");
+
+    assert_eq!(crate::requesting_client(mock.requested_headers().first()), None);
+}
