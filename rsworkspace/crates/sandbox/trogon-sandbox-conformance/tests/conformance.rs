@@ -191,6 +191,11 @@ async fn hluk_worker_conforms() -> Result<(), Box<dyn Error>> {
     target.checkpoint_running_unsupported = true;
     target.redispatch_idempotent = true;
     target.denied_connect_fails = true;
+    // Served from the host side of /workspace, the only guest directory that outlives a command.
+    target.file_ops = true;
+    target.file_search = true;
+    target.file_archive = true;
+    "/workspace".clone_into(&mut target.file_root);
     let failures = run_suite(&target).await;
     let mut report = String::new();
     for (name, _) in checks_for_target(&target) {

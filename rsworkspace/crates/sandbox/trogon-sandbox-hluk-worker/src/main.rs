@@ -26,8 +26,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         cancel.clone(),
         move || {
             let current = u32::try_from(heartbeat_provider.lease_count()).unwrap_or(u32::MAX);
-            let heartbeat = build_heartbeat(&heartbeat_id, max, current);
-            async move { heartbeat }
+            std::future::ready(build_heartbeat(&heartbeat_id, max, current))
         },
     );
     let on_signal = cancel.clone();

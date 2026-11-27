@@ -127,7 +127,12 @@ async fn main() -> Result<ExitCode, Box<dyn Error>> {
         let mut sorted = step.samples.clone();
         sorted.sort();
         if let Some(p99) = percentile(&sorted, 99.0) {
-            writeln!(std::io::stdout(), "p99 {}: {:.1} ms", step.step, p99.as_secs_f64() * 1000.0)?;
+            writeln!(
+                std::io::stdout(),
+                "p99 {}: {:.1} ms",
+                step.step,
+                p99.as_secs_f64() * 1000.0
+            )?;
         }
     }
     if let Some(worker) = worker {

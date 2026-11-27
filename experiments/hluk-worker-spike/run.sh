@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Spike driver for trogon-sandbox-hluk-worker on a KVM host. Prints Markdown to stdout, diagnostics to stderr.
 #   run.sh probe    what hluk's CLI does with the things a run_command needs, and its raw per-run latency
-#   run.sh build    the hluk and docker workers, the latency example and the conformance tests (release)
+#   run.sh build    the hluk and docker workers, the latency example, the conformance tests (release) and the
+#                   docker worker's keep-alive image
 #   run.sh measure  exec latency through NATS -> worker -> hluk for hluk and docker, and the conformance suite
 set -uo pipefail
 
@@ -12,6 +13,10 @@ export PATH=$bin:$PATH
 work=$(mktemp -d "${RUNNER_TEMP:-/tmp}/hluk-spike.XXXXXX")
 runs=${RUNS:-50}
 iterations=${ITERATIONS:-50}
+target=$root/rsworkspace/target
+nats_url=nats://127.0.0.1:4222
+# The docker worker execs into the container its image starts, so the image has to keep running.
+docker_image=sandbox-conformance:local
 
 install_hluk() {
   command -v hluk >/dev/null && return
@@ -38,15 +43,14 @@ summary() {
 }
 
 series() { # label cmd...
-  local label=$1 start
+  local label=$1 start samples=()
   shift
   for _ in $(seq "$runs"); do
     start=${EPOCHREALTIME/./}
-    "$@" >/dev/null 2>&1 </dev/null || { echo "| $label | failed | | |"; return; }
-    echo $((${EPOCHREALTIME/./} - start)) >>"$work/samples.$$"
+    "$@" >/dev/null 2>&1 </dev/null || { echo "| $label | failed | | | |"; return; }
+    samples+=($((${EPOCHREALTIME/./} - start)))
   done
-  echo "| $label | $(summary <"$work/samples.$$") |"
-  rm -f "$work/samples.$$"
+  echo "| $label | $(printf '%s\n' "${samples[@]}" | summary) |"
 }
 
 cmd_probe() {
@@ -101,7 +105,8 @@ cmd_build() {
   cargo build --release --locked -p trogon-sandbox-hluk-worker -p trogon-sandbox-docker-worker &&
     cargo build --release --locked -p trogon-sandbox-conformance --example latency &&
     cargo test --release --locked -p trogon-sandbox-hluk-worker &&
-    cargo test --release --locked -p trogon-sandbox-conformance --test conformance --no-run
+    cargo test --release --locked -p trogon-sandbox-conformance --test conformance --no-run &&
+    printf 'FROM alpine:3.20\nCMD ["sleep","infinity"]\n' | docker build --quiet --tag "$docker_image" -
 }
 
 pids=()
@@ -121,11 +126,9 @@ latency() { # provider image
 
 cmd_measure() {
   install_hluk || exit 1
-  target=$root/rsworkspace/target
-  nats_url=nats://127.0.0.1:4222
   nats-server -a 127.0.0.1 -p 4222 >"$work/nats.log" 2>&1 &
   pids+=($!)
-  sleep 1
+  wait_for "$work/nats.log" 'Server is ready' 10 || exit 1
 
   SANDBOX_DISPATCH_VERIFY=off SANDBOX_NATS_URL=$nats_url SANDBOX_HLUK_BIN=$bin/hluk \
     SANDBOX_HLUK_WORK_DIR=$work/leases "$target/release/trogon-sandbox-hluk-worker" >"$work/hluk-worker.log" 2>&1 &
@@ -160,15 +163,14 @@ cmd_measure() {
   echo
   echo "### Same harness against the docker worker (alpine keep-alive image)"
   echo
-  image=sandbox-conformance:local
-  printf 'FROM alpine:3.20\nCMD ["sleep","infinity"]\n' | docker build --quiet --tag "$image" - >&2
-  SANDBOX_DISPATCH_VERIFY=off SANDBOX_NATS_URL=$nats_url SANDBOX_IMAGE=$image SANDBOX_EGRESS_PROXY_IMAGE=$image \
+  SANDBOX_DISPATCH_VERIFY=off SANDBOX_NATS_URL=$nats_url SANDBOX_IMAGE=$docker_image \
+    SANDBOX_EGRESS_PROXY_IMAGE=$docker_image \
     SANDBOX_DOCKER_STATE_DIR=$work/docker-state SANDBOX_DOCKER_WORKER_OWNER="hluk-spike-$$" \
     "$target/release/trogon-sandbox-docker-worker" >"$work/docker-worker.log" 2>&1 &
   pids+=($!)
   if wait_for "$work/docker-worker.log" 'worker ready' 60; then
     echo '```text'
-    latency local_docker "$image"
+    latency local_docker "$docker_image"
     echo '```'
   else
     echo "docker worker did not start; see the job log"

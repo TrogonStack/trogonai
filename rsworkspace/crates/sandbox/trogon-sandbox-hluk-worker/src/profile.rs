@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 use trogon_sandbox_contract::{
-    CapabilitySupport::Unsupported, DormancyCapability, EgressCapability, EgressEnforcementLevel, IsolationCapability,
+    CapabilitySupport::{Supported, Unsupported}, DormancyCapability, EgressCapability, EgressEnforcementLevel, IsolationCapability,
     IsolationTier, LifecycleCapability, PerformanceProfile, ProviderCapabilityProfile, ProviderKind,
     ResourceLimitMechanism, SnapshotCapability, VolumeCapability, VolumeMode,
 };
@@ -53,9 +53,9 @@ pub static PROFILE: LazyLock<ProviderCapabilityProfile> = LazyLock::new(|| Provi
         supports_secret_bindings: Unsupported,
         supports_masked_files: Unsupported,
         supports_fs_policy: Unsupported,
-        supports_file_ops: Unsupported,
-        supports_file_search: Unsupported,
-        supports_file_archive: Unsupported,
+        supports_file_ops: Supported,
+        supports_file_search: Supported,
+        supports_file_archive: Supported,
         supports_output_redaction: Unsupported,
         supports_terminal: Unsupported,
         // Guest memory is the size each runtime image is tested with; the lease's limits are not applied.

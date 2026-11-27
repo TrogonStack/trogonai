@@ -7,7 +7,7 @@ use tokio::process::Command;
 use trogon_sandbox_contract::{CommandOutput, CommandTimeoutStatus};
 
 use crate::constants::{KILLED_EXIT_CODE, WORKSPACE_GUEST_DIR};
-use crate::{GuestNetwork, HlukCliError, HlukLease, HlukRuntime, WorkspaceAccess};
+use crate::{GuestNetwork, HlukCliError, HlukLease, HlukRuntime, LeaseWorkspace};
 
 /// The `hluk` binary, driven one process per command.
 #[derive(Debug, Clone)]
@@ -48,9 +48,9 @@ impl HlukCli {
         timeout: Duration,
     ) -> Result<CommandOutput, HlukCliError> {
         let mut command = self.command(lease.runtime);
-        let read_only = match lease.access {
-            WorkspaceAccess::ReadWrite => "",
-            WorkspaceAccess::ReadOnly => ":ro",
+        let read_only = match lease.kind {
+            LeaseWorkspace::Scratch => "",
+            LeaseWorkspace::CallerReadOnly => ":ro",
         };
         command.arg("--mount").arg(format!(
             "{}:{WORKSPACE_GUEST_DIR}{read_only}",

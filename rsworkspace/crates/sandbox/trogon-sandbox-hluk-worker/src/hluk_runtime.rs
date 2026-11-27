@@ -19,12 +19,11 @@ impl HlukRuntime {
         let SandboxImage::Registry { reference, .. } = image else {
             return Err(HlukSpecError::ImageKind);
         };
-        match reference.repository.rsplit('/').next().unwrap_or_default() {
-            "bash" => Ok(Self::Shell),
-            "python" => Ok(Self::Python),
-            "node" => Ok(Self::Node),
-            other => Err(HlukSpecError::UnknownRuntime(other.to_owned())),
-        }
+        let name = reference.repository.rsplit('/').next().unwrap_or_default();
+        [Self::Shell, Self::Python, Self::Node]
+            .into_iter()
+            .find(|runtime| runtime.image_name() == name)
+            .ok_or_else(|| HlukSpecError::UnknownRuntime(name.to_owned()))
     }
 
     /// The name `hluk run --runtime` takes.

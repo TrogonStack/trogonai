@@ -6,3 +6,6 @@ pub const LEASE_QUEUE_GROUP: &str = "sandbox-provider-hluk";
 
 /// Exit code reported when `hluk` ends without one, as a signal would.
 pub const KILLED_EXIT_CODE: i32 = 137;
+
+/// Why a request that names another user is refused.
+pub const ONE_USER: &str = "hluk guests have one user; acting as another user is not supported";
