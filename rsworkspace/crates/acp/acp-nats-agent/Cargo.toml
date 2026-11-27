@@ -24,7 +24,9 @@ trogon-nats = { workspace = true }
 trogon-std = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+async-compat = { workspace = true }
+opentelemetry = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "io-util", "time"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

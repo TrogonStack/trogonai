@@ -21,6 +21,7 @@ use futures::StreamExt;
 use futures::future::LocalBoxFuture;
 use serde::de::Error;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
@@ -327,14 +328,22 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
             )
             .await
         }
-        GlobalAgentMethod::Ext(_) => {
+        GlobalAgentMethod::Ext(ref name) => {
+            // `method` is `#[serde(skip)]` in the ACP schema, so the decoded body
+            // has an empty name. The subject token carries the exact name.
+            let name: Arc<str> = name.as_str().into();
             if msg.reply.is_some() {
-                handle_jsonrpc_request(msg, method.protocol_method().as_str(), nats, |req: ExtRequest| {
+                handle_jsonrpc_request(msg, method.protocol_method().as_str(), nats, |mut req: ExtRequest| {
+                    req.method = name;
                     agent.ext_method(req)
                 })
                 .await
             } else {
-                handle_notification(msg, |req: ExtNotification| agent.ext_notification(req)).await
+                handle_notification(msg, |mut req: ExtNotification| {
+                    req.method = name;
+                    agent.ext_notification(req)
+                })
+                .await
             }
         }
     }

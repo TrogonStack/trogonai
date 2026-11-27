@@ -1,5 +1,5 @@
 use crate::constants::{EXT_SUBJECT_PREFIX, SESSION_AGENT_MARKER, SESSION_CLIENT_MARKER, SESSION_PREFIX};
-use crate::ext_method_name::ExtMethodName;
+use crate::ext_method_name::{ExtMethodName, ext_protocol_method};
 use crate::session_id::AcpSessionId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +62,7 @@ impl GlobalAgentMethod {
             Self::ProvidersList => "providers/list".to_string(),
             Self::ProvidersSet => "providers/set".to_string(),
             Self::ProvidersDisable => "providers/disable".to_string(),
-            Self::Ext(name) => format!("_{}", name.as_str()),
+            Self::Ext(name) => name.protocol_method().into_owned(),
         }
     }
 
@@ -200,7 +200,8 @@ impl ClientMethod {
     /// ACP protocol method for the canonical JSON-RPC body (ADR#0056).
     ///
     /// Subject terminals are the dotted projection of this string (except
-    /// [`Self::Ext`], which projects to `ext.{name}` while the body uses `_{name}`).
+    /// [`Self::Ext`], which projects to `ext.{name}` while the body uses the name with
+    /// a leading `_`, added only when missing).
     pub fn protocol_method(&self) -> String {
         match self {
             Self::FsReadTextFile => "fs/read_text_file".to_string(),
@@ -214,7 +215,7 @@ impl ClientMethod {
             Self::TerminalWaitForExit => "terminal/wait_for_exit".to_string(),
             Self::ElicitationCreate => "elicitation/create".to_string(),
             Self::ElicitationComplete => "elicitation/complete".to_string(),
-            Self::Ext(name) => format!("_{name}"),
+            Self::Ext(name) => ext_protocol_method(name).into_owned(),
         }
     }
 
