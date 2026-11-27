@@ -49,6 +49,11 @@ jobs:
           install_args: bazel buf go kubeconform node rust cargo:wasm-tools github:open-telemetry/weaver github:rhysd/actionlint cargo:protoc-gen-buffa cargo:protoc-gen-buffa-packaging cargo:cargo-deny
           cache_save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
+      # Self-hosted runners keep their own disks; only a hosted runner needs room made.
+      - name: Free disk space
+        if: ${{ runner.environment == 'github-hosted' }}
+        run: mise run --skip-tools github:workflows:ci-bazel:free-disk-space
+
       # Self-hosted sunny-go runners have a bazel-remote cache on their private
       # network, so they skip the GitHub Actions Bazel caches below. Pushes to
       # main are the only runs that receive the write password.

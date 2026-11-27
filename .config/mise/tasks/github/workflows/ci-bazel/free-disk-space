@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Delete the hosted runner's preinstalled toolchains Bazel never uses"
+set -euo pipefail
+
+# A full `bazel coverage //...` outgrew the free space on a GitHub hosted
+# runner, which then died mid-test with "No space left on device". These
+# SDKs ship with the image and nothing in the build reads them; mise installs
+# every tool the build needs elsewhere.
+unused=(
+  /usr/share/dotnet
+  /usr/local/lib/android
+  /opt/ghc
+  /usr/local/.ghcup
+  /usr/local/share/boost
+  /opt/hostedtoolcache/CodeQL
+)
+
+df -h /
+for path in "${unused[@]}"; do
+  sudo rm -rf "$path" &
+done
+wait
+df -h /
