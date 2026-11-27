@@ -16,7 +16,7 @@ use trogon_sandbox_protocol::{
 };
 
 use crate::constants::{ONE_USER, WORKSPACE_GUEST_DIR};
-use crate::{HlukCli, HlukLease, HlukRuntime, LeaseWorkspace, PROFILE};
+use crate::{HlukCli, HlukLease, LeaseWorkspace, PROFILE};
 
 fn denied(message: impl Into<String>) -> RunCommandResponse {
     RunCommandResponse::Denied(LeaseError::Backend {
@@ -31,7 +31,7 @@ pub struct HlukProvider {
     cli: HlukCli,
     work_root: PathBuf,
     leases: Mutex<HashMap<LeaseId, Arc<HlukLease>>>,
-    /// Set once each runtime's snapshot is saved, indexed by [`HlukRuntime`]; runtimes warm independently.
+    /// Set once each runtime's snapshot is saved, indexed by `HlukRuntime`; runtimes warm independently.
     warmed: [OnceCell<()>; 3],
 }
 
