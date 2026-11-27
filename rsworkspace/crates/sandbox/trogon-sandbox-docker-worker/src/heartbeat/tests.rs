@@ -26,5 +26,7 @@ fn heartbeat_includes_cached_digests_and_warm_pool() -> TestResult {
     assert_eq!(heartbeat.capacity.max_concurrent_leases, 4);
     assert_eq!(heartbeat.capacity.current_leases, 1);
     assert_eq!(heartbeat.worker_id, worker_id);
+    assert!(heartbeat.profile.lifecycle.supports_warm_pool.is_supported());
+    assert_eq!(heartbeat.profile.lifecycle.max_warm_pool_size, Some(16));
     Ok(())
 }

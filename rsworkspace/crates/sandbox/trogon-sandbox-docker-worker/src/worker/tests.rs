@@ -5,10 +5,16 @@ use trogon_sandbox_protocol::ProviderError;
 
 use super::*;
 
+mod authority_pause_tests;
 mod counting_provider;
+mod docker_lease;
+mod heartbeat_identity_tests;
 mod lease_request;
 mod mock_provider;
+mod named_cancellation_tests;
+mod named_origin_tests;
 mod redispatch_tests;
+mod run_command_decode_tests;
 
 use lease_request::sample_lease_request;
 use mock_provider::{MockOutcome, MockProvider};
@@ -38,7 +44,10 @@ async fn failed_lease_propagates_the_backend_error() -> TestResult {
         outcome: MockOutcome::Fail,
     });
     let result = process_lease_request(sample_lease_request()?, provider).await;
-    assert!(matches!(result, Err(ProviderError::Backend(_))));
+    let Err(error) = result else {
+        return Err("a failed backend must not grant a lease".into());
+    };
+    assert!(matches!(error, ProviderError::Backend(_)), "{error}");
     Ok(())
 }
 

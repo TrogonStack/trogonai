@@ -134,6 +134,7 @@ async fn browser_probe_runs_exact_immutable_content_with_bounded_nonroot_resourc
     assert_eq!(spec.container.network_mode, "none");
     assert!(spec.container.env.contains(&"HOME=/tmp".into()));
     assert_eq!(spec.container.memory_mib, 512);
+    assert_eq!(spec.container.cpu, 1.0);
     assert_eq!(spec.container.hardening.pids_limit, Some(512));
     assert_eq!(spec.container.hardening.shm_size_mib, Some(256));
     assert!(spec.container.hardening.no_new_privileges);
@@ -228,6 +229,12 @@ fn browser_admission_requires_verified_exact_image_and_preserves_regular_leases(
     let mut parts = parts_for_browser()?;
     parts.image = registry_image("registry.example.test/other:latest");
     assert!(!admitted(&request_from(parts, true)?));
+    let mut parts = parts_for_browser()?;
+    parts.image = registry_image("");
+    assert!(
+        trogon_sandbox_contract::SandboxSpec::new(parts).is_err(),
+        "a browser lease with no image never reaches admission"
+    );
     let regular = admit_browser(&request(false)?, Some(&verified()), &ContainerHardening::secure())?;
     assert!(regular.is_none());
     Ok(())
@@ -240,6 +247,7 @@ fn browser_admission_uses_probed_image_id_even_if_the_configured_tag_moves() -> 
     assert_eq!(launch.image_id, IMAGE_ID);
     assert_eq!(launch.user, "65532:65532");
     assert_eq!(launch.env.get("HOME").map(String::as_str), Some("/tmp"));
+    assert_eq!(req.spec.image(), &registry_image(IMAGE));
     Ok(())
 }
 

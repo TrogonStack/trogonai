@@ -5,7 +5,10 @@ workspace_crate(
     unit_test_tags = ["requires-network"],
     integration_tests = {
         "*": {
-            "compile_data": ["tests/*/mod.rs"],
+            "compile_data": [
+                "tests/*/mod.rs",
+                "tests/composed_named_support/*.rs",
+            ],
             "tags": ["requires-network"],
         },
     },

@@ -55,6 +55,7 @@ uuid = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "sync", "time", "test-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-client = { workspace = true }
 trogon-sandbox-conformance = { workspace = true }
 trogon-sandbox-oci = { workspace = true }
 trogon-std = { workspace = true, features = ["test-support"] }
