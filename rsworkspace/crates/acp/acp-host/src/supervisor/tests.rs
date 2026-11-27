@@ -97,7 +97,7 @@ impl LaunchAgent for ExitingLauncher {
 async fn a_run_initializes_the_agent_once_and_serves_it_until_serving_ends() {
     let launcher = InProcessLauncher::default();
     let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
-        // Two clients opening their own connections both initialize.
+        // The client initializes again, as it does after it restarts.
         agent
             .initialize(agent_client_protocol::v1::schema::InitializeRequest::new(
                 ProtocolVersion::V1,
@@ -114,10 +114,63 @@ async fn a_run_initializes_the_agent_once_and_serves_it_until_serving_ends() {
         Ok(())
     };
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), &serve).await;
+    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), &serve).await;
 
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
     assert_eq!(launcher.agent.initializes.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_second_client_is_refused_and_the_first_keeps_working() {
+    use agent_client_protocol::v1::schema::{Implementation, InitializeRequest};
+    let launcher = InProcessLauncher::default();
+    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+        let first = InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("discord", "1.0.0"));
+        let second = InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("zed", "1.0.0"));
+        agent.initialize(first.clone()).await?;
+        let session = agent.new_session(NewSessionRequest::new("/tmp")).await?;
+
+        let refusal = agent.initialize(second).await.expect_err("second client refused");
+        assert_eq!(refusal.code, agent_client_protocol::ErrorCode::INVALID_REQUEST);
+        assert!(refusal.message.contains("serves one client"), "{}", refusal.message);
+
+        agent.initialize(first).await?;
+        let reply = agent.prompt(PromptRequest::new(session.session_id, vec![])).await?;
+        assert_eq!(reply.stop_reason, StopReason::EndTurn);
+        Ok(())
+    };
+
+    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), &serve).await;
+
+    assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
+}
+
+#[tokio::test]
+async fn the_claim_outlives_a_relaunch() {
+    use agent_client_protocol::v1::schema::{Implementation, InitializeRequest};
+    let launcher = InProcessLauncher::default();
+    let claim = Arc::new(ClientClaim::default());
+    let first = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+        agent
+            .initialize(InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("discord", "1")))
+            .await?;
+        Ok(())
+    };
+    let second = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+        agent
+            .initialize(InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("zed", "1")))
+            .await
+            .map(|_| ())
+    };
+
+    let exit = run_once(&launcher, Arc::new(NoopClient), claim.clone(), &first).await;
+    assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
+    let exit = run_once(&launcher, Arc::new(NoopClient), claim, &second).await;
+
+    assert!(
+        matches!(exit, RunExit::ServeFailed(ref e) if e.code == agent_client_protocol::ErrorCode::INVALID_REQUEST),
+        "got {exit}"
+    );
 }
 
 #[tokio::test]
@@ -125,7 +178,7 @@ async fn a_serving_failure_is_reported_as_such() {
     let launcher = InProcessLauncher::default();
     let serve = async |_agent: InitializedAgent<ConnectionAgent>| Err::<(), _>("nats down");
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), &serve).await;
+    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), &serve).await;
 
     assert!(matches!(exit, RunExit::ServeFailed("nats down")), "got {exit}");
 }
@@ -135,7 +188,7 @@ async fn an_agent_that_exits_before_answering_ends_the_run() {
     let launcher = ExitingLauncher::default();
     let serve = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), &serve).await;
+    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), &serve).await;
 
     assert!(
         matches!(exit, RunExit::AgentExited | RunExit::AgentFailed(_)),
@@ -150,7 +203,13 @@ async fn an_agent_that_keeps_exiting_is_relaunched_with_growing_delays() {
 
     // Delays run 1s, 2s, 4s, 8s: four launches fit in 10s of paused time, a
     // fifth would need 15s.
-    let supervised = supervise(&launcher, Arc::new(NoopClient), serve, RestartPolicy::DEFAULT);
+    let supervised = supervise(
+        &launcher,
+        Arc::new(NoopClient),
+        Arc::default(),
+        serve,
+        RestartPolicy::DEFAULT,
+    );
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), supervised).await;
 
     assert_eq!(launcher.launches.load(Ordering::SeqCst), 4);

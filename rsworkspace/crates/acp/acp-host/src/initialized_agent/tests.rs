@@ -38,7 +38,7 @@ impl AgentHandler for CountingAgent {
 async fn every_client_initialize_is_answered_from_the_hosts_own_handshake() {
     let reply =
         InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(AgentCapabilities::new().load_session(true));
-    let agent = InitializedAgent::new(CountingAgent::default(), reply.clone());
+    let agent = InitializedAgent::new(CountingAgent::default(), reply.clone(), Arc::default());
 
     for _ in 0..3 {
         let answer = agent
@@ -52,7 +52,11 @@ async fn every_client_initialize_is_answered_from_the_hosts_own_handshake() {
 
 #[tokio::test]
 async fn other_methods_reach_the_agent() {
-    let agent = InitializedAgent::new(CountingAgent::default(), InitializeResponse::new(ProtocolVersion::V1));
+    let agent = InitializedAgent::new(
+        CountingAgent::default(),
+        InitializeResponse::new(ProtocolVersion::V1),
+        Arc::default(),
+    );
 
     agent
         .prompt(PromptRequest::new("sess-1", vec![]))

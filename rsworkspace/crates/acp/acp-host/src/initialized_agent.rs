@@ -1,3 +1,4 @@
+use crate::client_claim::ClientClaim;
 use acp_nats::AgentHandler;
 use agent_client_protocol::Result;
 use agent_client_protocol::v1::schema::{
@@ -12,30 +13,43 @@ use agent_client_protocol::v1::schema::{
     SetSessionModeResponse, SetSessionTitleRequest, SetSessionTitleResponse, UnarchiveSessionRequest,
     UnarchiveSessionResponse,
 };
+use std::sync::Arc;
+use tracing::warn;
 
-/// An agent the host has already initialized, shared by every client on NATS.
+/// An agent the host has already initialized, served to its one client on NATS.
 ///
-/// ACP has a client send `initialize` once per connection. Here one child
-/// process sits behind many clients (every channel bridge, every editor), each
-/// of which opens with its own `initialize`. Forwarding them all would ask the
-/// agent to initialize repeatedly on one connection, which the protocol does
-/// not promise to allow. The host initializes the child once when it starts and
-/// answers every later `initialize` with that reply; every other method passes
-/// through untouched.
+/// ACP has a client send `initialize` once per connection, but the host's
+/// connection to the child outlives any one client connection: the client may
+/// restart and initialize again while the child keeps running. Forwarding
+/// every `initialize` would ask the agent to initialize repeatedly on one
+/// connection, which the protocol does not promise to allow. The host
+/// initializes the child once when it starts and answers the client's
+/// `initialize` with that reply, after checking the [`ClientClaim`] so that a
+/// second, different client is refused. Every other method passes through
+/// untouched.
 pub struct InitializedAgent<A> {
     inner: A,
     initialized: InitializeResponse,
+    claim: Arc<ClientClaim>,
 }
 
 impl<A> InitializedAgent<A> {
-    pub fn new(inner: A, initialized: InitializeResponse) -> Self {
-        Self { inner, initialized }
+    pub fn new(inner: A, initialized: InitializeResponse, claim: Arc<ClientClaim>) -> Self {
+        Self {
+            inner,
+            initialized,
+            claim,
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl<A: AgentHandler + Send + Sync> AgentHandler for InitializedAgent<A> {
-    async fn initialize(&self, _args: InitializeRequest) -> Result<InitializeResponse> {
+    async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
+        if let Err(refusal) = self.claim.admit(&args) {
+            warn!(error = %refusal, "refused a second client's initialize");
+            return Err(refusal);
+        }
         Ok(self.initialized.clone())
     }
 

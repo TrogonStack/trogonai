@@ -12,6 +12,7 @@
 //! command, not a code change.
 
 mod agent_launch;
+mod client_claim;
 mod config;
 mod constants;
 mod initialized_agent;
@@ -23,6 +24,7 @@ mod supervisor;
 use acp_nats::boundary::ConnectionAgent;
 use acp_nats::nats;
 use acp_nats_agent::AgentSideNatsConnection;
+use client_claim::ClientClaim;
 use config::HostConfig;
 use initialized_agent::InitializedAgent;
 use restart_policy::RestartPolicy;
@@ -76,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
     local
         .run_until(async {
             tokio::select! {
-                _ = supervisor::supervise(&config.agent, client, serve, RestartPolicy::DEFAULT) => {}
+                _ = supervisor::supervise(&config.agent, client, Arc::new(ClientClaim::default()), serve, RestartPolicy::DEFAULT) => {}
                 () = shutdown_signal() => info!("ACP host shutting down (signal received)"),
             }
         })

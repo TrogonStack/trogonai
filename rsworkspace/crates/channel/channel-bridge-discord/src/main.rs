@@ -19,7 +19,7 @@ mod render;
 use {
     acp_nats::AgentHandler,
     agent_client_protocol::schema::ProtocolVersion,
-    agent_client_protocol::v1::schema::InitializeRequest,
+    agent_client_protocol::v1::schema::{Implementation, InitializeRequest},
     anyhow::Context as _,
     async_nats::jetstream::consumer::DeliverPolicy,
     channel_acp_port::{AcpBridge, AcpPort, BufferedRenderClient, Pipeline, SessionMethods},
@@ -175,7 +175,12 @@ where
         bridge.clone(),
     ));
     let initialized = bridge
-        .initialize(InitializeRequest::new(ProtocolVersion::LATEST))
+        // The name is how an acp-host tells this bridge from a second client
+        // sharing its prefix, which it refuses.
+        .initialize(
+            InitializeRequest::new(ProtocolVersion::LATEST)
+                .client_info(Implementation::new(env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))),
+        )
         .await
         .map_err(|e| anyhow::anyhow!("ACP initialize failed: {e}"))?;
     let session_methods = SessionMethods::advertised(&initialized);

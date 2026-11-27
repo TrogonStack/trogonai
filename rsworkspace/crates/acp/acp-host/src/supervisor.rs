@@ -1,4 +1,5 @@
 use crate::agent_launch::AgentLaunch;
+use crate::client_claim::ClientClaim;
 use crate::initialized_agent::InitializedAgent;
 use crate::restart_policy::RestartPolicy;
 use acp_nats::boundary::{BoundaryExit, ConnectionAgent, connect_client_boundary_with};
@@ -56,7 +57,7 @@ impl<E: Display> Display for RunExit<E> {
 
 /// Launches the agent, initializes it once, and hands it to `serve` until
 /// either side ends.
-pub async fn run_once<L, C, S, F, E>(launcher: &L, client: Arc<C>, serve: &S) -> RunExit<E>
+pub async fn run_once<L, C, S, F, E>(launcher: &L, client: Arc<C>, claim: Arc<ClientClaim>, serve: &S) -> RunExit<E>
 where
     L: LaunchAgent,
     C: ClientHandler + Send + Sync + 'static,
@@ -70,7 +71,7 @@ where
         // the agent should use its own tools for both.
         let initialized = agent.initialize(InitializeRequest::new(ProtocolVersion::V1)).await?;
         info!(agent = ?initialized.agent_info, "agent initialized");
-        Ok(serve(InitializedAgent::new(agent, initialized)).await)
+        Ok(serve(InitializedAgent::new(agent, initialized, claim)).await)
     })
     .await;
 
@@ -87,10 +88,20 @@ where
 /// dropping the future (on shutdown), which also drops the child: the SDK
 /// shuts a spawned agent down when its connection goes away.
 ///
-/// Sessions do not survive a relaunch: the new process has never heard of
-/// them, so a client's next call on an old session id fails and the client
-/// opens a fresh one.
-pub async fn supervise<L, C, S, F, E>(launcher: &L, client: Arc<C>, serve: S, policy: RestartPolicy) -> Infallible
+/// The one [`ClientClaim`] spans every run, so the client a host serves stays
+/// the same across relaunches.
+///
+/// Whether a session survives a relaunch depends on the agent. One that keeps
+/// sessions on disk (fx does) reloads it when the client sends `session/load`;
+/// one that keeps them only in memory has never heard of the old id, so the
+/// client's next call on it fails and the client opens a fresh session.
+pub async fn supervise<L, C, S, F, E>(
+    launcher: &L,
+    client: Arc<C>,
+    claim: Arc<ClientClaim>,
+    serve: S,
+    policy: RestartPolicy,
+) -> Infallible
 where
     L: LaunchAgent,
     C: ClientHandler + Send + Sync + 'static,
@@ -101,7 +112,7 @@ where
     let mut delay = None;
     loop {
         let started = Instant::now();
-        let exit = run_once(launcher, client.clone(), &serve).await;
+        let exit = run_once(launcher, client.clone(), claim.clone(), &serve).await;
         let uptime = started.elapsed();
         let next = policy.next_delay(delay, uptime);
         warn!(%exit, uptime_ms = uptime.as_millis(), restart_in_ms = next.as_millis(), "agent run ended; relaunching");
