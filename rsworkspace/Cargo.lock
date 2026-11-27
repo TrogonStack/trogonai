@@ -3237,6 +3237,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ext4-view"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ecf6379b7cfeace5e109ccc51955afc05f5f7f2466ae0cf2697bda46afd01e6"
+dependencies = [
+ "bitflags 2.13.0",
+ "crc",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11246,6 +11256,36 @@ dependencies = [
  "trogon-std",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "trogon-sandbox-snapshot-builder"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "clap",
+ "ext4-view",
+ "flate2",
+ "futures",
+ "libc",
+ "prometheus",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-broker",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-cosign",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-oci",
+ "trogon-sandbox-protocol",
+ "trogon-std",
 ]
 
 [[package]]

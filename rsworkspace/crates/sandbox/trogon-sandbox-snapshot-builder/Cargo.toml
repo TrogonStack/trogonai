@@ -1,0 +1,47 @@
+[package]
+name = "trogon-sandbox-snapshot-builder"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "NATS service that exports worker snapshots, gates them on a scan, signs them, and records their digests in JetStream KV"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_snapshot_builder"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-snapshot-builder"
+path = "src/main.rs"
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream"] }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+ext4-view = { workspace = true }
+flate2 = { workspace = true }
+futures = { workspace = true }
+libc = { workspace = true }
+prometheus = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "process", "io-util"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+trogon-sandbox-broker = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-cosign = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-oci = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
