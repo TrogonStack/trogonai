@@ -1,0 +1,41 @@
+[package]
+name = "trogon-sandbox-memory-worker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "In-memory sandbox provider worker for tests: speaks the real provider subjects over NATS with a map-backed filesystem and a scripted command table, no containers"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_memory_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-memory-worker"
+path = "src/main.rs"
+
+[dependencies]
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-file-ops = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+
+[dev-dependencies]
+serde = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "signal", "test-util"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
