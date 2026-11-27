@@ -150,7 +150,7 @@ impl Ingress {
             }
         }
 
-        let exceptions = AllowRanges::from_policy(policy);
+        let exceptions = AllowRanges::from_policy(policy).for_port(target.port().get());
         let mut vetted = if routed {
             vec![VettedAddr::unresolved(literal_ip)].into_iter()
         } else {

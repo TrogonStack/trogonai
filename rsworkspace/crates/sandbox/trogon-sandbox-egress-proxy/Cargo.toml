@@ -18,7 +18,7 @@ name = "trogon-sandbox-egress-proxyd"
 path = "src/bin/trogon-sandbox-egress-proxyd/main.rs"
 
 [features]
-# Exposes `fuzz_support` for fuzz targets. Not for production.
+# Exposes `fuzz_support` for the cargo-fuzz targets in fuzz/. Not for production.
 fuzzing = []
 
 [dependencies]

@@ -1,0 +1,35 @@
+[package]
+name = "trogon-sandbox-egress-proxy-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Fuzz targets for the egress proxy HTTP parsers."
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.trogon-sandbox-egress-proxy]
+path = ".."
+features = ["fuzzing"]
+
+# Kept out of the Cargo workspace: it builds only under cargo-fuzz on a
+# nightly toolchain.
+[workspace]
+
+[[bin]]
+name = "proxied_head"
+path = "fuzz_targets/proxied_head.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chunked_body"
+path = "fuzz_targets/chunked_body.rs"
+test = false
+doc = false
+bench = false

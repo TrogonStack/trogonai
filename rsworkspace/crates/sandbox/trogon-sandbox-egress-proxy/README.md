@@ -23,3 +23,6 @@ TLS uses `rustls` with the `aws-lc-rs` provider.
 
 The `fuzzing` feature exposes `fuzz_support`, entry points that feed untrusted bytes to the HTTP request
 parsers. It is for fuzz targets and is not meant for production builds.
+
+The cargo-fuzz targets live in `fuzz/`, outside the Cargo workspace, and need a nightly toolchain:
+`cargo +nightly fuzz run proxied_head` or `cargo +nightly fuzz run chunked_body` from this directory.
