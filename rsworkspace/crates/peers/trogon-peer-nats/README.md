@@ -61,11 +61,11 @@ payload. It derives the route, builds a fresh exact reply subject, and validates
 that reply with `PeerReplySubject` before sending. An explicit SDK request inbox
 preserves this shape without using the default request multiplexer.
 
-The positive timeout is capped at two seconds per RPC. An outer deadline covers
-the whole send-request future, including subscription and publish queueing; the
-SDK's response timeout is bounded too. Both timeout paths retain the typed
-transport timeout classification. A timeout does not establish that remote
-effects were absent.
+The positive timeout is capped at two seconds per RPC. The request disables the
+SDK response timer, so one outer deadline is the only active timeout. It covers
+the whole send-request future, including subscription and publish queueing, and
+reports the typed transport timeout classification. A timeout does not
+establish that remote effects were absent.
 
 This per-RPC bound is separate from the host hook's two-second total budget.
 An adapter that performs enrollment and batch preparation needs an end-to-end
