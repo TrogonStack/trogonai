@@ -7937,6 +7937,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-dashboard"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "trogon-sandbox-observability",
+ "url",
+]
+
+[[package]]
 name = "trogon-sandbox-guest-init"
 version = "0.1.0"
 dependencies = [
