@@ -6,7 +6,7 @@ use std::time::Duration;
 ///
 /// `async_nats` seeds its `INFO` watch channel with `None` and only populates
 /// it once the first `INFO` frame arrives. When `retry_on_initial_connect` is
-/// enabled, [`connect`](crate::connect) returns the [`Client`] before that
+/// enabled, [`connect`](crate::connect()) returns the [`Client`] before that
 /// frame has been received, so the value is observably `None` for a short
 /// window after connecting. This trait abstracts that read so readiness can be
 /// awaited and tested without a live server.
