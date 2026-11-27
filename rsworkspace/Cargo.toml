@@ -92,6 +92,7 @@ trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-providers = { path = "crates/sandbox/trogon-sandbox-providers" }
 trogon-sandbox-proxmox-worker = { path = "crates/sandbox/trogon-sandbox-proxmox-worker" }
+trogon-sandbox-snapshot-builder = { path = "crates/sandbox/trogon-sandbox-snapshot-builder" }
 trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
 trogon-sandbox-ssh-gateway = { path = "crates/sandbox/trogon-sandbox-ssh-gateway" }
 trogon-sandbox-substrate-worker = { path = "crates/sandbox/trogon-sandbox-substrate-worker" }
@@ -236,6 +237,7 @@ k8s-openapi = { version = "=0.28.0", features = ["latest"] }
 kube = { version = "=4.2.0", default-features = false, features = ["aws-lc-rs", "client", "runtime", "rustls-tls", "ws"] }
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
+ext4-view = { version = "=1.0.0", features = ["std"] }
 flate2 = "=1.1.10"
 toml = "=1.1.8"
 wasmtime = "=47.0.3"
