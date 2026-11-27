@@ -1,0 +1,19 @@
+[package]
+name = "trogon-sandbox-doc-snippets"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Compiles the Rust code in the sandbox documentation as doc tests"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_doc_snippets"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-sandbox-client = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
