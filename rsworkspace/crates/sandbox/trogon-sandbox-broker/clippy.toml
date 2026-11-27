@@ -1,0 +1,2 @@
+# The wire error types are returned unboxed by design.
+large-error-threshold = 512

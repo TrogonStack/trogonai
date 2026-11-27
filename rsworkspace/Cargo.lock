@@ -10529,6 +10529,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-broker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "axum",
+ "bytes",
+ "chrono",
+ "clap",
+ "futures",
+ "hex",
+ "ipnet",
+ "object_store",
+ "prometheus",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-auth",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-credential-broker",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-oci",
+ "trogon-sandbox-protocol",
+ "trogon-std",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-sandbox-client"
 version = "0.1.0"
 dependencies = [
