@@ -2,6 +2,7 @@
 rsworkspace/crates/platform/trogonai-proto/src/gen/** linguist-generated=true
 rsworkspace/crates/platform/trogonai-proto/src/session_gen/** linguist-generated=true
 rsworkspace/crates/platform/trogon-semconv/src/gen/** linguist-generated=true
+rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/proto/substrate.ateapi.v1.rs linguist-generated=true
 goworkspace/internal/spirepolicy/testdata/deployment.json linguist-generated=true
 MODULE.bazel.lock linguist-generated=true
 .config/mise/mise.lock linguist-generated=true

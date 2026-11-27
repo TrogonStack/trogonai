@@ -803,7 +803,7 @@
           "REPO_MAPPING:rules_rust+,bazel_tools bazel_tools",
           "REPO_MAPPING:rules_rust+,rules_cc rules_cc+",
           "REPO_MAPPING:rules_rust+,rules_rust rules_rust+",
-          "FILE:@@//rsworkspace/Cargo.lock c0149648cb2d80dc9b627603d2e4cfa7f58d48cbf69175f9c0a7b63ba06dcf09",
+          "FILE:@@//rsworkspace/Cargo.lock f55aff6fc37d602b357b5a8834cf2cae384de51ba2ca8673412f928d0dab20b1",
           "FILE:@@//rsworkspace/Cargo.toml baa98f1257b0170fcf007098d14caf480e21699f2f2537cc60e97d24ccfb380a",
           "FILE:@@//rsworkspace/crates/a2a/a2a-auth-callout/Cargo.toml 0c16e0ead250f738fdea900ab404d6973d01d2e3d9cd56e5c20b8be80e9c7e92",
           "FILE:@@//rsworkspace/crates/a2a/a2a-identity-types/Cargo.toml c2d8f7b88902124b212c28e3329be12b321229d1f482bbf32e40760bca4a983b",
