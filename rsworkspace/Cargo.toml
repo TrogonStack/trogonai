@@ -65,6 +65,7 @@ trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-sandbox-credential-client = { path = "crates/sandbox/trogon-sandbox-credential-client" }
 trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
+trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-helper" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
@@ -195,6 +196,36 @@ reqwest = { version = "=0.12.28", default-features = false, features = ["json", 
 rrule = "=0.14.0"
 sha2 = "=0.11.1"
 wiremock = "=0.6.5"
+windows = { version = "=0.62.2", features = [
+  "Wdk_Foundation",
+  "Wdk_Storage_FileSystem",
+  "Win32_Foundation",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Threading",
+  "Win32_System_Memory",
+  "Win32_System_Rpc",
+  "Win32_System_Services",
+  "Win32_System_SystemServices",
+  "Win32_System_JobObjects",
+  "Win32_System_StationsAndDesktops",
+  "Win32_System_Com",
+  "Win32_System_Console",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Authentication_Identity",
+  "Win32_Security_Cryptography",
+  "Win32_Storage_FileSystem",
+  "Win32_NetworkManagement_WindowsFilteringPlatform",
+  "Win32_NetworkManagement_NetManagement",
+  "Win32_Networking_WinSock",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Registry",
+] }
 testcontainers-modules = { version = "=0.15.0", features = ["nats"] }
 tempfile = "=3.27.0"
 filetime = "=0.2.29"
