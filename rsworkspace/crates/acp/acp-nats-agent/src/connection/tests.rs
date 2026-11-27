@@ -2,9 +2,9 @@ use super::*;
 use acp_nats::nats::{ParsedAgentSubject, parse_agent_subject};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
-    ArchiveSessionResponse, AuthState, AuthStatusResponse, AuthenticateResponse, InitializeResponse, LogoutResponse,
-    NewSessionResponse, PromptResponse, SessionStatus, SessionStatusResponse, SetSessionTitleResponse, StopReason,
-    UnarchiveSessionResponse,
+    ArchiveSessionResponse, AuthState, AuthStatusResponse, AuthenticateResponse, InitializeRequest, InitializeResponse,
+    LogoutResponse, NewSessionResponse, PromptResponse, SessionStatus, SessionStatusResponse, SetSessionTitleResponse,
+    StopReason, UnarchiveSessionResponse,
 };
 use agent_client_protocol::{Error as AcpError, ErrorCode};
 use std::sync::Mutex;
@@ -1772,3 +1772,55 @@ async fn stopping_nacks_in_flight_and_undispatched_commands_and_returns() {
         .await;
 }
 
+/// An agent that relays the handshake: it keeps `initialize` params as sent.
+#[derive(Default)]
+struct RelayingAgent {
+    initialize_params: Mutex<Vec<serde_json::Value>>,
+}
+
+#[async_trait::async_trait]
+impl AgentHandler for RelayingAgent {
+    async fn initialize(&self, _args: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
+        panic!("a relaying agent is initialized with the params as sent")
+    }
+
+    async fn initialize_raw(&self, params: serde_json::Value) -> agent_client_protocol::Result<InitializeResponse> {
+        self.initialize_params.lock().unwrap().push(params);
+        Ok(InitializeResponse::new(ProtocolVersion::V1))
+    }
+
+    async fn authenticate(&self, _args: AuthenticateRequest) -> agent_client_protocol::Result<AuthenticateResponse> {
+        Ok(AuthenticateResponse::new())
+    }
+
+    async fn new_session(&self, _args: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
+        Ok(NewSessionResponse::new("s1"))
+    }
+
+    async fn prompt(&self, _args: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
+        Ok(PromptResponse::new(StopReason::EndTurn))
+    }
+
+    async fn cancel(&self, _args: CancelNotification) -> agent_client_protocol::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn initialize_reaches_the_agent_with_members_the_schema_does_not_name() {
+    let nats = MockNatsClient::new();
+    let agent = RelayingAgent::default();
+    let sent = serde_json::json!({
+        "protocolVersion": 1,
+        "clientCapabilities": {"libtrogonai": {"tools": [{"name": "send_message"}]}},
+    });
+    let encoded = wire_encode_request("initialize", &sent);
+    let mut msg = make_nats_message("acp.v1.global.agent.initialize", &encoded.body, Some("_INBOX.1"));
+    msg.headers = Some(encoded.headers);
+
+    dispatch_message(msg, &agent, &AdmitAll, &nats).await;
+
+    assert_eq!(*agent.initialize_params.lock().unwrap(), vec![sent]);
+    let response: InitializeResponse = published_response(&nats);
+    assert_eq!(response.protocol_version, ProtocolVersion::V1);
+}

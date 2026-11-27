@@ -2,8 +2,10 @@ use super::*;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::Implementation;
 
-fn from(name: &str) -> InitializeRequest {
-    InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new(name, "1.0.0"))
+fn from(name: &str) -> ClientInitialize {
+    InitializeRequest::new(ProtocolVersion::V1)
+        .client_info(Implementation::new(name, "1.0.0"))
+        .into()
 }
 
 #[test]
@@ -57,4 +59,36 @@ async fn an_answer_recorded_before_listening_is_not_taken_for_a_new_one() {
     let error = pending.answer(&from("discord")).await.expect_err("times out");
 
     assert!(error.message.contains("did not answer"), "{}", error.message);
+}
+
+#[test]
+fn members_the_schema_does_not_name_are_kept_and_compared() {
+    let offering = |tool: &str| {
+        ClientInitialize::from_params(serde_json::json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {"libtrogonai": {"tools": [{"name": tool}]}},
+            "clientInfo": {"name": "discord", "version": "1"},
+        }))
+        .expect("an initialize")
+    };
+
+    let request = offering("send_message");
+
+    assert_eq!(
+        request.params()["clientCapabilities"]["libtrogonai"]["tools"][0]["name"],
+        "send_message"
+    );
+    assert_eq!(
+        request.typed().client_info.as_ref().map(|info| info.name.as_str()),
+        Some("discord")
+    );
+    assert_eq!(request, offering("send_message"));
+    assert_ne!(request, offering("react"));
+}
+
+#[test]
+fn params_that_are_no_initialize_are_refused_as_bad_params() {
+    let error = ClientInitialize::from_params(serde_json::json!({"clientInfo": 7})).expect_err("not an initialize");
+
+    assert_eq!(error.code, agent_client_protocol::ErrorCode::INVALID_PARAMS);
 }

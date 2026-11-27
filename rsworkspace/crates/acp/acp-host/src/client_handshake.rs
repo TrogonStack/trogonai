@@ -1,14 +1,58 @@
 use crate::constants::REINITIALIZE_TIMEOUT;
 use agent_client_protocol::v1::schema::{InitializeRequest, InitializeResponse};
 use agent_client_protocol::{Error, ErrorCode, Result};
+use serde::Deserialize;
 use std::sync::{Arc, Mutex, PoisonError};
 use tokio::sync::watch;
 
+/// A client's `initialize` params exactly as sent, with the typed view the
+/// host reads (`clientInfo`, for the claim).
+///
+/// The child gets the params, not the typed request: the v1
+/// `ClientCapabilities` keeps only the members the schema names, and fx reads
+/// the host tools a client offers from a member of its own,
+/// `clientCapabilities.libtrogonai`. Two are the same `initialize` when their
+/// params are equal JSON.
+#[derive(Debug, Clone)]
+pub struct ClientInitialize {
+    params: serde_json::Value,
+    typed: InitializeRequest,
+}
+
+impl ClientInitialize {
+    /// Reads `params` as an `initialize`, refusing what is not one.
+    pub fn from_params(params: serde_json::Value) -> Result<Self> {
+        let typed = InitializeRequest::deserialize(&params).map_err(|e| Error::invalid_params().data(e.to_string()))?;
+        Ok(Self { params, typed })
+    }
+
+    pub fn params(&self) -> &serde_json::Value {
+        &self.params
+    }
+
+    pub fn typed(&self) -> &InitializeRequest {
+        &self.typed
+    }
+}
+
+impl From<InitializeRequest> for ClientInitialize {
+    fn from(typed: InitializeRequest) -> Self {
+        Self {
+            params: serde_json::to_value(&typed).unwrap_or_default(),
+            typed,
+        }
+    }
+}
+
+impl PartialEq for ClientInitialize {
+    fn eq(&self, other: &Self) -> bool {
+        self.params == other.params
+    }
+}
+
 /// The claiming client's `initialize`, kept across child runs so that every
-/// child the host launches is initialized the way that client asked:
-/// its protocol version, `clientCapabilities` (with their `_meta`, which is
-/// where an agent such as fx reads the host tools a client offers),
-/// `clientInfo`, and the request's own `_meta`.
+/// child the host launches is initialized the way that client asked, with
+/// the params it sent (see [`ClientInitialize`]).
 ///
 /// A run whose child is launched while a request is remembered initializes it
 /// with that request before serving: a relaunch after a crash, or the relaunch
@@ -18,13 +62,13 @@ use tokio::sync::watch;
 /// child's real response.
 #[derive(Debug)]
 pub struct ClientHandshake {
-    last: Mutex<Option<InitializeRequest>>,
+    last: Mutex<Option<ClientInitialize>>,
     outcomes: watch::Sender<Option<Arc<Outcome>>>,
 }
 
 #[derive(Debug)]
 struct Outcome {
-    request: InitializeRequest,
+    request: ClientInitialize,
     result: Result<InitializeResponse>,
 }
 
@@ -40,19 +84,19 @@ impl Default for ClientHandshake {
 impl ClientHandshake {
     /// The `initialize` the next child is to be launched with, if a client has
     /// sent one the host still holds.
-    pub fn last(&self) -> Option<InitializeRequest> {
+    pub fn last(&self) -> Option<ClientInitialize> {
         self.lock().clone()
     }
 
     /// Keeps `request` for every later child.
-    pub fn remember(&self, request: InitializeRequest) {
+    pub fn remember(&self, request: ClientInitialize) {
         *self.lock() = Some(request);
     }
 
     /// Records how a freshly launched child answered `request`, for the
     /// client waiting on it. A refused request is dropped, so the next child
     /// is not launched into the same refusal: it waits for the client instead.
-    pub fn settle(&self, request: &InitializeRequest, result: &Result<InitializeResponse>) {
+    pub fn settle(&self, request: &ClientInitialize, result: &Result<InitializeResponse>) {
         if result.is_err() {
             let mut last = self.lock();
             if last.as_ref() == Some(request) {
@@ -72,7 +116,7 @@ impl ClientHandshake {
         PendingInitialize(self.outcomes.subscribe())
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<InitializeRequest>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<ClientInitialize>> {
         self.last.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -82,7 +126,7 @@ pub struct PendingInitialize(watch::Receiver<Option<Arc<Outcome>>>);
 
 impl PendingInitialize {
     /// The answer the next child initialized with `request` gives.
-    pub async fn answer(mut self, request: &InitializeRequest) -> Result<InitializeResponse> {
+    pub async fn answer(mut self, request: &ClientInitialize) -> Result<InitializeResponse> {
         let wait = async {
             loop {
                 if self.0.changed().await.is_err() {

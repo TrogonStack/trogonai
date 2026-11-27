@@ -89,7 +89,7 @@ where
         let agent = ConnectionAgent::new(cx);
         let initialized = match handshake.last() {
             Some(request) => {
-                let result = agent.initialize(request.clone()).await;
+                let result = agent.initialize_raw(request.params().clone()).await;
                 handshake.settle(&request, &result);
                 let response = result?;
                 info!(agent = ?response.agent_info, "agent relaunched with the client's initialize");

@@ -1,5 +1,5 @@
 use crate::client_claim::ClientClaim;
-use crate::client_handshake::ClientHandshake;
+use crate::client_handshake::{ClientHandshake, ClientInitialize};
 use crate::constants::FALLBACK_PROTOCOL_VERSION;
 use acp_nats::AgentHandler;
 use agent_client_protocol::Result;
@@ -22,9 +22,11 @@ use tracing::{info, warn};
 /// The host's child agent, served to its one client on NATS, with the
 /// `initialize` handshake owned by the host.
 ///
-/// The child must see the client's own `initialize`: its protocol version,
-/// capabilities, `clientInfo` and `_meta` are how the client tells the agent
-/// what it offers (fx reads the host tools it may call from there). But ACP
+/// The child must see the client's own `initialize`, exactly as sent: its
+/// protocol version, capabilities, `clientInfo` and `_meta` are how the client
+/// tells the agent what it offers (fx reads the host tools it may call from
+/// `clientCapabilities.libtrogonai`, a member the typed request would drop;
+/// see [`ClientInitialize`]). But ACP
 /// has a client send `initialize` once per connection, and the host's
 /// connection to the child outlives any one client connection: the client may
 /// restart and initialize again while the child keeps running. So:
@@ -60,7 +62,7 @@ pub struct InitializedAgent<A> {
 /// One `initialize` the child answered.
 #[derive(Debug, Clone)]
 pub struct Handshake {
-    pub request: InitializeRequest,
+    pub request: ClientInitialize,
     pub response: InitializeResponse,
 }
 
@@ -91,26 +93,8 @@ impl<A> InitializedAgent<A> {
 }
 
 impl<A: AgentHandler + Send + Sync> InitializedAgent<A> {
-    /// Makes sure the child is initialized before it gets any other request.
-    async fn ready(&self) -> Result<()> {
-        let mut child = self.child.lock().await;
-        if child.is_none() {
-            warn!(
-                "a request reached the agent before any client initialized it; initializing it with defaults \
-                 until the client initializes"
-            );
-            let request = InitializeRequest::new(FALLBACK_PROTOCOL_VERSION);
-            let response = self.inner.initialize(request.clone()).await?;
-            *child = Some(Handshake { request, response });
-        }
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl<A: AgentHandler + Send + Sync> AgentHandler for InitializedAgent<A> {
-    async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
-        if let Err(refusal) = self.claim.admit(&args) {
+    async fn initialize_client(&self, args: ClientInitialize) -> Result<InitializeResponse> {
+        if let Err(refusal) = self.claim.admit(args.typed()) {
             warn!(error = %refusal, "refused a second client's initialize");
             return Err(refusal);
         }
@@ -126,7 +110,7 @@ impl<A: AgentHandler + Send + Sync> AgentHandler for InitializedAgent<A> {
                 pending.answer(&args).await
             }
             None => {
-                let response = self.inner.initialize(args.clone()).await?;
+                let response = self.inner.initialize_raw(args.params().clone()).await?;
                 info!(agent = ?response.agent_info, "agent initialized by the client");
                 self.handshake.remember(args.clone());
                 *child = Some(Handshake {
@@ -136,6 +120,32 @@ impl<A: AgentHandler + Send + Sync> AgentHandler for InitializedAgent<A> {
                 Ok(response)
             }
         }
+    }
+
+    /// Makes sure the child is initialized before it gets any other request.
+    async fn ready(&self) -> Result<()> {
+        let mut child = self.child.lock().await;
+        if child.is_none() {
+            warn!(
+                "a request reached the agent before any client initialized it; initializing it with defaults \
+                 until the client initializes"
+            );
+            let request = ClientInitialize::from(InitializeRequest::new(FALLBACK_PROTOCOL_VERSION));
+            let response = self.inner.initialize_raw(request.params().clone()).await?;
+            *child = Some(Handshake { request, response });
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl<A: AgentHandler + Send + Sync> AgentHandler for InitializedAgent<A> {
+    async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
+        self.initialize_client(args.into()).await
+    }
+
+    async fn initialize_raw(&self, params: serde_json::Value) -> Result<InitializeResponse> {
+        self.initialize_client(ClientInitialize::from_params(params)?).await
     }
 
     async fn auth_status(&self, args: AuthStatusRequest) -> Result<AuthStatusResponse> {

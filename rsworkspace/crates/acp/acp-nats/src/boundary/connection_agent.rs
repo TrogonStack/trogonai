@@ -58,6 +58,18 @@ impl AgentHandler for ConnectionAgent {
         self.cx.send_request(args).block_task().await
     }
 
+    async fn initialize_raw(&self, params: serde_json::Value) -> Result<InitializeResponse> {
+        let value = self
+            .cx
+            .send_request(UntypedMessage {
+                method: AGENT_METHOD_NAMES.initialize.to_string(),
+                params,
+            })
+            .block_task()
+            .await?;
+        serde_json::from_value(value).map_err(Error::into_internal_error)
+    }
+
     async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
         self.cx.send_request(args).block_task().await
     }

@@ -417,3 +417,79 @@ async fn shutdown_during_the_restart_delay_ends_supervision_without_another_laun
     assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
 }
 
+/// A child that records every JSON-RPC message it reads as raw JSON, so a test
+/// sees members no typed request has, and answers `initialize`.
+#[derive(Default)]
+struct RawLauncher {
+    seen: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+}
+
+impl RawLauncher {
+    fn initialize_params(&self) -> Vec<serde_json::Value> {
+        let seen = self.seen.lock().unwrap();
+        seen.iter()
+            .filter(|message| message["method"] == "initialize")
+            .map(|message| message["params"].clone())
+            .collect()
+    }
+}
+
+impl LaunchAgent for RawLauncher {
+    type Transport = ByteStreams<Compat<WriteHalf<DuplexStream>>, Compat<ReadHalf<DuplexStream>>>;
+
+    fn launch(&self) -> Self::Transport {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let (host_io, agent_io) = tokio::io::duplex(64 * 1024);
+        let (host_read, host_write) = tokio::io::split(host_io);
+        let (agent_read, mut agent_write) = tokio::io::split(agent_io);
+        let seen = self.seen.clone();
+        tokio::spawn(async move {
+            let mut lines = tokio::io::BufReader::new(agent_read).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let message: serde_json::Value = serde_json::from_str(&line).unwrap();
+                seen.lock().unwrap().push(message.clone());
+                if message["method"] == "initialize" {
+                    let reply = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": message["id"],
+                        "result": {"protocolVersion": message["params"]["protocolVersion"]},
+                    });
+                    agent_write.write_all(format!("{reply}\n").as_bytes()).await.unwrap();
+                }
+            }
+        });
+        ByteStreams::new(Compat::new(host_write), Compat::new(host_read))
+    }
+}
+
+#[tokio::test]
+async fn capabilities_the_schema_does_not_name_reach_every_child() {
+    let launcher = RawLauncher::default();
+    let handshake = Arc::new(ClientHandshake::default());
+    let sent = serde_json::json!({
+        "protocolVersion": 1,
+        "clientCapabilities": {
+            "terminal": true,
+            "libtrogonai": {"tools": [{"name": "send_message"}]},
+        },
+        "clientInfo": {"name": "discord", "version": "1"},
+    });
+    let first = async |agent: InitializedAgent<ConnectionAgent>| agent.initialize_raw(sent.clone()).await.map(drop);
+    let relaunched = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
+
+    let exit = run_once(
+        &launcher,
+        Arc::new(NoopClient),
+        Arc::default(),
+        handshake.clone(),
+        &first,
+    )
+    .await;
+    assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
+    // A relaunch (after a crash, say) initializes the next child with the
+    // same params.
+    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), handshake, &relaunched).await;
+    assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
+
+    assert_eq!(launcher.initialize_params(), vec![sent.clone(), sent]);
+}

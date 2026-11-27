@@ -96,7 +96,7 @@ async fn the_first_initialize_reaches_the_child_as_sent_and_returns_its_answer()
 
     assert_eq!(h.agent.inner.initializes(), vec![discord("1")]);
     assert_eq!(answer, reply_to(&discord("1")));
-    assert_eq!(h.handshake.last(), Some(discord("1")), "kept for the next child");
+    assert_eq!(h.handshake.last(), Some(discord("1").into()), "kept for the next child");
 }
 
 #[tokio::test]
@@ -115,7 +115,7 @@ async fn a_child_the_run_already_initialized_is_not_initialized_again() {
     let request = discord("1");
     let h = harness(Some(Handshake {
         response: reply_to(&request),
-        request: request.clone(),
+        request: request.clone().into(),
     }));
 
     h.agent.initialize(request).await.expect("initialize");
@@ -138,12 +138,12 @@ async fn a_different_initialize_relaunches_the_child_and_returns_the_new_childs_
 
     assert_eq!(
         h.handshake.last(),
-        Some(discord("2")),
+        Some(discord("2").into()),
         "the next child gets the new one"
     );
     let new_childs_answer =
         InitializeResponse::new(ProtocolVersion::V1).agent_info(Implementation::new("new-child", "1"));
-    h.handshake.settle(&discord("2"), &Ok(new_childs_answer.clone()));
+    h.handshake.settle(&discord("2").into(), &Ok(new_childs_answer.clone()));
 
     assert_eq!(reinitialize.await.unwrap().expect("answered"), new_childs_answer);
     assert_eq!(
@@ -185,7 +185,7 @@ async fn the_clients_initialize_after_defaults_relaunches_the_child_with_it() {
     let agent = h.agent.clone();
     let reinitialize = tokio::spawn(async move { agent.initialize(discord("1")).await });
     h.relaunch.notified().await;
-    h.handshake.settle(&discord("1"), &Ok(reply_to(&discord("1"))));
+    h.handshake.settle(&discord("1").into(), &Ok(reply_to(&discord("1"))));
 
     assert_eq!(reinitialize.await.unwrap().expect("answered"), reply_to(&discord("1")));
 }

@@ -10,7 +10,7 @@ use acp_nats::wire::{
 use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ResponseSubject, requesting_client};
 use agent_client_protocol::v1::schema::{
     ArchiveSessionRequest, AuthStatusRequest, AuthenticateRequest, CancelNotification, CloseSessionRequest,
-    DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
+    DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest,
     ListProvidersRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest,
     ResumeSessionRequest, SessionStatusRequest, SetProviderRequest, SetSessionConfigOptionRequest,
     SetSessionModeRequest, SetSessionTitleRequest, UnarchiveSessionRequest,
@@ -340,7 +340,9 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
                 msg,
                 method.protocol_method().as_str(),
                 nats,
-                |req: InitializeRequest| agent.initialize(req),
+                // As sent, so members the typed request does not name reach
+                // an agent that relays the handshake.
+                |params: serde_json::Value| agent.initialize_raw(params),
             )
             .await
         }
