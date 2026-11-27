@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use trogon_sandbox_contract::ArtifactType;
 use trogon_sandbox_oci::Layer;
 use trogon_sandbox_snapshot_builder::security::{
-    ScanInput, ScanLimits, ScanPreparation, SecurityError, prepare_scan_input_async, prepare_scan_input_with_options,
+    ExtractError, ScanInput, ScanLimits, ScanPreparation, SecurityError, prepare_scan_input_async,
+    prepare_scan_input_with_options,
 };
 
 type Boxed<T> = Result<T, Box<dyn std::error::Error>>;
@@ -184,7 +185,10 @@ async fn scan_extraction_enforces_byte_entry_depth_and_time_budgets() -> TestRes
         Ok(_) => return Err("a stalled extractor must not produce a scan input".into()),
         Err(error) => error,
     };
-    assert!(error.to_string().contains("deadline"), "{error}");
+    assert!(
+        matches!(error, SecurityError::Extraction(ExtractError::DeadlineExceeded)),
+        "{error}"
+    );
     assert!(started.elapsed() < Duration::from_secs(5));
     Ok(())
 }
