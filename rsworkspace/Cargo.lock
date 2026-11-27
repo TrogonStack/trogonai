@@ -11511,6 +11511,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-policy-cli"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rcgen",
+ "rustls",
+ "serde_json",
+ "signal-hook-registry",
+ "tempfile",
+ "tokio",
+ "trogon-sandbox-fence-helper",
+ "trogon-sandbox-policy-exec",
+ "trogon-sandbox-windows-fence",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-sandbox-policy-exec"
 version = "0.1.0"
 dependencies = [
