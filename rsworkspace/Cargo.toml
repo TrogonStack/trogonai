@@ -80,6 +80,7 @@ trogon-sandbox-fly-worker = { path = "crates/sandbox/trogon-sandbox-fly-worker" 
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-hyperlight-worker = { path = "crates/sandbox/trogon-sandbox-hyperlight-worker" }
 trogon-sandbox-kubevirt-worker = { path = "crates/sandbox/trogon-sandbox-kubevirt-worker" }
+trogon-sandbox-k8s-worker = { path = "crates/sandbox/trogon-sandbox-k8s-worker" }
 trogon-sandbox-lsp = { path = "crates/sandbox/trogon-sandbox-lsp" }
 trogon-sandbox-mcp = { path = "crates/sandbox/trogon-sandbox-mcp" }
 trogon-sandbox-memory-worker = { path = "crates/sandbox/trogon-sandbox-memory-worker" }
