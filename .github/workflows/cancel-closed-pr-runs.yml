@@ -1,0 +1,34 @@
+name: Cancel closed PR runs
+
+# A concurrency group only cancels a run when a newer one joins it, so a PR
+# that merges or closes leaves its queued and running CI behind, holding the
+# runners for a branch nobody will look at again.
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Cancel the PR's unfinished runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          for status in queued pending waiting requested in_progress; do
+            gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/actions/runs" \
+              -f branch="$HEAD_REF" -f status="$status" -f per_page=100 \
+              --jq '.workflow_runs[] | "\(.id) \(.head_repository.full_name)"'
+          done | sort -u | while read -r id repo; do
+            # A fork can push a branch with the same name as one in this repo.
+            [ "$repo" = "$HEAD_REPO" ] && [ "$id" != "$GITHUB_RUN_ID" ] || continue
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent \
+              || echo "::notice::run $id already finished"
+          done

@@ -6,6 +6,13 @@ on:
     branches:
       - main
 
+# Every merge to main queues a run, and each one recomputes the whole release
+# from main, so only the newest pending run matters. A running one is left to
+# finish rather than cut off halfway through opening a PR or tagging.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
