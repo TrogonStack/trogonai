@@ -29,19 +29,16 @@ fn prepare_atomically_records_ordered_batch_and_monotonic_dispositions() {
 }
 #[test]
 fn rendered_total_includes_provenance_and_warning_budget() {
-    for (ids, bytes) in [
-        (vec![0], 0),
-        (vec![0], 8193),
-        (vec![0, 1, 2, 3, 4], 8192),
-        (vec![0, 0], 10),
-        (vec![], 1),
-    ] {
+    for bytes in [0, 8193] {
+        assert!(RenderedUtf8Bytes::new(bytes).is_err());
+    }
+    for (ids, bytes) in [(vec![0, 1, 2, 3, 4], 8192), (vec![0, 0], 10), (vec![], 1)] {
         assert!(
             TrustedBatchPlan::from_renderer(
                 ids.into_iter()
                     .map(|i| MessageId::new(format!("message_{i}")).unwrap())
                     .collect(),
-                bytes
+                RenderedUtf8Bytes::new(bytes).unwrap()
             )
             .is_err()
         );
@@ -102,7 +99,11 @@ fn recipient_owner_and_current_generation_guard_prepare() {
         TrustedPeerOwner::new(TenantId::new("tenant").unwrap(), CallerId::new("foreign").unwrap()),
         reference("recipient", 1),
         BatchId::new("batch").unwrap(),
-        TrustedBatchPlan::from_renderer(vec![MessageId::new("message_0").unwrap()], 20).unwrap(),
+        TrustedBatchPlan::from_renderer(
+            vec![MessageId::new("message_0").unwrap()],
+            RenderedUtf8Bytes::new(20).unwrap(),
+        )
+        .unwrap(),
         time(3),
     );
     assert_eq!(
@@ -153,11 +154,11 @@ fn core760_renderer_plan_routes_and_replays_the_exact_ordered_batch() {
             MessageId::new("message_0").unwrap(),
             MessageId::new("message_1").unwrap(),
         ],
-        40,
+        RenderedUtf8Bytes::new(40).unwrap(),
     )
     .unwrap();
     let expected_ids: Vec<_> = plan.message_ids().iter().map(|id| id.as_str().to_owned()).collect();
-    let budget = plan.rendered_utf8_bytes();
+    let budget = plan.rendered_utf8_bytes().get();
     assert_eq!(budget, 40);
     let command = PrepareBatch::new(
         identity("recipient").owner().clone(),
@@ -263,7 +264,7 @@ fn renderer_plan_and_command_binding_match_the_persisted_batch() {
     assert_eq!(command.attachment(), &reference("recipient", 1));
     assert_eq!(command.stream_id(), command.attachment().peer_id());
     assert_eq!(command.batch_id().as_str(), "batch");
-    assert_eq!(command.plan().rendered_utf8_bytes(), 73);
+    assert_eq!(command.plan().rendered_utf8_bytes().get(), 73);
     let state = run(inbox(&[3, 1], 2), &command);
     assert_eq!(
         state.batches[0].message_ids,
@@ -427,7 +428,11 @@ fn preparation_time_remains_inside_the_validated_attachment_lease() {
             identity("recipient").owner().clone(),
             reference("recipient", 1),
             BatchId::new("bounded_time").unwrap(),
-            TrustedBatchPlan::from_renderer(vec![MessageId::new("message_0").unwrap()], 20).unwrap(),
+            TrustedBatchPlan::from_renderer(
+                vec![MessageId::new("message_0").unwrap()],
+                RenderedUtf8Bytes::new(20).unwrap(),
+            )
+            .unwrap(),
             at,
         );
         assert_eq!(error(inbox(&[0], 1), &command), MessageError::Guard(expected));
@@ -453,7 +458,11 @@ fn preparation_cannot_emit_a_receipt_with_non_protobuf_leap_nanoseconds() {
             identity("recipient").owner().clone(),
             reference("recipient", 1),
             BatchId::new("leap_batch").unwrap(),
-            TrustedBatchPlan::from_renderer(vec![MessageId::new("message_0").unwrap()], 20).unwrap(),
+            TrustedBatchPlan::from_renderer(
+                vec![MessageId::new("message_0").unwrap()],
+                RenderedUtf8Bytes::new(20).unwrap(),
+            )
+            .unwrap(),
             now,
         )
     };

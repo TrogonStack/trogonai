@@ -45,6 +45,9 @@ pub use trusted_content::TrustedContent;
 mod terminal_disposition;
 pub use terminal_disposition::TerminalDisposition;
 
+mod rendered_utf8_bytes;
+pub use rendered_utf8_bytes::RenderedUtf8Bytes;
+
 mod trusted_batch_plan;
 pub use trusted_batch_plan::TrustedBatchPlan;
 

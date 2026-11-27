@@ -28,7 +28,11 @@ fn acknowledgment_stops_replay_and_releases_recipient_quota_exactly_once() {
         identity("recipient").owner().clone(),
         reference("recipient", 1),
         BatchId::new("next_batch").unwrap(),
-        TrustedBatchPlan::from_renderer(vec![MessageId::new("message_4").unwrap()], 2048).unwrap(),
+        TrustedBatchPlan::from_renderer(
+            vec![MessageId::new("message_4").unwrap()],
+            RenderedUtf8Bytes::new(2048).unwrap(),
+        )
+        .unwrap(),
         time(5),
     );
     assert_eq!(run(state, &cmd).batches.len(), 2);

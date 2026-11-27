@@ -30,7 +30,7 @@ exact recipient, immutable collaboration, and acceptance time. An offline or
 expired connector does not remove the durable inbox.
 
 `TrustedBatchPlan::from_renderer` is an internal renderer result containing
-ordered message IDs and the total rendered UTF-8 size, including escaped
+ordered message IDs and the total rendered UTF-8 size (`RenderedUtf8Bytes`), including escaped
 provenance and warnings. The renderer must validate complete rendered messages
 before append. The core checks the oldest eligible intake prefix, current
 eligibility, distinct IDs, at most four messages, the 8 KiB total limit, and a

@@ -77,7 +77,7 @@ impl Decider for PrepareBatch {
             .take(ids.len())
             .map(|e| u64::from(e.message.content_size_bytes.unwrap_or(0)))
             .sum();
-        if bytes > command.plan.rendered_utf8_bytes as u64 {
+        if bytes > command.plan.rendered_utf8_bytes.get() as u64 {
             return Err(MessageError::InvalidPlan);
         }
         let batch_id = Some(command.batch_id.as_str().to_owned());

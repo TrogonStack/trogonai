@@ -116,7 +116,7 @@ pub fn prepare(indices: &[usize], size: usize, seconds: i64) -> PrepareBatch {
                 .iter()
                 .map(|i| MessageId::new(format!("message_{i}")).unwrap())
                 .collect(),
-            size,
+            RenderedUtf8Bytes::new(size).unwrap(),
         )
         .unwrap(),
         time(seconds),
