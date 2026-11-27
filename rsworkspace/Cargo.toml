@@ -65,6 +65,7 @@ trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
+trogon-sandbox-windows-fence = { path = "crates/sandbox/trogon-sandbox-windows-fence" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
 trogon-egress-proxy = { path = "crates/platform/trogon-egress-proxy" }

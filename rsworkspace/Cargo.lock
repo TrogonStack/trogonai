@@ -7875,6 +7875,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-windows-fence"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "trogon-std",
+]
+
+[[package]]
 name = "trogon-scheduler"
 version = "0.1.0"
 dependencies = [
