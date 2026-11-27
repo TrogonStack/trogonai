@@ -32,13 +32,21 @@ fn a_repeated_init_is_a_no_op_and_a_second_shutdown_reports_every_provider() {
             trogon_telemetry::shutdown_otel().is_ok(),
             "the first shutdown stops the providers installed by the first init"
         );
-        let error = trogon_telemetry::shutdown_otel()
-            .expect_err("stopped providers cannot be shut down again");
+        let error = trogon_telemetry::shutdown_otel().expect_err("stopped providers cannot be shut down again");
         let failed = error.errors();
         assert_eq!(failed.len(), 3, "every provider must report a failure: {error}");
-        assert!(matches!(failed[0], TelemetryProviderShutdownError::Tracer { .. }), "{error}");
-        assert!(matches!(failed[1], TelemetryProviderShutdownError::Meter { .. }), "{error}");
-        assert!(matches!(failed[2], TelemetryProviderShutdownError::Logger { .. }), "{error}");
+        assert!(
+            matches!(failed[0], TelemetryProviderShutdownError::Tracer { .. }),
+            "{error}"
+        );
+        assert!(
+            matches!(failed[1], TelemetryProviderShutdownError::Meter { .. }),
+            "{error}"
+        );
+        assert!(
+            matches!(failed[2], TelemetryProviderShutdownError::Logger { .. }),
+            "{error}"
+        );
         return;
     }
 
