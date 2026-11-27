@@ -17,6 +17,12 @@ The [gateway webhook reference](./reference/gateway-webhooks.md) describes
 dynamic endpoint registration, request authentication, and the durable delivery
 contract that other systems consume.
 
+## Sandbox
+
+- Explore the [Sandbox product](./product/sandbox.md) to see what an agent can do with a lease and which workers are available in source.
+- Read the [Sandbox client architecture](./architecture/sandbox-foundation.md) to see how a request reaches a worker and how clients release resources.
+- Compare [sandbox providers](./reference/sandbox-providers.md) by runtime and implementation status.
+
 ## Scheduler
 
 Browse the [scheduler product showcase](./product/scheduler.md) for what a
