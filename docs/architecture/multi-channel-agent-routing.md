@@ -471,6 +471,16 @@ them change the topology above.
   symmetric to its sources) would centralize outbound custody. It does not exist,
   and adding one is a gateway decision, not a channel one.
 - **One agent protocol.** `AgentPort` has a single implementation.
+- **One client per `acp-host`.** `acp-nats` sends an agent's `session/update`
+  and `session/request_permission` to every client listening on the prefix,
+  with no session filter, so two clients sharing a host's prefix would see each
+  other's turns and could approve each other's tool calls. The rule is one
+  client per `acp-host`: run a host per client, each on its own `ACP_PREFIX`,
+  and give the client the same prefix. The host refuses a second client's
+  `initialize` when its `clientInfo.name` differs from the first one's, which
+  catches a misconfigured prefix but is not access control; NATS permissions
+  per prefix are what actually keep clients apart. Filtering callbacks by
+  session in `acp-nats` would lift the rule, and nothing does that yet.
 
 ## End-to-end walkthrough
 
