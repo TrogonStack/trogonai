@@ -1,0 +1,54 @@
+[package]
+name = "trogon-sandbox-ws-gateway"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "WebSocket gateway bridging browser clients to the sandbox NATS service"
+
+[lib]
+name = "trogon_sandbox_ws_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-ws-gateway"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+hex = { workspace = true }
+hmac = { workspace = true }
+rand_core = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tower-http = { workspace = true, features = ["cors", "trace"] }
+tracing = { workspace = true }
+trogon-sandbox-auth = { workspace = true }
+trogon-sandbox-client = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-file-ops = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+futures-util = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+tempfile = { workspace = true }
+tokio-tungstenite = { workspace = true }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }

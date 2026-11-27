@@ -93,6 +93,7 @@ trogon-sandbox-v8-wasm-worker = { path = "crates/sandbox/trogon-sandbox-v8-wasm-
 trogon-sandbox-vercel-worker = { path = "crates/sandbox/trogon-sandbox-vercel-worker" }
 trogon-sandbox-volumes = { path = "crates/sandbox/trogon-sandbox-volumes" }
 trogon-sandbox-windows-fence = { path = "crates/sandbox/trogon-sandbox-windows-fence" }
+trogon-sandbox-ws-gateway = { path = "crates/sandbox/trogon-sandbox-ws-gateway" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
 trogon-egress-proxy = { path = "crates/platform/trogon-egress-proxy" }
