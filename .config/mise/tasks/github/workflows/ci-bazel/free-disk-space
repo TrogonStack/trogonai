@@ -16,8 +16,13 @@ unused=(
 )
 
 df -h /
+pids=()
 for path in "${unused[@]}"; do
   sudo rm -rf "$path" &
+  pids+=("$!")
 done
-wait
+# A bare `wait` reports success whatever the deletions returned.
+for pid in "${pids[@]}"; do
+  wait "$pid"
+done
 df -h /
