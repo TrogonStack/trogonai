@@ -1,16 +1,16 @@
 use crate::agent_launch::AgentLaunch;
 use crate::client_claim::ClientClaim;
-use crate::initialized_agent::InitializedAgent;
+use crate::client_handshake::ClientHandshake;
+use crate::initialized_agent::{Handshake, InitializedAgent};
 use crate::restart_policy::RestartPolicy;
 use acp_nats::boundary::{BoundaryExit, ConnectionAgent, connect_client_boundary_with};
 use acp_nats::{AgentHandler, ClientHandler};
-use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::v1::schema::InitializeRequest;
 use agent_client_protocol::{AcpAgent, Client, ConnectTo};
 use std::convert::Infallible;
 use std::fmt::Display;
 use std::future::Future;
 use std::sync::Arc;
+use tokio::sync::Notify;
 use tokio::time::Instant;
 use tracing::{info, warn};
 
@@ -39,9 +39,13 @@ pub enum RunExit<E> {
     ServeEnded,
     /// The NATS side failed; the agent is restarted with it.
     ServeFailed(E),
-    /// The agent connection failed: the child could not be launched, failed
-    /// its initialize handshake, or died abnormally (e.g. killed by a signal).
+    /// The agent connection failed: the child could not be launched, refused
+    /// the client's initialize it was relaunched with, or died abnormally
+    /// (e.g. killed by a signal).
     AgentFailed(agent_client_protocol::Error),
+    /// The client initialized again with different parameters, which the
+    /// running child cannot take: the next child is initialized with them.
+    Reinitialize,
 }
 
 impl<E: Display> Display for RunExit<E> {
@@ -51,13 +55,30 @@ impl<E: Display> Display for RunExit<E> {
             Self::ServeEnded => f.write_str("NATS serving ended"),
             Self::ServeFailed(error) => write!(f, "NATS serving failed: {error}"),
             Self::AgentFailed(error) => write!(f, "agent connection failed: {error}"),
+            Self::Reinitialize => f.write_str("the client initialized with different parameters"),
         }
     }
 }
 
-/// Launches the agent, initializes it once, and hands it to `serve` until
-/// either side ends.
-pub async fn run_once<L, C, S, F, E>(launcher: &L, client: Arc<C>, claim: Arc<ClientClaim>, serve: &S) -> RunExit<E>
+/// How a run's serving ended, short of the agent going away.
+enum Served<E> {
+    Ended(Result<(), E>),
+    Reinitialize,
+}
+
+/// Launches the agent and hands it to `serve` until either side ends.
+///
+/// When `handshake` holds a client's `initialize` (this is a relaunch), the
+/// child is initialized with it before serving starts. Otherwise the child is
+/// left for the first client `initialize` to reach it; see
+/// [`InitializedAgent`].
+pub async fn run_once<L, C, S, F, E>(
+    launcher: &L,
+    client: Arc<C>,
+    claim: Arc<ClientClaim>,
+    handshake: Arc<ClientHandshake>,
+    serve: &S,
+) -> RunExit<E>
 where
     L: LaunchAgent,
     C: ClientHandler + Send + Sync + 'static,
@@ -66,19 +87,30 @@ where
 {
     let result = connect_client_boundary_with(client, launcher.launch(), async move |cx| {
         let agent = ConnectionAgent::new(cx);
-        // Default client capabilities on purpose: the clients behind NATS are
-        // chat bridges and the like, which serve no filesystem or terminal, so
-        // the agent should use its own tools for both.
-        let initialized = agent.initialize(InitializeRequest::new(ProtocolVersion::V1)).await?;
-        info!(agent = ?initialized.agent_info, "agent initialized");
-        Ok(serve(InitializedAgent::new(agent, initialized, claim)).await)
+        let initialized = match handshake.last() {
+            Some(request) => {
+                let result = agent.initialize(request.clone()).await;
+                handshake.settle(&request, &result);
+                let response = result?;
+                info!(agent = ?response.agent_info, "agent relaunched with the client's initialize");
+                Some(Handshake { request, response })
+            }
+            None => None,
+        };
+        let relaunch = Arc::new(Notify::new());
+        let agent = InitializedAgent::new(agent, initialized, claim, handshake, relaunch.clone());
+        Ok(tokio::select! {
+            result = serve(agent) => Served::Ended(result),
+            () = relaunch.notified() => Served::Reinitialize,
+        })
     })
     .await;
 
     match result {
         Ok(BoundaryExit::TransportClosed) => RunExit::AgentExited,
-        Ok(BoundaryExit::Main(Ok(()))) => RunExit::ServeEnded,
-        Ok(BoundaryExit::Main(Err(error))) => RunExit::ServeFailed(error),
+        Ok(BoundaryExit::Main(Served::Ended(Ok(())))) => RunExit::ServeEnded,
+        Ok(BoundaryExit::Main(Served::Ended(Err(error)))) => RunExit::ServeFailed(error),
+        Ok(BoundaryExit::Main(Served::Reinitialize)) => RunExit::Reinitialize,
         Err(error) => RunExit::AgentFailed(error),
     }
 }
@@ -89,7 +121,10 @@ where
 /// shuts a spawned agent down when its connection goes away.
 ///
 /// The one [`ClientClaim`] spans every run, so the client a host serves stays
-/// the same across relaunches.
+/// the same across relaunches, and so does the client's `initialize`: every
+/// child after the first is initialized with the claiming client's last one.
+/// A relaunch the client asked for by initializing with different parameters
+/// happens at once and does not count toward the backoff.
 ///
 /// Whether a session survives a relaunch depends on the agent. One that keeps
 /// sessions on disk (fx does) reloads it when the client sends `session/load`;
@@ -109,11 +144,17 @@ where
     F: Future<Output = Result<(), E>>,
     E: Display,
 {
+    let handshake = Arc::new(ClientHandshake::default());
     let mut delay = None;
     loop {
         let started = Instant::now();
-        let exit = run_once(launcher, client.clone(), claim.clone(), &serve).await;
+        let exit = run_once(launcher, client.clone(), claim.clone(), handshake.clone(), &serve).await;
         let uptime = started.elapsed();
+        if matches!(exit, RunExit::Reinitialize) {
+            info!(%exit, uptime_ms = uptime.as_millis(), "relaunching the agent");
+            delay = None;
+            continue;
+        }
         let next = policy.next_delay(delay, uptime);
         warn!(%exit, uptime_ms = uptime.as_millis(), restart_in_ms = next.as_millis(), "agent run ended; relaunching");
         tokio::time::sleep(next).await;

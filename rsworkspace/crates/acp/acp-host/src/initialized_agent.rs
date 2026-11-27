@@ -1,4 +1,6 @@
 use crate::client_claim::ClientClaim;
+use crate::client_handshake::ClientHandshake;
+use crate::constants::FALLBACK_PROTOCOL_VERSION;
 use acp_nats::AgentHandler;
 use agent_client_protocol::Result;
 use agent_client_protocol::v1::schema::{
@@ -14,32 +16,86 @@ use agent_client_protocol::v1::schema::{
     UnarchiveSessionResponse,
 };
 use std::sync::Arc;
-use tracing::warn;
+use tokio::sync::{Mutex, Notify};
+use tracing::{info, warn};
 
-/// An agent the host has already initialized, served to its one client on NATS.
+/// The host's child agent, served to its one client on NATS, with the
+/// `initialize` handshake owned by the host.
 ///
-/// ACP has a client send `initialize` once per connection, but the host's
+/// The child must see the client's own `initialize`: its protocol version,
+/// capabilities, `clientInfo` and `_meta` are how the client tells the agent
+/// what it offers (fx reads the host tools it may call from there). But ACP
+/// has a client send `initialize` once per connection, and the host's
 /// connection to the child outlives any one client connection: the client may
-/// restart and initialize again while the child keeps running. Forwarding
-/// every `initialize` would ask the agent to initialize repeatedly on one
-/// connection, which the protocol does not promise to allow. The host
-/// initializes the child once when it starts and answers the client's
-/// `initialize` with that reply, after checking the [`ClientClaim`] so that a
-/// second, different client is refused. Every other method passes through
-/// untouched.
+/// restart and initialize again while the child keeps running. So:
+///
+/// - The first `initialize` this child sees is the client's, forwarded as sent,
+///   and the client gets the child's real answer. It is remembered in the
+///   [`ClientHandshake`], and every later child the host launches (after a
+///   crash, say) is initialized with it before it serves anything.
+/// - The same `initialize` again is answered from this child's reply, without
+///   bothering the child.
+/// - A different one (the client restarted with new capabilities, a new
+///   version, or new `_meta`) is not sent to this child a second time: the
+///   host relaunches the child, initializes the new one with it, and answers
+///   with that child's reply.
+/// - Any other request that reaches a child no client has initialized (the
+///   host restarted and its client carried on without initializing again)
+///   first initializes it with defaults at [`FALLBACK_PROTOCOL_VERSION`]; the
+///   client's next `initialize` then relaunches it with the real parameters.
+///
+/// A second, different client's `initialize` is refused by the
+/// [`ClientClaim`] before anything reaches the child.
 pub struct InitializedAgent<A> {
     inner: A,
-    initialized: InitializeResponse,
     claim: Arc<ClientClaim>,
+    handshake: Arc<ClientHandshake>,
+    /// How this run's child was initialized, once it has been.
+    child: Mutex<Option<Handshake>>,
+    relaunch: Arc<Notify>,
+}
+
+/// One `initialize` the child answered.
+#[derive(Debug, Clone)]
+pub struct Handshake {
+    pub request: InitializeRequest,
+    pub response: InitializeResponse,
 }
 
 impl<A> InitializedAgent<A> {
-    pub fn new(inner: A, initialized: InitializeResponse, claim: Arc<ClientClaim>) -> Self {
+    /// `initialized` is the handshake the run already did with the child, if
+    /// any. `relaunch` is notified when a client asks for a new child.
+    pub fn new(
+        inner: A,
+        initialized: Option<Handshake>,
+        claim: Arc<ClientClaim>,
+        handshake: Arc<ClientHandshake>,
+        relaunch: Arc<Notify>,
+    ) -> Self {
         Self {
             inner,
-            initialized,
             claim,
+            handshake,
+            child: Mutex::new(initialized),
+            relaunch,
         }
+    }
+}
+
+impl<A: AgentHandler + Send + Sync> InitializedAgent<A> {
+    /// Makes sure the child is initialized before it gets any other request.
+    async fn ready(&self) -> Result<()> {
+        let mut child = self.child.lock().await;
+        if child.is_none() {
+            warn!(
+                "a request reached the agent before any client initialized it; initializing it with defaults \
+                 until the client initializes"
+            );
+            let request = InitializeRequest::new(FALLBACK_PROTOCOL_VERSION);
+            let response = self.inner.initialize(request.clone()).await?;
+            *child = Some(Handshake { request, response });
+        }
+        Ok(())
     }
 }
 
@@ -50,54 +106,87 @@ impl<A: AgentHandler + Send + Sync> AgentHandler for InitializedAgent<A> {
             warn!(error = %refusal, "refused a second client's initialize");
             return Err(refusal);
         }
-        Ok(self.initialized.clone())
+        let mut child = self.child.lock().await;
+        match child.as_ref() {
+            Some(done) if done.request == args => Ok(done.response.clone()),
+            Some(_) => {
+                info!("the client initialized with different parameters; relaunching the agent with them");
+                let pending = self.handshake.listen();
+                self.handshake.remember(args.clone());
+                self.relaunch.notify_one();
+                drop(child);
+                pending.answer(&args).await
+            }
+            None => {
+                let response = self.inner.initialize(args.clone()).await?;
+                info!(agent = ?response.agent_info, "agent initialized by the client");
+                self.handshake.remember(args.clone());
+                *child = Some(Handshake {
+                    request: args,
+                    response: response.clone(),
+                });
+                Ok(response)
+            }
+        }
     }
 
     async fn auth_status(&self, args: AuthStatusRequest) -> Result<AuthStatusResponse> {
+        self.ready().await?;
         self.inner.auth_status(args).await
     }
 
     async fn archive_session(&self, args: ArchiveSessionRequest) -> Result<ArchiveSessionResponse> {
+        self.ready().await?;
         self.inner.archive_session(args).await
     }
 
     async fn unarchive_session(&self, args: UnarchiveSessionRequest) -> Result<UnarchiveSessionResponse> {
+        self.ready().await?;
         self.inner.unarchive_session(args).await
     }
 
     async fn session_status(&self, args: SessionStatusRequest) -> Result<SessionStatusResponse> {
+        self.ready().await?;
         self.inner.session_status(args).await
     }
 
     async fn set_session_title(&self, args: SetSessionTitleRequest) -> Result<SetSessionTitleResponse> {
+        self.ready().await?;
         self.inner.set_session_title(args).await
     }
 
     async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
+        self.ready().await?;
         self.inner.authenticate(args).await
     }
 
     async fn logout(&self, args: LogoutRequest) -> Result<LogoutResponse> {
+        self.ready().await?;
         self.inner.logout(args).await
     }
 
     async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
+        self.ready().await?;
         self.inner.new_session(args).await
     }
 
     async fn load_session(&self, args: LoadSessionRequest) -> Result<LoadSessionResponse> {
+        self.ready().await?;
         self.inner.load_session(args).await
     }
 
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
+        self.ready().await?;
         self.inner.prompt(args).await
     }
 
     async fn cancel(&self, args: CancelNotification) -> Result<()> {
+        self.ready().await?;
         self.inner.cancel(args).await
     }
 
     async fn set_session_mode(&self, args: SetSessionModeRequest) -> Result<SetSessionModeResponse> {
+        self.ready().await?;
         self.inner.set_session_mode(args).await
     }
 
@@ -105,46 +194,57 @@ impl<A: AgentHandler + Send + Sync> AgentHandler for InitializedAgent<A> {
         &self,
         args: SetSessionConfigOptionRequest,
     ) -> Result<SetSessionConfigOptionResponse> {
+        self.ready().await?;
         self.inner.set_session_config_option(args).await
     }
 
     async fn fork_session(&self, args: ForkSessionRequest) -> Result<ForkSessionResponse> {
+        self.ready().await?;
         self.inner.fork_session(args).await
     }
 
     async fn resume_session(&self, args: ResumeSessionRequest) -> Result<ResumeSessionResponse> {
+        self.ready().await?;
         self.inner.resume_session(args).await
     }
 
     async fn close_session(&self, args: CloseSessionRequest) -> Result<CloseSessionResponse> {
+        self.ready().await?;
         self.inner.close_session(args).await
     }
 
     async fn delete_session(&self, args: DeleteSessionRequest) -> Result<DeleteSessionResponse> {
+        self.ready().await?;
         self.inner.delete_session(args).await
     }
 
     async fn list_sessions(&self, args: ListSessionsRequest) -> Result<ListSessionsResponse> {
+        self.ready().await?;
         self.inner.list_sessions(args).await
     }
 
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
+        self.ready().await?;
         self.inner.ext_method(args).await
     }
 
     async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
+        self.ready().await?;
         self.inner.ext_notification(args).await
     }
 
     async fn list_providers(&self, args: ListProvidersRequest) -> Result<ListProvidersResponse> {
+        self.ready().await?;
         self.inner.list_providers(args).await
     }
 
     async fn set_provider(&self, args: SetProviderRequest) -> Result<SetProviderResponse> {
+        self.ready().await?;
         self.inner.set_provider(args).await
     }
 
     async fn disable_provider(&self, args: DisableProviderRequest) -> Result<DisableProviderResponse> {
+        self.ready().await?;
         self.inner.disable_provider(args).await
     }
 }

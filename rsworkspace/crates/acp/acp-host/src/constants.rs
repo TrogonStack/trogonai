@@ -16,3 +16,15 @@ pub const ENV_AGENT: &str = "ACP_HOST_AGENT";
 /// requester takes the acknowledgement as the reply. Creating them here would
 /// break every one of those calls, so they stay for whoever owns that design.
 pub const HOST_STREAMS: [AcpStream; 2] = [AcpStream::Commands, AcpStream::Responses];
+
+/// The protocol version the host initializes its child with when no client has
+/// said which it wants: before any client has initialized since the host
+/// started. A client's own `initialize` always goes to the child as sent,
+/// offered version included.
+pub const FALLBACK_PROTOCOL_VERSION: agent_client_protocol::schema::ProtocolVersion =
+    agent_client_protocol::schema::ProtocolVersion::V1;
+
+/// How long a client's `initialize` waits for the relaunched child it asked
+/// for to answer. Longer than the bridge's default operation timeout, so the
+/// client gives up first and this only bounds a task nobody is waiting on.
+pub const REINITIALIZE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);

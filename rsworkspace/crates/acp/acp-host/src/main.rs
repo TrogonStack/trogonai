@@ -13,6 +13,7 @@
 
 mod agent_launch;
 mod client_claim;
+mod client_handshake;
 mod config;
 mod constants;
 mod initialized_agent;
