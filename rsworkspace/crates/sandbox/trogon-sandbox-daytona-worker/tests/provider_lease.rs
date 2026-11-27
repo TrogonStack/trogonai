@@ -53,21 +53,22 @@ async fn the_request_shapes_the_create_body() -> TestResult {
         wire["spec"]["image"]["reference"] = json!({"registry": "", "repository": "agent", "tag": "dev"});
         wire["spec"]["env"] = json!({"A": "1"});
         wire["spec"]["idle_timeout_seconds"] = json!(90);
-        wire["spec"]["network_policy"] = json!("deny_all");
         wire["tags"] = json!({"team": "x"});
         wire["region"] = json!("eu");
-        wire["native"] = json!({"daytona": {"public": true, "auto_archive_interval": 30, "auto_stop_interval": 7}});
+        wire["native"] = json!({"daytona": {"public": true, "auto_archive_interval": 30, "auto_stop_interval": 7, "class": "large", "gpu": 2}});
     })?;
     fake.provider()?.lease(&request, &lease_id("l1")).await?;
     let body = create_body(&fake)?;
     assert!(body["snapshot"].as_str().is_some_and(|name| name.contains("agent")));
     assert_eq!(body["env"], json!({"A": "1"}));
-    assert_eq!(body["labels"], json!({"team": "x"}));
+    assert_eq!(body["labels"], json!({"trogon.tag.team": "x", "trogon.lease_id": "l1"}));
+    assert_eq!(body["class"], "large");
+    assert_eq!(body["gpu"], 2);
     assert_eq!(body["target"], "eu");
     assert_eq!(body["public"], true);
     assert_eq!(body["autoStopInterval"], 7);
     assert_eq!(body["autoArchiveInterval"], 30);
-    assert_eq!(body["networkBlockAll"], true);
+    assert!(body.get("networkBlockAll").is_none());
     let idle = request_with(|wire| wire["spec"]["idle_timeout_seconds"] = json!(90))?;
     let second = Fake::with_sandbox().await?;
     second.provider()?.lease(&idle, &lease_id("l2")).await?;
@@ -391,5 +392,18 @@ async fn the_request_region_stands_in_when_daytona_names_none() -> TestResult {
         provider.native_handle_for_lease(&lease_id("l1")).await,
         NativeHandleResponse::Available(ref held) if held.region.as_deref() == Some("sfo")
     ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_native_handle_points_at_the_sandbox_page() -> TestResult {
+    let fake = Fake::with_sandbox().await?;
+    let provider = fake.provider()?;
+    provider.lease(&request_with(|_| {})?, &lease_id("l1")).await?;
+    let NativeHandleResponse::Available(handle) = provider.native_handle_for_lease(&lease_id("l1")).await else {
+        return Err("no handle".into());
+    };
+    let url = handle.url.ok_or("no url")?;
+    assert!(url.ends_with(&format!("/sandbox/{SANDBOX}")), "{url}");
     Ok(())
 }

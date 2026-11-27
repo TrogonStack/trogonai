@@ -124,35 +124,50 @@ impl VettedEndpoint {
 }
 
 /// The `allow_ranges` of a lease policy: the only way to carve an exception
-/// out of the floor. Every entry is a CIDR range.
+/// out of the floor. An entry is a CIDR range, or an address and port
+/// (`10.0.0.5:8080`, `[fc00::1]:8080`) that carves the exception for that
+/// destination port only.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub struct AllowRanges(Vec<IpNet>);
+pub struct AllowRanges(Vec<(IpNet, Option<u16>)>);
 
 impl AllowRanges {
-    /// The ranges the policy allows.
+    /// Every range the policy allows, each with the one port it is scoped to, if any.
     pub fn from_policy(policy: &NetworkPolicy) -> Self {
         match policy {
-            NetworkPolicy::UserDefined { allow_ranges, .. } => Self::from_ranges(allow_ranges),
+            NetworkPolicy::UserDefined { allow_ranges, .. } => Self(
+                allow_ranges
+                    .iter()
+                    .filter_map(|range| Self::entry(range.cidr()).map(|net| (net, range.port().map(|port| port.get()))))
+                    .collect(),
+            ),
             NetworkPolicy::AllowAll | NetworkPolicy::DenyAll => Self::default(),
         }
     }
 
-    /// The ranges, with IPv4-mapped IPv6 ranges folded into IPv4 and ranges that fold to nothing dropped.
-    pub fn from_ranges(ranges: &[IpRange]) -> Self {
+    /// The exceptions that apply to connections to `port`.
+    pub fn for_port(&self, port: u16) -> Self {
         Self(
-            ranges
+            self.0
                 .iter()
-                .filter_map(|range| {
-                    IpNet::new(range.address(), range.prefix_len())
-                        .ok()
-                        .and_then(fold_mapped_net)
-                })
+                .filter(|(_, only)| only.is_none_or(|only| only == port))
+                .copied()
                 .collect(),
         )
     }
 
+    /// The ranges on every port, with IPv4-mapped IPv6 ranges folded into IPv4 and ranges that fold to nothing dropped.
+    pub fn from_ranges(ranges: &[IpRange]) -> Self {
+        Self(ranges.iter().filter_map(Self::entry).map(|net| (net, None)).collect())
+    }
+
+    fn entry(range: &IpRange) -> Option<IpNet> {
+        IpNet::new(range.address(), range.prefix_len())
+            .ok()
+            .and_then(fold_mapped_net)
+    }
+
     fn contains(&self, ip: IpAddr) -> bool {
-        self.0.iter().any(|net| net.contains(&ip))
+        self.0.iter().any(|(net, _)| net.contains(&ip))
     }
 
     fn is_empty(&self) -> bool {
@@ -332,7 +347,7 @@ impl SsrfFloor {
 
     #[cfg(test)]
     pub(crate) fn with_loopback_exception(mut self) -> Self {
-        self.loopback_exception = AllowRanges("127.0.0.0/8".parse().into_iter().collect());
+        self.loopback_exception = AllowRanges("127.0.0.0/8".parse().into_iter().map(|net| (net, None)).collect());
         self
     }
 
@@ -521,7 +536,7 @@ impl VettingResolver {
         let mut refused_classes: Vec<AddressDenialClass> = Vec::new();
         let mut refused_addrs: Vec<IpAddr> = Vec::new();
         let mut vetted_all = Vec::new();
-        let listed = self.listed.clone();
+        let listed = self.listed.for_port(port.get());
         for candidate in candidates {
             let judged = if loopback_only {
                 self.vet_loopback_name(candidate, exceptions)

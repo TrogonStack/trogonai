@@ -1,4 +1,4 @@
-use trogon_sandbox_contract::{CommandExecution, RunCommandRequest, StdinMode};
+use trogon_sandbox_contract::{CommandExecution, RunCommandRequest};
 
 fn valid_env_name(name: &str) -> bool {
     let mut bytes = name.bytes();
@@ -19,13 +19,8 @@ pub(crate) fn run_command_violation(request: &RunCommandRequest) -> Option<&'sta
     if request.stream_output.is_enabled() {
         return Some("this worker cannot stream command output");
     }
-    if let CommandExecution::Detached { stdin, process, .. } = &request.execution {
-        if *stdin == StdinMode::Interactive {
-            return Some("this worker cannot keep a command's stdin open");
-        }
-        if process.is_some() {
-            return Some("named processes and readiness probes are not supported");
-        }
+    if let CommandExecution::Detached { process: Some(_), .. } = &request.execution {
+        return Some("named processes and readiness probes are not supported");
     }
     if request.env.iter().any(|(name, _)| !valid_env_name(name)) {
         return Some("environment names are letters, digits and underscores, and do not start with a digit");

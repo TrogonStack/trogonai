@@ -1,0 +1,26 @@
+{{- if not (has .Values.resourceNaming (list "sandbox" "legacy")) }}
+{{- fail "sandbox-k8s-worker.resourceNaming must be sandbox or legacy" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sandbox-k8s-worker.fullname" . }}
+  labels:
+    {{- include "sandbox-k8s-worker.labels" . | nindent 4 }}
+data:
+  SANDBOX_NATS_URL: {{ include "sandbox-k8s-worker.natsUrl" . | quote }}
+  SANDBOX_METRICS_ADDR: "0.0.0.0:{{ .Values.metricsPort }}"
+  SANDBOX_K8S_NAMESPACE: {{ .Values.k8sNamespace | quote }}
+  SANDBOX_K8S_RESOURCE_NAMING: {{ .Values.resourceNaming | quote }}
+  SANDBOX_K8S_HONOR_IMAGE_USER: {{ .Values.honorImageUser | toString | quote }}
+  {{- if not (kindIs "invalid" .Values.orphanReclaimGraceSecs) }}
+  SANDBOX_K8S_ORPHAN_RECLAIM_GRACE_SECS: {{ .Values.orphanReclaimGraceSecs | int64 | toString | quote }}
+  {{- end }}
+  SANDBOX_IMAGE: {{ .Values.image | quote }}
+  SANDBOX_POD_RUNTIME_CLASS: {{ .Values.runtimeClass | quote }}
+  SANDBOX_SERVICE_ACCOUNT: {{ .Values.serviceAccountName | quote }}
+  SANDBOX_SNAPSHOT_REGISTRY: {{ include "sandbox-k8s-worker.registryUrl" . | quote }}
+  SANDBOX_OCI_INSECURE_REGISTRIES: {{ include "sandbox-k8s-worker.registryUrl" . | quote }}
+{{- with .Values.global.dispatchAuth }}
+  SANDBOX_DISPATCH_VERIFY: {{ .verify | quote }}
+{{- end }}

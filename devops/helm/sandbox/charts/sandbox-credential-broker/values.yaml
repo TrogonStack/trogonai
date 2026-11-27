@@ -1,0 +1,20 @@
+replicaCount: 1
+# Prometheus scrape port; the credential broker serves GET /metrics here.
+metricsPort: 9091
+# Secret holding the broker's root key: the standard base64 encoding of 32 random bytes.
+# Create it before installing (`kubectl create secret generic sandbox-credential-root-key
+# --from-literal=root-key="$(openssl rand -base64 32)"`); the pod does not start without it.
+rootKeySecret:
+  name: sandbox-credential-root-key
+  key: root-key
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+# Refuse a credential request that carries no policy fence (`required`), or accept it (`optional`).
+# `required` needs every client (the broker control plane and every worker) to stamp the
+# committed policy revision on its requests.
+fenceMode: required

@@ -1,3 +1,4 @@
+use crate::MaxLeases;
 use crate::constants::MAX_VCPU;
 use trogon_sandbox_contract::{
     CapabilitySupport, DormancyCapability, EgressCapability, EgressEnforcementLevel, IngressCapability,
@@ -9,7 +10,7 @@ use trogon_sandbox_contract::{
 /// What this worker does today, not what SPACE could do. Each unsupported entry is a
 /// feature the worker does not wire, even where SPACE offers a native form of it;
 /// advertising it would route work here that the worker would then have to refuse.
-pub(crate) fn capability_profile(max_leases: u32) -> ProviderCapabilityProfile {
+pub fn capability_profile(max_leases: MaxLeases) -> ProviderCapabilityProfile {
     let no = CapabilitySupport::Unsupported;
     ProviderCapabilityProfile {
         provider: ProviderKind::Space,
@@ -91,7 +92,7 @@ pub(crate) fn capability_profile(max_leases: u32) -> ProviderCapabilityProfile {
         performance: PerformanceProfile {
             cold_start_p50_ms: 0,
             cold_restore_p50_ms: 0,
-            max_concurrent_sandboxes: Some(max_leases),
+            max_concurrent_sandboxes: Some(max_leases.get()),
         },
         resources: ResourceCapability {
             vcpu_millis: ResourceRange::new(1000, MAX_VCPU * 1000).ok(),

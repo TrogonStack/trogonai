@@ -489,7 +489,9 @@ pub async fn handle_connection(
     resolver: &VettingResolver,
     tls_intercept: &TlsInterceptContext,
 ) -> ProxyOutcome {
-    let vetted = resolver.floor().vet(dest_ip, &AllowRanges::from_policy(policy));
+    let vetted = resolver
+        .floor()
+        .vet(dest_ip, &AllowRanges::from_policy(policy).for_port(dest_port));
     let (prefix, probe) = match postgres::peek_pg_probe(&mut client).await {
         Ok(result) => result,
         Err(err) => return ProxyOutcome::SniffFailed(err),

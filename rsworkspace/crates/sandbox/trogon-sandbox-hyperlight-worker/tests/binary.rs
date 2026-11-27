@@ -27,6 +27,10 @@ fn needs_a_component_root() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+#[cfg_attr(
+    all(trogon_hyperlight_wasm, any(target_os = "linux", target_os = "windows")),
+    ignore = "the wasm backend serves where the host has a hypervisor"
+)]
 fn exits_when_the_host_has_no_hypervisor() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let root = dir.path().to_string_lossy().into_owned();

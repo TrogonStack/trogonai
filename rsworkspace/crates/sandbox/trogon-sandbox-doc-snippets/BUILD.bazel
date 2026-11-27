@@ -1,0 +1,6 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    # The pages `src/lib.rs` includes, so the doc tests compile their code.
+    compile_data = ["//docs:sandbox_doc_snippets"],
+)

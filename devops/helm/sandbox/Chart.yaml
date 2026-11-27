@@ -1,0 +1,58 @@
+apiVersion: v2
+name: sandbox-stack
+description: Umbrella Helm chart for the sandbox control plane, snapshot store, and workers
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: zot
+    version: 0.1.0
+    condition: zot.enabled
+  - name: nats
+    version: 0.1.0
+    condition: nats.enabled
+  - name: spicedb
+    version: 0.1.0
+    condition: spicedb.enabled
+  - name: sandbox-broker
+    version: 0.1.0
+    condition: sandbox-broker.enabled
+  - name: sandbox-snapshot-builder
+    version: 0.1.0
+    condition: sandbox-snapshot-builder.enabled
+  - name: sandbox-credential-broker
+    version: 0.1.0
+    condition: sandbox-credential-broker.enabled
+  - name: sandbox-ws-gateway
+    version: 0.1.0
+    condition: sandbox-ws-gateway.enabled
+  - name: sandbox-ssh-gateway
+    version: 0.1.0
+    condition: sandbox-ssh-gateway.enabled
+  - name: sandbox-dashboard
+    version: 0.1.0
+    condition: sandbox-dashboard.enabled
+  - name: sandbox-hyperlight-worker
+    version: 0.1.0
+    condition: sandbox-hyperlight-worker.enabled
+  - name: sandbox-docker-worker
+    version: 0.1.0
+    condition: sandbox-docker-worker.enabled
+  - name: sandbox-k8s-worker
+    version: 0.1.0
+    condition: sandbox-k8s-worker.enabled
+  - name: sandbox-kubevirt-worker
+    version: 0.1.0
+    condition: sandbox-kubevirt-worker.enabled
+  - name: sandbox-daytona-worker
+    version: 0.1.0
+    condition: sandbox-daytona-worker.enabled
+  - name: sandbox-aca-worker
+    version: 0.1.0
+    condition: sandbox-aca-worker.enabled
+  - name: sandbox-modal-worker
+    version: 0.1.0
+    condition: sandbox-modal-worker.enabled
+  - name: sandbox-subprocess-worker
+    version: 0.1.0
+    condition: sandbox-subprocess-worker.enabled

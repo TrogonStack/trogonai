@@ -1,0 +1,19 @@
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+
+# The prebuilt V8 static library the v8 crate links, for the platforms the
+# crates repository supports. See the v8 annotation in deps.MODULE.bazel.
+genrule(
+    name = "archive",
+    srcs = select({
+        "@rules_rust//rust/platform:aarch64-apple-darwin": ["@rusty_v8_aarch64_apple_darwin//file"],
+        "@rules_rust//rust/platform:x86_64-unknown-linux-gnu": ["@rusty_v8_x86_64_unknown_linux_gnu//file"],
+    }),
+    outs = ["librusty_v8.a"],
+    cmd = "gzip -dc $< > $@",
+)
+
+cc_import(
+    name = "rusty_v8",
+    static_library = ":librusty_v8.a",
+    visibility = ["//visibility:public"],
+)

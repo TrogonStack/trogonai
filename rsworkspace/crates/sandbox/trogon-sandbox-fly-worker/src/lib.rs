@@ -83,3 +83,4 @@ pub use machine_id_error::MachineIdError;
 pub use machine_size::MachineSize;
 pub use machine_size_error::MachineSizeError;
 pub use machine_state::MachineState;
+pub use profile::capability_profile;

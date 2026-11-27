@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sandbox-daytona-worker.fullname" . }}
+  labels:
+    {{- include "sandbox-daytona-worker.labels" . | nindent 4 }}
+    sandbox.trogonai.io/egress-enforcement: {{ .Values.egressEnforcement | quote }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-daytona-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "sandbox-daytona-worker.labels" . | nindent 8 }}
+        sandbox.trogonai.io/egress-enforcement: {{ .Values.egressEnforcement | quote }}
+    spec:
+      serviceAccountName: {{ include "sandbox-daytona-worker.fullname" . }}
+      containers:
+        - name: worker
+          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-daytona-worker:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "sandbox-daytona-worker.fullname" . }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          env:
+            - name: DAYTONA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiKeySecret.name }}
+                  key: {{ .Values.apiKeySecret.key }}
+          {{- with .Values.global.dispatchAuth }}
+            - name: SANDBOX_DISPATCH_PUBLIC_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .publicKeysKey }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/trogon-sandbox-daytona-worker", "--help"]
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/trogon-sandbox-daytona-worker", "--help"]
+            initialDelaySeconds: 10
+            periodSeconds: 15

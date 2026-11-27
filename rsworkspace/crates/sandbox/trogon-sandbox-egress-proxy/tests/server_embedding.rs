@@ -10,7 +10,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::net::{TcpListener, TcpStream};
 use trogon_sandbox_contract::{
-    EgressViolation, EgressViolationReason, HttpMethod, IpRange, LeaseId, NetworkPolicy, PathPrefix, RequestRule,
+    AllowRange, EgressViolation, EgressViolationReason, HttpMethod, LeaseId, NetworkPolicy, PathPrefix, RequestRule,
     RequestRuleAction,
 };
 use trogon_sandbox_egress_proxy::ingress::{ListenAddress, Listener, ProxyToken};
@@ -63,7 +63,7 @@ fn policy(allow_loopback: bool) -> TestResult<NetworkPolicy> {
     Ok(NetworkPolicy::UserDefined {
         rules: vec![],
         allow_ranges: if allow_loopback {
-            vec![IpRange::new("127.0.0.0/8")?]
+            vec![AllowRange::new("127.0.0.0/8")?]
         } else {
             vec![]
         },

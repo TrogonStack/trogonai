@@ -314,8 +314,9 @@ the broker's messages; they do not store, mint, or verify credentials.
 
 The network egress contracts carry a lease's outbound policy and what the proxy
 reports. `NetworkPolicy` is `allow_all`, `deny_all`, or `user_defined` with
-`DomainRule` entries, `IpRange` allow and deny lists in CIDR notation, `DeniedDomain` patterns, an
-`OpaqueTunnelPolicy`, and `RequestRule` entries. A `DomainPattern` is a host, a
+`DomainRule` entries, `AllowRange` allow and `IpRange` deny lists, `DeniedDomain` patterns, an
+`OpaqueTunnelPolicy`, and `RequestRule` entries. An `IpRange` is CIDR notation; an `AllowRange` is a
+CIDR range, a single address, or an address with a port that allows that destination on that port only. A `DomainPattern` is a host, a
 `*.` wildcard, or `*`, with an optional `Port`; a `Host` is a lowercase DNS name
 or an IP address in WHATWG form, and an IPv4-mapped IPv6 address reads as IPv4.
 `HttpMethod`, `HeaderName`, `HeaderValue`, and `PathPrefix` bound and normalize

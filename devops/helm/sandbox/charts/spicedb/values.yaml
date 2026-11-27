@@ -1,0 +1,24 @@
+replicaCount: 1
+image:
+  repository: authzed/spicedb
+  tag: v1.35.0
+service:
+  grpcPort: 50051
+# `memory` keeps every relationship in the pod and loses them on restart: use it to evaluate the
+# stack. `postgres` keeps them in a database whose connection URI is read from a Secret.
+datastore:
+  engine: memory
+  # Used when engine is postgres. The Secret holds the full connection URI; it is never a value.
+  uriSecret:
+    name: ""
+    key: datastore-uri
+# Relationships written at startup, in zed form, for example
+# "sandbox_tenant:acme#admin@service_account:ci-runner". The schema is always written.
+bootstrapRelationships: []
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

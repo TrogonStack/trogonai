@@ -1,0 +1,45 @@
+[package]
+name = "trogon-sandbox-admin"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Operator CLI for the sandbox stack: API keys, tenant policies, leases, workers, credentials, snapshot tags and warm templates"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_admin"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-admin"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+bytes = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "io-std", "io-util"] }
+tokio-util = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-sandbox-auth = { workspace = true }
+trogon-sandbox-broker = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-credential-broker = { workspace = true }
+trogon-sandbox-credential-client = { workspace = true }
+trogon-sandbox-oci = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-sandbox-substrate-worker = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
+trogon-nats = { workspace = true, features = ["test-support"] }

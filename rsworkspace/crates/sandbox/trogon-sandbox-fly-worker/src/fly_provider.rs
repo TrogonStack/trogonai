@@ -146,6 +146,6 @@ impl FlyProvider {
 
     /// The capabilities this worker offers with its current settings.
     pub fn profile(&self) -> ProviderCapabilityProfile {
-        profile::for_config(&self.config)
+        profile::capability_profile(&self.config)
     }
 }

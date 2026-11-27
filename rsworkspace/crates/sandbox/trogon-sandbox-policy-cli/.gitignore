@@ -1,0 +1,2 @@
+# The repository ignores `debug` everywhere to keep build output out; this crate has a `debug` source module.
+!/src/debug/

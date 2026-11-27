@@ -417,7 +417,7 @@ fn forwarding_policy() -> Result<NetworkPolicy, Box<dyn std::error::Error>> {
                 ttl_seconds: trogon_sandbox_contract::RequestForward::DEFAULT_TTL_SECONDS,
             }),
         }],
-        allow_ranges: vec![trogon_sandbox_contract::IpRange::new("127.0.0.0/8")?],
+        allow_ranges: vec![trogon_sandbox_contract::AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

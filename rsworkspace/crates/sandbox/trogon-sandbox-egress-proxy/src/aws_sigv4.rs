@@ -9,8 +9,8 @@
 //! upstream.
 //!
 //! This module is pure protocol code: request classification, Authorization
-//! parsing, canonical request construction and signing, checked against the
-//! official aws-sig-v4-test-suite vectors. The pair lookup and request
+//! parsing, canonical request construction and signing, checked against
+//! known-answer tests. The pair lookup and request
 //! rewriting live in [`crate::sigv4_resign`].
 
 use sha2::{Digest, Sha256};

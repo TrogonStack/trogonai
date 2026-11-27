@@ -1,0 +1,19 @@
+# A standalone package: it builds for wasm32 only and stays out of the workspace.
+[package]
+name = "passthrough-guest"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+lto = true
+opt-level = "z"
+strip = true
+
+[workspace]
+
+[dependencies]

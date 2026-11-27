@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "zot.fullname" . }}
+  labels:
+    {{- include "zot.labels" . | nindent 4 }}
+data:
+  config.json: |
+    {
+      "distSpecVersion": "1.1.0-dev",
+      "storage": {
+        "rootDirectory": "/var/lib/zot/data",
+        {{- if .Values.gc.enabled }}
+        "gc": true,
+        "gcDelay": {{ .Values.gc.delay | quote }},
+        "gcInterval": {{ .Values.gc.interval | quote }},
+        {{- end }}
+        "retention": {
+          "dryRun": false,
+          "delay": {{ .Values.gc.delay | quote }},
+          "policies": {{ include "zot.retentionPolicies" . | nindent 10 }}
+        }
+      },
+      "http": {
+        "address": "0.0.0.0",
+        "port": "5000",
+        "accessControl": {{ include "zot.accessControlBlock" . | nindent 8 }}
+      },
+      "extensions": {
+        "search": {
+          "enable": true
+        },
+        "metrics": {
+          "enable": true
+        }{{- if .Values.replication.enabled }},
+        {{ include "zot.syncExtension" . | nindent 8 }}{{- end }}
+      }
+    }

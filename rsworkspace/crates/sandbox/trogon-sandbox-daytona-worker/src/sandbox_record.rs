@@ -14,4 +14,7 @@ pub struct SandboxRecord {
     pub target: Option<String>,
     #[serde(default)]
     pub error_reason: Option<String>,
+    /// The organization that owns the sandbox.
+    #[serde(default)]
+    pub organization_id: Option<String>,
 }

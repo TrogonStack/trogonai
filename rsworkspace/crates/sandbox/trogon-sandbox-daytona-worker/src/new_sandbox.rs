@@ -14,6 +14,10 @@ pub struct NewSandbox {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     /// Minutes of inactivity before the sandbox stops; zero never stops it.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -1,0 +1,21 @@
+replicaCount: 1
+# Prometheus scrape port; the worker listens on it for the whole pod network.
+metricsPort: 9109
+# Secret holding the Modal API token the worker's Python bridge reads as MODAL_TOKEN_ID and
+# MODAL_TOKEN_SECRET. Create it before installing; the chart never holds the token.
+tokenSecret:
+  name: sandbox-modal
+  idKey: token-id
+  secretKey: token-secret
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+# Mirrors the capability profile: the guest runs in Modal's cloud under gVisor with
+# mandatory enforcement. The label also selects the worker pod's own egress policy, so
+# the stack adds a modal-worker policy that lets the worker reach api.modal.com over
+# TCP/443 on top of the mandatory baseline.
+egressEnforcement: mandatory

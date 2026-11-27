@@ -16,6 +16,10 @@ use crate::support::{Boxed, Fake, request_json};
 
 pub const SILENCE: Duration = Duration::from_millis(700);
 
+const CONNECT_ATTEMPTS: u32 = 30;
+const CONNECT_ATTEMPT_BOUND: Duration = Duration::from_secs(5);
+const CONNECT_RETRY_PAUSE: Duration = Duration::from_millis(500);
+
 /// A throwaway NATS server running in a container.
 pub struct Nats {
     server: JetStreamTestServer,
@@ -28,7 +32,20 @@ impl Nats {
         }
     }
 
+    /// A connection to the server, retried for a while: a container that just started may accept connections later
+    /// than the fixed bound the shared fixture allows, most often when many test binaries start at once.
     pub async fn client(&self) -> Client {
+        for _ in 0..CONNECT_ATTEMPTS {
+            let connected = async_nats::ConnectOptions::new()
+                .connection_timeout(CONNECT_ATTEMPT_BOUND)
+                .connect(self.server.address())
+                .await;
+            if let Ok(client) = connected {
+                return client;
+            }
+            tokio::time::sleep(CONNECT_RETRY_PAUSE).await;
+        }
+        // The fixture reports a server that never accepts a connection.
         self.server.client().await
     }
 

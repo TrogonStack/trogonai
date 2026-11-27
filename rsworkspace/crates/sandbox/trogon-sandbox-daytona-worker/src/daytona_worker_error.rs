@@ -3,7 +3,7 @@ use trogon_sandbox_contract::TokenError;
 use trogon_sandbox_observability::ObservabilityError;
 use trogon_sandbox_protocol::{AuthorityModeError, NatsConnectError, NatsTransferError};
 
-use crate::{DaytonaApiError, DaytonaProviderError};
+use crate::{DaytonaApiError, DaytonaProviderError, OrdinaryCommandRuntimeError};
 
 /// The worker could not start, or one request it served failed.
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +26,8 @@ pub enum DaytonaWorkerError {
     Connect(#[from] NatsConnectError),
     #[error(transparent)]
     Api(#[from] DaytonaApiError),
+    #[error(transparent)]
+    Runtime(#[from] OrdinaryCommandRuntimeError),
     #[error(transparent)]
     Observability(#[from] ObservabilityError),
 }

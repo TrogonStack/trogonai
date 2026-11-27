@@ -43,12 +43,12 @@ fn streamed_output_is_refused() -> TestResult {
 }
 
 #[test]
-fn a_detached_command_cannot_keep_stdin_open_or_name_a_process() -> TestResult {
+fn a_detached_command_may_keep_stdin_open_but_cannot_name_a_process() -> TestResult {
     let stdin = violation(|wire| {
         wire["detached"] = json!(true);
         wire["stdin"] = json!("interactive");
     })?;
-    assert_eq!(stdin, Some("this worker cannot keep a command's stdin open"));
+    assert_eq!(stdin, None);
     let process = violation(|wire| {
         wire["detached"] = json!(true);
         wire["process"] = json!({});

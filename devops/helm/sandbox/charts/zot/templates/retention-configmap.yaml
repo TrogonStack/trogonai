@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "zot.fullname" . }}-retention
+  labels:
+    {{- include "zot.labels" . | nindent 4 }}
+data:
+  # Zot schema: storage.retention.policies (NOT registry.retention).
+  # Mapping from values.yaml:
+  #   retention.defaultPolicy.keepDays  -> keepTags[].pushedWithin (hours)
+  #   retention.defaultPolicy.keepLastN -> keepTags[].mostRecentlyPushedCount
+  #   retention.perTenant.<id>          -> repositories: ["snapshots/<id>"]
+  retention.json: |
+    {
+      "storage": {
+        "retention": {
+          "dryRun": false,
+          "delay": {{ .Values.gc.delay | quote }},
+          "policies": {{ include "zot.retentionPolicies" . | nindent 10 }}
+        }
+      }
+    }

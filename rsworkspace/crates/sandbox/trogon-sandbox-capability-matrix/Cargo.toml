@@ -1,0 +1,43 @@
+[package]
+name = "trogon-sandbox-capability-matrix"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Renders every sandbox worker's declared capability profile into a markdown matrix and fails when the committed copy drifts"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_capability_matrix"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-capability-matrix"
+path = "src/main.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+object_store = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+trogon-sandbox-aca-worker = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-daytona-worker = { workspace = true }
+trogon-sandbox-docker-worker = { workspace = true }
+trogon-sandbox-e2b-worker = { workspace = true }
+trogon-sandbox-firecracker-worker = { workspace = true }
+trogon-sandbox-fly-worker = { workspace = true }
+trogon-sandbox-hyperlight-worker = { workspace = true }
+trogon-sandbox-k8s-worker = { workspace = true }
+trogon-sandbox-kubevirt-worker = { workspace = true }
+trogon-sandbox-memory-worker = { workspace = true }
+trogon-sandbox-modal-worker = { workspace = true }
+trogon-sandbox-proxmox-worker = { workspace = true }
+trogon-sandbox-space-worker = { workspace = true }
+trogon-sandbox-subprocess-worker = { workspace = true }
+trogon-sandbox-substrate-worker = { workspace = true }
+trogon-sandbox-v8-wasm-worker = { workspace = true }
+trogon-sandbox-vercel-worker = { workspace = true }
+trogon-sandbox-volumes = { workspace = true }

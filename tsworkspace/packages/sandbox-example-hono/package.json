@@ -1,0 +1,31 @@
+{
+  "name": "@trogonai/sandbox-example-hono",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hono example: run code in a sandbox per request, stream command output, mint a browser token, check capacity and reap stale leases.",
+  "license": "Apache-2.0",
+  "author": "TrogonAI",
+  "type": "module",
+  "scripts": {
+    "dev": "node run-typescript.mjs --env-file-if-exists=.env --watch index.ts",
+    "start": "node run-typescript.mjs --env-file-if-exists=.env index.ts",
+    "typecheck": "tsc --noEmit",
+    "smoke": "SANDBOX_PROVIDER=memory node run-typescript.mjs smoke.ts",
+    "test": "node run-typescript.mjs --test app.test.ts server/*.test.ts",
+    "test:gateway": "node run-typescript.mjs --env-file-if-exists=.env --test gateway-smoke.ts",
+    "lint": "oxlint --deny-warnings ."
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.7",
+    "@trogonai/sandbox-ws-client": "workspace:*",
+    "hono": "4.13.18",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=22.7"
+  }
+}

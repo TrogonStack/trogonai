@@ -2,8 +2,9 @@ use std::error::Error;
 
 use super::*;
 use trogon_sandbox_contract::{
-    CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, CredentialTransform, ForwardUrl,
-    HeaderMatcher, HeaderName, HttpMethod, IpRange, OpaqueTunnelPolicy, PullSecretId, QueryMatcher, RequestForward,
+    AllowRange, CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, CredentialTransform,
+    ForwardUrl, HeaderMatcher, HeaderName, HttpMethod, IpRange, OpaqueTunnelPolicy, PullSecretId, QueryMatcher,
+    RequestForward,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -27,7 +28,7 @@ fn credential_transform(match_rules: Vec<MatchRule>) -> Result<CredentialTransfo
 fn policy(rules: Vec<DomainRule>, allow: Vec<IpRange>, deny: Vec<IpRange>) -> NetworkPolicy {
     NetworkPolicy::UserDefined {
         rules,
-        allow_ranges: allow,
+        allow_ranges: allow.into_iter().map(AllowRange::from).collect(),
         deny_ranges: deny,
         denied_domains: vec![],
         opaque_tunnels: OpaqueTunnelPolicy::default(),

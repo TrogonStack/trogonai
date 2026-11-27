@@ -1,0 +1,15 @@
+replicaCount: 1
+service:
+  port: 8443
+# Prometheus scrape port; the gateway serves GET /metrics here.
+metricsPort: 9443
+# Browser origins allowed to call the gateway, matched exactly against the Origin header (for
+# example https://app.example.com). Empty allows no cross-origin calls; "*" is not a wildcard.
+corsOrigins: []
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

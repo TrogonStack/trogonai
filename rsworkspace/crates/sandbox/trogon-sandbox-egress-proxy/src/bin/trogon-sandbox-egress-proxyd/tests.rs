@@ -380,7 +380,7 @@ async fn drive_one_connection_through_shared_policy(
 
     let mut policy = shared.read().await.clone();
     if let NetworkPolicy::UserDefined { allow_ranges, .. } = &mut policy {
-        allow_ranges.push(trogon_sandbox_contract::IpRange::new("127.0.0.0/8")?);
+        allow_ranges.push(trogon_sandbox_contract::AllowRange::new("127.0.0.0/8")?);
     }
     Ok(handle_connection(
         server_stream,

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use trogon_sandbox_observability::ObservabilityArgs;
 
-use crate::constants::DEFAULT_API_URL;
+use crate::constants::{DEFAULT_API_URL, DEFAULT_SNAPSHOT_POLL_INTERVAL_SECS, DEFAULT_SNAPSHOT_TIMEOUT_SECS};
 use crate::{DaytonaApiKey, DaytonaEndpoint, DaytonaOrganizationId};
 
 /// Everything the worker binary is configured with.
@@ -57,6 +57,45 @@ pub struct WorkerArgs {
         value_parser = clap::value_parser!(u64).range(1..=3600)
     )]
     pub start_timeout_secs: u64,
+
+    /// Seconds between two looks at a native snapshot that is still building.
+    #[arg(
+        long,
+        env = "SANDBOX_DAYTONA_SNAPSHOT_POLL_INTERVAL_SECS",
+        default_value_t = DEFAULT_SNAPSHOT_POLL_INTERVAL_SECS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    pub snapshot_poll_interval_secs: u64,
+
+    /// Seconds a native snapshot may take to turn active before the capture is reported as not finished.
+    #[arg(
+        long,
+        env = "SANDBOX_DAYTONA_SNAPSHOT_TIMEOUT_SECS",
+        default_value_t = DEFAULT_SNAPSHOT_TIMEOUT_SECS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    pub snapshot_timeout_secs: u64,
+
+    /// Daytona regions this worker can place sandboxes in (the API's `target`), comma separated. Empty means the
+    /// worker offers no region choice, so a lease naming a region never reaches it.
+    #[arg(long, env = "SANDBOX_DAYTONA_REGIONS", value_delimiter = ',')]
+    pub regions: Vec<String>,
+
+    /// A command supervisor artifact the sandboxes run ordinary commands through. Needs its digest.
+    #[arg(
+        long,
+        env = "SANDBOX_DAYTONA_COMMAND_SUPERVISOR",
+        requires = "command_supervisor_sha256"
+    )]
+    pub command_supervisor: Option<PathBuf>,
+
+    /// The lowercase hex SHA-256 the supervisor artifact must have. Needs the artifact.
+    #[arg(
+        long,
+        env = "SANDBOX_DAYTONA_COMMAND_SUPERVISOR_SHA256",
+        requires = "command_supervisor"
+    )]
+    pub command_supervisor_sha256: Option<String>,
 
     #[command(flatten)]
     pub observability: ObservabilityArgs,

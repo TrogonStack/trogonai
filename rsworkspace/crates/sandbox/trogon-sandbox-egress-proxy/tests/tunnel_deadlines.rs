@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 use trogon_sandbox_contract::Port;
 use trogon_sandbox_contract::{
-    DomainRule, DomainRuleAction, ForwardUrl, IpRange, LeaseId, NetworkPolicy, OpaqueTunnelPolicy, RequestForward,
+    AllowRange, DomainRule, DomainRuleAction, ForwardUrl, LeaseId, NetworkPolicy, OpaqueTunnelPolicy, RequestForward,
     SandboxId, TenantId,
 };
 use trogon_sandbox_contract::{NetworkOptions, TunnelCap};
@@ -74,7 +74,7 @@ fn rules() -> TestResult<Vec<DomainRule>> {
 fn policy() -> TestResult<NetworkPolicy> {
     Ok(NetworkPolicy::UserDefined {
         rules: rules()?,
-        allow_ranges: vec![IpRange::new("127.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: OpaqueTunnelPolicy::Allow,

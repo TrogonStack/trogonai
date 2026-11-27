@@ -1,0 +1,1929 @@
+[
+ {
+  "argv": [],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "echo",
+   "hi"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo",
+    "hi"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "echo",
+   "-d",
+   "hi"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo",
+    "hi"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "echo",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "ls",
+   "-la"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "ls",
+    "-la"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "ls",
+   "-x",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "ls",
+    "-x"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "-d"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--",
+   "echo",
+   "hi"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo",
+    "hi"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "proxy"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": []
+  }
+ },
+ {
+  "argv": [
+   "proxy",
+   "--",
+   "x"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": [
+    "x"
+   ]
+  }
+ },
+ {
+  "argv": [
+   "proxy",
+   "--foo",
+   "--",
+   "x"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": [
+    "--foo",
+    "--",
+    "x"
+   ]
+  }
+ },
+ {
+  "argv": [
+   "proxy",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": []
+  }
+ },
+ {
+  "argv": [
+   "proxy",
+   "--help"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": [
+    "--help"
+   ]
+  }
+ },
+ {
+  "argv": [
+   "proxy",
+   "-h",
+   "x"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": [
+    "-h",
+    "x"
+   ]
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "proxy",
+   "a"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": [
+    "a"
+   ]
+  }
+ },
+ {
+  "argv": [
+   "echo",
+   "proxy"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo",
+    "proxy"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-ds",
+   "f",
+   "echo"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo"
+   ],
+   "debug": true,
+   "settings": "f",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-sf",
+   "echo"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo"
+   ],
+   "debug": false,
+   "settings": "f",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-s",
+   "f",
+   "echo"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo"
+   ],
+   "debug": false,
+   "settings": "f",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--settings=f",
+   "echo"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo"
+   ],
+   "debug": false,
+   "settings": "f",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--settings",
+   "f",
+   "echo"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo"
+   ],
+   "debug": false,
+   "settings": "f",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-s"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '-s, --settings <path>' argument missing\n"
+  }
+ },
+ {
+  "argv": [
+   "-s",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": "-d",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--settings"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '-s, --settings <path>' argument missing\n"
+  }
+ },
+ {
+  "argv": [
+   "--control-fd",
+   "2",
+   "x"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '--control-fd <fd>' argument '2' is invalid. must be an integer file descriptor >= 3 (0-2 are stdin, stdout and stderr).\n"
+  }
+ },
+ {
+  "argv": [
+   "--control-fd",
+   "3",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "x"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": 3
+  }
+ },
+ {
+  "argv": [
+   "--control-fd=7",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "x"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": 7
+  }
+ },
+ {
+  "argv": [
+   "--control-fd=7"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": 7
+  }
+ },
+ {
+  "argv": [
+   "--control-fd",
+   "abc"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '--control-fd <fd>' argument 'abc' is invalid. must be an integer file descriptor >= 3 (0-2 are stdin, stdout and stderr).\n"
+  }
+ },
+ {
+  "argv": [
+   "--control-fd",
+   "3",
+   "--control-fd",
+   "9",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "x"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": 9
+  }
+ },
+ {
+  "argv": [
+   "--control-fd"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '--control-fd <fd>' argument missing\n"
+  }
+ },
+ {
+  "argv": [
+   "--control-fd",
+   "-1",
+   "--",
+   "x"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '--control-fd <fd>' argument '-1' is invalid. must be an integer file descriptor >= 3 (0-2 are stdin, stdout and stderr).\n"
+  }
+ },
+ {
+  "argv": [
+   "help"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "help"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "help",
+   "proxy"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "help",
+    "proxy"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "help",
+   "windows-install"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "help",
+    "windows-install"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "help",
+   "bogus"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "help",
+    "bogus"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-h"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy [options] [command] [command...]\n\nRun commands in a sandbox with network and filesystem restrictions\n\nArguments:\n  command                      command to run in the sandbox\n\nOptions:\n  -V, --version                output the version number\n  -d, --debug                  enable debug logging\n  -s, --settings <path>        path to config file (default:\n                               ~/.sandbox-settings.json)\n  -c <command>                 run command string directly (like sh -c), no\n                               escaping applied\n  --control-fd <fd>            read config updates from an inherited file\n                               descriptor >= 3 (JSON lines protocol; give it a\n                               dedicated read-only end - see the README)\n  --guest-view                 show the command a guest filesystem\n  -h, --help                   display help for command\n\nCommands:\n  windows-install [options]    Windows: provision the `trogon-sandbox` user\n                               account + install WFP filters (one UAC prompt),\n                               then make your user profile readable to\n                               sandboxed commands, except for credential stores\n                               (no elevation; minutes on a large profile the\n                               first time). No logout needed. Run it again\n                               after upgrading trogon-sandbox-policy when a\n                               command asks for it, or to bring the profile\n                               read grant up to date: it upgrades the existing\n                               install in place.\n  windows-uninstall [options]  Windows: remove WFP filters + the `trogon-sandbox`\n                               account (one UAC prompt).\n  proxy [args...]              Run only the HTTP proxy, deciding every request\n                               through an external decider on inherited fds.\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "--help"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy [options] [command] [command...]\n\nRun commands in a sandbox with network and filesystem restrictions\n\nArguments:\n  command                      command to run in the sandbox\n\nOptions:\n  -V, --version                output the version number\n  -d, --debug                  enable debug logging\n  -s, --settings <path>        path to config file (default:\n                               ~/.sandbox-settings.json)\n  -c <command>                 run command string directly (like sh -c), no\n                               escaping applied\n  --control-fd <fd>            read config updates from an inherited file\n                               descriptor >= 3 (JSON lines protocol; give it a\n                               dedicated read-only end - see the README)\n  --guest-view                 show the command a guest filesystem\n  -h, --help                   display help for command\n\nCommands:\n  windows-install [options]    Windows: provision the `trogon-sandbox` user\n                               account + install WFP filters (one UAC prompt),\n                               then make your user profile readable to\n                               sandboxed commands, except for credential stores\n                               (no elevation; minutes on a large profile the\n                               first time). No logout needed. Run it again\n                               after upgrading trogon-sandbox-policy when a\n                               command asks for it, or to bring the profile\n                               read grant up to date: it upgrades the existing\n                               install in place.\n  windows-uninstall [options]  Windows: remove WFP filters + the `trogon-sandbox`\n                               account (one UAC prompt).\n  proxy [args...]              Run only the HTTP proxy, deciding every request\n                               through an external decider on inherited fds.\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "echo",
+   "-h"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy [options] [command] [command...]\n\nRun commands in a sandbox with network and filesystem restrictions\n\nArguments:\n  command                      command to run in the sandbox\n\nOptions:\n  -V, --version                output the version number\n  -d, --debug                  enable debug logging\n  -s, --settings <path>        path to config file (default:\n                               ~/.sandbox-settings.json)\n  -c <command>                 run command string directly (like sh -c), no\n                               escaping applied\n  --control-fd <fd>            read config updates from an inherited file\n                               descriptor >= 3 (JSON lines protocol; give it a\n                               dedicated read-only end - see the README)\n  --guest-view                 show the command a guest filesystem\n  -h, --help                   display help for command\n\nCommands:\n  windows-install [options]    Windows: provision the `trogon-sandbox` user\n                               account + install WFP filters (one UAC prompt),\n                               then make your user profile readable to\n                               sandboxed commands, except for credential stores\n                               (no elevation; minutes on a large profile the\n                               first time). No logout needed. Run it again\n                               after upgrading trogon-sandbox-policy when a\n                               command asks for it, or to bring the profile\n                               read grant up to date: it upgrades the existing\n                               install in place.\n  windows-uninstall [options]  Windows: remove WFP filters + the `trogon-sandbox`\n                               account (one UAC prompt).\n  proxy [args...]              Run only the HTTP proxy, deciding every request\n                               through an external decider on inherited fds.\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "echo",
+   "-x",
+   "-h"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy [options] [command] [command...]\n\nRun commands in a sandbox with network and filesystem restrictions\n\nArguments:\n  command                      command to run in the sandbox\n\nOptions:\n  -V, --version                output the version number\n  -d, --debug                  enable debug logging\n  -s, --settings <path>        path to config file (default:\n                               ~/.sandbox-settings.json)\n  -c <command>                 run command string directly (like sh -c), no\n                               escaping applied\n  --control-fd <fd>            read config updates from an inherited file\n                               descriptor >= 3 (JSON lines protocol; give it a\n                               dedicated read-only end - see the README)\n  --guest-view                 show the command a guest filesystem\n  -h, --help                   display help for command\n\nCommands:\n  windows-install [options]    Windows: provision the `trogon-sandbox` user\n                               account + install WFP filters (one UAC prompt),\n                               then make your user profile readable to\n                               sandboxed commands, except for credential stores\n                               (no elevation; minutes on a large profile the\n                               first time). No logout needed. Run it again\n                               after upgrading trogon-sandbox-policy when a\n                               command asks for it, or to bring the profile\n                               read grant up to date: it upgrades the existing\n                               install in place.\n  windows-uninstall [options]  Windows: remove WFP filters + the `trogon-sandbox`\n                               account (one UAC prompt).\n  proxy [args...]              Run only the HTTP proxy, deciding every request\n                               through an external decider on inherited fds.\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "echo",
+   "--help"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy [options] [command] [command...]\n\nRun commands in a sandbox with network and filesystem restrictions\n\nArguments:\n  command                      command to run in the sandbox\n\nOptions:\n  -V, --version                output the version number\n  -d, --debug                  enable debug logging\n  -s, --settings <path>        path to config file (default:\n                               ~/.sandbox-settings.json)\n  -c <command>                 run command string directly (like sh -c), no\n                               escaping applied\n  --control-fd <fd>            read config updates from an inherited file\n                               descriptor >= 3 (JSON lines protocol; give it a\n                               dedicated read-only end - see the README)\n  --guest-view                 show the command a guest filesystem\n  -h, --help                   display help for command\n\nCommands:\n  windows-install [options]    Windows: provision the `trogon-sandbox` user\n                               account + install WFP filters (one UAC prompt),\n                               then make your user profile readable to\n                               sandboxed commands, except for credential stores\n                               (no elevation; minutes on a large profile the\n                               first time). No logout needed. Run it again\n                               after upgrading trogon-sandbox-policy when a\n                               command asks for it, or to bring the profile\n                               read grant up to date: it upgrades the existing\n                               install in place.\n  windows-uninstall [options]  Windows: remove WFP filters + the `trogon-sandbox`\n                               account (one UAC prompt).\n  proxy [args...]              Run only the HTTP proxy, deciding every request\n                               through an external decider on inherited fds.\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "-h"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy [options] [command] [command...]\n\nRun commands in a sandbox with network and filesystem restrictions\n\nArguments:\n  command                      command to run in the sandbox\n\nOptions:\n  -V, --version                output the version number\n  -d, --debug                  enable debug logging\n  -s, --settings <path>        path to config file (default:\n                               ~/.sandbox-settings.json)\n  -c <command>                 run command string directly (like sh -c), no\n                               escaping applied\n  --control-fd <fd>            read config updates from an inherited file\n                               descriptor >= 3 (JSON lines protocol; give it a\n                               dedicated read-only end - see the README)\n  --guest-view                 show the command a guest filesystem\n  -h, --help                   display help for command\n\nCommands:\n  windows-install [options]    Windows: provision the `trogon-sandbox` user\n                               account + install WFP filters (one UAC prompt),\n                               then make your user profile readable to\n                               sandboxed commands, except for credential stores\n                               (no elevation; minutes on a large profile the\n                               first time). No logout needed. Run it again\n                               after upgrading trogon-sandbox-policy when a\n                               command asks for it, or to bring the profile\n                               read grant up to date: it upgrades the existing\n                               install in place.\n  windows-uninstall [options]  Windows: remove WFP filters + the `trogon-sandbox`\n                               account (one UAC prompt).\n  proxy [args...]              Run only the HTTP proxy, deciding every request\n                               through an external decider on inherited fds.\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "-x",
+   "-h"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy [options] [command] [command...]\n\nRun commands in a sandbox with network and filesystem restrictions\n\nArguments:\n  command                      command to run in the sandbox\n\nOptions:\n  -V, --version                output the version number\n  -d, --debug                  enable debug logging\n  -s, --settings <path>        path to config file (default:\n                               ~/.sandbox-settings.json)\n  -c <command>                 run command string directly (like sh -c), no\n                               escaping applied\n  --control-fd <fd>            read config updates from an inherited file\n                               descriptor >= 3 (JSON lines protocol; give it a\n                               dedicated read-only end - see the README)\n  --guest-view                 show the command a guest filesystem\n  -h, --help                   display help for command\n\nCommands:\n  windows-install [options]    Windows: provision the `trogon-sandbox` user\n                               account + install WFP filters (one UAC prompt),\n                               then make your user profile readable to\n                               sandboxed commands, except for credential stores\n                               (no elevation; minutes on a large profile the\n                               first time). No logout needed. Run it again\n                               after upgrading trogon-sandbox-policy when a\n                               command asks for it, or to bring the profile\n                               read grant up to date: it upgrades the existing\n                               install in place.\n  windows-uninstall [options]  Windows: remove WFP filters + the `trogon-sandbox`\n                               account (one UAC prompt).\n  proxy [args...]              Run only the HTTP proxy, deciding every request\n                               through an external decider on inherited fds.\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "--version"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "0.0.0\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "-V"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "0.0.0\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "-V"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "0.0.0\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "echo",
+   "-V"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "0.0.0\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "-V",
+   "echo"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "0.0.0\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "--version",
+   "-s"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "0.0.0\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "windows-install"
+  ],
+  "outcome": {
+   "kind": "windows-install"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--bogus"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--bogus'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--force"
+  ],
+  "outcome": {
+   "kind": "windows-install"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--help"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy windows-install [options]\n\nWindows: provision the `trogon-sandbox` user account + install WFP filters (one\nUAC prompt), then make your user profile readable to sandboxed commands, except\nfor credential stores (no elevation; minutes on a large profile the first\ntime). No logout needed. Run it again after upgrading trogon-sandbox-policy\nwhen a command asks for it, or to bring the profile read grant up to date: it\nupgrades the existing install in place.\n\nOptions:\n  --sublayer-guid <guid>      WFP sublayer GUID\n  --proxy-port-range <lo-hi>  loopback PERMIT port range (e.g. 60080-60089)\n  --allow-loopback            let sandboxed commands connect to any localhost\n                              port (default: off); must match\n                              network.allowLocalBinding\n  --sandbox-user <name>       name for the sandbox user account (default:\n                              trogon-sandbox)\n  --force                     replace an existing install with different config\n  --profile-exclude <path>    a path inside your profile to keep unreadable in\n                              addition to the built-in exclusions (repeatable)\n                              (default: [])\n  --skip-profile-grant        install the account and the filters only;\n                              sandboxed commands then read nothing in your\n                              profile (use this on a computer other people have\n                              accounts on)\n  -h, --help                  display help for command\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall"
+  ],
+  "outcome": {
+   "kind": "windows-uninstall"
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall",
+   "x"
+  ],
+  "outcome": {
+   "kind": "windows-uninstall"
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall",
+   "--sublayer-guid"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '--sublayer-guid <guid>' argument missing\n"
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "windows-install"
+  ],
+  "outcome": {
+   "kind": "windows-install"
+  }
+ },
+ {
+  "argv": [
+   "-c"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '-c <command>' argument missing\n"
+  }
+ },
+ {
+  "argv": [
+   "-c",
+   "x",
+   "y"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "y"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": "x",
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-c",
+   "echo hi"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": null,
+   "c": "echo hi",
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-c",
+   ""
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": null,
+   "c": "",
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-c",
+   "",
+   "echo",
+   "hi"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo",
+    "hi"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": "",
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-cecho hi"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": null,
+   "c": "echo hi",
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-c",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": null,
+   "c": "-d",
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-c",
+   "--"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": null,
+   "c": "--",
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-dc",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": true,
+   "settings": null,
+   "c": "x",
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "-c",
+   "x",
+   "-s",
+   "f"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": true,
+   "settings": "f",
+   "c": "x",
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "-"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "-",
+    "x"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-dd",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "x"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-dx",
+   "y"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "-x",
+    "y"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-xd",
+   "y"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "-xd",
+    "y"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--bogus"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "--bogus"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--bogus",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "--bogus"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--debug"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--debug",
+   "--",
+   "--debug"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "--debug"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "--",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "-d"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "echo",
+   "--",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo",
+    "-d"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "echo",
+   "-d",
+   "--",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "echo",
+    "x"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--=x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "--=x"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--settings="
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": "",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--debug=1"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "--debug=1"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-s=f"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": "=f",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-s",
+   "a",
+   "-s",
+   "b",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "x"
+   ],
+   "debug": false,
+   "settings": "b",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--guest-view",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "x"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null,
+   "guestView": true
+  }
+ },
+ {
+  "argv": [
+   "--unknown=x",
+   "y"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "--unknown=x",
+    "y"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-sd"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": "d",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-s",
+   "--"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": "--",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--",
+   "--",
+   "x"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "--",
+    "x"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "--"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "a",
+   "b",
+   "c"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "a",
+    "b",
+    "c"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "a",
+   "",
+   "b"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "a",
+    "",
+    "b"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "",
+   "a"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "",
+    "a"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   ""
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    ""
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--force",
+   "--bogus"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--bogus'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--bogus",
+   "--",
+   "-h"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy windows-install [options]\n\nWindows: provision the `trogon-sandbox` user account + install WFP filters (one\nUAC prompt), then make your user profile readable to sandboxed commands, except\nfor credential stores (no elevation; minutes on a large profile the first\ntime). No logout needed. Run it again after upgrading trogon-sandbox-policy\nwhen a command asks for it, or to bring the profile read grant up to date: it\nupgrades the existing install in place.\n\nOptions:\n  --sublayer-guid <guid>      WFP sublayer GUID\n  --proxy-port-range <lo-hi>  loopback PERMIT port range (e.g. 60080-60089)\n  --allow-loopback            let sandboxed commands connect to any localhost\n                              port (default: off); must match\n                              network.allowLocalBinding\n  --sandbox-user <name>       name for the sandbox user account (default:\n                              trogon-sandbox)\n  --force                     replace an existing install with different config\n  --profile-exclude <path>    a path inside your profile to keep unreadable in\n                              addition to the built-in exclusions (repeatable)\n                              (default: [])\n  --skip-profile-grant        install the account and the filters only;\n                              sandboxed commands then read nothing in your\n                              profile (use this on a computer other people have\n                              accounts on)\n  -h, --help                  display help for command\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--profile-exclude"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '--profile-exclude <path>' argument missing\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall",
+   "--help"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "Usage: trogon-sandbox-policy windows-uninstall [options]\n\nWindows: remove WFP filters + the `trogon-sandbox` account (one UAC prompt).\n\nOptions:\n  --sublayer-guid <guid>  WFP sublayer GUID\n  -h, --help              display help for command\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "windows-uninstall",
+   "--sublayer-guid",
+   "g"
+  ],
+  "outcome": {
+   "kind": "windows-uninstall"
+  }
+ },
+ {
+  "argv": [
+   "proxy",
+   "x",
+   "--",
+   "y"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": [
+    "x",
+    "y"
+   ]
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "proxy",
+   "--foo",
+   "x"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": [
+    "--foo",
+    "x"
+   ]
+  }
+ },
+ {
+  "argv": [
+   "-s",
+   "f",
+   "proxy"
+  ],
+  "outcome": {
+   "kind": "proxy",
+   "args": []
+  }
+ },
+ {
+  "argv": [
+   "--control-fd",
+   "3",
+   "-c",
+   "x",
+   "y",
+   "z"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "y",
+    "z"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": "x",
+   "controlFd": 3
+  }
+ },
+ {
+  "argv": [
+   "-V",
+   "-s"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "0.0.0\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "-s",
+   "-V"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": "-V",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "--control-fd",
+   "bad",
+   "-V"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: option '--control-fd <fd>' argument 'bad' is invalid. must be an integer file descriptor >= 3 (0-2 are stdin, stdout and stderr).\n"
+  }
+ },
+ {
+  "argv": [
+   "-d",
+   "--bogus",
+   "-V"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 0,
+   "stdout": "0.0.0\n",
+   "stderr": ""
+  }
+ },
+ {
+  "argv": [
+   "ls",
+   "-",
+   "-d"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "ls",
+    "-"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-s",
+   ""
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [],
+   "debug": false,
+   "settings": "",
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "éa"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "éa"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-é"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "-é"
+   ],
+   "debug": false,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "-dé"
+  ],
+  "outcome": {
+   "kind": "run",
+   "args": [
+    "-é"
+   ],
+   "debug": true,
+   "settings": null,
+   "c": null,
+   "controlFd": null
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--forc"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--forc'\n(Did you mean --force?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--forse"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--forse'\n(Did you mean --force?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--sandbox-usr"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--sandbox-usr'\n(Did you mean --sandbox-user?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--profile-exclud"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--profile-exclud'\n(Did you mean --profile-exclude?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--skip-profile"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--skip-profile'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--sublayer-gui"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--sublayer-gui'\n(Did you mean --sublayer-guid?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--proxy-port"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--proxy-port'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--allow-loopbac"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--allow-loopbac'\n(Did you mean --allow-loopback?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--verson"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--verson'\n(Did you mean --version?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--debg"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--debg'\n(Did you mean --debug?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--control-f"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--control-f'\n(Did you mean --control-fd?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--setting"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--setting'\n(Did you mean --settings?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--hel"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--hel'\n(Did you mean --help?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--bogus"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--bogus'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--a"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--a'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--FORCE"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--FORCE'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--sandbox"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--sandbox'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--profile-exclude-x"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--profile-exclude-x'\n(Did you mean --profile-exclude?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--sublayer-guid2=x"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--sublayer-guid2=x'\n(Did you mean --sublayer-guid?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "--forc=1"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--forc=1'\n(Did you mean --force?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-install",
+   "-x"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '-x'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall",
+   "--sublayer-guidd"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--sublayer-guidd'\n(Did you mean --sublayer-guid?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall",
+   "--forse"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--forse'\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall",
+   "--debu"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--debu'\n(Did you mean --debug?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall",
+   "--versio"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--versio'\n(Did you mean --version?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall",
+   "--sublayer-gu"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--sublayer-gu'\n(Did you mean --sublayer-guid?)\n"
+  }
+ },
+ {
+  "argv": [
+   "windows-uninstall",
+   "--xyz"
+  ],
+  "outcome": {
+   "kind": "exit",
+   "code": 1,
+   "stdout": "",
+   "stderr": "error: unknown option '--xyz'\n"
+  }
+ }
+]

@@ -9,7 +9,7 @@ use std::net::IpAddr;
 use trogon_sandbox_contract::{DomainRuleAction, LeaseError, NetworkPolicy, PatternTarget};
 
 use crate::DaytonaNetwork;
-use crate::constants::MAX_ALLOW_ENTRIES;
+use crate::constants::{MAX_ALLOW_ENTRIES, RESTRICTED_EGRESS_UNVERIFIED};
 
 fn invalid(reason: impl Into<String>) -> LeaseError {
     LeaseError::InvalidNetworkPolicy { reason: reason.into() }
@@ -26,6 +26,15 @@ fn blocked() -> DaytonaNetwork {
     DaytonaNetwork {
         block_all: Some(true),
         allow_list: None,
+    }
+}
+
+/// Refuses a policy that restricts egress, before any sandbox exists. The worker cannot verify that Daytona enforces
+/// a restriction, so it will not claim one: only an absent policy or [`NetworkPolicy::AllowAll`] is admitted.
+pub fn require_unrestricted_egress(policy: Option<&NetworkPolicy>) -> Result<(), LeaseError> {
+    match policy {
+        None | Some(NetworkPolicy::AllowAll) => Ok(()),
+        Some(NetworkPolicy::DenyAll | NetworkPolicy::UserDefined { .. }) => Err(invalid(RESTRICTED_EGRESS_UNVERIFIED)),
     }
 }
 
@@ -62,7 +71,13 @@ pub fn translate_network_policy(policy: Option<&NetworkPolicy>) -> Result<Dayton
     if !deny_ranges.is_empty() {
         return Err(invalid("Daytona cannot express deny_ranges"));
     }
-    let mut entries: Vec<String> = allow_ranges.iter().map(|range| range.as_str().to_owned()).collect();
+    let mut entries: Vec<String> = Vec::new();
+    for range in allow_ranges {
+        if range.port().is_some() {
+            return Err(invalid(format!("Daytona cannot restrict by port: {range}")));
+        }
+        entries.push(range.cidr().as_str().to_owned());
+    }
     for rule in rules {
         if !matches!(rule.action, DomainRuleAction::PassThrough) {
             return Err(invalid(format!(

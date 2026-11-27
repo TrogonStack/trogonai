@@ -17,6 +17,7 @@ single_version_override(
 
 bazel_dep(name = "rules_go", version = "0.65.0")
 bazel_dep(name = "rules_shell", version = "0.6.1")
+bazel_dep(name = "rules_cc", version = "0.2.17")
 bazel_dep(name = "gazelle", version = "0.54.0")
 bazel_dep(name = "aspect_rules_js", version = "3.6.1")
 single_version_override(
@@ -107,6 +108,50 @@ crate.annotation(
     },
     crate = "*",
     repositories = ["crates"],
+)
+
+# The v8 build script downloads its prebuilt static library into a directory
+# above OUT_DIR, which a sandboxed Bazel action does not keep, and points rustc
+# at bindings under its own runfiles, which rustc never sees. Bazel fetches the
+# same release archive instead, //.config/bazel/rusty_v8 links it, and rustc
+# reads the bindings the crate ships in gen/. Bump the archives with the crate.
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "rusty_v8_aarch64_apple_darwin",
+    sha256 = "5aeffd8d5a0c1b79ac1d70af83d5b19099655fd9c645a794dc43f101f779838c",
+    urls = ["https://github.com/denoland/rusty_v8/releases/download/v150.4.0/librusty_v8_simdutf_release_aarch64-apple-darwin.a.gz"],
+)
+
+http_file(
+    name = "rusty_v8_x86_64_unknown_linux_gnu",
+    sha256 = "f48762ca10d1f1fc605a441c5ae430ec8ce1e9e80f14d78fbc42cb878c30b476",
+    urls = ["https://github.com/denoland/rusty_v8/releases/download/v150.4.0/librusty_v8_simdutf_release_x86_64-unknown-linux-gnu.a.gz"],
+)
+
+crate.annotation(
+    crate = "v8",
+    # crate_universe writes labels into the crate repository verbatim, so this one names the main repository.
+    deps = ["@@//.config/bazel/rusty_v8"],
+    gen_build_script = "off",
+    repositories = ["crates"],
+    version = "150.4.0",
+)
+
+crate.annotation_select(
+    crate = "v8",
+    repositories = ["crates"],
+    rustc_env = {"RUSTY_V8_SRC_BINDING_PATH": "$(execpath gen/src_binding_simdutf_release_aarch64-apple-darwin.rs)"},
+    triples = ["aarch64-apple-darwin"],
+    version = "150.4.0",
+)
+
+crate.annotation_select(
+    crate = "v8",
+    repositories = ["crates"],
+    rustc_env = {"RUSTY_V8_SRC_BINDING_PATH": "$(execpath gen/src_binding_simdutf_release_x86_64-unknown-linux-gnu.rs)"},
+    triples = ["x86_64-unknown-linux-gnu"],
+    version = "150.4.0",
 )
 
 # Resolve Rust dependencies from the Cargo workspace lockfile. crate_universe
@@ -254,6 +299,12 @@ npm.npm_translate_lock(
         "//tsworkspace:pnpm-workspace.yaml",
         "//tsworkspace/apps/console:package.json",
         "//tsworkspace/packages/proto:package.json",
+        "//tsworkspace/packages/sandbox-agent-tools:package.json",
+        "//tsworkspace/packages/sandbox-cli:package.json",
+        "//tsworkspace/packages/sandbox-example-ai-app-builder:package.json",
+        "//tsworkspace/packages/sandbox-example-hono:package.json",
+        "//tsworkspace/packages/sandbox-example-nextjs:package.json",
+        "//tsworkspace/packages/sandbox-examples:package.json",
         "//tsworkspace/packages/sandbox-ws-client:package.json",
         "//tsworkspace/packages/slack-bolt-fixtures:package.json",
     ],

@@ -218,7 +218,10 @@ impl<H: Hypervisor> Serving<H> {
     }
 
     async fn handle_cancel(self: Arc<Self>, message: Message) {
-        self.cancel(&extract_cancel_lease_id(message.subject.as_str())).await;
+        match extract_cancel_lease_id(message.subject.as_str()) {
+            Some(lease_id) => self.cancel(&lease_id).await,
+            None => tracing::warn!(subject = message.subject.as_str(), "cancel names no lease"),
+        }
     }
 
     async fn cancel(&self, lease_id: &LeaseId) {

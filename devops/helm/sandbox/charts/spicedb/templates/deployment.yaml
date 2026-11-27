@@ -1,0 +1,90 @@
+{{- $key := .Values.global.spicedb.presharedKeySecret }}
+{{- if not $key.name }}
+{{- fail "global.spicedb.presharedKeySecret.name is required: name the Secret that holds the SpiceDB preshared key" }}
+{{- end }}
+{{- if and (eq .Values.datastore.engine "postgres") (not .Values.datastore.uriSecret.name) }}
+{{- fail "spicedb.datastore.uriSecret.name is required when spicedb.datastore.engine is postgres" }}
+{{- end }}
+{{- if and (eq .Values.datastore.engine "memory") (gt (int .Values.replicaCount) 1) }}
+{{- fail "spicedb.replicaCount must be 1 with the memory datastore; use postgres to scale out" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spicedb.fullname" . }}
+  labels:
+    {{- include "spicedb.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spicedb
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "spicedb.labels" . | nindent 8 }}
+      annotations:
+        checksum/bootstrap: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- if eq .Values.datastore.engine "postgres" }}
+      initContainers:
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args: ["datastore", "migrate", "head"]
+          env:
+            - name: SPICEDB_DATASTORE_ENGINE
+              value: postgres
+            - name: SPICEDB_DATASTORE_CONN_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.datastore.uriSecret.name }}
+                  key: {{ .Values.datastore.uriSecret.key }}
+      {{- end }}
+      containers:
+        - name: spicedb
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: ["serve"]
+          env:
+            - name: SPICEDB_GRPC_PRESHARED_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $key.name }}
+                  key: {{ $key.key }}
+            - name: SPICEDB_DATASTORE_ENGINE
+              value: {{ .Values.datastore.engine | quote }}
+            {{- if eq .Values.datastore.engine "postgres" }}
+            - name: SPICEDB_DATASTORE_CONN_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.datastore.uriSecret.name }}
+                  key: {{ .Values.datastore.uriSecret.key }}
+            {{- end }}
+            - name: SPICEDB_DATASTORE_BOOTSTRAP_FILES
+              value: /bootstrap/bootstrap.yaml
+            - name: SPICEDB_DATASTORE_BOOTSTRAP_OVERWRITE
+              value: "true"
+          ports:
+            - name: grpc
+              containerPort: 50051
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["grpc_health_probe", "-addr=localhost:50051"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["grpc_health_probe", "-addr=localhost:50051"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: {{ include "spicedb.fullname" . }}-bootstrap

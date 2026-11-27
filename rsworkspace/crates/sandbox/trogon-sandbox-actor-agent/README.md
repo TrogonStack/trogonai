@@ -50,8 +50,8 @@ trogon-sandbox-actor-agent --port 8110 --bind 0.0.0.0
 ```
 
 Every flag has a `SANDBOX_ACTOR_AGENT_*` environment variable: `PORT`, `BIND`,
-`ACTOR_ID_PATH` and `VSOCK_PORT`. The `Dockerfile` builds the binary into a Debian slim
-image; build it from the repository root.
+`ACTOR_ID_PATH` and `VSOCK_PORT`. `devops/docker/images/trogon-sandbox-actor-agent/Dockerfile`
+builds the binary into a Debian slim image; build it from the repository root.
 
 ## Related crates
 

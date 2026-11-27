@@ -1,0 +1,15 @@
+replicaCount: 1
+# Prometheus scrape port; the worker listens on it for the whole pod network.
+metricsPort: 9102
+privileged: true
+# Directory inside the image the worker resolves a lease's logical image name under, as
+# <name>.wasm. The worker refuses to start without one, so set it (SANDBOX_HYPERLIGHT_COMPONENT_ROOT).
+componentRoot: ""
+resources:
+  requests:
+    cpu: 500m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+egressEnforcement: mandatory

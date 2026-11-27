@@ -137,3 +137,7 @@ See [crate boundaries](../adr/0002-rust-crate-boundaries.md) and
 [domain grouping](../adr/0034-rust-crate-domain-grouping.md) for the Rust
 integration rules. A runtime or provider will have its own acceptance contract;
 the client package alone does not supply one.
+
+## Sandbox broker and workers
+
+The broker, the workers and the operator tooling behind this client are documented in the sandbox guides. Start with [your first sandbox lease](../get-started/sandbox/first-sandbox-lease.md), or use the [sandbox documentation map](../reference/sandbox/documentation-map.md) to find a tutorial, how-to guide, explanation or reference.

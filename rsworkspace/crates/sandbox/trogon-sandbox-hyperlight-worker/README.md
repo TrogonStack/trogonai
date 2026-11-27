@@ -11,9 +11,38 @@ bounded warm pool. Snapshots travel as OCI artifacts of type `HyperlightSnapshot
 Everything that touches a hypervisor sits behind the `Hypervisor` trait. The lease rules, the warm pool,
 the snapshot transport and the authority guard are plain code that runs and is tested without one.
 
-The shipped binary uses `UnsupportedHypervisor`. It exits at startup with a clear error on a host that
-cannot run guests, instead of advertising capacity it does not have. A deployment that has a hypervisor
-backend passes it to `serve` or `launch`.
+`WasmHypervisor` runs guests through `hyperlight-wasm`. It is built only when the
+`trogon_hyperlight_wasm` rustc cfg is set, and only on Linux (KVM or MSHV) and Windows (WHP). With the
+cfg the binary serves leases on it.
+
+Every other build uses `UnsupportedHypervisor`. The binary then exits at startup with a clear error
+instead of advertising capacity it does not have. A deployment that has another hypervisor backend
+passes it to `serve` or `launch`.
+
+## Building the Hyperlight backend
+
+The backend is a rustc cfg rather than a Cargo feature, so `--all-features` builds leave it out. Its
+build script compiles the `hyperlight-wasm` guest runtime for a custom target, which stable Rust stopped
+accepting in 1.95, so a feature would break every workspace-wide `--all-features` build on Linux.
+
+To build it you need:
+
+- A toolchain that accepts custom target specifications: Rust 1.94, a nightly, or a newer stable with
+  `RUSTC_BOOTSTRAP=1`.
+- The `rust-src` component of that toolchain, to build the guest sysroot.
+- `clang` on the `PATH`, to compile the guest's C code.
+
+Then set the cfg through `RUSTFLAGS`:
+
+```sh
+rustup component add rust-src
+RUSTC_BOOTSTRAP=1 RUSTFLAGS="--cfg trogon_hyperlight_wasm" \
+  cargo build -p trogon-sandbox-hyperlight-worker
+```
+
+`RUSTFLAGS` replaces any `rustflags` from Cargo configuration and changes the fingerprint of every
+crate, so the first build with the cfg rebuilds the dependency tree. The cfg is declared in the crate's
+`check-cfg` list, so builds without it stay free of `unexpected_cfgs` findings.
 
 ## Configuration
 
@@ -35,3 +64,28 @@ that are absolute or contain `..` are refused.
 A guest is a sealed Wasm component, so a lease is refused when it asks for `spec.env`, a clone, host
 mount or S3 workspace, privileged access, or a provider-native snapshot. A snapshot image must be a
 `HyperlightSnapshotV1` artifact, and the broker resolves snapshot tags before dispatch.
+
+## Running against a hypervisor
+
+`tests/wasm_backend.rs` holds the tests that need a real guest. They are ignored by default. Build the
+`echo_double` guest in `tests/fixtures/passthrough-guest`, compile it ahead of time as its README
+describes, and point `HYPERLIGHT_TEST_MODULE` at the result:
+
+```sh
+HYPERLIGHT_TEST_MODULE=/path/to/passthrough_guest.aot \
+  RUSTC_BOOTSTRAP=1 RUSTFLAGS="--cfg trogon_hyperlight_wasm" \
+  cargo test -p trogon-sandbox-hyperlight-worker --test wasm_backend -- --ignored
+```
+
+Without the cfg the file compiles to nothing, so the plain test run skips it. With the cfg,
+`tests/binary.rs` also ignores the check that the binary exits when the host has no hypervisor.
+
+Two examples drive the same paths end to end against a local OCI registry:
+
+- `e2e_snapshot_roundtrip` loads a module, snapshots it, pushes and pulls the snapshot, and checks the
+  restored guest answers the same.
+- `e2e_provider_roundtrip` leases a module through the provider, snapshots the lease, and leases again
+  from that snapshot.
+
+Both need the same `RUSTC_BOOTSTRAP` and `RUSTFLAGS` as the tests. Without the cfg they build and
+exit with an error saying so.

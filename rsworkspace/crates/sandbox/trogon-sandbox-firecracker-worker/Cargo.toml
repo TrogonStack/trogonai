@@ -1,0 +1,75 @@
+[package]
+name = "trogon-sandbox-firecracker-worker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "NATS-subscribed worker that fulfills sandbox lease requests as Firecracker microVMs"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_firecracker_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-firecracker-worker"
+path = "src/main.rs"
+
+[[example]]
+name = "e2e_lease_exec"
+path = "examples/e2e_lease_exec.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true }
+flate2 = { workspace = true }
+fs2 = { workspace = true }
+futures = { workspace = true }
+getrandom = { workspace = true }
+goblin = { workspace = true }
+hex = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true }
+ipnet = { workspace = true, features = ["serde"] }
+libc = { workspace = true }
+prometheus = { workspace = true }
+rusqlite = { workspace = true }
+rustix = { workspace = true }
+rustls = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "io-util", "process", "fs"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+trogon-sandbox-actor-agent = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-cosign = { workspace = true }
+trogon-sandbox-credential-broker = { workspace = true }
+trogon-sandbox-egress-proxy = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-oci = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+base64 = { workspace = true }
+httpmock = { workspace = true }
+rcgen = { workspace = true }
+tar = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "io-util", "process", "fs"] }
+tokio-rustls = { workspace = true }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-actor-agent = { workspace = true, features = ["server"] }
+trogon-sandbox-broker = { workspace = true }
+trogon-sandbox-conformance = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }

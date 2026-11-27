@@ -1,0 +1,8 @@
+# The image copies nothing from the build context.
+**
+!devops/
+!devops/docker/
+!devops/docker/images/
+!devops/docker/images/sandbox-agent/
+!devops/docker/images/sandbox-agent/Dockerfile
+!devops/docker/images/sandbox-agent/Dockerfile.dockerignore

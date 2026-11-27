@@ -20,12 +20,20 @@ path = "src/main.rs"
 anyhow = { workspace = true }
 async-nats = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true }
 bytes = { workspace = true }
+chrono = { workspace = true }
 clap = { workspace = true, features = ["env"] }
 futures = { workspace = true }
+hex = { workspace = true }
+libc = { workspace = true }
 reqwest = { workspace = true }
+russh = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "macros", "sync", "signal"] }
 tokio-util = { workspace = true }
@@ -34,12 +42,15 @@ trogon-nats = { workspace = true }
 trogon-sandbox-contract = { workspace = true }
 trogon-sandbox-observability = { workspace = true }
 trogon-sandbox-protocol = { workspace = true }
+trogon-sandbox-ssh-gateway = { workspace = true }
+trogon-sandbox-volumes = { workspace = true }
 trogon-std = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "macros", "sync", "signal", "test-util", "process"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-conformance = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }

@@ -1,0 +1,13 @@
+replicaCount: 1
+metricsPort: 9095
+maxConcurrent: 4
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+metrics:
+  prometheusRule:
+    enabled: true

@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sandbox-subprocess-worker.fullname" . }}
+  labels:
+    {{- include "sandbox-subprocess-worker.labels" . | nindent 4 }}
+    sandbox.trogonai.io/egress-enforcement: {{ .Values.egressEnforcement | quote }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-subprocess-worker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "sandbox-subprocess-worker.labels" . | nindent 8 }}
+        sandbox.trogonai.io/egress-enforcement: {{ .Values.egressEnforcement | quote }}
+    spec:
+      serviceAccountName: {{ include "sandbox-subprocess-worker.fullname" . }}
+      containers:
+        - name: worker
+          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-subprocess-worker:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "sandbox-subprocess-worker.fullname" . }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          {{- with .Values.global.dispatchAuth }}
+          env:
+            - name: SANDBOX_DISPATCH_PUBLIC_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .publicKeysKey }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: workspaces
+              mountPath: {{ .Values.workspaceRoot | quote }}
+          livenessProbe:
+            exec:
+              command: ["/usr/local/bin/trogon-sandbox-subprocess-worker", "--help"]
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["/usr/local/bin/trogon-sandbox-subprocess-worker", "--help"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: workspaces
+          emptyDir: {}

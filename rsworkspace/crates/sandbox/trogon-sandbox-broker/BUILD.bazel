@@ -3,6 +3,8 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 workspace_crate(
     unit_test_tags = ["requires-network"],
     integration_tests = {
+        # Test binaries share the `*_support` module directories and `src/test_support.rs` through `#[path]`.
+        "*": {"compile_data": ["src/test_support.rs", "tests/*_support/**/*.rs"]},
         "assigned_cancellation_contract": {"tags": ["requires-network"]},
         "command_readiness_contract": {"tags": ["requires-network"]},
         "command_readiness_fresh_launch": {"tags": ["requires-network"]},

@@ -1,0 +1,54 @@
+replicaCount: 1
+image:
+  repository: ghcr.io/project-zot/zot
+  tag: v2.1.2
+  pullPolicy: IfNotPresent
+service:
+  port: 5000
+persistence:
+  enabled: false
+  size: 10Gi
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Repository layout. The broker writes a tenant's snapshots to
+# <snapshotPrefix>/<tenant id>, or to <snapshotPrefix>/tenant-hex/<hex of the
+# tenant id> when the id contains ':' or '/' (or is the literal tenant-hex).
+# The tenantId keys under retention.perTenant and accessControl.tenants are
+# that repository segment: the id itself, or tenant-hex/<hex>.
+repositoryLayout:
+  conventions:
+    snapshotPrefix: "snapshots"
+
+# Retention policies map to Zot storage.retention.policies (not extensions).
+# values defaultPolicy.keepDays -> keepTags[].pushedWithin (e.g. 90d -> 2160h).
+# values defaultPolicy.keepLastN -> keepTags[].mostRecentlyPushedCount.
+retention:
+  defaultPolicy:
+    keepDays: 90
+    keepLastN: 50
+  perTenant: {} # operators override: { acme: { keepDays: 30, keepLastN: 20 } }
+
+# Garbage collection for untagged manifests and dangling blobs (storage.gc*).
+gc:
+  enabled: true
+  delay: 2h # untagged manifests must be older than this (maps to storage.gcDelay)
+  interval: 1h # GC sweep cadence (maps to storage.gcInterval)
+
+# Optional multi-region mirroring via extensions.sync (disabled for single-region).
+replication:
+  enabled: false
+  # When enabled, Zot sync extension mirrors from remote registries on a schedule.
+  syncRegistries: [] # list of { url, onDemand, pollInterval, tlsVerify, content: [{ prefix, destination }] }
+
+# Tenant-scoped registry RBAC (http.accessControl.repositories).
+accessControl:
+  platformIdentity:
+    serviceAccount: sandbox-snapshot-builder
+    pushRepositories: ["snapshots/**"]
+  tenants: [] # list of { tenantId, serviceAccount }, expanded into pull-only grants

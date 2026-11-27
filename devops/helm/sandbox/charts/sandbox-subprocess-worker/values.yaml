@@ -1,0 +1,36 @@
+replicaCount: 1
+# Prometheus scrape port; the worker listens on it for the whole pod network.
+metricsPort: 9105
+# Directory leases get their workspaces under, backed by an emptyDir (SANDBOX_WORKSPACE_ROOT).
+workspaceRoot: /var/lib/sandbox-subprocess/workspaces
+# Path inside the image of the agent binary a lease runs. The worker refuses to start without
+# one (SANDBOX_AGENT_BINARY).
+agentBinary: ""
+# Path inside the image of the egress proxy daemon (trogon-sandbox-egress-proxyd). Optional.
+egressProxyBinary: ""
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+egressEnforcement: mandatory
+# Options for the per-lease egress proxy the worker starts. Every one is off by default.
+egressProxy:
+  # Seconds a name-to-address binding the proxy observed stays live (built-in default 60).
+  bindingTtlSeconds: null
+  # Seconds between revalidations of open flows against fresh DNS answers. A positive value also
+  # turns on live-flow tracking. Null or 0 revalidates only when the policy changes.
+  revalidateIntervalSeconds: null
+  # Cancel open flows a policy replacement no longer admits.
+  resweepLiveFlows: false
+  # Terminate TLS for allows that rest on the presented name alone (needs a trusted CA).
+  requireTerminationForNameOnlyAllows: false
+  # Hosts and CIDR ranges relayed without TLS termination. They grant no egress.
+  tlsExemptHosts: []
+  tlsExemptAddresses: []
+# Refuse a lease that needs credentials when the control plane committed no credential policy
+# for it (SANDBOX_REQUIRE_COMMITTED_POLICY). The worker's own default is false, which runs such a
+# lease with unfenced credential requests; set false only while the broker commits no policies.
+requireCommittedPolicy: true

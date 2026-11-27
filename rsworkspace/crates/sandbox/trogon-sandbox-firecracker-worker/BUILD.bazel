@@ -1,0 +1,18 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    compile_data = [
+        "README.md",
+        "scripts/build-oci-rootfs.sh",
+        "scripts/fc-netns",
+    ],
+    # The worker unit tests start a NATS server in a container through Docker.
+    unit_test_tags = ["requires-network"],
+    integration_tests = {
+        "rootfs_script": {
+            "data": ["scripts/build-guest-rootfs.sh"],
+            # The test finds the script through the manifest directory, relative to its runfiles.
+            "rustc_env": {"CARGO_MANIFEST_DIR": "{package}"},
+        },
+    },
+)

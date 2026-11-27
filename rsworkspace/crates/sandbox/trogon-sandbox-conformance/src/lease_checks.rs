@@ -92,6 +92,9 @@ pub(crate) fn unsupported_checkpoint_running_gets_a_typed_reply<'a>(l: &'a Held<
 
 pub(crate) fn unknown_native_key_is_refused_with_a_typed_error(target: &Target) -> CheckFuture<'_> {
     Box::pin(async move {
+        if !target.native_passthrough {
+            return Ok(());
+        }
         let mut request = target.lease_request()?;
         let native = BTreeMap::from([(
             provider_token(target.kind),

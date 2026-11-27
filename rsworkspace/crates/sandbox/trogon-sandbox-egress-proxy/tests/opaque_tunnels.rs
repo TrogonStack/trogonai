@@ -10,8 +10,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use trogon_sandbox_contract::Port;
 use trogon_sandbox_contract::{
-    DomainRule, DomainRuleAction, EgressViolation, EgressViolationReason, ForwardUrl, IpRange, LeaseId, NetworkPolicy,
-    OpaqueTunnelPolicy, RequestForward,
+    AllowRange, DomainRule, DomainRuleAction, EgressViolation, EgressViolationReason, ForwardUrl, LeaseId,
+    NetworkPolicy, OpaqueTunnelPolicy, RequestForward,
 };
 use trogon_sandbox_egress_proxy::credential_source::UnconfiguredCredentialSource;
 use trogon_sandbox_egress_proxy::ingress::{Ingress, IngressLimits, IngressOutcome, ProxyToken};
@@ -74,7 +74,7 @@ fn rules() -> TestResult<Vec<DomainRule>> {
 fn policy(opaque_tunnels: OpaqueTunnelPolicy) -> TestResult<NetworkPolicy> {
     Ok(NetworkPolicy::UserDefined {
         rules: rules()?,
-        allow_ranges: vec![IpRange::new("127.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels,

@@ -21,8 +21,8 @@ use tokio::sync::oneshot;
 use tokio::time::{Instant, sleep, sleep_until, timeout};
 use tokio_rustls::TlsConnector;
 use trogon_sandbox_contract::Port;
+use trogon_sandbox_contract::{AllowRange, DomainRule, DomainRuleAction, LeaseId, NetworkPolicy};
 use trogon_sandbox_contract::{AllowedTlsTermination, NetworkOptions, TunnelCap, UpstreamCaCertificates};
-use trogon_sandbox_contract::{DomainRule, DomainRuleAction, IpRange, LeaseId, NetworkPolicy};
 use trogon_sandbox_egress_proxy::TunnelGate;
 use trogon_sandbox_egress_proxy::ingress::{ListenAddress, Listener, ProxyToken};
 use trogon_sandbox_egress_proxy::resolve::{NameLookup, SsrfFloor, VettingResolver};
@@ -140,7 +140,7 @@ impl Serve {
         });
         let policy = NetworkPolicy::UserDefined {
             rules: rules.clone(),
-            allow_ranges: vec![IpRange::new("127.0.0.0/8")?],
+            allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
             deny_ranges: vec![],
             denied_domains: vec![],
             opaque_tunnels: Default::default(),

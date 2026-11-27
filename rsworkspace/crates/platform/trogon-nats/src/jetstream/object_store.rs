@@ -140,7 +140,7 @@ impl NatsObjectStore {
     }
 
     /// Provision a bucket that backs claim-check payloads, sizing its `max_age`
-    /// from [`ClaimRetention`] so the object always outlives the messages that
+    /// from [`ClaimRetention`](super::ClaimRetention) so the object always outlives the messages that
     /// reference it. Callers cannot forget the retention or let it drift from
     /// the owning stream.
     ///

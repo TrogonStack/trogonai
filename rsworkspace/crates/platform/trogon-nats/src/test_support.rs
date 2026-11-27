@@ -14,6 +14,8 @@ use rcgen::{
 use tempfile::TempDir;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 use testcontainers_modules::testcontainers::{ContainerAsync, ContainerRequest, ImageExt, runners::AsyncRunner};
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpStream;
 use trogon_std::env::SystemEnv;
 
 use crate::auth::NatsConfig;
@@ -25,6 +27,9 @@ const NATS_IMAGE_TAG: &str = "2.14.2-alpine";
 const ATOMIC_BATCH_NATS_IMAGE_TAG: &str = "2.14.2";
 const NATS_CLIENT_PORT: u16 = 4222;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+const READY_TIMEOUT: Duration = Duration::from_secs(15);
+const READY_POLL: Duration = Duration::from_millis(50);
+const GREETING: &[u8; 5] = b"INFO ";
 const SERVER_NAMES: [&str; 3] = ["localhost", "127.0.0.1", "::1"];
 const SERVER_CERT: &str = "/tls/server-cert.pem";
 const SERVER_KEY: &str = "/tls/server-key.pem";
@@ -58,10 +63,12 @@ impl TestServer {
             .get_host_port_ipv4(NATS_CLIENT_PORT)
             .await
             .expect("get NATS testcontainer port");
+        let address = format!("{host}:{port}");
+        wait_until_greeted(&address).await;
 
         Self {
             _container: container,
-            address: format!("{host}:{port}"),
+            address,
             diagnostics,
         }
     }
@@ -76,6 +83,30 @@ impl TestServer {
             .await
             .expect("connect to NATS testcontainer")
     }
+}
+
+/// Docker can publish the port before its forwarder reaches the server, so a
+/// client that connects right after start can be refused. A NATS server greets
+/// every connection with `INFO` before TLS or authentication, so the greeting
+/// proves readiness for every fixture without knowing what the server enforces.
+async fn wait_until_greeted(address: &str) {
+    tokio::time::timeout(READY_TIMEOUT, async {
+        while !greets(address).await {
+            tokio::time::sleep(READY_POLL).await;
+        }
+    })
+    .await
+    .expect("NATS testcontainer greets clients");
+}
+
+async fn greets(address: &str) -> bool {
+    let greeting = async {
+        let mut stream = TcpStream::connect(address).await.ok()?;
+        let mut greeting = [0; GREETING.len()];
+        stream.read_exact(&mut greeting).await.ok()?;
+        Some(greeting)
+    };
+    matches!(tokio::time::timeout(CONNECT_TIMEOUT, greeting).await, Ok(Some(greeting)) if &greeting == GREETING)
 }
 
 /// An isolated NATS server with JetStream enabled.

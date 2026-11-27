@@ -1,20 +1,21 @@
 mod support;
 
-use std::time::Duration;
-
 use serde_json::{Value, json};
 use support::*;
 use trogon_sandbox_contract::{
-    CommandOutput, CommandTimeoutStatus, ExecutionId, GetSandboxDomainResponse, KillCommandRequest,
-    KillCommandResponse, LeaseError, LeaseId, PollCommandResponse, ReadFileRequest, ReadFileResponse,
-    RunCommandRequest, RunCommandResponse, UnixSignal, WriteFilesRequest, WriteFilesResponse, WriteStdinResponse,
+    CommandOutput, CommandTimeoutStatus, GetSandboxDomainResponse, LeaseError, ReadFileRequest, ReadFileResponse,
+    RunCommandRequest, RunCommandResponse, WriteFilesRequest, WriteFilesResponse,
 };
-use trogon_sandbox_daytona_worker::{DaytonaExec, LeaseSandbox};
+use trogon_sandbox_daytona_worker::LeaseSandbox;
 
 const LEASE: &str = "lease-1";
 
 fn execute_route() -> String {
     format!("/box/{SANDBOX}/process/execute")
+}
+
+fn download_route() -> String {
+    format!("/box/{SANDBOX}/files/download")
 }
 
 fn sandbox() -> LeaseSandbox {
@@ -27,14 +28,6 @@ fn run_request(change: impl FnOnce(&mut Value)) -> Result<RunCommandRequest, ser
     serde_json::from_value(wire)
 }
 
-fn kill_request(execution: &str) -> KillCommandRequest {
-    KillCommandRequest {
-        lease_id: LeaseId::new(LEASE),
-        execution_id: ExecutionId::new(execution),
-        signal: UnixSignal::Term,
-    }
-}
-
 /// A toolbox answer: the exit code and the text.
 fn done(code: i32, result: &str) -> Reply {
     Reply::json(200, json!({"exitCode": code, "result": result}))
@@ -42,6 +35,14 @@ fn done(code: i32, result: &str) -> Reply {
 
 fn broken() -> Reply {
     Reply::json(500, json!({"message": "down"}))
+}
+
+fn file(text: &str) -> Reply {
+    Reply::Complete(200, text.as_bytes().to_vec())
+}
+
+fn missing() -> Reply {
+    Reply::Complete(404, b"missing".to_vec())
 }
 
 fn completed(response: RunCommandResponse) -> Result<CommandOutput, Boxed> {
@@ -55,27 +56,14 @@ fn is_denied(response: &RunCommandResponse) -> bool {
     matches!(response, RunCommandResponse::Denied(_))
 }
 
-async fn started(exec: &DaytonaExec) -> Result<String, Boxed> {
-    match exec
-        .handle_run_command(&sandbox(), &run_request(|wire| wire["detached"] = json!(true))?)
-        .await
-    {
-        RunCommandResponse::Started(started) => Ok(started.execution_id.as_str().to_owned()),
-        other => Err(format!("not started: {other:?}").into()),
-    }
-}
-
-fn finished_frame() -> String {
-    frame("0", b"out", b"err")
-}
-
 #[tokio::test]
 async fn a_foreground_command_returns_its_separated_output() -> TestResult {
     let fake = Fake::with_sandbox().await?;
+    fake.script("POST", &execute_route(), vec![done(7, "")]);
     fake.script(
-        "POST",
-        &execute_route(),
-        vec![done(0, &frame("7", b"out\n", b"warn\n"))],
+        "GET",
+        &download_route(),
+        vec![file("completed"), file("out\n"), file("warn\n")],
     );
     let output = completed(fake.exec()?.handle_run_command(&sandbox(), &run_request(|_| {})?).await)?;
     assert_eq!(output.exit_code, 7);
@@ -87,25 +75,29 @@ async fn a_foreground_command_returns_its_separated_output() -> TestResult {
     assert_eq!(body["timeout"], 15);
     let command = body["command"].as_str().ok_or("no command")?;
     assert!(
-        command.contains("sandbox-capture") && command.contains("'echo' 'hi'"),
+        command.contains("timeout -k 1s 5s") && command.contains("echo") && command.contains("hi"),
         "{command}"
     );
+    assert_eq!(fake.count("DELETE", &format!("/box/{SANDBOX}/files")), 3);
     Ok(())
 }
 
 #[tokio::test]
 async fn a_command_the_deadline_stopped_reports_a_timeout() -> TestResult {
     let fake = Fake::with_sandbox().await?;
-    fake.script("POST", &execute_route(), vec![done(0, &frame("timeout", b"", b""))]);
+    fake.script("POST", &execute_route(), vec![done(143, "")]);
+    fake.script("GET", &download_route(), vec![file("timed_out"), file(""), file("")]);
     let output = completed(fake.exec()?.handle_run_command(&sandbox(), &run_request(|_| {})?).await)?;
     assert_eq!(output.timed_out, CommandTimeoutStatus::TimedOut);
+    assert_eq!(output.exit_code, CommandOutput::TIMED_OUT_EXIT_CODE);
     Ok(())
 }
 
 #[tokio::test]
 async fn the_environment_and_user_reach_the_command() -> TestResult {
     let fake = Fake::with_sandbox().await?;
-    fake.script("POST", &execute_route(), vec![done(0, &finished_frame())]);
+    fake.script("POST", &execute_route(), vec![done(0, "")]);
+    fake.script("GET", &download_route(), vec![file("completed"), file(""), file("")]);
     let request = run_request(|wire| {
         wire["env"] = json!({"A": "1"});
         wire["cwd"] = json!("sub");
@@ -118,7 +110,7 @@ async fn the_environment_and_user_reach_the_command() -> TestResult {
         .unwrap_or_default()
         .to_owned();
     assert!(
-        command.contains("'A=1'") && command.contains("'sudo'") && command.contains("/home/builder/sub"),
+        command.contains("A=") && command.contains("sudo") && command.contains("/home/builder/sub"),
         "{command}"
     );
     Ok(())
@@ -132,6 +124,10 @@ async fn a_command_that_cannot_run_is_denied() -> TestResult {
         (|wire: &mut Value| wire["stream_output"] = json!(true)) as fn(&mut Value),
         |wire| wire["command"] = json!([]),
         |wire| wire["env"] = json!({"1BAD": "x"}),
+        |wire| {
+            wire["detached"] = json!(true);
+            wire["process"] = json!({"name": "web", "ready": null});
+        },
     ] {
         let response = exec.handle_run_command(&sandbox(), &run_request(change)?).await;
         assert!(matches!(
@@ -140,201 +136,32 @@ async fn a_command_that_cannot_run_is_denied() -> TestResult {
         ));
     }
     assert_eq!(fake.total(), 0);
-    fake.script("POST", &execute_route(), vec![done(2, "")]);
-    assert!(is_denied(
-        &exec.handle_run_command(&sandbox(), &run_request(|_| {})?).await
-    ));
-    fake.script("POST", &execute_route(), vec![done(0, "garbage")]);
-    assert!(is_denied(
-        &exec.handle_run_command(&sandbox(), &run_request(|_| {})?).await
-    ));
     fake.script("POST", &execute_route(), vec![broken()]);
     assert!(is_denied(
         &exec.handle_run_command(&sandbox(), &run_request(|_| {})?).await
     ));
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_detached_command_starts_polls_and_is_cleaned_up() -> TestResult {
-    let fake = Fake::with_sandbox().await?;
-    fake.script(
-        "POST",
-        &execute_route(),
-        vec![done(0, ""), done(3, ""), done(0, &finished_frame()), done(0, "")],
-    );
-    let exec = fake.exec()?;
-    let id = started(&exec).await?;
-    let calls = fake.calls("POST", &execute_route());
-    let command = calls.first().ok_or("no start call")?.json()["command"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
-    assert!(command.contains("nohup") && command.contains(&id), "{command}");
-    assert!(matches!(
-        exec.handle_poll_command(&sandbox(), LEASE, &id).await,
-        PollCommandResponse::Running
-    ));
-    match exec.handle_poll_command(&sandbox(), LEASE, &id).await {
-        PollCommandResponse::Completed(output) => assert_eq!(output.stdout, b"out"),
-        other => return Err(format!("not completed: {other:?}").into()),
-    }
-    assert_eq!(fake.count("POST", &execute_route()), 4);
-    // The result is kept: asking again costs no call.
-    assert!(matches!(
-        exec.handle_poll_command(&sandbox(), LEASE, &id).await,
-        PollCommandResponse::Completed(_)
-    ));
-    assert_eq!(fake.count("POST", &execute_route()), 4);
-    assert!(matches!(
-        exec.handle_kill_command(&sandbox(), LEASE, &kill_request(&id)).await,
-        KillCommandResponse::AlreadyCompleted
-    ));
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_detached_command_that_cannot_start_is_denied() -> TestResult {
-    let fake = Fake::with_sandbox().await?;
-    let exec = fake.exec()?;
-    let request = run_request(|wire| wire["detached"] = json!(true))?;
-    fake.script("POST", &execute_route(), vec![done(1, "")]);
-    assert!(is_denied(&exec.handle_run_command(&sandbox(), &request).await));
-    fake.script("POST", &execute_route(), vec![broken()]);
-    assert!(is_denied(&exec.handle_run_command(&sandbox(), &request).await));
-    Ok(())
-}
-
-#[tokio::test]
-async fn polling_what_this_lease_did_not_start_finds_nothing() -> TestResult {
-    let fake = Fake::with_sandbox().await?;
     fake.script("POST", &execute_route(), vec![done(0, "")]);
-    let exec = fake.exec()?;
-    let id = started(&exec).await?;
-    assert!(matches!(
-        exec.handle_poll_command(&sandbox(), "other", &id).await,
-        PollCommandResponse::NotFound
-    ));
-    assert!(matches!(
-        exec.handle_poll_command(
-            &LeaseSandbox {
-                id: "elsewhere".to_owned()
-            },
-            LEASE,
-            &id
-        )
-        .await,
-        PollCommandResponse::NotFound
-    ));
-    assert!(matches!(
-        exec.handle_poll_command(&sandbox(), LEASE, "nope").await,
-        PollCommandResponse::NotFound
-    ));
-    assert!(matches!(
-        exec.handle_kill_command(&sandbox(), LEASE, &kill_request("nope")).await,
-        KillCommandResponse::NotFound
-    ));
-    exec.forget_lease(LEASE).await;
-    assert!(matches!(
-        exec.handle_poll_command(&sandbox(), LEASE, &id).await,
-        PollCommandResponse::NotFound
-    ));
-    Ok(())
-}
-
-#[tokio::test]
-async fn a_poll_that_fails_is_denied() -> TestResult {
-    let fake = Fake::with_sandbox().await?;
-    let exec = fake.exec()?;
-    for (reply, label) in [(broken(), "api"), (done(5, ""), "exit"), (done(0, "garbage"), "frame")] {
-        fake.script("POST", &execute_route(), vec![done(0, "")]);
-        let id = started(&exec).await?;
-        fake.script("POST", &execute_route(), vec![reply]);
-        let response = exec.handle_poll_command(&sandbox(), LEASE, &id).await;
-        assert!(matches!(response, PollCommandResponse::Denied(_)), "{label}");
+    for (replies, label) in [
+        (vec![file("garbage"), file(""), file("")], "invalid receipt"),
+        (vec![file("unavailable"), file(""), file("")], "no timeout utility"),
+        (vec![missing()], "receipt unreadable"),
+        (vec![file("completed"), missing()], "stdout unreadable"),
+        (vec![file("completed"), file(""), missing()], "stderr unreadable"),
+    ] {
+        fake.script("GET", &download_route(), replies);
+        let response = exec.handle_run_command(&sandbox(), &run_request(|_| {})?).await;
+        assert!(is_denied(&response), "{label}: {response:?}");
     }
     Ok(())
 }
 
 #[tokio::test]
-async fn a_cleanup_that_fails_does_not_lose_the_result() -> TestResult {
+async fn a_missing_timeout_utility_is_an_invalid_spec() -> TestResult {
     let fake = Fake::with_sandbox().await?;
-    fake.script("POST", &execute_route(), vec![done(0, "")]);
-    let exec = fake.exec()?;
-    let id = started(&exec).await?;
-    fake.script("POST", &execute_route(), vec![done(0, &finished_frame()), broken()]);
-    assert!(matches!(
-        exec.handle_poll_command(&sandbox(), LEASE, &id).await,
-        PollCommandResponse::Completed(_)
-    ));
-    Ok(())
-}
-
-#[tokio::test]
-async fn killing_signals_the_marked_processes() -> TestResult {
-    let fake = Fake::with_sandbox().await?;
-    fake.script("POST", &execute_route(), vec![done(0, "")]);
-    let exec = fake.exec()?;
-    let id = started(&exec).await?;
-    fake.script("POST", &execute_route(), vec![done(0, "")]);
-    assert!(matches!(
-        exec.handle_kill_command(&sandbox(), LEASE, &kill_request(&id)).await,
-        KillCommandResponse::Signaled
-    ));
-    let calls = fake.calls("POST", &execute_route());
-    let command = calls.last().ok_or("no kill call")?.json()["command"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
-    assert!(command.contains(&format!("SANDBOX_EXECUTION_ID={id}")), "{command}");
-    Ok(())
-}
-
-#[tokio::test]
-async fn killing_what_nothing_matches_checks_whether_it_already_finished() -> TestResult {
-    let fake = Fake::with_sandbox().await?;
-    fake.script("POST", &execute_route(), vec![done(0, "")]);
-    let exec = fake.exec()?;
-    let id = started(&exec).await?;
-    let cases = [
-        (vec![done(1, ""), done(0, &finished_frame())], "completed"),
-        (vec![done(1, ""), done(3, "")], "no process"),
-        (vec![done(1, ""), broken()], "poll failed"),
-        (vec![done(2, "")], "odd exit"),
-        (vec![broken()], "api"),
-    ];
-    for (replies, label) in cases {
-        fake.script("POST", &execute_route(), replies);
-        let response = exec.handle_kill_command(&sandbox(), LEASE, &kill_request(&id)).await;
-        let expected = match label {
-            "completed" => matches!(response, KillCommandResponse::AlreadyCompleted),
-            _ => matches!(response, KillCommandResponse::Denied(_)),
-        };
-        assert!(expected, "{label}: {response:?}");
-    }
-    Ok(())
-}
-
-#[tokio::test]
-async fn expired_results_are_dropped_when_the_next_command_starts() -> TestResult {
-    let fake = Fake::with_sandbox().await?;
-    fake.script(
-        "POST",
-        &execute_route(),
-        vec![done(0, ""), done(0, &finished_frame()), done(0, ""), done(0, "")],
-    );
-    let exec = fake.exec()?.with_result_ttl(Duration::ZERO);
-    let first = started(&exec).await?;
-    assert!(matches!(
-        exec.handle_poll_command(&sandbox(), LEASE, &first).await,
-        PollCommandResponse::Completed(_)
-    ));
-    tokio::time::sleep(Duration::from_millis(5)).await;
-    started(&exec).await?;
-    assert!(matches!(
-        exec.handle_poll_command(&sandbox(), LEASE, &first).await,
-        PollCommandResponse::NotFound
-    ));
+    fake.script("POST", &execute_route(), vec![done(125, "")]);
+    fake.script("GET", &download_route(), vec![file("unavailable")]);
+    let response = fake.exec()?.handle_run_command(&sandbox(), &run_request(|_| {})?).await;
+    assert!(matches!(response, RunCommandResponse::Denied(_)), "{response:?}");
     Ok(())
 }
 
@@ -484,15 +311,5 @@ async fn a_domain_that_cannot_be_served_is_denied() -> TestResult {
             "{url}"
         );
     }
-    Ok(())
-}
-
-#[tokio::test]
-async fn stdin_is_not_supported() -> TestResult {
-    let fake = Fake::with_sandbox().await?;
-    assert!(matches!(
-        fake.exec()?.handle_write_stdin(),
-        WriteStdinResponse::Unsupported
-    ));
     Ok(())
 }
