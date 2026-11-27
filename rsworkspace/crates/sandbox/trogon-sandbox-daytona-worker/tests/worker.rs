@@ -7,7 +7,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use nats_support::{Nats, Running, SILENCE, dispatch_json, until};
 use serde_json::{Value, json};
-use support::{Boxed, Fake, Reply, SANDBOX, TestResult, frame, record, request_json};
+use support::{Boxed, Fake, Reply, SANDBOX, TestResult, record, request_json};
 use tokio_util::sync::CancellationToken;
 use trogon_sandbox_contract::{
     LeaseId, LeaseRequest, LifecycleEvent, SnapshotExportError, SnapshotExportOutcome, WorkerId,
@@ -68,6 +68,7 @@ fn every_verb() -> Vec<(&'static str, Value)> {
         ("suspend", json!({"generation": 1, "level": "disk"})),
         ("wake", json!({"generation": 1, "level": "disk"})),
         ("native_handle", json!({})),
+        ("ssh_access", json!({})),
         ("checkpoint_running", json!({"target": target, "native_name": "snap"})),
         ("network_policy_update", json!({"network_policy": "deny_all"})),
         ("create_user", json!({"username": "alice"})),
@@ -81,9 +82,19 @@ fn every_verb() -> Vec<(&'static str, Value)> {
 
 fn script_toolbox(fake: &Fake) {
     let get = format!("/sandbox/{SANDBOX}");
-    fake.executes(&[(0, frame("0", b"hi\n", b""))]);
+    fake.executes(&[(0, String::new())]);
     fake.json("POST", &format!("/box/{SANDBOX}/files/bulk-upload"), 200, json!({}));
-    fake.raw("GET", &format!("/box/{SANDBOX}/files/download"), 200, b"hello");
+    let download = |text: &[u8]| Reply::Complete(200, text.to_vec());
+    fake.script(
+        "GET",
+        &format!("/box/{SANDBOX}/files/download"),
+        vec![
+            download(b"completed"),
+            download(b"hi\n"),
+            download(b""),
+            download(b"hello"),
+        ],
+    );
     fake.json(
         "GET",
         &format!("{get}/port-preview/8080"),
@@ -302,7 +313,7 @@ async fn every_verb_replies_when_the_lease_is_held() -> TestResult {
         ("run_command", "completed"),
         ("poll_command", "not_found"),
         ("kill_command", "not_found"),
-        ("write_stdin", "unsupported"),
+        ("write_stdin", "not_found"),
         ("write_files", "written"),
         ("read_file", "content"),
         ("file_op", "unsupported"),
@@ -312,6 +323,7 @@ async fn every_verb_replies_when_the_lease_is_held() -> TestResult {
         ("suspend", "done"),
         ("wake", "done"),
         ("native_handle", "available"),
+        ("ssh_access", "denied"),
         ("checkpoint_running", "err"),
         ("network_policy_update", "denied"),
         ("create_user", "denied"),

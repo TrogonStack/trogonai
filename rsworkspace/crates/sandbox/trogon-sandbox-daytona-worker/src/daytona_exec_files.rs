@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use trogon_sandbox_contract::{
     GetSandboxDomainResponse, PortAccess, ReadFileRequest, ReadFileResponse, WriteFilesRequest, WriteFilesResponse,
-    WriteStdinResponse,
 };
 use trogon_sandbox_protocol::resolve_exec_cwd;
 use url::Url;
@@ -12,11 +11,6 @@ use crate::daytona_exec::{denied, invalid_spec};
 use crate::{DaytonaApiError, DaytonaExec, LeaseSandbox};
 
 impl DaytonaExec {
-    /// A detached command keeps no stdin open, so there is nothing to write to.
-    pub fn handle_write_stdin(&self) -> WriteStdinResponse {
-        WriteStdinResponse::Unsupported
-    }
-
     pub async fn handle_write_files(&self, sandbox: &LeaseSandbox, request: &WriteFilesRequest) -> WriteFilesResponse {
         if request.as_user.is_some() {
             return WriteFilesResponse::Denied(invalid_spec("Daytona writes files as the sandbox user only"));

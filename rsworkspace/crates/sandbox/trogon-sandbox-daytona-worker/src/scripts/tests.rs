@@ -2,8 +2,11 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use trogon_sandbox_contract::{StdinChunk, StdinEof};
 
 use super::*;
+use crate::constants::COMMAND_FILE_PREFIX;
+use crate::side_files::SideFiles;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -23,122 +26,143 @@ fn sh(script: &str) -> Result<(i32, String), Box<dyn std::error::Error>> {
     Ok((output.status.code().unwrap_or(-1), String::from_utf8(output.stdout)?))
 }
 
+fn words(items: &[&str]) -> Vec<String> {
+    items.iter().map(|item| (*item).to_owned()).collect()
+}
+
 #[test]
-fn the_capture_words_carry_the_limit_the_directory_the_environment_and_the_command() -> TestResult {
-    let words = capture_words(&request(|_| {})?, CommandDeadline::Timeout, None);
-    assert_eq!(&words[..2], ["sh", "-c"]);
-    assert_eq!(
-        &words[3..],
-        ["sandbox-capture", "30s", "/workspace", "A=1", "B=2", "echo", "it's"]
-    );
-    assert_eq!(words[2], guest_capture_script("timeout", "env"));
+fn a_command_is_rendered_with_every_word_quoted_and_the_directory_first() {
+    let line = render_command(&words(&["echo", "it's"]), Some("/work dir"), &[("A", "1 2")]);
+    assert_eq!(line, "cd '/work dir' && env A='1 2' 'echo' 'it'\\''s'");
+}
+
+#[test]
+fn a_rendered_command_runs_back_as_the_same_words() -> TestResult {
+    let line = render_command(&words(&["printf", "%s|", "a b", "$HOME", "it's"]), Some("/tmp"), &[]);
+    assert_eq!(sh(&line)?, (0, "a b|$HOME|it's|".to_owned()));
     Ok(())
 }
 
 #[test]
-fn a_lease_bound_command_runs_without_a_deadline() -> TestResult {
-    let words = capture_words(&request(|_| {})?, CommandDeadline::Lease, None);
-    assert!(words[2].starts_with("capture_without_deadline() { shift 3;"));
-    assert!(words[2].contains(&guest_capture_script("capture_without_deadline", "env")));
+fn the_environment_reaches_the_command() -> TestResult {
+    let line = render_command(&words(&["sh", "-c", "printf %s \"$A\""]), None, &[("A", "x y")]);
+    assert_eq!(sh(&line)?, (0, "x y".to_owned()));
     Ok(())
 }
 
 #[test]
-fn a_relative_directory_joins_the_default_and_the_marker_tags_the_command() -> TestResult {
-    let words = capture_words(
-        &request(|wire| wire["cwd"] = json!("sub"))?,
-        CommandDeadline::Timeout,
-        Some("abc"),
-    );
-    assert_eq!(words[5], "/workspace/sub");
-    assert_eq!(words[8], "SANDBOX_EXECUTION_ID=abc");
+fn home_directories_follow_the_user() {
+    assert_eq!(home_of("root"), "/root");
+    assert_eq!(home_of("dev"), "/home/dev");
+}
+
+#[test]
+fn a_per_call_user_switches_with_su_for_root_and_sudo_otherwise() {
+    let line = render_as_user("dev", "echo hi");
+    assert!(line.contains("su -s /bin/sh 'dev' -c 'echo hi'"));
+    assert!(line.contains("sudo -n -u 'dev' /bin/sh -c 'echo hi'"));
+}
+
+#[test]
+fn a_request_starts_in_the_workspace_unless_it_names_a_directory() -> TestResult {
+    let line = render_request(&request(|_| {})?);
+
+    assert!(line.starts_with(&format!("cd '{WORKSPACE_PATH}'")));
+    let line = render_request(&request(|wire| wire["cwd"] = json!("sub"))?);
+    assert!(line.starts_with(&format!("cd '{WORKSPACE_PATH}/sub'")));
     Ok(())
 }
 
 #[test]
-fn another_user_runs_through_sudo_from_their_home() -> TestResult {
-    let words = capture_words(
-        &request(|wire| wire["run_as_user"] = json!("builder"))?,
-        CommandDeadline::Timeout,
-        None,
-    );
-    assert_eq!(words[5], "/home/builder");
-    assert_eq!(
-        &words[6..14],
-        ["sudo", "-n", "-u", "builder", "env", "A=1", "B=2", "echo"]
-    );
-    let root = capture_words(
-        &request(|wire| wire["run_as_user"] = json!("root"))?,
-        CommandDeadline::Timeout,
-        None,
-    );
-    assert_eq!(root[5], "/workspace");
+fn a_per_call_user_starts_in_its_home() -> TestResult {
+    let line = render_request(&request(|wire| wire["run_as_user"] = json!("dev"))?);
+    assert!(line.contains("/home/dev"));
     Ok(())
 }
 
 #[test]
-fn quoted_words_reach_the_shell_intact() -> TestResult {
-    let words = vec!["it's".to_owned(), "a b".to_owned(), "$HOME".to_owned()];
-    let (code, out) = sh(&format!("printf '%s|' {}", join_quoted(&words)))?;
-    assert_eq!((code, out.as_str()), (0, "it's|a b|$HOME|"));
+fn output_capture_sends_each_stream_to_its_file() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let (out, err) = (dir.path().join("o"), dir.path().join("e"));
+    let line = capture_output("echo a; echo b >&2", &out.to_string_lossy(), &err.to_string_lossy());
+    assert_eq!(sh(&line)?.0, 0);
+    assert_eq!(std::fs::read_to_string(out)?, "a\n");
+    assert_eq!(std::fs::read_to_string(err)?, "b\n");
     Ok(())
 }
 
+fn have_timeout() -> bool {
+    Command::new("/bin/sh")
+        .arg("-c")
+        .arg("command -v timeout >/dev/null 2>&1")
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 #[test]
-fn a_detached_command_reports_running_until_its_done_marker_appears() -> TestResult {
-    let tmp = tempfile::tempdir()?;
-    let dir = tmp.path().join("cmd").display().to_string();
-    let poll = poll_script(&dir, 3);
-    let (code, out) = sh(&detach_command(&dir, "sh -c 'printf frame; exit 7'"))?;
-    assert_eq!((code, out.as_str()), (0, ""));
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        let (code, out) = sh(&poll)?;
-        if code == 0 {
-            assert_eq!(out, "frame");
-            break;
-        }
-        assert_eq!(code, 3);
-        assert!(Instant::now() < deadline, "the detached command never finished");
-        std::thread::sleep(Duration::from_millis(20));
+fn a_command_that_ends_in_time_leaves_a_completed_receipt() -> TestResult {
+    if !have_timeout() {
+        return Ok(());
     }
-    assert_eq!(std::fs::read_to_string(format!("{dir}/done"))?, "7\n");
-    let (code, _) = sh(&remove_script(&dir))?;
-    assert_eq!(code, 0);
-    assert!(!std::path::Path::new(&dir).exists());
+    let dir = tempfile::tempdir()?;
+    let status = dir.path().join("s").to_string_lossy().into_owned();
+    let line = with_deadline("exit 3", 5, &status, StdinMode::Closed);
+    assert_eq!(sh(&line)?.0, 3);
+    assert_eq!(std::fs::read_to_string(&status)?, "completed");
     Ok(())
 }
 
 #[test]
-fn a_poll_of_a_directory_that_was_never_made_reports_running() -> TestResult {
-    let tmp = tempfile::tempdir()?;
-    let dir = tmp.path().join("never").display().to_string();
-    assert_eq!(sh(&poll_script(&dir, 3))?.0, 3);
+fn a_command_that_outlives_the_deadline_leaves_a_timed_out_receipt() -> TestResult {
+    if !have_timeout() {
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    let status = dir.path().join("s").to_string_lossy().into_owned();
+    let line = with_deadline("sleep 30", 1, &status, StdinMode::Closed);
+    let started = Instant::now();
+    sh(&line)?;
+    assert!(started.elapsed() < Duration::from_secs(20));
+    assert_eq!(std::fs::read_to_string(&status)?, "timed_out");
     Ok(())
 }
 
 #[test]
-fn the_directory_and_the_marker_name_the_execution() {
-    assert_eq!(command_dir("abc"), "/tmp/.trogon-exec-abc");
-    assert_eq!(marker_line("abc"), "SANDBOX_EXECUTION_ID=abc");
+fn an_image_without_timeout_leaves_an_unavailable_receipt() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let status = dir.path().join("s").to_string_lossy().into_owned();
+    let line = with_deadline("echo hi", 5, &status, StdinMode::Closed);
+    let output = Command::new("/bin/sh").arg("-c").arg(&line).env("PATH", "").output()?;
+    assert_eq!(output.status.code(), Some(125));
+    assert_eq!(std::fs::read_to_string(&status)?, "unavailable");
+    Ok(())
 }
 
-#[cfg(target_os = "linux")]
 #[test]
-fn the_signal_script_ends_the_process_that_carries_the_marker() -> TestResult {
-    let marker = format!("SANDBOX_EXECUTION_ID={}", uuid::Uuid::new_v4().simple());
-    let mut child = Command::new("sleep")
-        .arg("60")
-        .env(
-            "SANDBOX_EXECUTION_ID",
-            marker.trim_start_matches("SANDBOX_EXECUTION_ID="),
-        )
-        .spawn()?;
-    let (code, _) = sh(&signal_script(&marker, 15))?;
-    assert_eq!(code, 0);
-    let status = child.wait()?;
-    assert!(!status.success());
-    let (code, _) = sh(&signal_script(&marker, 15))?;
-    assert_eq!(code, 1);
+fn a_closed_stdin_reads_nothing() -> TestResult {
+    assert_eq!(sh(&closed_stdin("cat; echo done"))?, (0, "done\n".to_owned()));
     Ok(())
+}
+
+#[test]
+fn stdin_lines_carry_the_data_as_base64_then_the_end_marker() -> TestResult {
+    let write = StdinWrite {
+        data: StdinChunk::new(b"hi\n".to_vec())?,
+        eof: StdinEof::Close,
+    };
+    assert_eq!(stdin_lines(&write), ["aGkK", "."]);
+    let empty = StdinWrite {
+        data: StdinChunk::new(Vec::new())?,
+        eof: StdinEof::Keep,
+    };
+    assert!(stdin_lines(&empty).is_empty());
+    Ok(())
+}
+
+#[test]
+fn the_side_files_of_one_command_share_a_prefix() {
+    let files = SideFiles::new("abc");
+    assert_eq!(files.out, format!("{COMMAND_FILE_PREFIX}abc.out"));
+    assert_eq!(files.all().len(), 5);
+    assert!(files.all().iter().all(|path| path.starts_with(COMMAND_FILE_PREFIX)));
 }

@@ -1,15 +1,21 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
+use async_nats::jetstream;
 use tokio::sync::Mutex;
 use trogon_sandbox_contract::{
     LeaseError, LeaseId, NativeHandle, NativeHandleResponse, ProviderKind, SandboxFreezeResponse, WorkerId,
 };
 
+use trogon_sandbox_protocol::lifecycle_subject;
+
 use crate::active_lease::ActiveLease;
 use crate::constants::{DEFAULT_START_TIMEOUT, STATE_POLL_INTERVAL};
 use crate::settle::settle;
-use crate::{DaytonaApi, DaytonaExec, DaytonaProviderError, LeaseSandbox, SandboxState, Wait};
+use crate::{
+    DaytonaApi, DaytonaExec, DaytonaProviderError, LeaseSandbox, NatsLifecycleEmitter, SandboxState, SnapshotCustody,
+    SnapshotWait, Wait,
+};
 
 /// A [`Provider`](trogon_sandbox_protocol::Provider) that leases sandboxes from Daytona.
 pub struct DaytonaWorkerProvider {
@@ -20,6 +26,9 @@ pub struct DaytonaWorkerProvider {
     gates: std::sync::Mutex<HashMap<LeaseId, Weak<Mutex<()>>>>,
     pub(crate) worker_id: std::sync::OnceLock<WorkerId>,
     pub(crate) wait: Wait,
+    pub(crate) snapshot_custody: Option<Arc<SnapshotCustody>>,
+    snapshot_wait: std::sync::Mutex<SnapshotWait>,
+    pub(crate) lifecycle: Option<jetstream::Context>,
 }
 
 impl DaytonaWorkerProvider {
@@ -35,6 +44,9 @@ impl DaytonaWorkerProvider {
                 timeout: DEFAULT_START_TIMEOUT,
                 interval: STATE_POLL_INTERVAL,
             },
+            snapshot_custody: None,
+            snapshot_wait: std::sync::Mutex::new(SnapshotWait::default()),
+            lifecycle: None,
         }
     }
 
@@ -43,6 +55,52 @@ impl DaytonaWorkerProvider {
     pub fn with_wait(mut self, wait: Wait) -> Self {
         self.wait = wait;
         self
+    }
+
+    /// Keeps the record of every native snapshot this worker takes in `custody`. Without it a native snapshot is
+    /// refused, since nothing could clean it up after a crash.
+    #[must_use]
+    pub fn with_snapshot_custody(mut self, custody: SnapshotCustody) -> Self {
+        self.snapshot_custody = Some(Arc::new(custody));
+        self
+    }
+
+    /// Changes how often a native snapshot is looked at and how long it may take to turn active.
+    #[must_use]
+    pub fn with_snapshot_wait(self, wait: SnapshotWait) -> Self {
+        self.set_snapshot_wait(wait);
+        self
+    }
+
+    /// Changes the snapshot wait of a provider that is already serving. Captures that have started keep the wait
+    /// they began with.
+    pub fn set_snapshot_wait(&self, wait: SnapshotWait) {
+        *self
+            .snapshot_wait
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = wait;
+    }
+
+    pub(crate) fn snapshot_wait(&self) -> SnapshotWait {
+        *self
+            .snapshot_wait
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Publishes the phases of every launch and teardown on the lease's lifecycle stream through `js`. Without it the
+    /// phases run silently.
+    #[must_use]
+    pub fn with_lifecycle(mut self, js: jetstream::Context) -> Self {
+        self.lifecycle = Some(js);
+        self
+    }
+
+    /// The emitter for `lease`'s lifecycle stream, when the provider publishes lifecycle events.
+    pub(crate) fn emitter(&self, lease: &LeaseId) -> Option<NatsLifecycleEmitter> {
+        self.lifecycle
+            .clone()
+            .map(|js| NatsLifecycleEmitter::new(js, lifecycle_subject(lease)))
     }
 
     /// Binds the provider to the worker id it reports in leases. Binding the same id again is fine.
@@ -75,7 +133,11 @@ impl DaytonaWorkerProvider {
             Some(lease) => NativeHandleResponse::Available(NativeHandle {
                 provider: ProviderKind::Daytona,
                 vendor_id: lease.id.clone(),
-                url: None,
+                url: Some(format!(
+                    "{}/sandbox/{}",
+                    self.api.config().endpoint().as_str().trim_end_matches('/'),
+                    lease.id
+                )),
                 region: lease.region.clone(),
             }),
             None => NativeHandleResponse::Denied(LeaseError::LeaseNotFound {
