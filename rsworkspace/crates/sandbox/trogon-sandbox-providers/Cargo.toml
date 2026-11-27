@@ -1,0 +1,50 @@
+[package]
+name = "trogon-sandbox-providers"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Docker, Kubernetes microVM and subprocess sandbox providers shared by the sandbox workers"
+
+[features]
+default = []
+volume-cache = ["dep:trogon-sandbox-volumes"]
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+bollard = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+hyperlocal = { workspace = true }
+ipnet = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_urlencoded = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { workspace = true, features = ["io", "rt"] }
+tracing = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-sandbox-volumes = { workspace = true, optional = true, features = ["volume-cache"] }
+trogon-std = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+hyper = { workspace = true, features = ["http1", "server"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["net", "test-util"] }
+tokio-tungstenite = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }

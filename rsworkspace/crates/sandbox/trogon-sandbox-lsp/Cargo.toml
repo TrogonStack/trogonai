@@ -1,0 +1,28 @@
+[package]
+name = "trogon-sandbox-lsp"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Language server client that talks to a language server running inside a sandbox"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
+trogon-sandbox-client = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+bytes = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "test-util"] }
+trogon-std = { workspace = true }

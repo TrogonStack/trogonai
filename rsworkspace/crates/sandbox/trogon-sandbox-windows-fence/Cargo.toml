@@ -1,0 +1,20 @@
+[package]
+name = "trogon-sandbox-windows-fence"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Host side of the Windows network fence: install, uninstall, status and verification through the fence helper, plus the argv of a fenced launch"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+trogon-std = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }
