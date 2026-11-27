@@ -83,7 +83,7 @@ oxlint_bin.oxlint_test(
 
 npm_package(
     name = "pkg",
-    srcs = ["LICENSE", "README.md", "llms.txt", "package.json", ":build", ":build_types"] + glob(["docs/**"]),
+    srcs = ["README.md", "llms.txt", "package.json", ":build", ":build_types"] + glob(["docs/**"]),
     package = "@trogonai/sandbox-ws-client",
     visibility = ["//visibility:public"],
 )
