@@ -472,8 +472,12 @@ async fn connection_client_forwards_every_client_method() {
     let peer = async move {
         let mut writer = client_write;
         let mut lines = BufReader::new(client_read).lines();
+        let mut ext_methods = Vec::new();
         while let Ok(Some(line)) = lines.next_line().await {
             let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if let Some(method) = value["method"].as_str().filter(|m| m.starts_with('_')) {
+                ext_methods.push(method.to_string());
+            }
             let (Some(id), Some(method)) = (value.get("id").cloned(), value["method"].as_str()) else {
                 continue;
             };
@@ -500,10 +504,13 @@ async fn connection_client_forwards_every_client_method() {
             let frame = serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result});
             writer.write_all(format!("{frame}\n").as_bytes()).await.unwrap();
         }
+        ext_methods
     };
 
-    let (boundary_result, ()) = tokio::join!(boundary, peer);
+    let (boundary_result, ext_methods) = tokio::join!(boundary, peer);
     assert!(matches!(boundary_result, Ok(BoundaryExit::Main(()))));
+    // The SDK keeps the leading `_`, so the boundary must not add a second one.
+    assert_eq!(ext_methods, vec!["_probe".to_string(), "_note".to_string()]);
 }
 
 struct ContraryAgent;

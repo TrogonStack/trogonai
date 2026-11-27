@@ -1,5 +1,6 @@
 use crate::client::rpc_reply;
 use crate::client_handler::ClientHandler;
+use crate::ext_method_name::ext_protocol_method;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_notification_params, decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
@@ -60,7 +61,7 @@ async fn handle_request<N: PublishClient + FlushClient, C: ClientHandler + Sync>
     nats: &N,
     ext_method_name: &str,
 ) {
-    let wire_method = format!("_{ext_method_name}");
+    let wire_method = ext_protocol_method(ext_method_name);
     let response_id = response_id_from_request_headers(headers);
     match forward_request(headers, payload, client, ext_method_name, &wire_method).await {
         Ok(response) => {
@@ -80,7 +81,7 @@ async fn handle_notification<C: ClientHandler + Sync>(
     client: &C,
     ext_method_name: &str,
 ) {
-    let wire_method = format!("_{ext_method_name}");
+    let wire_method = ext_protocol_method(ext_method_name);
     let params: Arc<RawValue> = match decode_notification_params(&wire_method, headers, payload) {
         Ok(v) => v,
         Err(e) => {
