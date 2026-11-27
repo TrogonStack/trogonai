@@ -28,11 +28,14 @@ trogon-sandbox-daytona-worker = { workspace = true }
 trogon-sandbox-docker-worker = { workspace = true }
 trogon-sandbox-e2b-worker = { workspace = true }
 trogon-sandbox-firecracker-worker = { workspace = true }
+trogon-sandbox-fly-worker = { workspace = true }
 trogon-sandbox-hyperlight-worker = { workspace = true }
 trogon-sandbox-k8s-worker = { workspace = true }
 trogon-sandbox-kubevirt-worker = { workspace = true }
 trogon-sandbox-memory-worker = { workspace = true }
 trogon-sandbox-modal-worker = { workspace = true }
+trogon-sandbox-proxmox-worker = { workspace = true }
+trogon-sandbox-space-worker = { workspace = true }
 trogon-sandbox-subprocess-worker = { workspace = true }
 trogon-sandbox-substrate-worker = { workspace = true }
 trogon-sandbox-v8-wasm-worker = { workspace = true }

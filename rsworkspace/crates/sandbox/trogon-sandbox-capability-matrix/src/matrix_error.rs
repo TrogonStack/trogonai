@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
+use trogon_sandbox_fly_worker::{FlyConfigError, FlyRegionError};
 use trogon_sandbox_modal_worker::{ModalApiError, ModalAppNameError};
+use trogon_sandbox_proxmox_worker::{ProxmoxConfigError, VmIdError};
+use trogon_sandbox_space_worker::MaxLeasesError;
 use trogon_sandbox_volumes::VolumeRegionError;
 
 use crate::constants::REGENERATE_COMMAND;
@@ -29,6 +32,16 @@ pub enum MatrixError {
     ModalVolumeRegion(#[from] VolumeRegionError),
     #[error("the modal bridge: {0}")]
     ModalBridge(#[from] ModalApiError),
+    #[error("the fly region: {0}")]
+    FlyRegion(#[from] FlyRegionError),
+    #[error("the fly config: {0}")]
+    FlyConfig(#[from] FlyConfigError),
+    #[error("the proxmox template: {0}")]
+    ProxmoxTemplate(#[from] VmIdError),
+    #[error("the proxmox config: {0}")]
+    ProxmoxConfig(#[from] ProxmoxConfigError),
+    #[error("the space lease capacity: {0}")]
+    SpaceMaxLeases(#[from] MaxLeasesError),
     #[error("unknown argument {0}; pass --write to regenerate or nothing to check")]
     UnknownArgument(String),
 }

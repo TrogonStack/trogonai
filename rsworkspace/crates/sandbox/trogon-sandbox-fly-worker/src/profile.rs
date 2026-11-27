@@ -10,7 +10,7 @@ use crate::constants::{MAX_VCPU_MILLIS, MIN_VCPU_MILLIS};
 
 /// What a worker with `config` offers. Native snapshots exist only with a workspace volume, and the volume
 /// modes only with an operator volume.
-pub(crate) fn for_config(config: &FlyConfig) -> ProviderCapabilityProfile {
+pub fn capability_profile(config: &FlyConfig) -> ProviderCapabilityProfile {
     let off = CapabilitySupport::Unsupported;
     let workspace = CapabilitySupport::from(config.workspace_volume.is_some());
     let pooled = CapabilitySupport::from(config.warm_pool_size > 0);

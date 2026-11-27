@@ -10,7 +10,7 @@ use crate::constants::{MAX_VCPU_MILLIS, MIN_VCPU_MILLIS};
 
 /// What a worker with `config` offers. Without a proxy network a guest has no NIC at all and only `DenyAll`
 /// is served; with one, leases may name a domain allowlist that the egress proxy enforces.
-pub(crate) fn for_config(config: &ProxmoxConfig) -> ProviderCapabilityProfile {
+pub fn capability_profile(config: &ProxmoxConfig) -> ProviderCapabilityProfile {
     let off = CapabilitySupport::Unsupported;
     let proxied = config.network.is_some();
     ProviderCapabilityProfile {

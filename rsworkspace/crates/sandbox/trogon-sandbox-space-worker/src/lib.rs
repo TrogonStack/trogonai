@@ -83,6 +83,7 @@ pub use operation_state::OperationState;
 pub use operation_subject::OperationSubject;
 pub use operation_subject_error::OperationSubjectError;
 pub use operation_verb::OperationVerb;
+pub use profile::capability_profile;
 pub use sandbox_info::SandboxInfo;
 pub use sandbox_state::SandboxState;
 pub use space_api::SpaceApi;

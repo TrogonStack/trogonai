@@ -1,3 +1,6 @@
+use std::num::NonZeroU32;
+use std::time::Duration;
+
 /// Opens the region of `README.md` this crate owns.
 pub const BEGIN_MARKER: &str = "<!-- BEGIN GENERATED: capability-matrix -->";
 
@@ -58,3 +61,46 @@ pub(crate) const MODAL_VOLUME_REGION: &str = "us-east-1";
 
 /// The modal worker's default volume credential (`--volume-credential-id`).
 pub(crate) const MODAL_VOLUME_CREDENTIAL_ID: &str = "modal-volume";
+
+/// The fly worker's default lease capacity (`--max-leases`).
+pub(crate) const FLY_MAX_LEASES: usize = 4;
+
+/// The fly worker's default warm pool (`--warm-pool-size`).
+pub(crate) const FLY_WARM_POOL_SIZE: usize = 0;
+
+/// The fly worker's default boot timeout (`--boot-timeout-seconds`).
+pub(crate) const FLY_BOOT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The fly worker's default Machine memory (`--memory-mib`).
+pub(crate) const FLY_MEMORY_MIB: NonZeroU32 = NonZeroU32::MIN.saturating_add(511);
+
+/// The fly worker's default Machine CPU count (`--cpus`).
+pub(crate) const FLY_CPUS: NonZeroU32 = NonZeroU32::MIN;
+
+/// The fly worker's default state directory (`--state-dir`). Only named, never opened, while rendering.
+pub(crate) const FLY_STATE_DIR: &str = "/var/lib/trogon-sandbox-fly";
+
+/// `--region` has no default, so fly is rendered in this region. It is the only operator value that reaches
+/// the profile, as `placement.regions`.
+pub(crate) const FLY_REGION: &str = "iad";
+
+/// `--image` has no default; the profile does not read it.
+pub(crate) const FLY_IMAGE: &str = "trogon-sandbox";
+
+/// The proxmox worker's default lease capacity (`--max-leases`).
+pub(crate) const PROXMOX_MAX_LEASES: usize = 4;
+
+/// The proxmox worker's default boot timeout (`--boot-timeout-seconds`).
+pub(crate) const PROXMOX_BOOT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The proxmox worker's default state directory (`--state-dir`). Only named, never opened, while rendering.
+pub(crate) const PROXMOX_STATE_DIR: &str = "/var/lib/trogon-sandbox-proxmox";
+
+/// `--template` has no default; the profile does not read it.
+pub(crate) const PROXMOX_TEMPLATE: u32 = 9000;
+
+/// `--image` has no default; the profile does not read it.
+pub(crate) const PROXMOX_IMAGE: &str = "trogon-sandbox";
+
+/// The space worker's default lease capacity (`--max-leases`).
+pub(crate) const SPACE_MAX_LEASES: u32 = 4;
