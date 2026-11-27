@@ -9896,6 +9896,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-modal-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "clap",
+ "futures",
+ "object_store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-credential-client",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-protocol",
+ "trogon-sandbox-volumes",
+ "trogon-std",
+ "url",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "trogon-sandbox-observability"
 version = "0.1.0"
 dependencies = [
