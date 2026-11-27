@@ -1,0 +1,12 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    # Unit tests start a NATS server in a container through Docker.
+    unit_test_tags = ["requires-network"],
+    integration_tests = {
+        "*": {
+            "compile_data": ["tests/*/mod.rs"],
+            "tags": ["requires-network"],
+        },
+    },
+)
