@@ -1,0 +1,50 @@
+[package]
+name = "trogon-sandbox-policy-exec"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Runs commands under filesystem and network policy from inside another Rust program, with no message bus"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_policy_exec"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-policy-exec-helper"
+path = "src/bin/trogon-sandbox-policy-exec-helper.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+ipnet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_path_to_error = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync", "net", "signal"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-egress-proxy = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-sandbox-subprocess-worker = { workspace = true }
+trogon-sandbox-windows-fence = { workspace = true }
+trogon-std = { workspace = true }
+url = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+nix = { workspace = true, features = ["signal", "process"] }
+uuid = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+which = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
