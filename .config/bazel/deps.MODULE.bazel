@@ -255,6 +255,7 @@ npm.npm_translate_lock(
         "//tsworkspace/apps/console:package.json",
         "//tsworkspace/packages/proto:package.json",
         "//tsworkspace/packages/sandbox-agent-tools:package.json",
+        "//tsworkspace/packages/sandbox-cli:package.json",
         "//tsworkspace/packages/sandbox-ws-client:package.json",
         "//tsworkspace/packages/slack-bolt-fixtures:package.json",
     ],

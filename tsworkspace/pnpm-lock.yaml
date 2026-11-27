@@ -171,6 +171,34 @@ importers:
         specifier: 5.0.0
         version: 5.0.0(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
 
+  packages/sandbox-cli:
+    dependencies:
+      '@trogonai/sandbox-ws-client':
+        specifier: workspace:*
+        version: link:../sandbox-ws-client
+      commander:
+        specifier: 12.1.0
+        version: 12.1.0
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.0
+        version: 22.20.0
+      '@types/ws':
+        specifier: 8.18.2
+        version: 8.18.2
+      '@vitest/coverage-v8':
+        specifier: 5.0.0
+        version: 5.0.0(vitest@5.0.0)
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.0
+        version: 5.0.0(@types/node@22.20.0)(@vitest/coverage-v8@5.0.0)(jsdom@28.1.0)(vite@8.3.5(@types/node@22.20.0)(jiti@2.7.0))
+      ws:
+        specifier: 8.22.2
+        version: 8.22.2
+
   packages/sandbox-ws-client:
     dependencies:
       ws:
@@ -1665,6 +1693,10 @@ packages:
   commander@11.1.0:
     resolution: {integrity: sha512-yPVavfyCcRhmorC7rWlkHn15b4wDVgVmBA7kV4QVBsF7kv/9TKJAbAXVTxvTnwP8HHKjRCJDClKbciiYS7p0DQ==}
     engines: {node: '>=16'}
+
+  commander@12.1.0:
+    resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
+    engines: {node: '>=18'}
 
   commander@14.0.3:
     resolution: {integrity: sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==}
@@ -3258,18 +3290,6 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  ws@8.21.0:
-    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   ws@8.22.2:
     resolution: {integrity: sha512-/rEZ2ejown2N5gxVTHUu9bVVC7ttu0/Tgzf5hbTOixR3Fs7mbbXgn2DbdbcKgJOmpQMtrIUWivtYuVMnp/W/yA==}
     engines: {node: '>=10.0.0'}
@@ -4089,7 +4109,7 @@ snapshots:
 
   '@tanstack/devtools-event-bus@0.4.2':
     dependencies:
-      ws: 8.21.0
+      ws: 8.22.2
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -4591,6 +4611,8 @@ snapshots:
   color-name@1.1.4: {}
 
   commander@11.1.0: {}
+
+  commander@12.1.0: {}
 
   commander@14.0.3: {}
 
@@ -6025,8 +6047,6 @@ snapshots:
       strip-ansi: 6.0.1
 
   wrappy@1.0.2: {}
-
-  ws@8.21.0: {}
 
   ws@8.22.2: {}
 
