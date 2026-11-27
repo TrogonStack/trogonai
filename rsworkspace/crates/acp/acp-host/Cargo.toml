@@ -24,7 +24,10 @@ trogon-telemetry = { workspace = true }
 
 [dev-dependencies]
 async-compat = { workspace = true }
+bytes = { workspace = true }
 futures = { workspace = true }
+jsonrpc-nats = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "time", "test-util", "io-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

@@ -44,8 +44,10 @@ use tracing::{info, warn};
 ///   first initializes it with defaults at [`FALLBACK_PROTOCOL_VERSION`]; the
 ///   client's next `initialize` then relaunches it with the real parameters.
 ///
-/// A second, different client's `initialize` is refused by the
-/// [`ClientClaim`] before anything reaches the child.
+/// A second, different client is refused by the [`ClientClaim`] before
+/// anything reaches the child: here for `initialize`, which names its client
+/// in `clientInfo`, and on the NATS side for everything else, which names it
+/// in a header (see [`Self::claim`]).
 pub struct InitializedAgent<A> {
     inner: A,
     claim: Arc<ClientClaim>,
@@ -79,6 +81,12 @@ impl<A> InitializedAgent<A> {
             child: Mutex::new(initialized),
             relaunch,
         }
+    }
+
+    /// The claim this agent is served under, to gate the requests that do not
+    /// pass through `initialize`.
+    pub fn claim(&self) -> Arc<ClientClaim> {
+        self.claim.clone()
     }
 }
 

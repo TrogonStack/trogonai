@@ -1,9 +1,10 @@
+use acp_nats_agent::ClientGate;
 use agent_client_protocol::v1::schema::InitializeRequest;
 use agent_client_protocol::{Error, ErrorCode};
 use std::sync::Mutex;
 
-/// Which client an `acp-host` serves: the first one to `initialize`, for as
-/// long as the host process lives.
+/// Which client an `acp-host` serves: the first one to identify itself, for
+/// as long as the host process lives.
 ///
 /// An `acp-host` serves exactly one client. `acp-nats` routes the agent's
 /// `session/update` and `session/request_permission` callbacks to every
@@ -12,18 +13,25 @@ use std::sync::Mutex;
 /// its permission requests. Running one `acp-host` per client, each on its own
 /// ACP prefix, keeps every client's traffic on subjects only it uses.
 ///
-/// The host cannot tell who sent a NATS request; the only identity a client
-/// gives is the `clientInfo.name` in its `initialize`. So the first
-/// `initialize` claims the host for that name (or for "no name", if it sent
-/// none), and a later `initialize` naming anyone else is refused. The same
-/// client initializing again (after it restarts, or after the host's child
-/// restarts) is accepted. The claim outlives child restarts and ends only when
-/// the host exits.
+/// NATS does not tell the host who sent a request, so the claim goes by the
+/// names clients give: the `clientInfo.name` in an `initialize` (or "no name",
+/// if it sent none), and the [`ACP_CLIENT_HEADER`](acp_nats::ACP_CLIENT_HEADER)
+/// the `acp-nats` bridge stamps with that same name on everything its client
+/// sends after initializing. Whichever arrives first claims the host; from
+/// then on an `initialize`, or any other request, naming anyone else is
+/// refused before it reaches the agent. A request with no header is served:
+/// that is a client that sent no `clientInfo`, or a bridge from before the
+/// header, and a lone client of either kind must keep working. The same client
+/// initializing again (after it restarts, or after the host's child restarts)
+/// is accepted. The claim outlives child restarts and ends only when the host
+/// exits.
 ///
 /// This catches a misconfigured second client that shares a prefix. It is not
-/// an access control: two instances of the same client give the same name, and
-/// a client that never initializes is not seen at all. Keeping clients apart
-/// for real takes NATS permissions on the prefix.
+/// an access control: the name is whatever a client says it is, two instances
+/// of the same client give the same name, and a second client that sends no
+/// header (no `clientInfo`, or an older bridge) is let through on everything
+/// but `initialize`. Keeping clients apart for real takes NATS permissions on
+/// the prefix.
 #[derive(Debug, Default)]
 pub struct ClientClaim {
     claimed_by: Mutex<Option<ClientName>>,
@@ -36,7 +44,10 @@ impl ClientClaim {
     /// Claims the host for this request's client, or refuses it because a
     /// different client already holds the claim.
     pub fn admit(&self, request: &InitializeRequest) -> Result<(), Error> {
-        let client = request.client_info.as_ref().map(|info| info.name.clone());
+        self.admit_client(request.client_info.as_ref().map(|info| info.name.clone()))
+    }
+
+    fn admit_client(&self, client: ClientName) -> Result<(), Error> {
         let mut claimed_by = self
             .claimed_by
             .lock()
@@ -48,6 +59,17 @@ impl ClientClaim {
             }
             Some(served) if *served == client => Ok(()),
             Some(served) => Err(refusal(served, &client)),
+        }
+    }
+}
+
+/// Every request is put to the claim by the client its header names; one with
+/// no header names no one and is served.
+impl ClientGate for ClientClaim {
+    fn admit(&self, client: Option<&str>) -> Result<(), Error> {
+        match client {
+            Some(name) => self.admit_client(Some(name.to_string())),
+            None => Ok(()),
         }
     }
 }

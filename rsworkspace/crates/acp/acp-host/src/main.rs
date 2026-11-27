@@ -18,13 +18,13 @@ mod config;
 mod constants;
 mod initialized_agent;
 mod restart_policy;
+mod serving;
 mod session_routed_client;
 mod streams;
 mod supervisor;
 
 use acp_nats::boundary::ConnectionAgent;
 use acp_nats::nats;
-use acp_nats_agent::AgentSideNatsConnection;
 use client_claim::ClientClaim;
 use config::HostConfig;
 use initialized_agent::InitializedAgent;
@@ -62,16 +62,7 @@ async fn main() -> anyhow::Result<()> {
     ));
     let prefix = acp.acp_prefix_ref().clone();
     let serve = move |agent: InitializedAgent<ConnectionAgent>| {
-        let (_connection, serving) = AgentSideNatsConnection::with_jetstream(
-            agent,
-            nats_client.clone(),
-            js_client.clone(),
-            prefix.clone(),
-            |task| {
-                tokio::task::spawn_local(task);
-            },
-        );
-        serving
+        serving::serve(agent, nats_client.clone(), js_client.clone(), prefix.clone())
     };
 
     // The NATS agent side runs `!Send` tasks on the current thread.
