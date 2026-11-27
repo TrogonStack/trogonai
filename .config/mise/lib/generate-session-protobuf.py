@@ -29,15 +29,15 @@ def main():
     buf = executable("buf", f"buf@{pins['buf']}")
     if subprocess.check_output([buf, "--version"], text=True).strip() != pins["buf"]:
         raise SystemExit("Buf version does not match the repository pin")
-    template = (root / "buf.session.gen.yaml").read_text()
+    template = (root / ".config/buf/buf.session.gen.yaml").read_text()
     input_paths = [line.removeprefix("      - ") for line in template.splitlines() if line.startswith("      - proto/")]
     if not input_paths or len(input_paths) != len(set(input_paths)):
         raise SystemExit("Session generation requires distinct explicit protobuf input paths")
     descriptor_paths = [argument for path in input_paths for argument in ("--path", path)]
     output_name = "rsworkspace/crates/platform/trogonai-proto/src/session_gen"
-    if template.count("directory: .\n") != 1 or template.count(f"out: {output_name}\n") != 2:
+    if template.count("directory: proto\n") != 1 or template.count(f"out: {output_name}\n") != 2:
         raise SystemExit("Session generation template changed")
-    template = template.replace("directory: .\n", f"directory: {json.dumps(str(root))}\n")
+    template = template.replace("directory: proto\n", f"directory: {json.dumps(str(root / 'proto'))}\n")
     for name in ("protoc-gen-buffa", "protoc-gen-buffa-packaging"):
         version = pins[f"cargo:{name}"]
         plugin = executable(name, f"cargo:{name}@{version}")
@@ -52,9 +52,9 @@ def main():
         config = Path(temporary) / "buf.gen.yaml"
         config.write_text(template.replace(f"out: {output_name}\n", f"out: {json.dumps(str(output))}\n"))
         run([buf, "generate", "--template", str(config)])
-        run([buf, "build", "--as-file-descriptor-set", "--exclude-source-info", *descriptor_paths, "-o", str(output / "contracts.json")])
+        run([buf, "build", "proto", "--as-file-descriptor-set", "--exclude-source-info", *descriptor_paths, "-o", str(output / "contracts.json")])
         run([
-            buf, "build", "--as-file-descriptor-set", "--exclude-source-info",
+            buf, "build", "proto", "--as-file-descriptor-set", "--exclude-source-info",
             "--path", "proto/trogonai/session/plans",
             "--path", "proto/trogonai/agents/agents/v1alpha1/agent.proto",
             "-o", str(output / "plan-contracts.json"),

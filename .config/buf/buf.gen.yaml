@@ -9,7 +9,7 @@ clean: true
 # therefore inert only while the package stays excluded; ADR#0064 makes that
 # promotion the moment to decide whether they become enforced.
 inputs:
-  - directory: .
+  - directory: proto
     exclude_paths:
       - proto/trogonai/agents
       - proto/trogonai/catalog

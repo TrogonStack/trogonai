@@ -755,7 +755,7 @@ func schedulerEventRequest(t *testing.T, repoRoot string) *pluginpb.CodeGenerato
 		"trogonai/scheduler/schedules/v1/schedule_completed.proto",
 		"trogonai/scheduler/schedules/v1/schedule_status.proto",
 	}
-	arguments := []string{"build", "--as-file-descriptor-set", "--output", "-"}
+	arguments := []string{"build", "proto", "--as-file-descriptor-set", "--output", "-"}
 	for _, descriptorPath := range descriptorPaths {
 		arguments = append(arguments, "--path", "proto/"+descriptorPath)
 	}
@@ -790,7 +790,7 @@ func repositoryRoot(t *testing.T) string {
 	start := directory
 
 	for {
-		bufConfig, bufErr := os.Stat(filepath.Join(directory, "buf.yaml"))
+		bufConfig, bufErr := os.Stat(filepath.Join(directory, "proto", "buf.yaml"))
 		goModule, goErr := os.Stat(filepath.Join(directory, "goworkspace", "go.mod"))
 		if bufErr == nil && !bufConfig.IsDir() && goErr == nil && !goModule.IsDir() {
 			return directory
@@ -799,7 +799,7 @@ func repositoryRoot(t *testing.T) string {
 		parent := filepath.Dir(directory)
 		if parent == directory {
 			t.Fatalf(
-				"locate repository root from %q: expected a parent containing buf.yaml and goworkspace/go.mod",
+				"locate repository root from %q: expected a parent containing proto/buf.yaml and goworkspace/go.mod",
 				start,
 			)
 		}

@@ -2,4 +2,4 @@
 #MISE description="Generate Buffa Rust protobuf bindings from Buf modules"
 #MISE depends_post=["proto:format:rust"]
 
-exec buf generate "$@"
+exec buf generate --template .config/buf/buf.gen.yaml "$@"

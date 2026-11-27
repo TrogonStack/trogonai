@@ -50,15 +50,15 @@ format)
   ;;
 lint)
   cd "$ws"
-  exec "$buf" lint
+  exec "$buf" lint proto
   ;;
 build)
   cd "$ws"
-  exec "$buf" build
+  exec "$buf" build proto
   ;;
 schedules-descriptor)
   cd "$ws"
-  exec "$buf" build -o "${check_args[0]}" --as-file-descriptor-set --path proto/trogonai/scheduler/schedules
+  exec "$buf" build proto -o "${check_args[0]}" --as-file-descriptor-set --path proto/trogonai/scheduler/schedules
   ;;
 rust|rust-session)
   # CHECK_ARGS: OUT_DIR CARGO_TOML PROTOC_GEN_BUFFA PROTOC_GEN_BUFFA_PACKAGING RUSTFMT RUSTFMT_TOML
@@ -67,7 +67,7 @@ rust|rust-session)
   rustfmt="$PWD/${check_args[4]}"
   rustfmt_toml="$PWD/${check_args[5]}"
 
-  # buf.gen.yaml starts each plugin through the mise launcher; this one runs the
+  # .config/buf/buf.gen.yaml starts each plugin through the mise launcher; this one runs the
   # plugin Bazel provides under the same name.
   mkdir -p "$ws/.config/mise/lib" "$TEST_TMPDIR/bin"
   ln -s "$PWD/${check_args[2]}" "$TEST_TMPDIR/bin/protoc-gen-buffa"
@@ -76,24 +76,24 @@ rust|rust-session)
   chmod +x "$ws/.config/mise/lib/proto-plugin"
 
   if [[ "$check" == "rust-session" ]]; then
-    (cd "$ws" && "$buf" generate --template buf.session.gen.yaml)
+    (cd "$ws" && "$buf" generate --template .config/buf/buf.session.gen.yaml)
     session_paths=()
     while IFS= read -r line; do
       case "$line" in
         "      - proto/"*) session_paths+=(--path "${line#      - }") ;;
       esac
-    done <"$ws/buf.session.gen.yaml"
+    done <"$ws/.config/buf/buf.session.gen.yaml"
     if [[ ${#session_paths[@]} -eq 0 ]]; then
       echo "Session generation requires explicit protobuf input paths" >&2
       exit 1
     fi
-    (cd "$ws" && "$buf" build --as-file-descriptor-set --exclude-source-info "${session_paths[@]}" -o "$out/contracts.json")
-    (cd "$ws" && "$buf" build --as-file-descriptor-set --exclude-source-info \
+    (cd "$ws" && "$buf" build proto --as-file-descriptor-set --exclude-source-info "${session_paths[@]}" -o "$out/contracts.json")
+    (cd "$ws" && "$buf" build proto --as-file-descriptor-set --exclude-source-info \
       --path proto/trogonai/session/plans \
       --path proto/trogonai/agents/agents/v1alpha1/agent.proto \
       -o "$out/plan-contracts.json")
   else
-    (cd "$ws" && "$buf" generate)
+    (cd "$ws" && "$buf" generate --template .config/buf/buf.gen.yaml)
   fi
 
   # proto:generate finishes with cargo fmt, which reaches the generated tree
