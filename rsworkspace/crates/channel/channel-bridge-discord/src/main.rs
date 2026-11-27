@@ -42,6 +42,9 @@ use {
 #[tokio::main]
 #[cfg_attr(coverage_nightly, coverage(off))]
 async fn main() -> anyhow::Result<()> {
+    // The Discord HTTP client builds its rustls config as it is created,
+    // before the NATS connection would install a provider.
+    trogon_std::install_default_crypto_provider();
     let config = BridgeConfig::from_env(&SystemEnv)?;
     trogon_telemetry::init_logger(ServiceName::ChannelBridgeDiscord, [], &SystemEnv, &SystemFs);
 
