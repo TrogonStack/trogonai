@@ -10852,6 +10852,7 @@ dependencies = [
  "trogon-sandbox-contract",
  "trogon-sandbox-file-ops",
  "trogon-sandbox-protocol",
+ "trogon-std",
  "uuid",
 ]
 
