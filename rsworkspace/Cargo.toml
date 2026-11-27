@@ -75,6 +75,7 @@ trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
 trogon-sandbox-daytona-worker = { path = "crates/sandbox/trogon-sandbox-daytona-worker" }
 trogon-sandbox-dev = { path = "crates/sandbox/trogon-sandbox-dev" }
 trogon-sandbox-e2b-worker = { path = "crates/sandbox/trogon-sandbox-e2b-worker" }
+trogon-sandbox-egress-proxy = { path = "crates/sandbox/trogon-sandbox-egress-proxy" }
 trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-helper" }
 trogon-sandbox-file-ops = { path = "crates/sandbox/trogon-sandbox-file-ops" }
 trogon-sandbox-fly-worker = { path = "crates/sandbox/trogon-sandbox-fly-worker" }
@@ -314,6 +315,15 @@ rustls-pki-types = { version = "=1.15.1", default-features = false, features = [
 rustls-webpki = { version = "=0.103.16", default-features = false, features = ["std", "alloc", "ring"] }
 x509-parser = "=0.18.1"
 spiffe = { version = "=0.19.0", default-features = false }
+
+# Sandbox egress proxy
+aho-corasick = "=1.1.4"
+rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser"] }
+rsa = { version = "=0.9.10", features = ["pem"] }
+rustls-native-certs = "=0.8.3"
+sha1 = "=0.10.7"
+socket2 = { version = "=0.6.5", features = ["all"] }
+subtle = "=2.6.1"
 
 [profile.release]
 lto = "thin"

@@ -1016,7 +1016,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
- "sha1 0.10.6",
+ "sha1 0.10.7",
  "sync_wrapper",
  "tokio",
  "tokio-tungstenite",
@@ -8074,9 +8074,9 @@ dependencies = [
 
 [[package]]
 name = "sha1"
-version = "0.10.6"
+version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",
@@ -8355,9 +8355,9 @@ dependencies = [
 
 [[package]]
 name = "socket2"
-version = "0.6.3"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -10788,6 +10788,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-egress-proxy"
+version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "base64 0.23.1",
+ "futures",
+ "hex",
+ "ipnet",
+ "jsonwebtoken 11.1.0",
+ "libc",
+ "rand_core 0.6.4",
+ "rcgen",
+ "regex",
+ "rsa",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "sha1 0.10.7",
+ "sha2 0.11.1",
+ "socket2",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-credential-client",
+ "trogon-sandbox-protocol",
+ "trogon-std",
+ "url",
+ "windows",
+ "x509-parser",
+]
+
+[[package]]
 name = "trogon-sandbox-fence-helper"
 version = "0.1.0"
 dependencies = [
@@ -11804,7 +11848,7 @@ dependencies = [
  "rand 0.9.5",
  "rustls",
  "rustls-pki-types",
- "sha1 0.10.6",
+ "sha1 0.10.7",
  "thiserror 2.0.21",
 ]
 
@@ -13434,7 +13478,7 @@ checksum = "1301e935010a701ae5f8655edc0ad17c44bad3ac5ce8c39185f75453b720ae94"
 dependencies = [
  "const-oid 0.9.6",
  "der 0.7.10",
- "sha1 0.10.6",
+ "sha1 0.10.7",
  "signature 2.2.0",
  "spki 0.7.3",
  "tls_codec",

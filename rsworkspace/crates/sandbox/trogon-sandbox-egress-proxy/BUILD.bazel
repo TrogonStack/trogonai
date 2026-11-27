@@ -1,0 +1,9 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    integration_tests = {
+        "decider_nats": {"tags": ["requires-network"]},
+    },
+    # Some unit tests start a JetStream server on a local port.
+    unit_test_tags = ["requires-network"],
+)

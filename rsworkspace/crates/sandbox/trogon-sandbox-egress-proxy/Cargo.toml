@@ -1,0 +1,77 @@
+[package]
+name = "trogon-sandbox-egress-proxy"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Provider-agnostic TCP egress proxy core: transparent SNI sniffing, authenticated HTTP CONNECT and SOCKS5 ingress, policy decisions and splicing"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_egress_proxy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-egress-proxyd"
+path = "src/bin/trogon-sandbox-egress-proxyd/main.rs"
+
+[features]
+# Exposes `fuzz_support` for fuzz targets. Not for production.
+fuzzing = []
+
+[dependencies]
+aho-corasick = { workspace = true }
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+hex = { workspace = true }
+ipnet = { workspace = true }
+jsonwebtoken = { workspace = true, features = ["use_pem"] }
+rand_core = { workspace = true }
+rcgen = { workspace = true }
+regex = { workspace = true }
+rsa = { workspace = true }
+rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
+tokio-rustls = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-credential-client = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
+url = { workspace = true }
+x509-parser = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_Ndis",
+  "Win32_Networking_WinSock",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+socket2 = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }
+rustls-pemfile = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "test-util"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+x509-parser = { workspace = true, features = ["verify"] }
