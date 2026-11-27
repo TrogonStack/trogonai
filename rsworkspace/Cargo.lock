@@ -10861,6 +10861,7 @@ name = "trogon-sandbox-conformance"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "async-trait",
  "base64 0.23.1",
  "bytes",
  "futures",
@@ -10871,7 +10872,9 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-nats",
+ "trogon-sandbox-broker",
  "trogon-sandbox-contract",
+ "trogon-sandbox-memory-worker",
  "trogon-sandbox-protocol",
  "trogon-std",
  "uuid",
