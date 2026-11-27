@@ -27,17 +27,9 @@ pub fn response_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId) -> Confi
 ///
 /// Acks messages for audit persistence. No filter needed — the stream-level
 /// subject list already scopes to session-scoped commands only.
-///
-/// `DeliverPolicy::New` rather than `All`: the consumer is ephemeral and made
-/// each time an agent side starts, and COMMANDS keeps acked commands for its
-/// whole retention window. Under `All`, every start (a relaunch after a crash
-/// included) would replay that history to an agent that holds none of those
-/// sessions, flooding it and `RESPONSES` with failures. A command published
-/// while no agent is consuming goes unanswered and its caller times out,
-/// which is what a call to a session the agent no longer has gets anyway.
 pub fn commands_observer() -> Config {
     Config {
-        deliver_policy: DeliverPolicy::New,
+        deliver_policy: DeliverPolicy::All,
         ack_policy: AckPolicy::Explicit,
         replay_policy: ReplayPolicy::Instant,
         ..Default::default()

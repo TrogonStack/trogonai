@@ -9,9 +9,9 @@ fn sid(s: &str) -> AcpSessionId {
 }
 
 #[test]
-fn commands_observer_delivers_only_new_commands() {
+fn commands_observer_delivers_all() {
     let config = commands_observer();
-    assert_eq!(config.deliver_policy, DeliverPolicy::New);
+    assert_eq!(config.deliver_policy, DeliverPolicy::All);
     assert_eq!(config.ack_policy, AckPolicy::Explicit);
 }
 
