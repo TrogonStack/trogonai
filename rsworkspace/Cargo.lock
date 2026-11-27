@@ -10825,6 +10825,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-kubevirt-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "clap",
+ "futures",
+ "http",
+ "http-body-util",
+ "k8s-openapi",
+ "kube",
+ "libc",
+ "object_store",
+ "russh",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-cosign",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-oci",
+ "trogon-sandbox-protocol",
+ "trogon-sandbox-ssh-gateway",
+ "trogon-sandbox-volumes",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-sandbox-lsp"
 version = "0.1.0"
 dependencies = [
