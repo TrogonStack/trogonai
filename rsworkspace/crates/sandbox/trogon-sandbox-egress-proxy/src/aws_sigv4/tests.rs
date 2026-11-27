@@ -245,3 +245,212 @@ fn a_key_longer_than_the_block_is_hashed_first() -> Result<(), Box<dyn std::erro
     );
     Ok(())
 }
+
+const KAT_ACCESS_KEY_ID: &str = "TROGONEXAMPLEKEY0001";
+const KAT_SECRET_ACCESS_KEY: &str = "trogon/example+secret/0123456789abcdefABCD";
+
+struct KnownAnswer<'a> {
+    method: &'a str,
+    target: &'a str,
+    headers: &'a [(&'a str, &'a str)],
+    payload_hash: PayloadHash,
+    amz_date: &'a str,
+    region: &'a str,
+    service: &'a str,
+    secret_access_key: &'a str,
+}
+
+struct Signed {
+    canonical_request: String,
+    string_to_sign: String,
+    authorization: String,
+}
+
+fn sign_known_answer(case: &KnownAnswer<'_>) -> Result<Signed, Box<dyn std::error::Error>> {
+    let headers = pairs(case.headers);
+    let signed_headers = SignedHeaders::new(case.headers.iter().map(|(name, _)| *name));
+    let scope = SigningScope {
+        date: case.amz_date.chars().take(8).collect(),
+        region: case.region.to_string(),
+        service: case.service.to_string(),
+    };
+    let input = SigningInput {
+        method: case.method,
+        target: case.target,
+        headers: &headers,
+        signed_headers: &signed_headers,
+        payload_hash: &case.payload_hash,
+        amz_date: case.amz_date,
+        scope: &scope,
+    };
+    let canonical_request = canonical_request(&input)?;
+    let string_to_sign = string_to_sign(&canonical_request, case.amz_date, &scope);
+    let authorization = sign(
+        &input,
+        &RealValue::new(KAT_ACCESS_KEY_ID.to_string()),
+        &RealValue::new(case.secret_access_key.to_string()),
+    )?;
+    Ok(Signed {
+        canonical_request,
+        string_to_sign,
+        authorization,
+    })
+}
+
+#[test]
+fn a_get_with_a_query_signs_the_sorted_query() -> Result<(), Box<dyn std::error::Error>> {
+    let signed = sign_known_answer(&KnownAnswer {
+        method: "get",
+        target: "/reports/2026?zone=north&limit=10&after=",
+        headers: &[
+            ("host", "widgets.eu-west-3.example.test"),
+            ("x-amz-date", "20260412T083015Z"),
+        ],
+        payload_hash: PayloadHash::of(b""),
+        amz_date: "20260412T083015Z",
+        region: "eu-west-3",
+        service: "widgets",
+        secret_access_key: KAT_SECRET_ACCESS_KEY,
+    })?;
+
+    assert_eq!(
+        signed.canonical_request,
+        "GET\n/reports/2026\nafter=&limit=10&zone=north\nhost:widgets.eu-west-3.example.test\nx-amz-date:20260412T083015Z\n\nhost;x-amz-date\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        signed.string_to_sign,
+        "AWS4-HMAC-SHA256\n20260412T083015Z\n20260412/eu-west-3/widgets/aws4_request\n836e14fc4c7bd2edbe885c97c193605621497c82ef10c82ff7442e95732d8c7b"
+    );
+    assert_eq!(
+        signed.authorization,
+        "AWS4-HMAC-SHA256 Credential=TROGONEXAMPLEKEY0001/20260412/eu-west-3/widgets/aws4_request, SignedHeaders=host;x-amz-date, Signature=eed3b8ef59b5313067ac0161f41fd467fe664226d263559e2afcf667694fc1c4"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_post_signs_its_body_and_folds_header_whitespace_and_repeats() -> Result<(), Box<dyn std::error::Error>> {
+    let signed = sign_known_answer(&KnownAnswer {
+        method: "POST",
+        target: "/v1/items/",
+        headers: &[
+            ("host", "inventory.example.test"),
+            ("Content-Type", "application/json"),
+            ("x-amz-date", "20260412T083015Z"),
+            ("x-trace", "  first   hop  "),
+            ("x-tag", "one"),
+            ("X-Tag", "two"),
+        ],
+        payload_hash: PayloadHash::of(br#"{"name":"lamp","count":3}"#),
+        amz_date: "20260412T083015Z",
+        region: "ap-south-2",
+        service: "inventory",
+        secret_access_key: KAT_SECRET_ACCESS_KEY,
+    })?;
+
+    assert_eq!(
+        signed.canonical_request,
+        "POST\n/v1/items/\n\ncontent-type:application/json\nhost:inventory.example.test\nx-amz-date:20260412T083015Z\nx-tag:one,two\nx-trace:first hop\n\ncontent-type;host;x-amz-date;x-tag;x-trace\nb715303d880135547ecc0b6a15ac3ada51e3a1a462a5a64115b85ae151622695"
+    );
+    assert_eq!(
+        signed.string_to_sign,
+        "AWS4-HMAC-SHA256\n20260412T083015Z\n20260412/ap-south-2/inventory/aws4_request\nc4f4baad91336afaaf2cf7a7a6d78f3376014d25d9edce549ddfdd9aa4450e7d"
+    );
+    assert_eq!(
+        signed.authorization,
+        "AWS4-HMAC-SHA256 Credential=TROGONEXAMPLEKEY0001/20260412/ap-south-2/inventory/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-tag;x-trace, Signature=aa88edc31cbbd6b70632e448516225f9c28e442a768dac2b3979bd70e2e7e0c5"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_non_s3_path_is_normalized_and_encoded_once_more() -> Result<(), Box<dyn std::error::Error>> {
+    let signed = sign_known_answer(&KnownAnswer {
+        method: "GET",
+        target: "/files/./drafts/../report%202026.txt?q=a%20b&flag",
+        headers: &[
+            ("host", "files.example.test"),
+            ("x-amz-date", "20260101T000000Z"),
+            ("x-amz-security-token", "session/token+value="),
+        ],
+        payload_hash: PayloadHash::of(b""),
+        amz_date: "20260101T000000Z",
+        region: "us-west-2",
+        service: "files",
+        secret_access_key: KAT_SECRET_ACCESS_KEY,
+    })?;
+
+    assert_eq!(
+        signed.canonical_request,
+        "GET\n/files/report%25202026.txt\nflag=&q=a%20b\nhost:files.example.test\nx-amz-date:20260101T000000Z\nx-amz-security-token:session/token+value=\n\nhost;x-amz-date;x-amz-security-token\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        signed.string_to_sign,
+        "AWS4-HMAC-SHA256\n20260101T000000Z\n20260101/us-west-2/files/aws4_request\ne9dd074624335486023d9bf70dc956a7903a9dd867a2272aa5a1eeb8d0977718"
+    );
+    let signature = "d2dbf12512d38c03bdc23366c83dd5b82bdfb4a607895e6fd4f797e3c5e43e0d";
+    assert_eq!(
+        signed.authorization,
+        format!(
+            "AWS4-HMAC-SHA256 Credential=TROGONEXAMPLEKEY0001/20260101/us-west-2/files/aws4_request, SignedHeaders=host;x-amz-date;x-amz-security-token, Signature={signature}"
+        )
+    );
+    Ok(())
+}
+
+#[test]
+fn an_s3_unsigned_payload_signs_the_raw_path() -> Result<(), Box<dyn std::error::Error>> {
+    let signed = sign_known_answer(&KnownAnswer {
+        method: "PUT",
+        target: "/raw%20key//part.bin",
+        headers: &[
+            ("host", "bucket-one.s3.example.test"),
+            ("x-amz-content-sha256", UNSIGNED_PAYLOAD),
+            ("x-amz-date", "20260412T083015Z"),
+        ],
+        payload_hash: PayloadHash::Unsigned,
+        amz_date: "20260412T083015Z",
+        region: "eu-central-1",
+        service: "s3",
+        secret_access_key: KAT_SECRET_ACCESS_KEY,
+    })?;
+
+    assert_eq!(
+        signed.canonical_request,
+        "PUT\n/raw%20key//part.bin\n\nhost:bucket-one.s3.example.test\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:20260412T083015Z\n\nhost;x-amz-content-sha256;x-amz-date\nUNSIGNED-PAYLOAD"
+    );
+    assert_eq!(
+        signed.string_to_sign,
+        "AWS4-HMAC-SHA256\n20260412T083015Z\n20260412/eu-central-1/s3/aws4_request\ne3b3c1eaf3b2a22452c5e980269e5b681853652fcae3a3a2b18b0b540b3dd16e"
+    );
+    assert_eq!(
+        signed.authorization,
+        "AWS4-HMAC-SHA256 Credential=TROGONEXAMPLEKEY0001/20260412/eu-central-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=b756b1c21aa0c42b3fe458d1fe123274687e9ada6fef48856309d2e198fedf71"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_secret_longer_than_the_hmac_block_still_signs() -> Result<(), Box<dyn std::error::Error>> {
+    let long_secret = "L".repeat(80);
+    let signed = sign_known_answer(&KnownAnswer {
+        method: "GET",
+        target: "/",
+        headers: &[("host", "long.example.test"), ("x-amz-date", "20260412T083015Z")],
+        payload_hash: PayloadHash::of(b""),
+        amz_date: "20260412T083015Z",
+        region: "us-east-2",
+        service: "long",
+        secret_access_key: &long_secret,
+    })?;
+
+    assert_eq!(
+        signed.string_to_sign,
+        "AWS4-HMAC-SHA256\n20260412T083015Z\n20260412/us-east-2/long/aws4_request\ncc9c7a90c5032cd687e37b73855074fdaf43efe75fe4f2f4787c0e684b2e47fb"
+    );
+    assert_eq!(
+        signed.authorization,
+        "AWS4-HMAC-SHA256 Credential=TROGONEXAMPLEKEY0001/20260412/us-east-2/long/aws4_request, SignedHeaders=host;x-amz-date, Signature=4a6ea756bd96b117b808085cdc60b7ef23bca921131d59ff665d8221c3bc565c"
+    );
+    Ok(())
+}

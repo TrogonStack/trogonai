@@ -243,8 +243,19 @@ fn malformed_ranges_cannot_be_built_and_absent_ranges_grant_nothing() -> Result<
         AllowRanges::from_policy(&NetworkPolicy::AllowAll),
         AllowRanges::default()
     );
-    assert_eq!(allow(&["10.0.0.5:8080"])?, AllowRanges::default());
     assert_eq!(allow(&["10.0.0.5"])?, allow(&["10.0.0.5/32"])?);
+    Ok(())
+}
+
+#[test]
+fn a_range_with_a_port_carves_out_that_port_only() -> Result<(), Box<dyn std::error::Error>> {
+    let floor = floor(&[])?;
+    let exceptions = allow(&["10.0.0.5:8080", "[fc00::1]:9", "10.0.0.6"])?;
+    assert!(floor.vet(ip("10.0.0.5")?, &exceptions.for_port(8080)).is_ok());
+    assert_eq!(floor.vet(ip("10.0.0.5")?, &exceptions.for_port(22)), Err(PrivateUse));
+    assert!(floor.vet(ip("fc00::1")?, &exceptions.for_port(9)).is_ok());
+    assert_eq!(floor.vet(ip("fc00::1")?, &exceptions.for_port(8080)), Err(PrivateUse));
+    assert!(floor.vet(ip("10.0.0.6")?, &exceptions.for_port(22)).is_ok());
     Ok(())
 }
 
