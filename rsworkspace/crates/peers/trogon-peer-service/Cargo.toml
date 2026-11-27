@@ -1,0 +1,19 @@
+[package]
+name = "trogon-peer-service"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+thiserror = { workspace = true }
+trogon-decider-runtime = { workspace = true }
+trogon-peer = { path = "../trogon-peer" }
+trogonai-proto = { workspace = true, features = ["peers-runtime", "chrono"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trogon-decider-runtime = { workspace = true, features = ["test-support"] }
