@@ -262,8 +262,11 @@ fn real_path_of_the_root_and_of_a_link_to_it_is_the_root() -> TestResult {
 #[test]
 fn real_path_reads_a_relative_path_from_the_working_directory() -> TestResult {
     let cwd = std::fs::canonicalize(std::env::current_dir()?)?;
+    let name = cwd.file_name().ok_or("the working directory is the root")?;
+    let parent = cwd.parent().ok_or("the working directory is the root")?;
     assert_eq!(real_path_of(".")?, cwd);
-    assert_eq!(real_path_of("Cargo.toml")?, cwd.join("Cargo.toml"));
-    assert_eq!(real_path_of("src/../Cargo.toml")?, cwd.join("Cargo.toml"));
+    assert_eq!(real_path_of("..")?, parent);
+    assert_eq!(real_path_of(Path::new("..").join(name))?, cwd);
+    assert_eq!(real_path_of(Path::new(".").join("..").join(name).join("."))?, cwd);
     Ok(())
 }

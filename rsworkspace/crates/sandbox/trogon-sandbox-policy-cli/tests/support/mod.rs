@@ -3,7 +3,7 @@
 use std::io::Read;
 use std::os::fd::RawFd;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -13,9 +13,14 @@ pub type TestResult = Result<(), Box<dyn std::error::Error>>;
 pub const EXIT_TIMEOUT: Duration = Duration::from_secs(60);
 pub const NO_HOME: &str = "/tmp/trogon-sandbox-policy-test-nonexistent";
 
+/// A package binary as an absolute path, so a test that moves the command to another directory still finds it.
+pub fn binary(path: &str) -> PathBuf {
+    std::path::absolute(path).unwrap_or_else(|_| PathBuf::from(path))
+}
+
 /// The command line under test with a home directory that holds no settings.
 pub fn policy_cli() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_trogon-sandbox-policy"));
+    let mut command = Command::new(binary(env!("CARGO_BIN_EXE_trogon-sandbox-policy")));
     command.env("HOME", NO_HOME).env_remove("TROGON_SANDBOX_POLICY_DEBUG");
     command
 }

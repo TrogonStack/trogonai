@@ -1,6 +1,8 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
+    # `doc.rs` finds README.md through the manifest directory, which a test reads from its runfiles.
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
     integration_tests = {
         # Compares the committed README.md against the rendered profiles.
         "doc_in_sync": {"data": ["README.md"]},

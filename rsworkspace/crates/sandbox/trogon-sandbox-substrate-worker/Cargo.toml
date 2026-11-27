@@ -5,7 +5,6 @@ edition = "2024"
 license = "Apache-2.0"
 publish = false
 description = "NATS-subscribed worker that fulfills sandbox lease requests as Agent Substrate actors"
-build = "build.rs"
 
 [lints]
 workspace = true
@@ -51,15 +50,15 @@ trogon-sandbox-actor-agent = { workspace = true, default-features = false }
 trogon-std = { workspace = true }
 uuid = { workspace = true }
 
-[build-dependencies]
-tonic-prost-build = { workspace = true }
-
 [dev-dependencies]
 # A stand-in for the in-actor agent, so the worker's half of the HTTP contract can be exercised (including responses
 # the real agent would never produce) without a substrate cluster or a running sandbox.
 axum = { workspace = true }
+# protox and tonic-prost-build regenerate the committed `ateapi` bindings in the drift test without a `protoc` binary.
+protox = { workspace = true }
 rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
+tonic-prost-build = { workspace = true }
 trogon-nats = { workspace = true, features = ["test-support"] }
 trogon-std = { workspace = true, features = ["test-support"] }

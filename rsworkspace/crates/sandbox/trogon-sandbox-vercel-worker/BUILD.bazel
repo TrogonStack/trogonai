@@ -2,7 +2,8 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
     integration_tests = {
-        "*": {"compile_data": ["tests/*/mod.rs"]},
+        # Test binaries share the `*_support` module directories through `#[path]` and `mod` items.
+        "*": {"compile_data": ["tests/*_support/**/*.rs"]},
         # These start a NATS server in a container through Docker.
         "binary": {"tags": ["requires-network"]},
         "launch": {"tags": ["requires-network"]},

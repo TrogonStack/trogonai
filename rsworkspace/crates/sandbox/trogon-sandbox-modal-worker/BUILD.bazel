@@ -4,10 +4,15 @@ workspace_crate(
     compile_data = ["src/modal_bridge.py"],
     integration_tests = {
         "*": {"compile_data": ["tests/*/mod.rs"]},
-        "bridge": {"data": glob(["tests/fixtures/**"])},
+        # These tests find their fixtures through the manifest directory, relative to their runfiles.
+        "bridge": {
+            "data": glob(["tests/fixtures/**"]),
+            "rustc_env": {"CARGO_MANIFEST_DIR": "{package}"},
+        },
         # These start a NATS server in a container through Docker.
         "binary": {
             "data": glob(["tests/fixtures/**"]),
+            "rustc_env": {"CARGO_MANIFEST_DIR": "{package}"},
             "tags": ["requires-network"],
         },
         "worker": {"tags": ["requires-network"]},

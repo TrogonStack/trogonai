@@ -316,6 +316,7 @@ uuid = { version = "=1.24.0", features = ["v4", "v7"] }
 prost = "=0.14.3"
 prost-reflect = "=0.14.7"
 prost-types = "=0.14.3"
+protox = "=0.10.0"
 serde_urlencoded = "=0.7.1"
 serde_yaml = "=0.9.34"
 wasmtime-wasi = "=47.0.3"
