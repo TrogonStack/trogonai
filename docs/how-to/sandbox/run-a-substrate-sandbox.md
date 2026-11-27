@@ -1,6 +1,6 @@
 # Run a sandbox on Agent Substrate v1
 
-This guide targets Agent Substrate `v1.0.0`, the `substrate.ateapi.v1` contract pinned in `rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/proto`. It describes the adapter configuration. Validate it against your intended cluster before rollout. The contract the adapter relies on is in [Agent Substrate v1 adapter contract](../../reference/sandbox/substrate-v1-contract.md).
+This guide targets Agent Substrate `v1.0.1`, the `substrate.ateapi.v1` contract pinned in `.config/buf/substrate-worker.buf.gen.yaml`. It describes the adapter configuration. Validate it against your intended cluster before rollout. The contract the adapter relies on is in [Agent Substrate v1 adapter contract](../../reference/sandbox/substrate-v1-contract.md).
 
 ## Prepare the cluster and images
 

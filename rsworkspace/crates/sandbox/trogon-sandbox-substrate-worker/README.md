@@ -49,10 +49,11 @@ The bearer token file is read on every call, so a rotated projected token is pic
 
 ## The wire contract
 
-`proto/ateapi.proto` is the pinned `substrate.ateapi.v1` contract. Its client-only bindings are checked in at
-`src/proto/substrate.ateapi.v1.rs`, and `ate_client` is the single place where `tonic::Status` is classified. To move
-to a newer contract, follow `proto/README.md`: replace the file, regenerate the bindings, rerun the tests, and re-read
-`ate_client` if a `Control` call changed shape.
+The `substrate.ateapi.v1` contract is pinned to an upstream release tag in `.config/buf/substrate-worker.buf.gen.yaml`.
+Its client-only bindings for the `Control` service are generated with buf and checked in under `src/proto/`, and
+`ate_client` is the single place where `tonic::Status` is classified. To move to a newer contract, change the tag, run
+`mise run proto:generate-substrate-worker`, rerun the tests, and re-read `ate_client` if a `Control` call changed
+shape. CI fails when the committed bindings differ from what the pinned schema generates.
 
 ## What a lease may not ask for
 

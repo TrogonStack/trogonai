@@ -4,12 +4,12 @@
 
 | Item | Pinned contract |
 | --- | --- |
-| Upstream release | `v1.0.0` |
-| Source file | `api/ateapi/v1/ateapi.proto`, vendored at `rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/proto/ateapi.proto` |
+| Upstream release | `v1.0.1` |
+| Source file | `api/ateapi/v1/ateapi.proto`, fetched by tag in `.config/buf/substrate-worker.buf.gen.yaml` |
 | Control service | `substrate.ateapi.v1.Control` |
 | Guest HTTP protocol | `trogon-sandbox-actor-agent`, versioned independently |
 
-The adapter does not negotiate the beta service or translate beta enum values. A server upgrade requires reviewing this contract and rerunning its regressions. The vendored file preserves upstream authorship and its Apache-2.0 notice.
+The adapter does not negotiate the beta service or translate beta enum values. A server upgrade requires reviewing this contract and rerunning its regressions.
 
 ## API and transport mapping
 

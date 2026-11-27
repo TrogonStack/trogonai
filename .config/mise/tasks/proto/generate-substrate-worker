@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Generate the substrate worker's ateapi client bindings with buf from the pinned upstream schema"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+exec buf generate --template .config/buf/substrate-worker.buf.gen.yaml "$@"

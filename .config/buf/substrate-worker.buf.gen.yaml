@@ -1,0 +1,22 @@
+version: v2
+clean: true
+# The worker's client bindings for the Agent Substrate `Control` service, generated from the pinned upstream schema
+# rather than a vendored copy. Run it through `mise run proto:generate-substrate-worker`.
+inputs:
+  - git_repo: https://github.com/agent-substrate/substrate.git
+    tag: v1.0.1
+    paths:
+      - api/ateapi/v1/ateapi.proto
+    types:
+      - substrate.ateapi.v1.Control
+plugins:
+  - local: [.config/mise/lib/proto-plugin, protoc-gen-prost]
+    out: rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/proto
+    opt:
+      - disable_comments=.
+      - flat_output_dir
+  - local: [.config/mise/lib/proto-plugin, protoc-gen-tonic]
+    out: rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/proto
+    opt:
+      - no_server=true
+      - flat_output_dir
