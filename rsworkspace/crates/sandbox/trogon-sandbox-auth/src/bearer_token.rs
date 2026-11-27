@@ -4,6 +4,13 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::{ApiKeyHash, BearerTokenError};
 
+impl ApiKeyHash {
+    /// The hash a store indexes `token` under.
+    pub fn of(token: &BearerToken) -> Self {
+        Self::from_secret(token.expose_secret())
+    }
+}
+
 /// A bearer API key presented by a caller.
 ///
 /// It holds one or more visible ASCII characters. The value is wrapped so it never appears in
@@ -29,7 +36,7 @@ impl BearerToken {
 
     /// The hash the key store indexes this token under.
     pub fn hash(&self) -> ApiKeyHash {
-        ApiKeyHash::of(self)
+        ApiKeyHash::from_secret(self.expose_secret())
     }
 }
 

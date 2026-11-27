@@ -2,8 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::TenantResourceTypeError;
-
-const DEFAULT_TENANT_RESOURCE_TYPE: &str = "sandbox_tenant";
+use crate::constants::DEFAULT_TENANT_RESOURCE_TYPE;
 
 /// The permission schema object type that tenants are checked as.
 ///

@@ -10,10 +10,8 @@ use tonic::transport::Channel;
 use tonic::{Code, Request, Status};
 use trogon_sandbox_contract::{ServiceAccountId, TenantId};
 
+use crate::constants::{PERMISSION_LEASE_SANDBOX, SUBJECT_TYPE};
 use crate::{AuthzError, SpiceDbConnectError, SpiceDbEndpoint, SpiceDbToken, TenantResourceType};
-
-const SUBJECT_TYPE: &str = "service_account";
-const PERMISSION_LEASE_SANDBOX: &str = "lease_sandbox";
 
 #[derive(Clone)]
 struct BearerInterceptor {

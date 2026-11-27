@@ -2,9 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::ApiKeyBucketError;
-
-/// Bucket the API key store uses when none is selected.
-pub const DEFAULT_BUCKET: &str = "sandbox-api-keys";
+use crate::constants::DEFAULT_BUCKET;
 
 /// The name of the key-value bucket that holds API key records.
 ///

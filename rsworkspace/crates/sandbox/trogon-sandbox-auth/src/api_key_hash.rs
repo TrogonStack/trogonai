@@ -3,9 +3,8 @@ use std::str::FromStr;
 
 use sha2::{Digest, Sha256};
 
-use crate::{ApiKeyHashError, BearerToken};
-
-const HASH_LEN: usize = 64;
+use crate::ApiKeyHashError;
+use crate::constants::HASH_LEN;
 
 /// The lowercase hexadecimal SHA-256 of a bearer token, which is the key records are stored under.
 ///
@@ -14,8 +13,9 @@ const HASH_LEN: usize = 64;
 pub struct ApiKeyHash(String);
 
 impl ApiKeyHash {
-    pub fn of(token: &BearerToken) -> Self {
-        Self(hex::encode(Sha256::digest(token.expose_secret().as_bytes())))
+    /// Hashes `secret`; [`BearerToken::hash`](crate::BearerToken::hash) is the public entry point.
+    pub(crate) fn from_secret(secret: &str) -> Self {
+        Self(hex::encode(Sha256::digest(secret.as_bytes())))
     }
 
     pub fn new(value: impl Into<String>) -> Result<Self, ApiKeyHashError> {

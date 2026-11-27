@@ -7,9 +7,8 @@ use bytes::Bytes;
 use rand_core::{OsRng, RngCore};
 use trogon_sandbox_contract::{ServiceAccountId, TenantId};
 
+use crate::constants::TOKEN_BYTES;
 use crate::{ApiKeyBucket, ApiKeyHash, ApiKeyRecord, ApiKeyStore, ApiKeyStoreError, BearerToken};
-
-const TOKEN_BYTES: usize = 32;
 
 /// An [`ApiKeyStore`] backed by a JetStream key-value bucket.
 ///

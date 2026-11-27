@@ -133,7 +133,7 @@ async fn refused_bucket_metadata_is_never_interpreted_as_absence() -> TestResult
         .err()
         .ok_or("a refused lookup must fail")?;
     assert!(matches!(error, ApiKeyStoreError::Backend(_)));
-    assert!(error.to_string().contains("fixture metadata refusal"), "{error}");
+    assert!(format!("{error}").contains("fixture metadata refusal"), "{error}");
     task.await?.map_err(|error| error.to_string())?;
     assert!(server.jetstream().await.get_key_value(DEFAULT_BUCKET).await.is_err());
     Ok(())

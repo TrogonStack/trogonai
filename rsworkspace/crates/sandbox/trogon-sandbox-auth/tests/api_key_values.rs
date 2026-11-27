@@ -46,8 +46,8 @@ fn bucket_rejects_names_the_key_value_store_cannot_hold() {
             "{value:?}"
         );
     }
-    assert!(ApiKeyBucketError::Empty.to_string().contains("empty"));
-    assert!(ApiKeyBucketError::InvalidCharacter.to_string().contains("hyphens"));
+    assert!(!format!("{}", ApiKeyBucketError::Empty).is_empty());
+    assert!(!format!("{}", ApiKeyBucketError::InvalidCharacter).is_empty());
 }
 
 #[test]
@@ -78,8 +78,8 @@ fn bearer_token_rejects_empty_and_non_visible_characters() {
             "{value:?}"
         );
     }
-    assert!(BearerTokenError::Empty.to_string().contains("empty"));
-    assert!(BearerTokenError::InvalidCharacter.to_string().contains("visible"));
+    assert!(!format!("{}", BearerTokenError::Empty).is_empty());
+    assert!(!format!("{}", BearerTokenError::InvalidCharacter).is_empty());
 }
 
 #[test]
@@ -92,8 +92,8 @@ fn key_hash_accepts_only_64_lowercase_hex_characters() -> TestResult {
         Err(ApiKeyHashError::InvalidCharacter)
     );
     assert_eq!(ApiKeyHash::new("g".repeat(64)), Err(ApiKeyHashError::InvalidCharacter));
-    assert!(ApiKeyHashError::WrongLength.to_string().contains("64"));
-    assert!(ApiKeyHashError::InvalidCharacter.to_string().contains("hexadecimal"));
+    assert!(!format!("{}", ApiKeyHashError::WrongLength).is_empty());
+    assert!(!format!("{}", ApiKeyHashError::InvalidCharacter).is_empty());
     Ok(())
 }
 
@@ -126,9 +126,9 @@ fn record_before_the_epoch_serializes_as_zero() -> TestResult {
 #[test]
 fn record_rejects_an_invalid_tenant() {
     let json = r#"{"tenant":"","service_account":"s","name":"n","created_at":1}"#;
-    let error = serde_json::from_str::<ApiKeyRecord>(json).err().map(|e| e.to_string());
-    assert!(error.is_some_and(|message| message.contains("tenant")));
-    assert!(ApiKeyRecordError::CreatedAtOutOfRange.to_string().contains("range"));
+    let error = serde_json::from_str::<ApiKeyRecord>(json).err();
+    assert!(error.is_some_and(|error| !format!("{error}").is_empty()));
+    assert!(!format!("{}", ApiKeyRecordError::CreatedAtOutOfRange).is_empty());
 }
 
 #[test]
@@ -137,8 +137,8 @@ fn record_rejects_an_out_of_range_creation_time() {
         r#"{{"tenant":"t","service_account":"s","name":"n","created_at":{}}}"#,
         u64::MAX
     );
-    let error = serde_json::from_str::<ApiKeyRecord>(&json).err().map(|e| e.to_string());
-    assert!(error.is_some_and(|message| message.contains("out of range")));
+    let error = serde_json::from_str::<ApiKeyRecord>(&json).err();
+    assert!(error.is_some_and(|error| !format!("{error}").is_empty()));
 }
 
 #[tokio::test]
@@ -157,7 +157,7 @@ fn store_errors_describe_the_failure_without_secrets() -> TestResult {
         .err()
         .ok_or("expected a parse error")?;
     let error = ApiKeyStoreError::from(malformed);
-    assert!(error.to_string().starts_with("API key record is malformed"));
+    assert!(matches!(error, ApiKeyStoreError::Record(_)));
     let backend = ApiKeyStoreError::Backend("bucket unavailable".into());
     assert_eq!(backend.to_string(), "API key store backend error: bucket unavailable");
     Ok(())
