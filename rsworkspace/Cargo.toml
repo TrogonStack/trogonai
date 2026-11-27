@@ -61,11 +61,23 @@ trogon-identity-types = { path = "crates/platform/trogon-identity-types" }
 trogon-jwks-publisher = { path = "crates/platform/trogon-jwks-publisher" }
 trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
+trogon-sandbox-actor-agent = { path = "crates/sandbox/trogon-sandbox-actor-agent" }
 trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
+trogon-sandbox-client = { path = "crates/sandbox/trogon-sandbox-client" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
+trogon-sandbox-cosign = { path = "crates/sandbox/trogon-sandbox-cosign" }
+trogon-sandbox-credential-broker = { path = "crates/sandbox/trogon-sandbox-credential-broker" }
+trogon-sandbox-credential-client = { path = "crates/sandbox/trogon-sandbox-credential-client" }
+trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
+trogon-sandbox-dev = { path = "crates/sandbox/trogon-sandbox-dev" }
+trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-helper" }
+trogon-sandbox-file-ops = { path = "crates/sandbox/trogon-sandbox-file-ops" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
+trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
+trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
+trogon-sandbox-volumes = { path = "crates/sandbox/trogon-sandbox-volumes" }
 trogon-sandbox-windows-fence = { path = "crates/sandbox/trogon-sandbox-windows-fence" }
 trogon-std = { path = "crates/platform/trogon-std" }
 trogonai-proto = { path = "crates/platform/trogonai-proto" }
@@ -128,9 +140,12 @@ buffa-types = { version = "=0.9.2", features = ["json"] }
 buffa-descriptor = { version = "=0.9.2" }
 futures = "=0.3.34"
 futures-util = "=0.3.34"
+hyper-util = { version = "=0.1.20", default-features = false, features = ["client", "client-legacy", "http1", "tokio"] }
 tokio = "=1.54.1"
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["aws_lc_rs"] }
+tokio-stream = "=0.1.18"
 tokio-util = "=0.7.20"
+tokio-vsock = { version = "=0.7.3", default-features = false, features = ["axum08"] }
 tokio-tungstenite = "=0.29.0"
 tower = "=0.5.3"
 tower-http = { version = "=0.7.1", features = ["trace"] }
@@ -150,7 +165,7 @@ serde_json = "=1.0.154"
 jsonschema = { version = "=0.49.4", default-features = false }
 
 # CLI
-clap = { version = "=4.6.7", features = ["derive"] }
+clap = { version = "=4.6.7", features = ["derive", "env"] }
 
 # Observability
 opentelemetry = "=0.33.1"
@@ -180,25 +195,67 @@ authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
 tonic = { version = "=0.14.9", default-features = false, features = ["transport", "codegen", "router"] }
 moka = { version = "=0.12.16", features = ["future"] }
 
+# Object storage
+object_store = { version = "=0.14.2", default-features = false, features = ["aws", "azure", "fs", "gcp"] }
+
 # Misc
+aes-gcm = "=0.11.0"
 libc = "=0.2.186"
+nix = { version = "=0.31.2", default-features = false, features = ["fs", "signal", "term", "user"] }
 chrono = "=0.4.45"
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
 toml = "=1.1.8"
 wasmtime = "=47.0.3"
 http = "=1.5.0"
+regex = "=1.12.3"
+http-auth = { version = "=0.1.10", default-features = false }
+oci-client = { version = "=0.17.0", default-features = false, features = ["rustls-tls"] }
+olpc-cjson = "=0.1.4"
 regress = { version = "=0.12.0", features = ["utf16"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rrule = "=0.14.0"
+rustix = { version = "=1.1.4", default-features = false, features = ["fs", "std"] }
 sha2 = "=0.11.1"
 wiremock = "=0.6.5"
+windows = { version = "=0.62.2", features = [
+  "Wdk_Foundation",
+  "Wdk_Storage_FileSystem",
+  "Win32_Foundation",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_Threading",
+  "Win32_System_Memory",
+  "Win32_System_Rpc",
+  "Win32_System_Services",
+  "Win32_System_SystemServices",
+  "Win32_System_JobObjects",
+  "Win32_System_StationsAndDesktops",
+  "Win32_System_Com",
+  "Win32_System_Console",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Authentication_Identity",
+  "Win32_Security_Cryptography",
+  "Win32_Storage_FileSystem",
+  "Win32_NetworkManagement_WindowsFilteringPlatform",
+  "Win32_NetworkManagement_NetManagement",
+  "Win32_Networking_WinSock",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Registry",
+] }
 testcontainers-modules = { version = "=0.15.0", features = ["nats"] }
+tar = { version = "=0.4.46", default-features = false }
 tempfile = "=3.27.0"
 filetime = "=0.2.29"
 time = "=0.3.55"
 unicode-ident = "=1.0.24"
 url = "=2.5.8"
+walkdir = "=2.5.0"
 uuid = { version = "=1.24.0", features = ["v4", "v7"] }
 prost-reflect = "=0.14.7"
 serde_yaml = "=0.9.34"
@@ -209,6 +266,8 @@ wit-bindgen = "=0.63.0"
 hex = "=0.4.3"
 rand_core = { version = "=0.6.4", features = ["getrandom", "std"] }
 secrecy = "=0.10.3"
+sigstore = { version = "=0.14.0", default-features = false, features = ["cosign", "registry", "rustls-tls", "verify"] }
+zeroize = "=1.8.2"
 hmac = "=0.13.0"
 jsonwebtoken = { version = "=11.1.0", features = ["rust_crypto"] }
 nats-jwt-rs = "=0.1.1"
