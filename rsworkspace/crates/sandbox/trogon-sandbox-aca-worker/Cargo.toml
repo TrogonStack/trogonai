@@ -1,0 +1,48 @@
+[package]
+name = "trogon-sandbox-aca-worker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "NATS-subscribed worker that fulfills sandbox lease requests through Azure Container Apps Dynamic Sessions"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_aca_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-aca-worker"
+path = "src/main.rs"
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream"] }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "fs", "process"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-credential-client = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-sandbox-volumes = { workspace = true }
+trogon-std = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+wiremock = { workspace = true }
