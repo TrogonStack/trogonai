@@ -113,7 +113,7 @@ impl AgentHandler for ConnectionAgent {
     }
 
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
-        let wire_method = format!("_{}", args.method);
+        let wire_method = ext_wire_method(&args.method);
         let value = self
             .cx
             .send_request(UntypedMessage::new(&wire_method, args.params)?)
@@ -124,7 +124,7 @@ impl AgentHandler for ConnectionAgent {
     }
 
     async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
-        let wire_method = format!("_{}", args.method);
+        let wire_method = ext_wire_method(&args.method);
         self.cx
             .send_notification(UntypedMessage::new(&wire_method, args.params)?)
     }
@@ -139,6 +139,19 @@ impl AgentHandler for ConnectionAgent {
 
     async fn disable_provider(&self, args: DisableProviderRequest) -> Result<DisableProviderResponse> {
         self.cx.send_request(args).block_task().await
+    }
+}
+
+/// The JSON-RPC method for an extension call: ACP extension methods start with
+/// `_`. The SDK hands a handler the name with its `_` already on, so a call
+/// relayed from one peer to another must not add a second one.
+// TODO(#1376): switch to `crate::ext_protocol_method` once
+// https://github.com/TrogonStack/trogonai/pull/1376 lands.
+fn ext_wire_method(method: &str) -> std::borrow::Cow<'_, str> {
+    if method.starts_with('_') {
+        std::borrow::Cow::Borrowed(method)
+    } else {
+        std::borrow::Cow::Owned(format!("_{method}"))
     }
 }
 
