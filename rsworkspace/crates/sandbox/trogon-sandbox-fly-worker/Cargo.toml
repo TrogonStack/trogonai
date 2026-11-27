@@ -1,0 +1,47 @@
+[package]
+name = "trogon-sandbox-fly-worker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Sandbox worker that leases Fly.io Machines over NATS"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_fly_worker"
+
+[[bin]]
+name = "trogon-sandbox-fly-worker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "macros", "sync", "signal"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+trogon-nats = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "macros", "sync", "signal", "test-util", "process"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+wiremock = { workspace = true }

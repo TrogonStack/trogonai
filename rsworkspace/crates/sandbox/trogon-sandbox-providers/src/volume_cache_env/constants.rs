@@ -1,0 +1,5 @@
+pub const BUCKET_ENV: &str = "SANDBOX_VOLUME_CACHE_BUCKET";
+pub const REGION_ENV: &str = "SANDBOX_VOLUME_CACHE_REGION";
+pub const ENDPOINT_ENV: &str = "SANDBOX_VOLUME_CACHE_ENDPOINT";
+pub const KMS_KEY_ID_ENV: &str = "SANDBOX_VOLUME_CACHE_KMS_KEY_ID";
+pub const DEFAULT_REGION: &str = "us-east-1";

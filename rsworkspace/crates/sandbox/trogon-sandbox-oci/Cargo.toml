@@ -1,0 +1,38 @@
+[package]
+name = "trogon-sandbox-oci"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Typed digest-verifying OCI registry client for sandbox snapshot artifacts"
+
+[lints]
+workspace = true
+
+[dependencies]
+base64 = { workspace = true }
+bytes = { workspace = true }
+hex = { workspace = true }
+http-auth = { workspace = true }
+oci-client = { workspace = true }
+olpc-cjson = { workspace = true }
+prometheus = { workspace = true }
+reqwest = { workspace = true }
+secrecy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "time"] }
+tracing = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-std = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+trogon-std = { workspace = true, features = ["test-support"] }
+axum = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "time"] }
+wiremock = { workspace = true }
