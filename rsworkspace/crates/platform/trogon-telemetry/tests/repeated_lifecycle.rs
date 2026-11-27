@@ -6,6 +6,10 @@
 
 mod common;
 
+use opentelemetry_otlp::{
+    OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+};
 use trogon_std::fs::MemFs;
 use trogon_telemetry::TelemetryProviderShutdownError::{Logger, Meter, Tracer};
 
@@ -13,7 +17,15 @@ const CHILD_MARKER: &str = "TROGON_TELEMETRY_REPEATED_LIFECYCLE_CHILD";
 
 #[test]
 fn a_repeated_init_is_a_no_op_and_a_second_shutdown_reports_every_provider() {
-    let Some(output) = common::rerun_as_child(CHILD_MARKER, |command| command) else {
+    let Some(output) = common::rerun_as_child(CHILD_MARKER, |command| {
+        // The lifecycle checks need OpenTelemetry setup to succeed, so the exporters get a
+        // valid endpoint and no signal-specific override may leak in from the caller.
+        command
+            .env(OTEL_EXPORTER_OTLP_ENDPOINT, "http://127.0.0.1:4318")
+            .env_remove(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+            .env_remove(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT)
+            .env_remove(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
+    }) else {
         let fs = MemFs::new();
         for _ in 0..2 {
             common::init_test_logger("/tmp/test-repeated-lifecycle", &fs);
