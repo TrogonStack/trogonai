@@ -1,0 +1,58 @@
+{
+  "name": "@trogonai/sandbox-agent-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Framework-neutral, LLM-friendly tool bundle over one Sandbox from @trogonai/sandbox-ws-client, with thin structural adapters for agent frameworks.",
+  "license": "Apache-2.0",
+  "author": "TrogonAI",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./ai-sdk": {
+      "types": "./dist/adapters/ai-sdk.d.ts",
+      "import": "./dist/adapters/ai-sdk.js",
+      "default": "./dist/adapters/ai-sdk.js"
+    },
+    "./mastra": {
+      "types": "./dist/adapters/mastra.d.ts",
+      "import": "./dist/adapters/mastra.js",
+      "default": "./dist/adapters/mastra.js"
+    },
+    "./openai-agents": {
+      "types": "./dist/adapters/openai-agents.d.ts",
+      "import": "./dist/adapters/openai-agents.js",
+      "default": "./dist/adapters/openai-agents.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "test": "vitest run",
+    "dev": "tsc --watch",
+    "lint": "oxlint --deny-warnings ."
+  },
+  "dependencies": {
+    "@trogonai/sandbox-ws-client": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.0",
+    "@vitest/coverage-v8": "5.0.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.0"
+  },
+  "engines": {
+    "node": ">=22.7"
+  }
+}
