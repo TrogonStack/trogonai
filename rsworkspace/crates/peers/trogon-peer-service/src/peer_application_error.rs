@@ -5,8 +5,6 @@ use trogon_peer::{DetachError, HeartbeatError, MessageError, PeerObservationErro
 pub enum PeerApplicationError<ReadError, AppendError> {
     #[error("peer context rendering failed: {0}")]
     Context(#[from] trogon_peer_context::PeerContextError),
-    #[error("peer application operation is not implemented")]
-    NotImplemented,
     #[error("invalid or missing peer request field")]
     Input,
     #[error("peer request value is invalid: {0}")]
