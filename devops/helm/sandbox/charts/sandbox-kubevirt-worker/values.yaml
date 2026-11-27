@@ -1,0 +1,35 @@
+replicaCount: 1
+# Prometheus scrape port; the worker listens on it for the whole pod network.
+metricsPort: 9104
+# Identity of this worker. Empty uses the release-scoped worker name.
+workerId: ""
+# Disk image a lease boots when it names none. The worker refuses to start without one
+# (SANDBOX_KUBEVIRT_IMAGE).
+image: ""
+stateDir: /var/lib/sandbox-kubevirt/state
+persistence:
+  existingClaim: ""
+  mountPath: /var/lib/sandbox-kubevirt
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+egressEnforcement: none
+# Namespace the worker creates guest VMs in; the stack guest NetworkPolicy lives here.
+k8sNamespace: sandbox-vms
+# Restrict guest VMs to DNS and NATS with the stack NetworkPolicy. Off by default:
+# the worker advertises no egress enforcement, so its leases expect open egress.
+guestEgressBackstop: false

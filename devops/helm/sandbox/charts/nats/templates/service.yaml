@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nats.fullname" . }}
+  labels:
+    {{- include "nats.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: client
+      port: {{ .Values.service.clientPort }}
+      targetPort: client
+    - name: monitor
+      port: {{ .Values.service.monitorPort }}
+      targetPort: monitor

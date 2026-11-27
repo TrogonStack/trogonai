@@ -1,0 +1,272 @@
+# Default values for sandbox-stack.
+# Release name `sandbox` yields services like sandbox-nats and sandbox-zot.
+# Service images are named after the binary they run, for example
+# <imageRegistry>/trogon-sandbox-broker. They are not published yet: build them
+# and push them to the registry imageRegistry points at.
+
+global:
+  imageRegistry: ghcr.io/trogonstack/images/trogonai
+  imagePullPolicy: IfNotPresent
+  imageTag: latest
+  stackLabel: sandbox.trogonai.io/stack
+  stackLabelValue: "true"
+  componentLabel: sandbox.trogonai.io/component
+  # Override when release name is not `sandbox`.
+  natsUrl: ""
+  registryUrl: ""
+  apiKeyBucket: sandbox-api-keys
+  # The broker signs lease dispatches, per-lease requests and cleanup; every
+  # worker refuses anything unsigned. Create the Secret before installing; the
+  # pods do not start without it. signingKeyKey holds the broker's base64
+  # Ed25519 seed and publicKeysKey the matching "k1:<base64 public key>" entry
+  # (k1 is the broker's default key id). For a staged rollout set verify to
+  # warn first, then back to require. Remove the whole block to leave signing
+  # unconfigured.
+  dispatchAuth:
+    verify: require
+    secretName: sandbox-dispatch-auth
+    # Secret key holding the broker's base64 Ed25519 seed.
+    signingKeyKey: signing-key
+    # Secret key holding the workers' "key_id:base64-public-key" entries.
+    publicKeysKey: public-keys
+  networkPolicy:
+    enabled: true
+  serviceAccount:
+    create: true
+    annotations: {}
+  # Authorization for the broker. The preshared key is read from a Secret you create beforehand
+  # (`kubectl create secret generic sandbox-spicedb --from-literal=preshared-key=...`); the
+  # chart never holds the key. Leave endpoint empty to use the SpiceDB this chart deploys, or
+  # set it (and spicedb.enabled=false) to use an external one.
+  spicedb:
+    endpoint: ""
+    tenantResourceType: sandbox_tenant
+    presharedKeySecret:
+      name: sandbox-spicedb
+      key: preshared-key
+
+# SpiceDB for the broker's authorization checks, with the schema written at startup. The
+# default datastore is in-memory, which loses relationships on restart; see charts/spicedb.
+spicedb:
+  enabled: true
+
+zot:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/project-zot/zot
+    tag: v2.1.2
+  service:
+    port: 5000
+  persistence:
+    enabled: false
+    size: 10Gi
+
+nats:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: nats
+    tag: 2.14.2-alpine
+  jetstream:
+    enabled: true
+    storageSize: 5Gi
+  service:
+    clientPort: 4222
+    monitorPort: 8222
+
+sandbox-broker:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  quotaBackend: nats-kv
+  idempotencyBackend: nats-kv
+
+sandbox-snapshot-builder:
+  enabled: true
+  replicaCount: 1
+  metricsPort: 9095
+  maxConcurrent: 4
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+sandbox-credential-broker:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+sandbox-ws-gateway:
+  enabled: true
+  replicaCount: 1
+  service:
+    port: 8443
+  # Origins the gateway accepts, matched exactly; empty accepts none.
+  corsOrigins: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+sandbox-ssh-gateway:
+  enabled: true
+  replicaCount: 1
+  service:
+    port: 2222
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+sandbox-dashboard:
+  enabled: true
+  replicaCount: 1
+  service:
+    port: 8080
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+sandbox-hyperlight-worker:
+  enabled: true
+  replicaCount: 1
+  metricsPort: 9100
+  privileged: true
+  resources:
+    requests:
+      cpu: 500m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+sandbox-docker-worker:
+  enabled: false
+  replicaCount: 1
+  privileged: true
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+sandbox-k8s-worker:
+  enabled: true
+  replicaCount: 1
+  # StatefulSet to run more than one replica; see charts/sandbox-k8s-worker/values.yaml.
+  workloadKind: Deployment
+  recoverUnlabeledLeases: true
+  # Unset uses the worker default (3600 seconds); 0 turns the reclaim off.
+  # orphanReclaimGraceSecs: 7200
+  k8sNamespace: sandbox-leases
+  runtimeClass: kata-fc
+  serviceAccountName: sandbox-k8s-worker
+  image: busybox:latest
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  rbac:
+    create: true
+
+sandbox-kubevirt-worker:
+  enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+sandbox-daytona-worker:
+  enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+sandbox-aca-worker:
+  enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+sandbox-modal-worker:
+  enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+sandbox-subprocess-worker:
+  enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+backup:
+  enabled: true
+  schedule: "0 3 * * *"
+  image:
+    repository: ghcr.io/oras-project/oras
+    tag: v1.3.0
+  # The bundled Zot serves plain HTTP; set false for a registry behind TLS.
+  plainHttp: true
+  # Snapshot repositories to back up, one per tenant: snapshots/<tenant id>, or
+  # snapshots/tenant-hex/<hex> for an id with ':' or '/'. The CronJob and its
+  # PVC render only when the list is not empty.
+  repositories: []
+  storage:
+    pvcName: sandbox-backup
+    size: 20Gi

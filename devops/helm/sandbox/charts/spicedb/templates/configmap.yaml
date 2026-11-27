@@ -1,0 +1,20 @@
+# Read by SpiceDB at startup (--datastore-bootstrap-files), so the schema is present after every
+# restart without a separate job.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "spicedb.fullname" . }}-bootstrap
+  labels:
+    {{- include "spicedb.labels" . | nindent 4 }}
+data:
+  bootstrap.yaml: |
+    schema: |-
+      {{- $resourceType := .Values.global.spicedb.tenantResourceType | default "sandbox_tenant" }}
+      {{- if ne $resourceType "sandbox_tenant" }}
+      {{- fail "the bundled SpiceDB schema defines only sandbox_tenant: set global.spicedb.tenantResourceType to sandbox_tenant, or set spicedb.enabled=false and point global.spicedb.endpoint at a SpiceDB that holds your schema" }}
+      {{- end }}
+      {{- .Files.Get "schema.zed" | nindent 6 }}
+    relationships: |-
+      {{- range .Values.bootstrapRelationships }}
+      {{ . }}
+      {{- end }}

@@ -1,0 +1,15 @@
+replicaCount: 1
+# Prometheus scrape port; the worker listens on it for the whole pod network.
+metricsPort: 9100
+privileged: true
+# Image of the per-lease egress proxy the worker starts next to each sandbox container. The worker
+# refuses to start without one (SANDBOX_EGRESS_PROXY_IMAGE).
+egressProxyImage: ""
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+egressEnforcement: best-effort

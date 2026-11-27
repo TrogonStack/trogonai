@@ -1,0 +1,18 @@
+replicaCount: 1
+# Prometheus scrape port; the worker listens on it for the whole pod network.
+metricsPort: 9103
+# Secret holding the Daytona API key. Create it before installing; the worker refuses to start
+# without DAYTONA_API_KEY and the chart never holds the key.
+# Snapshot a sandbox starts from when a lease names no image. Empty uses the worker default.
+snapshot: ""
+apiKeySecret:
+  name: sandbox-daytona
+  key: api-key
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+egressEnforcement: none

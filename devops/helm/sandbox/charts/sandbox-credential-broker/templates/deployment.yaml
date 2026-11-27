@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sandbox-credential-broker.fullname" . }}
+  labels:
+    {{- include "sandbox-credential-broker.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-credential-broker
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "sandbox-credential-broker.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "sandbox-credential-broker.fullname" . }}
+      containers:
+        - name: sandbox-credential-broker
+          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-credential-broker:{{ .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "sandbox-credential-broker.fullname" . }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            # The root key is read from a Secret the operator creates; it is never a value.
+            - name: SANDBOX_KMS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rootKeySecret.name }}
+                  key: {{ .Values.rootKeySecret.key }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 15
