@@ -1,6 +1,25 @@
-//! Documented default service ports for sandbox binaries.
-//!
-//! Prometheus scrape targets listen on `service_port + 1000` (see [`crate::metrics_addr`]).
+//! Constants shared across the observability helpers.
+
+use std::time::Duration;
+
+/// Upper bound on flushing spans when the guard is dropped.
+pub(crate) const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Offset between a service port and its Prometheus scrape port.
+pub(crate) const METRICS_PORT_OFFSET: u16 = 1000;
+
+/// Resource attribute carrying the crate version.
+pub(crate) const SERVICE_VERSION_KEY: &str = "service.version";
+
+/// Environment variable consulted when no endpoint is passed explicitly.
+pub const OTLP_ENDPOINT_ENV: &str = "SANDBOX_OTLP_ENDPOINT";
+
+/// Content type of the Prometheus scrape response.
+pub(crate) const METRICS_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
+
+// Documented default service ports for sandbox binaries.
+//
+// Prometheus scrape targets listen on `service_port + 1000` (see [`crate::metrics_addr`]).
 
 /// NATS lease broker (control plane only; port is logical for metrics docs).
 pub const BROKER: u16 = 8090;

@@ -25,17 +25,10 @@ fn blank_endpoint_means_no_export() -> TestResult {
 }
 
 #[test]
-fn explicit_endpoint_enables_export() -> TestResult {
-    let guard = init_tracing_with_env("worker", Some(UNREACHABLE), &InMemoryEnv::new())?;
-    assert!(guard.exports_spans());
-    Ok(())
-}
-
-#[test]
-fn environment_endpoint_enables_export() -> TestResult {
-    let env = InMemoryEnv::new();
-    env.set(OTLP_ENDPOINT_ENV, UNREACHABLE);
-    assert!(init_tracing_with_env("worker", None, &env)?.exports_spans());
+fn an_endpoint_exports_nothing_once_a_subscriber_is_installed() -> TestResult {
+    let _first = init_tracing_with_env("worker", None, &InMemoryEnv::new())?;
+    let second = init_tracing_with_env("worker", Some(UNREACHABLE), &InMemoryEnv::new())?;
+    assert!(!second.exports_spans());
     Ok(())
 }
 

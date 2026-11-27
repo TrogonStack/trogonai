@@ -1,9 +1,6 @@
-use std::time::Duration;
-
 use opentelemetry_sdk::trace::SdkTracerProvider;
 
-/// Upper bound on flushing spans when the guard is dropped.
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+use crate::constants::SHUTDOWN_TIMEOUT;
 
 /// Flushes and shuts down the OTLP tracer provider when dropped.
 #[derive(Debug)]

@@ -4,9 +4,8 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use prometheus::Registry;
 
+use crate::constants::METRICS_CONTENT_TYPE;
 use crate::{ObservabilityError, gather_text};
-
-const METRICS_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 
 fn metrics_response(body: Result<String, ObservabilityError>) -> Response {
     match body {
@@ -34,8 +33,22 @@ pub async fn serve_metrics(addr: SocketAddr, registry: Registry) -> Result<(), O
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(listener_error(addr))?;
+    serve_metrics_on(listener, registry, std::future::pending()).await
+}
+
+/// Serve `GET /metrics` on an already bound `listener` until it fails or `shutdown` completes.
+///
+/// Binding first lets a caller hold the port, for example one chosen by the OS, before serving.
+/// Once `shutdown` completes the server stops accepting, drains open requests, and returns `Ok`.
+pub async fn serve_metrics_on(
+    listener: tokio::net::TcpListener,
+    registry: Registry,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), ObservabilityError> {
+    let addr = listener.local_addr().map_err(ObservabilityError::ListenerAddress)?;
     tracing::info!(%addr, "prometheus metrics listening");
-    served(addr, axum::serve(listener, router(registry)).await)
+    let server = axum::serve(listener, router(registry)).with_graceful_shutdown(shutdown);
+    served(addr, server.await)
 }
 
 fn served(addr: SocketAddr, result: std::io::Result<()>) -> Result<(), ObservabilityError> {

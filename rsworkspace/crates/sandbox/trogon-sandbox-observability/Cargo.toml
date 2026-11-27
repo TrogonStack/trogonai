@@ -25,5 +25,5 @@ trogon-std = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 trogon-std = { workspace = true, features = ["test-support"] }

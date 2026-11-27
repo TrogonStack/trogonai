@@ -7,7 +7,7 @@ use crate::metrics_addr;
 /// CLI flags for OTLP export and the Prometheus scrape listener.
 #[derive(Clone, Debug, Parser)]
 pub struct ObservabilityArgs {
-    /// OTLP HTTP endpoint (collector, Tempo, Jaeger OTLP receiver, etc.). No-op when unset.
+    /// Full OTLP/HTTP traces URL, for example `http://collector:4318/v1/traces`. No-op when unset.
     #[arg(long, env = "SANDBOX_OTLP_ENDPOINT")]
     pub otlp_endpoint: Option<String>,
 

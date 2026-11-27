@@ -1,7 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-/// Offset between a service port and its Prometheus scrape port.
-const METRICS_PORT_OFFSET: u16 = 1000;
+use crate::constants::METRICS_PORT_OFFSET;
 
 /// Default Prometheus scrape address: loopback on `service_port + 1000`.
 ///

@@ -6,19 +6,16 @@ use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
 use trogon_std::env::{ReadEnv, SystemEnv};
 
+use crate::constants::{OTLP_ENDPOINT_ENV, SERVICE_VERSION_KEY};
 use crate::{ObservabilityError, TracingGuard};
-
-/// Resource attribute carrying the crate version.
-const SERVICE_VERSION_KEY: &str = "service.version";
-
-/// Environment variable consulted when no endpoint is passed explicitly.
-pub const OTLP_ENDPOINT_ENV: &str = "SANDBOX_OTLP_ENDPOINT";
 
 /// Initialize `tracing` with optional OTLP export.
 ///
-/// The endpoint comes from `otlp_endpoint`, falling back to `SANDBOX_OTLP_ENDPOINT`.
-/// Blank values count as unset. Installing the global subscriber is best effort:
-/// when one already exists it is left in place.
+/// The endpoint comes from `otlp_endpoint`, falling back to `SANDBOX_OTLP_ENDPOINT`,
+/// and is the full OTLP/HTTP traces URL (for example `http://collector:4318/v1/traces`),
+/// used as given. Blank values count as unset. Installing the global subscriber is
+/// best effort: when one already exists it is left in place and the returned guard
+/// exports nothing.
 pub fn init_tracing(service_name: &str, otlp_endpoint: Option<&str>) -> Result<TracingGuard, ObservabilityError> {
     init_tracing_with_env(service_name, otlp_endpoint, &SystemEnv)
 }
@@ -33,11 +30,7 @@ pub fn init_tracing_with_env(
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     let fmt_layer = tracing_subscriber::fmt::layer();
 
-    let endpoint = otlp_endpoint
-        .map(str::to_owned)
-        .or_else(|| env.var(OTLP_ENDPOINT_ENV).ok())
-        .map(|endpoint| endpoint.trim().to_owned())
-        .filter(|endpoint| !endpoint.is_empty());
+    let endpoint = non_blank(otlp_endpoint.map(str::to_owned)).or_else(|| non_blank(env.var(OTLP_ENDPOINT_ENV).ok()));
 
     let Some(endpoint) = endpoint else {
         let _ = tracing_subscriber::registry()
@@ -68,11 +61,18 @@ pub fn init_tracing_with_env(
         .build();
 
     let otel_layer = tracing_opentelemetry::layer().with_tracer(provider.tracer("sandbox"));
-    let _ = tracing_subscriber::registry()
+    let installed = tracing_subscriber::registry()
         .with(env_filter)
         .with(fmt_layer)
         .with(otel_layer)
-        .try_init();
+        .try_init()
+        .is_ok();
 
-    Ok(TracingGuard::new(Some(provider)))
+    Ok(TracingGuard::new(installed.then_some(provider)))
+}
+
+fn non_blank(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }

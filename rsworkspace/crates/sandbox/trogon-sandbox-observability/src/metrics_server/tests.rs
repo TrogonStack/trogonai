@@ -1,6 +1,7 @@
 use axum::http::StatusCode;
 
 use super::*;
+use crate::constants::METRICS_CONTENT_TYPE;
 
 #[test]
 fn encode_failure_maps_to_internal_server_error() {
@@ -37,6 +38,12 @@ fn serve_outcome_maps_io_errors_to_listener_errors() -> Result<(), Box<dyn std::
         Err(ObservabilityError::Listener { addr: failed, .. }) if failed == addr
     ));
     Ok(())
+}
+
+#[test]
+fn a_listener_without_an_address_is_named() {
+    let error = ObservabilityError::ListenerAddress(std::io::Error::other("boom"));
+    assert_eq!(error.to_string(), "metrics listener has no local address");
 }
 
 #[test]

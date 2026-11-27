@@ -13,4 +13,6 @@ pub enum ObservabilityError {
         #[source]
         source: std::io::Error,
     },
+    #[error("metrics listener has no local address")]
+    ListenerAddress(#[source] std::io::Error),
 }

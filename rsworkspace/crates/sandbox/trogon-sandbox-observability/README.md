@@ -5,14 +5,17 @@ binaries: optional OTLP span export and a Prometheus `/metrics` endpoint.
 
 - `ObservabilityArgs` is a `clap` argument group with `--otlp-endpoint`
   (`SANDBOX_OTLP_ENDPOINT`) and `--metrics-addr` (`SANDBOX_METRICS_ADDR`). The
-  metrics address is parsed into a `SocketAddr` when arguments are parsed.
+  endpoint is the full OTLP/HTTP traces URL, for example
+  `http://collector:4318/v1/traces`, not just the collector address. The metrics
+  address is parsed into a `SocketAddr` when arguments are parsed.
 - `init_tracing` installs the `tracing` subscriber with an `EnvFilter` (default
   `info`) and, when an endpoint is configured, exports spans over OTLP HTTP. The
   returned `TracingGuard` flushes the exporter on drop, waiting at most three
   seconds. `init_tracing_with_env` takes an explicit environment source.
 - `default_registry` builds a Prometheus registry containing `sandbox_build_info`;
-  `gather_text` renders it, and `serve_metrics` / `spawn_metrics_server` expose it
-  at `/metrics`.
+  `gather_text` renders it, and `serve_metrics`, `serve_metrics_on` (an already
+  bound listener, with a shutdown future) and `spawn_metrics_server` expose it at
+  `/metrics`.
 - `metrics_addr` derives the default scrape address, loopback on
   `service_port + 1000`. The `BROKER`, `WS_GATEWAY`, `DOCKER_WORKER`, and related
   constants list the documented service ports.

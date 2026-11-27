@@ -4,15 +4,10 @@ use std::time::Duration;
 use clap::Parser;
 use trogon_sandbox_observability::{
     BROKER, ObservabilityArgs, ObservabilityError, default_registry, gather_text, metrics_addr, serve_metrics,
-    spawn_metrics_server,
+    serve_metrics_on, spawn_metrics_server,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
-
-fn free_addr() -> Result<SocketAddr, Box<dyn std::error::Error>> {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-    Ok(listener.local_addr()?)
-}
 
 async fn fetch(addr: SocketAddr) -> Result<reqwest::Response, Box<dyn std::error::Error>> {
     let url = format!("http://{addr}/metrics");
@@ -65,10 +60,12 @@ fn default_registry_exposes_build_info() -> TestResult {
 }
 
 #[tokio::test]
-async fn serve_metrics_returns_registry_text() -> TestResult {
-    let addr = free_addr()?;
-    let registry = default_registry("worker")?;
-    let server = tokio::spawn(serve_metrics(addr, registry));
+async fn serve_metrics_returns_registry_text_until_shut_down() -> TestResult {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let shutdown = async move { drop(stopped.await) };
+    let server = tokio::spawn(serve_metrics_on(listener, default_registry("worker")?, shutdown));
     let response = fetch(addr).await?;
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     assert_eq!(
@@ -76,15 +73,17 @@ async fn serve_metrics_returns_registry_text() -> TestResult {
         Some("text/plain; charset=utf-8".as_bytes())
     );
     assert!(response.text().await?.contains("sandbox_build_info 1"));
-    server.abort();
+    stop.send(()).map_err(|()| "server stopped before shutdown")?;
+    tokio::time::timeout(Duration::from_secs(5), server).await???;
     Ok(())
 }
 
 #[tokio::test]
-async fn spawned_server_serves_metrics() -> TestResult {
-    let addr = free_addr()?;
-    spawn_metrics_server(addr, default_registry("worker")?);
-    assert_eq!(fetch(addr).await?.status(), reqwest::StatusCode::OK);
+async fn serve_metrics_keeps_serving_on_the_address_it_binds() -> TestResult {
+    let server = tokio::spawn(serve_metrics("127.0.0.1:0".parse()?, default_registry("worker")?));
+    tokio::task::yield_now().await;
+    assert!(!server.is_finished());
+    server.abort();
     Ok(())
 }
 
