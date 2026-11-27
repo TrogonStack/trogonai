@@ -90,6 +90,9 @@ pub async fn launch_until<H: Hypervisor>(
     let provider = Arc::new(HyperlightWorkerProvider::new(runtime, args.max_concurrent_leases));
     let worker_id = WorkerId::new(Uuid::new_v4().to_string())?;
     let client = nats_connect::connect(&args.nats_url).await?;
+    let health = args.observability.health();
+    health.started_with_nats(&client);
+    health.shutdown_when(stop.clone().cancelled_owned());
     tracing::info!(
         max_concurrent_leases = args.max_concurrent_leases,
         max_warm_sandboxes = args.max_warm_sandboxes,

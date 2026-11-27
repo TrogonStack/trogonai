@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use trogon_sandbox_observability::{
-    BROKER, ObservabilityArgs, ObservabilityError, default_registry, gather_text, metrics_addr, serve_metrics,
+    BROKER, Health, ObservabilityArgs, ObservabilityError, default_registry, gather_text, metrics_addr, serve_metrics,
     serve_metrics_on, spawn_metrics_server,
 };
 
@@ -65,7 +65,12 @@ async fn serve_metrics_returns_registry_text_until_shut_down() -> TestResult {
     let addr = listener.local_addr()?;
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let shutdown = async move { drop(stopped.await) };
-    let server = tokio::spawn(serve_metrics_on(listener, default_registry("worker")?, shutdown));
+    let server = tokio::spawn(serve_metrics_on(
+        listener,
+        default_registry("worker")?,
+        Health::new(),
+        shutdown,
+    ));
     let response = fetch(addr).await?;
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     assert_eq!(
@@ -80,7 +85,11 @@ async fn serve_metrics_returns_registry_text_until_shut_down() -> TestResult {
 
 #[tokio::test]
 async fn serve_metrics_keeps_serving_on_the_address_it_binds() -> TestResult {
-    let server = tokio::spawn(serve_metrics("127.0.0.1:0".parse()?, default_registry("worker")?));
+    let server = tokio::spawn(serve_metrics(
+        "127.0.0.1:0".parse()?,
+        default_registry("worker")?,
+        Health::new(),
+    ));
     tokio::task::yield_now().await;
     assert!(!server.is_finished());
     server.abort();
@@ -91,7 +100,9 @@ async fn serve_metrics_keeps_serving_on_the_address_it_binds() -> TestResult {
 async fn serve_metrics_reports_bind_failure() -> TestResult {
     let held = std::net::TcpListener::bind("127.0.0.1:0")?;
     let addr = held.local_addr()?;
-    let error = serve_metrics(addr, default_registry("worker")?).await.err();
+    let error = serve_metrics(addr, default_registry("worker")?, Health::new())
+        .await
+        .err();
     assert!(matches!(error, Some(ObservabilityError::Listener { addr: failed, .. }) if failed == addr));
     Ok(())
 }
@@ -99,7 +110,7 @@ async fn serve_metrics_reports_bind_failure() -> TestResult {
 #[tokio::test]
 async fn spawned_server_survives_bind_failure() -> TestResult {
     let held = std::net::TcpListener::bind("127.0.0.1:0")?;
-    spawn_metrics_server(held.local_addr()?, default_registry("worker")?);
+    spawn_metrics_server(held.local_addr()?, default_registry("worker")?, Health::new());
     tokio::task::yield_now().await;
     Ok(())
 }

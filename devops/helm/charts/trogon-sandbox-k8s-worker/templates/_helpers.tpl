@@ -60,8 +60,9 @@ spec:
       envFrom:
         - configMapRef:
             name: {{ include "trogon-sandbox-k8s-worker.fullname" . }}
+      # Audience: private only: this service has no client listener; the port serves /-/liveness, /-/readiness and /metrics to the cluster only.
       ports:
-        - name: metrics
+        - name: private
           containerPort: {{ .Values.metricsPort }}
       {{- if or (eq .Values.workloadKind "StatefulSet") .Values.global.dispatchAuth }}
       env:
@@ -85,14 +86,21 @@ spec:
       {{- end }}
       resources:
         {{- toYaml .Values.resources | nindent 8 }}
+      startupProbe:
+        httpGet:
+          path: /-/liveness
+          port: private
+        periodSeconds: 5
+        failureThreshold: 30
       livenessProbe:
-        exec:
-          command: ["/usr/local/bin/trogon-sandbox-k8s-worker", "--help"]
-        initialDelaySeconds: 20
+        httpGet:
+          path: /-/liveness
+          port: private
         periodSeconds: 30
+        failureThreshold: 6
       readinessProbe:
-        exec:
-          command: ["/usr/local/bin/trogon-sandbox-k8s-worker", "--help"]
-        initialDelaySeconds: 10
-        periodSeconds: 15
+        httpGet:
+          path: /-/readiness
+          port: private
+        periodSeconds: 10
 {{- end }}

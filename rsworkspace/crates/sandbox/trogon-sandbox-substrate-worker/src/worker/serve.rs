@@ -53,6 +53,9 @@ pub async fn serve(args: &WorkerArgs, env: &impl ReadEnv, cancel: CancellationTo
     tokio::spawn(recovery::reap_loop(Arc::clone(&provider), recovery::REAP_INTERVAL));
     spawn_heartbeat_task(nats.clone(), Arc::clone(&provider), cancel.clone());
 
+    let health = args.observability.health();
+    health.started_with_nats(&nats);
+    health.shutdown_when(cancel.clone().cancelled_owned());
     info!(%worker_id, "sandbox-substrate-worker starting");
     Ok(run(nats, js, provider, worker_id, cancel, env).await?)
 }

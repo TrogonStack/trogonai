@@ -32,18 +32,24 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.rootKeySecret.name }}
                   key: {{ .Values.rootKeySecret.key }}
+          # Audience: private only: this service has no client listener; the port serves /-/liveness, /-/readiness and /metrics to the cluster only.
           ports:
-            - name: metrics
+            - name: private
               containerPort: {{ .Values.metricsPort }}
+          startupProbe:
+            httpGet:
+              path: /-/liveness
+              port: private
+            periodSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
-              path: /metrics
-              port: metrics
-            initialDelaySeconds: 15
+              path: /-/liveness
+              port: private
             periodSeconds: 30
+            failureThreshold: 6
           readinessProbe:
             httpGet:
-              path: /metrics
-              port: metrics
-            initialDelaySeconds: 5
-            periodSeconds: 15
+              path: /-/readiness
+              port: private
+            periodSeconds: 10

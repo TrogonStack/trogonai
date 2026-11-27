@@ -347,6 +347,9 @@ async fn main() -> anyhow::Result<()> {
             cancel_clone.cancel();
         }
     });
+    let health = args.observability.health();
+    health.started_with_nats(&nats);
+    health.shutdown_when(cancel.clone().cancelled_owned());
 
     let machine_resources = resources(
         args.max_vcpus

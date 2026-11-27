@@ -45,6 +45,9 @@ pub async fn launch(
         shutdown.await;
         stop.cancel();
     });
+    let health = args.observability.health();
+    health.started_with_nats(&nats);
+    health.shutdown_when(cancel.clone().cancelled_owned());
     let (regions, plan, heartbeat_provider, heartbeat_id) =
         (args.regions.clone(), args.plan, Arc::clone(&vercel), worker_id.clone());
     let max_concurrent_leases = args.max_concurrent_leases;

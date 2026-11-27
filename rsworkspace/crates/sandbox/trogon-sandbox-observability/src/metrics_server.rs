@@ -5,7 +5,7 @@ use axum::response::{IntoResponse, Response};
 use prometheus::Registry;
 
 use crate::constants::METRICS_CONTENT_TYPE;
-use crate::{ObservabilityError, gather_text};
+use crate::{Health, ObservabilityError, gather_text};
 
 fn metrics_response(body: Result<String, ObservabilityError>) -> Response {
     match body {
@@ -14,40 +14,44 @@ fn metrics_response(body: Result<String, ObservabilityError>) -> Response {
     }
 }
 
-fn router(registry: Registry) -> axum::Router {
-    axum::Router::new().route(
-        "/metrics",
-        axum::routing::get(move || {
-            let registry = registry.clone();
-            async move { metrics_response(gather_text(&registry)) }
-        }),
-    )
+fn router(registry: Registry, health: &Health) -> axum::Router {
+    axum::Router::new()
+        .route(
+            "/metrics",
+            axum::routing::get(move || {
+                let registry = registry.clone();
+                async move { metrics_response(gather_text(&registry)) }
+            }),
+        )
+        .merge(health.router())
 }
 
 fn listener_error(addr: SocketAddr) -> impl FnOnce(std::io::Error) -> ObservabilityError {
     move |source| ObservabilityError::Listener { addr, source }
 }
 
-/// Serve `GET /metrics` on `addr` until the listener fails.
-pub async fn serve_metrics(addr: SocketAddr, registry: Registry) -> Result<(), ObservabilityError> {
+/// Serve the `private` listener on `addr` until it fails: `GET /metrics` plus the operational
+/// paths `/-/liveness` and `/-/readiness` answered from `health`.
+pub async fn serve_metrics(addr: SocketAddr, registry: Registry, health: Health) -> Result<(), ObservabilityError> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(listener_error(addr))?;
-    serve_metrics_on(listener, registry, std::future::pending()).await
+    serve_metrics_on(listener, registry, health, std::future::pending()).await
 }
 
-/// Serve `GET /metrics` on an already bound `listener` until it fails or `shutdown` completes.
+/// Serve the `private` listener, see [`serve_metrics`], on an already bound `listener` until it fails or `shutdown` completes.
 ///
 /// Binding first lets a caller hold the port, for example one chosen by the OS, before serving.
 /// Once `shutdown` completes the server stops accepting, drains open requests, and returns `Ok`.
 pub async fn serve_metrics_on(
     listener: tokio::net::TcpListener,
     registry: Registry,
+    health: Health,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ObservabilityError> {
     let addr = listener.local_addr().map_err(ObservabilityError::ListenerAddress)?;
-    tracing::info!(%addr, "prometheus metrics listening");
-    let server = axum::serve(listener, router(registry)).with_graceful_shutdown(shutdown);
+    tracing::info!(%addr, "private listener serving health paths and metrics");
+    let server = axum::serve(listener, router(registry, &health)).with_graceful_shutdown(shutdown);
     served(addr, server.await)
 }
 
@@ -61,12 +65,12 @@ fn log_exit(addr: SocketAddr, result: Result<(), ObservabilityError>) {
     }
 }
 
-/// Start the `/metrics` HTTP server in the background.
+/// Start the private HTTP listener, see [`serve_metrics`], in the background.
 ///
 /// Must be called from within a Tokio runtime.
-pub fn spawn_metrics_server(addr: SocketAddr, registry: Registry) {
+pub fn spawn_metrics_server(addr: SocketAddr, registry: Registry, health: Health) {
     tokio::spawn(async move {
-        log_exit(addr, serve_metrics(addr, registry).await);
+        log_exit(addr, serve_metrics(addr, registry, health).await);
     });
 }
 

@@ -38,5 +38,8 @@ pub async fn serve(args: &WorkerArgs, cancel: CancellationToken) -> Result<(), S
         },
     );
     info!(max_concurrent_leases, "worker starting");
+    let health = args.observability.health();
+    health.started_with_nats(&nats);
+    health.shutdown_when(cancel.clone().cancelled_owned());
     Ok(run_worker(nats, provider, v8, worker, cancel).await?)
 }

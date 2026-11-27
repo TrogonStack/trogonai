@@ -85,6 +85,8 @@ async fn main() -> anyhow::Result<()> {
     let stores = Arc::new(BrokeredVolumeStores::new(client.clone(), config.volume.clone()));
     let provider = Arc::new(ModalProvider::new(api, stores, config));
     let worker_id = WorkerId::new(uuid::Uuid::new_v4().to_string())?;
+    let health = args.observability.health().clone();
+    health.started_with_nats(&client);
     ModalWorker::new(
         client,
         provider,
@@ -93,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .run(async {
         let _ = tokio::signal::ctrl_c().await;
+        health.begin_shutdown();
     })
     .await?;
     Ok(())

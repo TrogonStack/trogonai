@@ -25,6 +25,8 @@ where
 
     let nats = connect(&args.nats_url).await?;
     tracing::info!(url = %args.nats_url, "connected to NATS");
+    let health = args.observability.health().clone();
+    health.require_nats(&nats);
 
     let api_key_nats = match args.api_key_store_url.as_deref() {
         Some(url) if url != args.nats_url => connect(url).await?,
@@ -58,7 +60,15 @@ where
 
     let listener = TcpListener::bind(args.listen).await.map_err(GatewayError::Bind)?;
     tracing::info!(listen = %args.listen, "sandbox ws gateway listening");
-    let served = serve_with_shutdown(listener, router(state, args.cors_origin), shutdown).await;
+    let app = router(state, args.cors_origin).merge(health.router());
+    health.mark_started();
+    let stopping = health.clone();
+    let shutdown = async move {
+        let outcome = shutdown.await;
+        stopping.begin_shutdown();
+        outcome
+    };
+    let served = serve_with_shutdown(listener, app, shutdown).await;
     cancel.cancel();
     served
 }

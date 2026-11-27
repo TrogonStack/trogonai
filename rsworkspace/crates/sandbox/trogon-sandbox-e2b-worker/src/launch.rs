@@ -52,6 +52,9 @@ pub async fn launch(
         shutdown.await;
         stop.cancel();
     });
+    let health = args.observability.health();
+    health.started_with_nats(&nats);
+    health.shutdown_when(cancel.clone().cancelled_owned());
     spawn_heartbeats(
         nats.clone(),
         &worker_id,
