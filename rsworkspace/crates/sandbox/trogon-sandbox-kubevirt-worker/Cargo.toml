@@ -1,0 +1,56 @@
+[package]
+name = "trogon-sandbox-kubevirt-worker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Sandbox worker that leases KubeVirt virtual machines over NATS"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_kubevirt_worker"
+
+[[bin]]
+name = "trogon-sandbox-kubevirt-worker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+object_store = { workspace = true }
+russh = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "macros", "sync", "signal", "process", "fs", "io-util"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-cosign = { workspace = true }
+trogon-sandbox-oci = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-sandbox-ssh-gateway = { workspace = true }
+trogon-sandbox-volumes = { workspace = true }
+trogon-std = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+base64 = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+libc = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "macros", "sync", "signal", "test-util", "process", "net"] }
+tower = { workspace = true, features = ["util"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
