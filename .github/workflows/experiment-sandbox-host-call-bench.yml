@@ -1,4 +1,5 @@
-# Experiment: runs experiments/sandbox-host-call-bench on a KVM-capable GitHub runner.
+# Experiment: runs experiments/sandbox-host-call-bench (Wasm boundary costs, and hluk's Linux
+# binaries in Hyperlight) on KVM-capable GitHub runners.
 # Triggers only on pushes to its own branch and is not meant to merge, so it calls the
 # experiment's script directly rather than a mise task.
 name: Experiment sandbox host-call bench
@@ -32,3 +33,20 @@ jobs:
         env:
           REQUIRE_HYPERLIGHT: "1"
         run: experiments/sandbox-host-call-bench/run.sh | tee -a "$GITHUB_STEP_SUMMARY"
+
+  hluk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Open /dev/kvm to the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: Python in hluk vs native vs Docker
+        run: |
+          { echo "### Python hello world: hluk vs native vs Docker"; experiments/sandbox-host-call-bench/hluk.sh; } \
+            | tee -a "$GITHUB_STEP_SUMMARY"

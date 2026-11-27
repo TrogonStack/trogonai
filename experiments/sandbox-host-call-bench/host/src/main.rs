@@ -21,6 +21,8 @@ const SPAWN_RUNS: usize = 30;
 const HL_CREATE_RUNS: usize = 30;
 const HL_SNAPSHOT_RUNS: usize = 100;
 const HL_RESTORE_RUNS: usize = 1_000;
+const PAYLOAD_SIZES: [i32; 2] = [1024, 64 * 1024];
+const PAYLOAD_CALLS: usize = 1_000;
 
 const OP_RESULT: u8 = 0;
 const OP_PING: u8 = 1;
@@ -42,6 +44,14 @@ impl<T, E: std::fmt::Debug> Ctx<T> for std::result::Result<T, E> {
 trait Guest {
     fn ping(&mut self, value: i32) -> Result<i32>;
     fn noop_loop(&mut self, count: i32) -> Result<i32>;
+    /// Writes `message` into guest memory and has the guest `consume` it.
+    fn consume(&mut self, _message: Vec<u8>) -> Result<i32> {
+        bail!("this host has no payload path")
+    }
+    /// Has the guest send a `len`-byte buffer to the host `count` times.
+    fn bytes_loop(&mut self, _count: i32, _len: i32) -> Result<i32> {
+        bail!("this host has no payload path")
+    }
 }
 
 fn main() -> Result<()> {
@@ -141,13 +151,69 @@ fn measure_calls(host: &str, guest: &mut impl Guest) -> Result<()> {
     Ok(())
 }
 
+/// Like `measure_calls`, with a payload of each `PAYLOAD_SIZES` size. A size the host refuses
+/// becomes an error row instead of ending the run, since a refused size is itself a result.
+fn measure_payloads(host: &str, guest: &mut impl Guest) -> Result<()> {
+    for len in PAYLOAD_SIZES {
+        let kib = len / 1024;
+        let into = format!("host→guest call with {kib} KiB");
+        let out = format!("guest→host call with {kib} KiB (amortized over {PAYLOAD_CALLS})");
+        // Built before the clock starts: hosts that take the message by value would otherwise
+        // pay for a copy the others do not.
+        let mut messages = vec![vec![7u8; len as usize]; PAYLOAD_CALLS + 1];
+        let result = guest.consume(messages.pop().unwrap_or_default()).and_then(|_| {
+            sample(PAYLOAD_CALLS, |i| match guest.consume(std::mem::take(&mut messages[i as usize]))? {
+                got if got == len => Ok(()),
+                got => bail!("{host}: consume returned {got}"),
+            })
+        });
+        match result {
+            Ok(samples) => row(host, &into, samples),
+            Err(e) => error_row(host, &into, &e),
+        }
+
+        let count = PAYLOAD_CALLS as i32;
+        let result = sample(LOOP_RUNS, |_| match guest.bytes_loop(count, len)? {
+            got if got == count => Ok(()),
+            got => bail!("{host}: bytes_loop delivered {got} of {count}"),
+        });
+        match result {
+            Ok(batches) => row(host, &out, batches.into_iter().map(|t| t / f64::from(count)).collect()),
+            Err(e) => error_row(host, &out, &e),
+        }
+    }
+    Ok(())
+}
+
+fn error_row(host: &str, metric: &str, error: &anyhow::Error) {
+    let error = format!("{error:#}").replace(['|', '\n'], " ");
+    println!("| {host} | {metric} | — | failed: {:.160} | | |", error);
+}
+
+/// Copies `len` bytes at `ptr` out of the caller's memory, as Hyperlight's marshalling does,
+/// and returns how many arrived (-1 when the range is out of bounds).
+fn host_bytes<T>(mut caller: wasmtime::Caller<'_, T>, ptr: i32, len: i32) -> i32 {
+    let Some(memory) = caller.get_export("memory").and_then(wasmtime::Extern::into_memory) else {
+        return -1;
+    };
+    memory
+        .data(&caller)
+        .get(ptr as usize..)
+        .and_then(|data| data.get(..len as usize))
+        .map_or(-1, |bytes| std::hint::black_box(bytes.to_vec()).len() as i32)
+}
+
 // ---------------------------------------------------------------------------------------------
 // wasmtime, in process
 
 struct InProcess {
     store: wasmtime::Store<()>,
+    memory: wasmtime::Memory,
     ping: wasmtime::TypedFunc<i32, i32>,
     noop_loop: wasmtime::TypedFunc<i32, i32>,
+    malloc: wasmtime::TypedFunc<i32, i32>,
+    consume: wasmtime::TypedFunc<(i32, i32), i32>,
+    bytes_loop: wasmtime::TypedFunc<(i32, i32), i32>,
 }
 
 impl InProcess {
@@ -156,7 +222,21 @@ impl InProcess {
         let instance = pre.instantiate(&mut store).ctx()?;
         let ping = instance.get_typed_func(&mut store, "ping").ctx()?;
         let noop_loop = instance.get_typed_func(&mut store, "noop_loop").ctx()?;
-        Ok(Self { store, ping, noop_loop })
+        let malloc = instance.get_typed_func(&mut store, "malloc").ctx()?;
+        let consume = instance.get_typed_func(&mut store, "consume").ctx()?;
+        let bytes_loop = instance.get_typed_func(&mut store, "bytes_loop").ctx()?;
+        let memory = instance
+            .get_memory(&mut store, "memory")
+            .ok_or_else(|| anyhow!("guest exports no memory"))?;
+        Ok(Self {
+            store,
+            memory,
+            ping,
+            noop_loop,
+            malloc,
+            consume,
+            bytes_loop,
+        })
     }
 }
 
@@ -167,6 +247,15 @@ impl Guest for InProcess {
     fn noop_loop(&mut self, count: i32) -> Result<i32> {
         self.noop_loop.call(&mut self.store, count).ctx()
     }
+    fn consume(&mut self, message: Vec<u8>) -> Result<i32> {
+        let len = message.len() as i32;
+        let ptr = self.malloc.call(&mut self.store, len).ctx()?;
+        self.memory.write(&mut self.store, ptr as usize, &message).ctx()?;
+        self.consume.call(&mut self.store, (ptr, len)).ctx()
+    }
+    fn bytes_loop(&mut self, count: i32, len: i32) -> Result<i32> {
+        self.bytes_loop.call(&mut self.store, (count, len)).ctx()
+    }
 }
 
 fn instance_pre(config: &wasmtime::Config, wasm: &Path) -> Result<wasmtime::InstancePre<()>> {
@@ -176,6 +265,7 @@ fn instance_pre(config: &wasmtime::Config, wasm: &Path) -> Result<wasmtime::Inst
     linker
         .func_wrap("env", "HostNoop", |value: i32| value.wrapping_add(1))
         .ctx()?;
+    linker.func_wrap("env", "HostBytes", host_bytes::<()>).ctx()?;
     linker.instantiate_pre(&module).ctx()
 }
 
@@ -200,7 +290,9 @@ fn wasmtime_in_process(wasm: &Path) -> Result<()> {
     config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(pooling));
     measure_instantiate(host, "instantiate + first call (pooling)", &instance_pre(&config, wasm)?)?;
 
-    measure_calls(host, &mut InProcess::new(&pre)?)
+    let mut guest = InProcess::new(&pre)?;
+    measure_calls(host, &mut guest)?;
+    measure_payloads(host, &mut guest)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -308,6 +400,8 @@ fn child(cwasm: &Path) -> Result<()> {
             },
         )
         .ctx()?;
+    // Imported by the guest but only exercised by the payload rows, which this host skips.
+    linker.func_wrap("env", "HostBytes", host_bytes::<ChildIo>).ctx()?;
     let io = ChildIo {
         from_parent: std::io::stdin().lock(),
         to_parent: BufWriter::new(std::io::stdout().lock()),
@@ -353,6 +447,13 @@ fn hyperlight(args: &[String]) -> Result<()> {
         fn noop_loop(&mut self, count: i32) -> Result<i32> {
             self.0.call_guest_function::<i32>("noop_loop", (count,)).ctx()
         }
+        fn consume(&mut self, message: Vec<u8>) -> Result<i32> {
+            let len = message.len() as i32;
+            self.0.call_guest_function::<i32>("consume", (message, len)).ctx()
+        }
+        fn bytes_loop(&mut self, count: i32, len: i32) -> Result<i32> {
+            self.0.call_guest_function::<i32>("bytes_loop", (count, len)).ctx()
+        }
     }
 
     /// The trogon-sandbox-hyperlight-worker defaults: 256 KiB input buffer, 1.25 MiB heap.
@@ -363,6 +464,11 @@ fn hyperlight(args: &[String]) -> Result<()> {
             .build()
             .ctx()?;
         proto.register("HostNoop", |value: i32| value.wrapping_add(1)).ctx()?;
+        proto
+            .register("HostBytes", |data: Vec<u8>, len: i32| {
+                if data.len() == len as usize { len } else { -1 }
+            })
+            .ctx()?;
         proto.load_runtime().ctx()
     }
 
@@ -409,5 +515,6 @@ fn hyperlight(args: &[String]) -> Result<()> {
     row(host, "restore to clean snapshot", restore);
     row(host, "first call after restore", first_call);
 
-    measure_calls(host, &mut guest)
+    measure_calls(host, &mut guest)?;
+    measure_payloads(host, &mut guest)
 }

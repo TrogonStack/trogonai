@@ -16,7 +16,14 @@ boundary, not marshalling. The harness (`host/`) reports p50/p99/mean for:
 - creating a ready guest (instantiate, spawn, or micro-VM build and module load),
 - one host→guest call,
 - one guest→host call, amortized over 10,000 calls in a loop,
+- one host→guest and one guest→host call carrying 1 KiB and 64 KiB (in-process and Hyperlight
+  only), the copy a protocol wrapper pays per message,
 - for Hyperlight, snapshot and restore-to-clean.
+
+`hluk.sh` is a second, separate bench: a Python hello world as a Linux binary in a Hyperlight
+micro-VM through hyperlight-unikraft's `hluk` (first run, then restored from its snapshot), against
+native `python3` and `docker run`. It answers whether stateless Linux tool calls could leave the
+microVM tier.
 
 The Hyperlight sandbox uses the `trogon-sandbox-hyperlight-worker` defaults (256 KiB input buffer,
 1.25 MiB heap) and the same pinned `hyperlight-wasm` revision.
