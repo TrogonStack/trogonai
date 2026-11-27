@@ -117,6 +117,18 @@ fn what_vercel_cannot_express_is_refused() -> TestResult {
         }]);
     })?;
     assert!(is_invalid_policy(&forwarded));
+    let scoped = policy(|wire| wire["allow_ranges"] = json!(["10.0.0.5:8080"]))?;
+    assert!(is_invalid_policy(&scoped));
+    Ok(())
+}
+
+#[test]
+fn a_single_address_allow_range_is_sent_as_a_one_address_subnet() -> TestResult {
+    let single = policy(|wire| wire["allow_ranges"] = json!(["10.0.0.6"]))?;
+    assert_eq!(
+        translated(&single)?,
+        Some(json!({"subnets": {"allow": ["10.0.0.6/32"]}}))
+    );
     Ok(())
 }
 

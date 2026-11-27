@@ -15,7 +15,8 @@ use trogon_sandbox_contract::DomainPattern;
 use trogon_sandbox_contract::MitmUnixSocket;
 use trogon_sandbox_contract::Port;
 use trogon_sandbox_contract::{
-    DomainRule, DomainRuleAction, EgressViolation, EgressViolationReason, HttpMethod, IpRange, LeaseId, NetworkPolicy,
+    AllowRange, DomainRule, DomainRuleAction, EgressViolation, EgressViolationReason, HttpMethod, IpRange, LeaseId,
+    NetworkPolicy,
 };
 use trogon_sandbox_contract::{HeaderCondition, HeaderName, HeaderValue, PathPrefix, RequestRule, RequestRuleAction};
 use trogon_sandbox_contract::{NetworkOptions, NoProxy, ParentProxy, ParentProxyUrl, ReasonedRefusals, TunnelCap};
@@ -111,7 +112,7 @@ fn policy() -> TestResult<NetworkPolicy> {
             domain: "allowed.test".parse()?,
             action: DomainRuleAction::PassThrough,
         }],
-        allow_ranges: vec![IpRange::new("127.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![IpRange::new("10.0.0.0/8")?],
         denied_domains: vec!["blocked.test".parse()?],
         opaque_tunnels: Default::default(),
@@ -406,7 +407,7 @@ async fn http_connect_falls_back_to_the_next_vetted_address() -> TestResult {
     let upstream = echo_upstream().await?;
     let mut network = policy()?;
     if let NetworkPolicy::UserDefined { allow_ranges, .. } = &mut network {
-        allow_ranges.push(IpRange::new("::1/128")?);
+        allow_ranges.push(AllowRange::new("::1/128")?);
     }
     let mut h = start_resolving(
         IngressLimits::default(),
@@ -434,7 +435,7 @@ async fn http_connect_falls_back_to_the_next_vetted_address() -> TestResult {
 fn allowing_v6_loopback() -> TestResult<NetworkPolicy> {
     let mut network = policy()?;
     if let NetworkPolicy::UserDefined { allow_ranges, .. } = &mut network {
-        allow_ranges.push(IpRange::new("::1/128")?);
+        allow_ranges.push(AllowRange::new("::1/128")?);
     }
     Ok(network)
 }
@@ -498,7 +499,7 @@ async fn socks5_falls_back_to_the_next_vetted_address() -> TestResult {
     let upstream = echo_upstream().await?;
     let mut network = policy()?;
     if let NetworkPolicy::UserDefined { allow_ranges, .. } = &mut network {
-        allow_ranges.push(IpRange::new("::1/128")?);
+        allow_ranges.push(AllowRange::new("::1/128")?);
     }
     let h = start_resolving(
         IngressLimits::default(),
@@ -1597,7 +1598,7 @@ async fn every_class_among_the_denied_addresses_is_named_in_the_documented_order
 async fn a_bracketed_ipv6_denied_domain_blocks_a_connect_to_that_literal_in_any_spelling() -> TestResult {
     let network = NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("::/0")?],
+        allow_ranges: vec![AllowRange::new("::/0")?],
         deny_ranges: vec![],
         denied_domains: vec!["[2001:db8::1]:443".parse()?, "[fd00:ec2::254]".parse()?],
         opaque_tunnels: Default::default(),

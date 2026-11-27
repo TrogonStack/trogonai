@@ -6,8 +6,8 @@ use crate::host_kind::{HostClassification, HostKind};
 use std::net::IpAddr;
 
 use ipnet::IpNet;
+use trogon_sandbox_contract::{AllowRange, DomainRule, DomainRuleAction, IpRange, NetworkPolicy};
 use trogon_sandbox_contract::{DeniedDomain, DomainPattern, Host, Port};
-use trogon_sandbox_contract::{DomainRule, DomainRuleAction, IpRange, NetworkPolicy};
 use trogon_sandbox_protocol::{denied_domain_matches, exact_denied_domain, exact_pattern, pattern_matches};
 
 use crate::resolve::embedded_ipv4;
@@ -218,7 +218,7 @@ pub fn amended(policy: &NetworkPolicy, host: &Host, port: Port, decision: Decisi
 /// ranges, since the name is attacker-controlled and unvettable.
 fn decide_user_defined(
     rules: &[DomainRule],
-    allow_ranges: &[IpRange],
+    allow_ranges: &[AllowRange],
     deny_ranges: &[IpRange],
     denied_domains: &[DeniedDomain],
     sni: Option<&str>,
@@ -248,7 +248,10 @@ fn decide_user_defined(
         return Ruling::Allow(Some(rule.action.clone()));
     }
 
-    if any_range_contains(allow_ranges, dest_ip) {
+    if allow_ranges
+        .iter()
+        .any(|range| range.allows_port(dest_port) && ip_range_contains(range.cidr(), dest_ip))
+    {
         return Ruling::Allow(None);
     }
 
@@ -288,8 +291,8 @@ pub fn addresses_contain(ranges: &[IpRange], ip: IpAddr) -> bool {
     any_range_contains(ranges, ip) || any_range_contains(ranges, folded)
 }
 
-/// Whether the policy names `ip` itself as allowed: an allow range of exactly
-/// that one address, or an exact rule for the address literal. An allow like
+/// Whether the policy names `ip` itself as allowed on `port`: an allow range of
+/// exactly that one address, or an exact rule for the address literal. An allow like
 /// that does not depend on which name the client presented.
 pub fn address_allowed_exactly(policy: &NetworkPolicy, ip: IpAddr, port: u16) -> bool {
     let NetworkPolicy::UserDefined {
@@ -300,8 +303,10 @@ pub fn address_allowed_exactly(policy: &NetworkPolicy, ip: IpAddr, port: u16) ->
     };
     let ip = crate::fold_mapped::fold_mapped(ip);
     let single = allow_ranges.iter().any(|range| {
-        IpNet::new(range.address(), range.prefix_len())
-            .is_ok_and(|net| net.prefix_len() == net.max_prefix_len() && net.contains(&ip))
+        let cidr = range.cidr();
+        range.allows_port(port)
+            && IpNet::new(cidr.address(), cidr.prefix_len())
+                .is_ok_and(|net| net.prefix_len() == net.max_prefix_len() && net.contains(&ip))
     });
     single
         || rules

@@ -6,7 +6,7 @@ use std::io::Write;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use trogon_sandbox_policy_exec::{
-    AskQuestion, AskVerdict, CommandSpec, DenialReason, IpRange, NetworkPolicy, PolicyExec, PolicyExecConfig,
+    AllowRange, AskQuestion, AskVerdict, CommandSpec, DenialReason, NetworkPolicy, PolicyExec, PolicyExecConfig,
 };
 
 #[cfg(target_os = "linux")]
@@ -54,7 +54,7 @@ async fn execute() -> Result<i32, Box<dyn std::error::Error>> {
 
     let config = PolicyExecConfig::new(&workspace).network(NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("0.0.0.0/0")?],
+        allow_ranges: vec![AllowRange::new("0.0.0.0/0")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

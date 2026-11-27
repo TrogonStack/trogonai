@@ -4,6 +4,8 @@
 mod account_limits;
 mod address_denial_class;
 mod all_unix_sockets_access;
+mod allow_range;
+mod allow_range_error;
 mod allowed_tls_termination;
 mod ambiguous_targets;
 mod apple_events_access;
@@ -646,6 +648,8 @@ mod write_stdin_response;
 pub use account_limits::AccountLimits;
 pub use address_denial_class::AddressDenialClass;
 pub use all_unix_sockets_access::AllUnixSocketsAccess;
+pub use allow_range::AllowRange;
+pub use allow_range_error::AllowRangeError;
 pub use allowed_tls_termination::AllowedTlsTermination;
 pub use ambiguous_targets::AmbiguousTargets;
 pub use apple_events_access::AppleEventsAccess;

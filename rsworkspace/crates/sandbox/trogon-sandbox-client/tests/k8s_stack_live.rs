@@ -31,8 +31,8 @@ use std::time::{Duration, Instant};
 use common::TestResult;
 use trogon_sandbox_client::{ClientError, CommandOptions, SandboxClient};
 use trogon_sandbox_contract::{
-    ArtifactType, CommandDeadline, Digest, DomainPattern, DomainRule, DomainRuleAction, ExecutionId, IpRange,
-    KillCommandResponse, LeaseError, LeaseId, LeaseRequest, NetworkPolicy, OciArtifactRef, OpaqueTunnelPolicy,
+    AllowRange, ArtifactType, CommandDeadline, Digest, DomainPattern, DomainRule, DomainRuleAction, ExecutionId,
+    IpRange, KillCommandResponse, LeaseError, LeaseId, LeaseRequest, NetworkPolicy, OciArtifactRef, OpaqueTunnelPolicy,
     PollCommandResponse, ProviderKind, RestartCommandResponse, SandboxImage, SandboxSpec, SnapshotLeaseResponse,
     StdinMode, StopCommandResponse, StopSignal, TenantId, UnixSignal,
 };
@@ -94,7 +94,7 @@ fn lease_request_for(
 fn user_defined(rules: Vec<DomainRule>, allow_ranges: Vec<IpRange>) -> NetworkPolicy {
     NetworkPolicy::UserDefined {
         rules,
-        allow_ranges,
+        allow_ranges: allow_ranges.into_iter().map(AllowRange::from).collect(),
         deny_ranges: Vec::new(),
         denied_domains: Vec::new(),
         opaque_tunnels: OpaqueTunnelPolicy::default(),

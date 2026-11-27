@@ -14,8 +14,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 use trogon_sandbox_contract::{
-    CredentialProvider, CredentialRequest, CredentialScope, DomainPattern, DomainRule, DomainRuleAction, EnvVarName,
-    Extract, ExtractPattern, InjectHosts, IpRange, LeaseId, LeaseRequest, LiteralPath, NetworkPolicy, PullSecretId,
+    AllowRange, CredentialProvider, CredentialRequest, CredentialScope, DomainPattern, DomainRule, DomainRuleAction,
+    EnvVarName, Extract, ExtractPattern, InjectHosts, LeaseId, LeaseRequest, LiteralPath, NetworkPolicy, PullSecretId,
     SecretBinding, SecretBindingParts, SecretMode, SecretName, SecretTarget,
 };
 use trogon_sandbox_subprocess_worker::lease_secrets::FixedCredentialSources;
@@ -235,7 +235,7 @@ fn policy() -> Result<NetworkPolicy, Box<dyn Error>> {
             domain: DomainPattern::new(MASKED_HOST)?,
             action: DomainRuleAction::PassThrough,
         }],
-        allow_ranges: vec![IpRange::new("127.0.0.1/32")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.1/32")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

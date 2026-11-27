@@ -51,6 +51,19 @@ fn ranges_and_ip_hosts_become_one_sorted_allow_list() -> TestResult {
 }
 
 #[test]
+fn a_single_address_allow_range_becomes_a_one_address_block() -> TestResult {
+    let policy = policy(|wire| wire["allow_ranges"] = json!(["10.0.0.6", "fc00::1"]))?;
+    assert_eq!(
+        translate_network_policy(Some(&policy))?,
+        DaytonaNetwork {
+            block_all: None,
+            allow_list: Some("10.0.0.6/32,fc00::1/128".to_owned()),
+        }
+    );
+    Ok(())
+}
+
+#[test]
 fn what_daytona_cannot_express_is_refused() -> TestResult {
     let cases = [
         json!({"rules": [{"domain": "10.0.0.1:8443"}]}),
@@ -60,6 +73,7 @@ fn what_daytona_cannot_express_is_refused() -> TestResult {
         json!({"denied_domains": ["x.com"]}),
         json!({"request_rules": [{"action": "deny"}]}),
         json!({"deny_ranges": ["10.0.0.0/8"]}),
+        json!({"allow_ranges": ["10.0.0.5:8080"]}),
         json!({"rules": [{
             "domain": "10.0.0.1",
             "action": {"forward": {"forward_url": "https://forward.example.com/"}}

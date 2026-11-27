@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use trogon_sandbox_contract::DirectoryMarker;
 use trogon_sandbox_policy_exec::{
-    AskQuestion, AskVerdict, CommandSpec, DenialReason, FsPathEntry, FsPolicy, IpRange, LiteralPath, NetworkPolicy,
+    AllowRange, AskQuestion, AskVerdict, CommandSpec, DenialReason, FsPathEntry, FsPolicy, LiteralPath, NetworkPolicy,
     OutputLimit, PolicyExec, PolicyExecConfig, StdioMode,
 };
 
@@ -53,11 +53,11 @@ fn fs_policy() -> Result<FsPolicy, Box<dyn std::error::Error>> {
     )?)
 }
 
-fn loopback() -> Result<IpRange, Box<dyn std::error::Error>> {
-    Ok(IpRange::new("127.0.0.0/8")?)
+fn loopback() -> Result<AllowRange, Box<dyn std::error::Error>> {
+    Ok(AllowRange::new("127.0.0.0/8")?)
 }
 
-fn user_defined(allow_ranges: Vec<IpRange>) -> NetworkPolicy {
+fn user_defined(allow_ranges: Vec<AllowRange>) -> NetworkPolicy {
     NetworkPolicy::UserDefined {
         rules: vec![],
         allow_ranges,

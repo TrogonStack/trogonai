@@ -25,7 +25,7 @@ fn user_defined(
 ) -> ContractNetworkPolicy {
     ContractNetworkPolicy::UserDefined {
         rules,
-        allow_ranges,
+        allow_ranges: allow_ranges.into_iter().map(AllowRange::from).collect(),
         deny_ranges,
         denied_domains: vec![],
         opaque_tunnels: Default::default(),
@@ -138,6 +138,32 @@ fn user_defined_ipv6_ranges_are_carved_out_too() -> TestResult {
         first_ip_block(&manifest(&policy)?)?.except,
         Some(vec!["2001:db8:1::/48".to_string()])
     );
+    Ok(())
+}
+
+#[test]
+fn an_allow_range_with_a_port_allows_tcp_to_that_port_only() -> TestResult {
+    let policy = ContractNetworkPolicy::UserDefined {
+        rules: vec![],
+        allow_ranges: vec![AllowRange::new("10.0.0.5:8080")?, AllowRange::new("10.0.0.0/8")?],
+        deny_ranges: vec![],
+        denied_domains: vec![],
+        opaque_tunnels: Default::default(),
+        request_rules: vec![],
+    };
+    let egress = manifest(&policy)?.spec.ok_or("spec")?.egress.ok_or("egress")?;
+    let scoped = egress.first().ok_or("scoped rule")?;
+    let peer = scoped.to.as_ref().and_then(|to| to.first()).ok_or("peer")?;
+    assert_eq!(peer.ip_block.as_ref().ok_or("ip_block")?.cidr, "10.0.0.5/32");
+    assert_eq!(
+        scoped.ports,
+        Some(vec![NetworkPolicyPort {
+            port: Some(IntOrString::Int(8080)),
+            protocol: Some("TCP".to_string()),
+            ..Default::default()
+        }])
+    );
+    assert_eq!(egress.get(1).ok_or("unscoped rule")?.ports, None);
     Ok(())
 }
 

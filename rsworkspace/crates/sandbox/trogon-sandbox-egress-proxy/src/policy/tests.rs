@@ -48,7 +48,7 @@ fn user_defined(
         rules: allow.iter().map(|d| domain_rule(d)).collect::<Result<_, _>>()?,
         allow_ranges: allow_ranges
             .iter()
-            .map(|r| IpRange::new(*r))
+            .map(|r| AllowRange::new(*r))
             .collect::<Result<_, _>>()?,
         deny_ranges: deny_ranges.iter().map(|r| IpRange::new(*r)).collect::<Result<_, _>>()?,
         denied_domains: denied.iter().map(|d| d.parse()).collect::<Result<_, _>>()?,
@@ -382,7 +382,7 @@ fn user_defined_allows_matching_sni_domain() -> Result<(), Box<dyn std::error::E
 fn user_defined_allows_matching_ip_range() -> Result<(), Box<dyn std::error::Error>> {
     let policy = NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("10.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),
@@ -394,10 +394,31 @@ fn user_defined_allows_matching_ip_range() -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
+fn an_allow_range_with_a_port_allows_that_port_only() -> Result<(), Box<dyn std::error::Error>> {
+    let policy = NetworkPolicy::UserDefined {
+        rules: vec![],
+        allow_ranges: vec![AllowRange::new("10.0.0.5:5432")?, AllowRange::new("[fc00::1]:9")?],
+        deny_ranges: vec![],
+        denied_domains: vec![],
+        opaque_tunnels: Default::default(),
+        request_rules: vec![],
+    };
+    assert_eq!(decide(&policy, None, ip4("10.0.0.5")?, 5432), Decision::Allow);
+    assert_eq!(decide(&policy, None, ip4("10.0.0.5")?, 22), Decision::Deny);
+    assert_eq!(decide(&policy, None, ip4("10.0.0.6")?, 5432), Decision::Deny);
+    assert_eq!(decide(&policy, None, "fc00::1".parse::<IpAddr>()?, 9), Decision::Allow);
+    assert_eq!(
+        decide(&policy, None, "fc00::1".parse::<IpAddr>()?, 5432),
+        Decision::Deny
+    );
+    Ok(())
+}
+
+#[test]
 fn deny_ranges_take_precedence_over_allow_ranges() -> Result<(), Box<dyn std::error::Error>> {
     let policy = NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("10.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![IpRange::new("10.1.0.0/16")?],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),
@@ -431,7 +452,7 @@ fn deny_ranges_take_precedence_over_matching_sni() -> Result<(), Box<dyn std::er
 fn user_defined_denies_by_default_with_no_sni_and_no_range_match() -> Result<(), Box<dyn std::error::Error>> {
     let policy = NetworkPolicy::UserDefined {
         rules: vec![domain_rule("api.example.com")?],
-        allow_ranges: vec![IpRange::new("10.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),
@@ -503,7 +524,7 @@ fn decide_with_action_returns_forward_action_on_domain_match() -> Result<(), Box
 fn decide_with_action_returns_none_on_ip_range_match() -> Result<(), Box<dyn std::error::Error>> {
     let policy = NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("10.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),
@@ -575,7 +596,7 @@ fn sni_policy(allow_ranges: &[&str]) -> Result<NetworkPolicy, Box<dyn std::error
         rules: vec![domain_rule("*.example.com")?],
         allow_ranges: allow_ranges
             .iter()
-            .map(|r| IpRange::new(*r))
+            .map(|r| AllowRange::new(*r))
             .collect::<Result<_, _>>()?,
         deny_ranges: vec![],
         denied_domains: vec![],
@@ -761,7 +782,7 @@ fn only_an_exact_address_counts_as_an_exact_address_allow() -> Result<(), Box<dy
     let policy = |ranges: &[&str]| -> Result<NetworkPolicy, Box<dyn std::error::Error>> {
         Ok(NetworkPolicy::UserDefined {
             rules: vec![domain_rule("api.example.com")?],
-            allow_ranges: ranges.iter().map(|r| IpRange::new(*r)).collect::<Result<_, _>>()?,
+            allow_ranges: ranges.iter().map(|r| AllowRange::new(*r)).collect::<Result<_, _>>()?,
             deny_ranges: vec![],
             denied_domains: vec![],
             opaque_tunnels: Default::default(),
@@ -771,8 +792,11 @@ fn only_an_exact_address_counts_as_an_exact_address_allow() -> Result<(), Box<dy
     let ip = ip4("203.0.113.7")?;
     assert!(address_allowed_exactly(&policy(&["203.0.113.7/32"])?, ip, 443));
     assert!(!address_allowed_exactly(&policy(&["203.0.113.0/24"])?, ip, 443));
-    // A bare IP is not a range at all, so it cannot be an exact-address allow.
-    assert!(policy(&["203.0.113.7"]).is_err());
+    // A bare address is the one-address range.
+    assert!(address_allowed_exactly(&policy(&["203.0.113.7"])?, ip, 443));
+    // An address with a port allows that address on that port only.
+    assert!(address_allowed_exactly(&policy(&["203.0.113.7:443"])?, ip, 443));
+    assert!(!address_allowed_exactly(&policy(&["203.0.113.7:8443"])?, ip, 443));
     assert!(!address_allowed_exactly(&policy(&[])?, ip, 443));
     assert!(!address_allowed_exactly(&NetworkPolicy::DenyAll, ip, 443));
     Ok(())

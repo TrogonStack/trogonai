@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use trogon_sandbox_policy_exec::{
-    CommandSpec, DeciderLimits, DeciderTransport, DeciderTransportError, IpRange, NetworkPolicy, PolicyExec,
+    AllowRange, CommandSpec, DeciderLimits, DeciderTransport, DeciderTransportError, NetworkPolicy, PolicyExec,
     PolicyExecConfig,
 };
 
@@ -22,7 +22,7 @@ fn can_sandbox() -> bool {
 fn loopback_policy() -> Result<NetworkPolicy, Box<dyn std::error::Error>> {
     Ok(NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("127.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

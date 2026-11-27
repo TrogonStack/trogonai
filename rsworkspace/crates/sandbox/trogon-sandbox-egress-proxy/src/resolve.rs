@@ -129,10 +129,17 @@ impl VettedEndpoint {
 pub struct AllowRanges(Vec<IpNet>);
 
 impl AllowRanges {
-    /// The ranges the policy allows.
+    /// The ranges the policy allows on every port. An entry scoped to one port
+    /// carves nothing out of the floor.
     pub fn from_policy(policy: &NetworkPolicy) -> Self {
         match policy {
-            NetworkPolicy::UserDefined { allow_ranges, .. } => Self::from_ranges(allow_ranges),
+            NetworkPolicy::UserDefined { allow_ranges, .. } => Self::from_ranges(
+                &allow_ranges
+                    .iter()
+                    .filter(|range| range.port().is_none())
+                    .map(|range| range.cidr().clone())
+                    .collect::<Vec<_>>(),
+            ),
             NetworkPolicy::AllowAll | NetworkPolicy::DenyAll => Self::default(),
         }
     }

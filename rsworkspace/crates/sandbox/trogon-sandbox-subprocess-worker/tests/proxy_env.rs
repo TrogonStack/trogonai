@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use trogon_sandbox_contract::{
-    CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, CredentialTransform, DomainPattern,
-    DomainRule, DomainRuleAction, HeaderName, IpRange, NetworkPolicy, PullSecretId,
+    AllowRange, CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, CredentialTransform,
+    DomainPattern, DomainRule, DomainRuleAction, HeaderName, NetworkPolicy, PullSecretId,
 };
 use trogon_sandbox_subprocess_worker::isolation::relay::RelayEgress;
 use trogon_sandbox_subprocess_worker::isolation::resource_limits::ResourceLimits;
@@ -65,7 +65,7 @@ fn proxy_binary() -> Result<PathBuf, Box<dyn Error>> {
 fn allow_loopback_policy() -> Result<NetworkPolicy, Box<dyn Error>> {
     Ok(NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("127.0.0.1/32")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.1/32")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

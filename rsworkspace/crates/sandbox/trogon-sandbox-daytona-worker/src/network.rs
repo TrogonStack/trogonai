@@ -71,7 +71,13 @@ pub fn translate_network_policy(policy: Option<&NetworkPolicy>) -> Result<Dayton
     if !deny_ranges.is_empty() {
         return Err(invalid("Daytona cannot express deny_ranges"));
     }
-    let mut entries: Vec<String> = allow_ranges.iter().map(|range| range.as_str().to_owned()).collect();
+    let mut entries: Vec<String> = Vec::new();
+    for range in allow_ranges {
+        if range.port().is_some() {
+            return Err(invalid(format!("Daytona cannot restrict by port: {range}")));
+        }
+        entries.push(range.cidr().as_str().to_owned());
+    }
     for rule in rules {
         if !matches!(rule.action, DomainRuleAction::PassThrough) {
             return Err(invalid(format!(

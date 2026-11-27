@@ -7,7 +7,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tokio::io::{AsyncWriteExt, duplex};
 use tokio::sync::RwLock;
-use trogon_sandbox_contract::{AddressDenialClass, NetworkOptions, Port};
+use trogon_sandbox_contract::{AddressDenialClass, AllowRange, NetworkOptions, Port};
 use trogon_sandbox_contract::{
     DecideRequest, DomainRule, HttpMethod, IpRange, LeaseId, NamesMatchedByName, NetworkPolicy,
 };
@@ -162,7 +162,7 @@ fn user_policy(allow_ranges: &[&str]) -> Result<NetworkPolicy, Box<dyn std::erro
         }],
         allow_ranges: allow_ranges
             .iter()
-            .map(|range| IpRange::new(*range))
+            .map(|range| AllowRange::new(*range))
             .collect::<Result<Vec<_>, _>>()?,
         deny_ranges: vec![IpRange::new("10.0.0.0/8")?],
         denied_domains: vec!["blocked.test".parse()?],
@@ -373,7 +373,7 @@ fn name_matched_policy(allowed: &[&str], denied: &[&str]) -> Result<NetworkPolic
         allow_ranges: allowed
             .iter()
             .filter_map(|domain| domain.parse::<IpAddr>().ok().map(|address| (domain, address)))
-            .map(|(domain, address)| IpRange::new(format!("{domain}/{}", if address.is_ipv4() { 32 } else { 128 })))
+            .map(|(domain, address)| AllowRange::new(format!("{domain}/{}", if address.is_ipv4() { 32 } else { 128 })))
             .collect::<Result<Vec<_>, _>>()?,
         deny_ranges: vec![],
         denied_domains: denied
@@ -578,7 +578,7 @@ async fn an_address_a_deny_range_covers_is_denied_after_resolution() -> Result<(
     let covered = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9));
     let policy = NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("127.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![IpRange::new("203.0.113.0/24")?],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

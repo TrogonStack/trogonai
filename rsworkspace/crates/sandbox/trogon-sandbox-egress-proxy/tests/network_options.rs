@@ -9,14 +9,14 @@ use base64::engine::general_purpose::STANDARD;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use trogon_sandbox_contract::{
+    AllowRange, DomainPattern, DomainRule, DomainRuleAction, EgressViolation, EgressViolationReason, LeaseId,
+    MatchRule, MitmUnixSocket, NetworkPolicy, RequestForward, StringMatcher,
+};
+use trogon_sandbox_contract::{
     AllowedTlsTermination, DeniedDomainReasons, DenyReason, LoopbackNames, NetworkOptions, NoProxy, ParentProxy,
     ParentProxyUrl, TunnelCap, UpstreamCaCertificates,
 };
 use trogon_sandbox_contract::{DeniedDomain, ForwardUrl, Port};
-use trogon_sandbox_contract::{
-    DomainPattern, DomainRule, DomainRuleAction, EgressViolation, EgressViolationReason, IpRange, LeaseId, MatchRule,
-    MitmUnixSocket, NetworkPolicy, RequestForward, StringMatcher,
-};
 use trogon_sandbox_contract::{ResponseHeaderStrip, StrippedHeader};
 use trogon_sandbox_egress_proxy::TunnelGate;
 use trogon_sandbox_egress_proxy::ingress::{ListenAddress, Listener, ProxyToken};
@@ -47,8 +47,8 @@ fn domain_pattern(input: &str) -> TestResult<DomainPattern> {
     Ok(input.parse()?)
 }
 
-fn loopback_range() -> TestResult<IpRange> {
-    Ok(IpRange::new("127.0.0.0/8")?)
+fn loopback_range() -> TestResult<AllowRange> {
+    Ok(AllowRange::new("127.0.0.0/8")?)
 }
 
 fn terminating() -> NetworkOptions {

@@ -12,9 +12,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UnixListener};
+use trogon_sandbox_contract::{AllowRange, DomainRule, DomainRuleAction, LeaseId, NetworkPolicy, OpaqueTunnelPolicy};
 use trogon_sandbox_contract::{AllowedTlsTermination, UnlistedDestinations};
 use trogon_sandbox_contract::{DomainPattern, Port};
-use trogon_sandbox_contract::{DomainRule, DomainRuleAction, IpRange, LeaseId, NetworkPolicy, OpaqueTunnelPolicy};
 use trogon_sandbox_contract::{MitmUnixSocket, NetworkOptions, NoProxy, ParentProxy, ParentProxyUrl, TlsExclusions};
 use trogon_sandbox_egress_proxy::ingress::{ListenAddress, Listener, ProxyToken};
 use trogon_sandbox_egress_proxy::resolve::{NameLookup, SsrfFloor, VettingResolver};
@@ -197,7 +197,7 @@ async fn start(setup: Setup, mitm: Option<&Mitm>, parent: Option<&Parent>, termi
             })
             .collect::<TestResult<Vec<_>>>()?,
         allow_ranges: if setup.loopback {
-            vec![IpRange::new("127.0.0.0/8")?]
+            vec![AllowRange::new("127.0.0.0/8")?]
         } else {
             vec![]
         },

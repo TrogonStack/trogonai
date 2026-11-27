@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use trogon_sandbox_contract::{AllowRange, NetworkPolicy};
 use trogon_sandbox_contract::{DirectoryMarker, LiteralPath};
 use trogon_sandbox_contract::{FsPathEntry, FsPolicy};
-use trogon_sandbox_contract::{IpRange, NetworkPolicy};
 use trogon_sandbox_subprocess_worker::fs_violation::FsDenialSink;
 use trogon_sandbox_subprocess_worker::isolation::limits::ResourceLimits;
 use trogon_sandbox_subprocess_worker::isolation::relay::{RELAY_EXIT_CODE, RelayEgress};
@@ -141,7 +141,7 @@ fn relay_egress(proxy: &LeaseProxy) -> RelayEgress {
 fn allow_loopback_policy() -> Result<NetworkPolicy, Box<dyn std::error::Error>> {
     Ok(NetworkPolicy::UserDefined {
         rules: vec![],
-        allow_ranges: vec![IpRange::new("127.0.0.1/32")?],
+        allow_ranges: vec![AllowRange::new("127.0.0.1/32")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

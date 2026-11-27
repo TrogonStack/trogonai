@@ -1,6 +1,6 @@
 use super::constants::FLOOR_RANGES;
 use super::*;
-use trogon_sandbox_contract::{DomainRule, DomainRuleAction, IpRange};
+use trogon_sandbox_contract::{AllowRange, DomainRule, DomainRuleAction, IpRange};
 
 use AddressDenialClass::*;
 
@@ -44,7 +44,7 @@ fn floor(local: &[&str]) -> Result<SsrfFloor, Box<dyn std::error::Error>> {
 fn allow(ranges: &[&str]) -> Result<AllowRanges, Box<dyn std::error::Error>> {
     Ok(AllowRanges::from_policy(&NetworkPolicy::UserDefined {
         rules: Vec::<DomainRule>::new(),
-        allow_ranges: ranges.iter().map(|r| IpRange::new(*r)).collect::<Result<_, _>>()?,
+        allow_ranges: ranges.iter().map(|r| AllowRange::new(*r)).collect::<Result<_, _>>()?,
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),
@@ -243,6 +243,8 @@ fn malformed_ranges_cannot_be_built_and_absent_ranges_grant_nothing() -> Result<
         AllowRanges::from_policy(&NetworkPolicy::AllowAll),
         AllowRanges::default()
     );
+    assert_eq!(allow(&["10.0.0.5:8080"])?, AllowRanges::default());
+    assert_eq!(allow(&["10.0.0.5"])?, allow(&["10.0.0.5/32"])?);
     Ok(())
 }
 
@@ -376,7 +378,7 @@ fn an_explicit_catch_all_range_lifts_the_floor() -> Result<(), Box<dyn std::erro
             domain: "allowed.test".parse()?,
             action: DomainRuleAction::PassThrough,
         }],
-        allow_ranges: vec![IpRange::new("0.0.0.0/0")?],
+        allow_ranges: vec![AllowRange::new("0.0.0.0/0")?],
         deny_ranges: vec![],
         denied_domains: vec![],
         opaque_tunnels: Default::default(),

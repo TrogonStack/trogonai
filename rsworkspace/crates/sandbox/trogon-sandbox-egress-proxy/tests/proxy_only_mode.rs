@@ -7,7 +7,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use trogon_sandbox_contract::UpstreamCaCertificates;
 use trogon_sandbox_contract::{
-    AllowedTlsTermination, DomainRule, DomainRuleAction, IpRange, NetworkOptions, NetworkPolicy, TlsExclusions,
+    AllowRange, AllowedTlsTermination, DomainRule, DomainRuleAction, NetworkOptions, NetworkPolicy, TlsExclusions,
 };
 use trogon_sandbox_egress_proxy::deny_header_style::DenyHeaderStyle;
 use trogon_sandbox_egress_proxy::ingress::{IngressLimits, ListenAddress, Listener};
@@ -18,8 +18,8 @@ use trogon_sandbox_egress_proxy::tls_ca::{
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-fn loopback_range() -> TestResult<IpRange> {
-    Ok(IpRange::new("127.0.0.0/8")?)
+fn loopback_range() -> TestResult<AllowRange> {
+    Ok(AllowRange::new("127.0.0.0/8")?)
 }
 
 fn terminating() -> NetworkOptions {

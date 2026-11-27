@@ -1,10 +1,10 @@
 use serde_json::error::Category::Data;
 use serde_json::json;
 use trogon_sandbox_contract::{
-    CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, CredentialTransform, DeniedDomain,
-    DomainPattern, DomainRule, DomainRuleAction, ForwardUrl, ForwardUrlError, HeaderMatcher, HeaderName, HttpMethod,
-    IpRange, MatchRule, NetworkPolicy, OpaqueTunnelPolicy, PullSecretId, QueryMatcher, RequestForward, RequestRule,
-    RequestRuleAction, ServiceAccountId, StringMatcher,
+    AllowRange, CredentialInjection, CredentialProvider, CredentialRequest, CredentialScope, CredentialTransform,
+    DeniedDomain, DomainPattern, DomainRule, DomainRuleAction, ForwardUrl, ForwardUrlError, HeaderMatcher, HeaderName,
+    HttpMethod, IpRange, MatchRule, NetworkPolicy, OpaqueTunnelPolicy, PullSecretId, QueryMatcher, RequestForward,
+    RequestRule, RequestRuleAction, ServiceAccountId, StringMatcher,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -77,7 +77,7 @@ fn a_full_user_defined_policy_round_trips() -> TestResult {
                 }),
             },
         ],
-        allow_ranges: vec![IpRange::new("10.0.0.0/8")?],
+        allow_ranges: vec![AllowRange::new("10.0.0.0/8")?, AllowRange::new("[fc00::1]:8080")?],
         deny_ranges: vec![IpRange::new("10.1.0.0/16")?],
         denied_domains: vec![DeniedDomain::new("admin.example.com")?, DeniedDomain::new("*:22")?],
         opaque_tunnels: OpaqueTunnelPolicy::Refuse,
@@ -102,7 +102,7 @@ fn a_full_user_defined_policy_round_trips() -> TestResult {
                     }},
                 },
             ],
-            "allow_ranges": ["10.0.0.0/8"],
+            "allow_ranges": ["10.0.0.0/8", "[fc00::1]:8080"],
             "deny_ranges": ["10.1.0.0/16"],
             "denied_domains": ["admin.example.com", "*:22"],
             "opaque_tunnels": "refuse",
@@ -396,6 +396,94 @@ fn an_ip_range_rejects_what_is_not_cidr() -> TestResult {
         );
     }
     let policy = json!({"user_defined": {"rules": [], "allow_ranges": ["10.0.0.0/999"], "deny_ranges": []}});
+    assert_eq!(
+        error_of(serde_json::from_value::<NetworkPolicy>(policy))?.classify(),
+        Data
+    );
+    Ok(())
+}
+
+#[test]
+fn an_allow_range_reads_a_range_an_address_or_an_address_with_a_port() -> TestResult {
+    for (value, cidr, port) in [
+        ("10.0.0.0/8", "10.0.0.0/8", None),
+        ("2001:0db8::/32", "2001:0db8::/32", None),
+        ("10.0.0.6", "10.0.0.6/32", None),
+        ("fc00::1", "fc00::1/128", None),
+        ("10.0.0.5:8080", "10.0.0.5/32", Some(8080)),
+        ("[fc00::1]:9", "fc00::1/128", Some(9)),
+        ("[::ffff:10.0.0.5]:65535", "::ffff:10.0.0.5/128", Some(65535)),
+    ] {
+        let range = AllowRange::new(value)?;
+        assert_eq!(range.as_str(), value);
+        assert_eq!(range.to_string(), value);
+        assert_eq!(range.cidr().as_str(), cidr);
+        assert_eq!(range.port().map(|port| port.get()), port);
+        assert_eq!(value.parse::<AllowRange>()?, range);
+        assert_eq!(AllowRange::try_from(value.to_string())?, range);
+        assert_eq!(serde_json::to_value(&range)?, json!(value));
+        assert_eq!(serde_json::from_value::<AllowRange>(json!(value))?, range);
+        assert_eq!(String::from(range), value);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_range_with_a_port_allows_that_port_only() -> TestResult {
+    let scoped = AllowRange::new("10.0.0.5:8080")?;
+    assert!(scoped.allows_port(8080));
+    assert!(!scoped.allows_port(22));
+    let unscoped = AllowRange::new("10.0.0.0/8")?;
+    assert!(unscoped.allows_port(8080) && unscoped.allows_port(22));
+    Ok(())
+}
+
+#[test]
+fn an_ip_range_becomes_an_allow_range_for_every_port() -> TestResult {
+    let range = AllowRange::from(IpRange::new("10.0.0.0/8")?);
+    assert_eq!(range, AllowRange::new("10.0.0.0/8")?);
+    assert_eq!(range.port(), None);
+    Ok(())
+}
+
+#[test]
+fn an_allow_range_rejects_what_is_not_a_range_an_address_or_a_socket_address() -> TestResult {
+    for value in [
+        "",
+        "not a range",
+        "10.0.0.0/33",
+        "10.0.0.0/8:443",
+        "10.0.0.5:",
+        "10.0.0.5:0",
+        "10.0.0.5:080",
+        "10.0.0.5:65536",
+        "10.0.0.5:+80",
+        "10.0.0.5:http",
+        "fc00::1]:80",
+        "[fc00::1",
+        "[fc00::1]",
+        "[10.0.0.5]:80",
+        "host:80",
+        " 10.0.0.5",
+    ] {
+        let error = error_of(AllowRange::new(value))?;
+        assert_eq!(error.input(), value);
+        assert_eq!(
+            error.to_string(),
+            format!("'{value}' is not a CIDR range, an IP address, or an IP address with a port such as 10.0.0.5:8080")
+        );
+        assert_eq!(error_of(value.parse::<AllowRange>())?, error);
+        assert_eq!(
+            error_of(serde_json::from_value::<AllowRange>(json!(value)))?.classify(),
+            Data
+        );
+    }
+    let policy = json!({"user_defined": {"rules": [], "allow_ranges": ["10.0.0.5:0"], "deny_ranges": []}});
+    assert_eq!(
+        error_of(serde_json::from_value::<NetworkPolicy>(policy))?.classify(),
+        Data
+    );
+    let policy = json!({"user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": ["10.0.0.5:80"]}});
     assert_eq!(
         error_of(serde_json::from_value::<NetworkPolicy>(policy))?.classify(),
         Data
