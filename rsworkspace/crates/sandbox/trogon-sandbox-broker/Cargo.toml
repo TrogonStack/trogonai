@@ -1,0 +1,55 @@
+[package]
+name = "trogon-sandbox-broker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "NATS broker that arbitrates sandbox lease requests and dispatches to provider workers"
+
+[lib]
+name = "trogon_sandbox_broker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-broker"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+clap = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+ipnet = { workspace = true }
+object_store = { workspace = true }
+prometheus = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+trogon-sandbox-auth = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-credential-broker = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-oci = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }

@@ -1,0 +1,16 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    unit_test_tags = ["requires-network"],
+    integration_tests = {
+        "assigned_cancellation_contract": {"tags": ["requires-network"]},
+        "command_readiness_contract": {"tags": ["requires-network"]},
+        "command_readiness_fresh_launch": {"tags": ["requires-network"]},
+        "legacy_snapshot_quarantine": {"tags": ["requires-network"]},
+        "snapshot_accounting": {"tags": ["requires-network"]},
+        "authz_e2e": {"tags": ["requires-network"]},
+        "binary": {"tags": ["requires-network"]},
+        "docker_targeted_quota": {"tags": ["requires-network"]},
+        "e2b_targeted_quota": {"tags": ["requires-network"]},
+    },
+)
