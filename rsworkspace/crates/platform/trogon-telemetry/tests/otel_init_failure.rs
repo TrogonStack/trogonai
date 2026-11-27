@@ -4,7 +4,7 @@
 //! cannot change safely in-process. The test re-runs itself as a child process with an
 //! unusable endpoint, and the child does the logging setup.
 
-mod common;
+mod support;
 
 use opentelemetry_otlp::{
     OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
@@ -16,7 +16,7 @@ const CHILD_MARKER: &str = "TROGON_TELEMETRY_INIT_FAILURE_CHILD";
 
 #[test]
 fn logging_starts_without_otel_when_the_exporters_cannot_be_built() {
-    let Some(output) = common::rerun_as_child(CHILD_MARKER, |command| {
+    let Some(output) = support::rerun_as_child(CHILD_MARKER, |command| {
         command
             .env(OTEL_EXPORTER_OTLP_ENDPOINT, "not a uri")
             // Signal-specific endpoints override the generic one, and RUST_LOG could filter out
@@ -26,7 +26,7 @@ fn logging_starts_without_otel_when_the_exporters_cannot_be_built() {
             .env_remove(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
             .env("RUST_LOG", "info")
     }) else {
-        common::init_test_logger("/tmp/test-otel-init-failure", &MemFs::new());
+        support::init_test_logger("/tmp/test-otel-init-failure", &MemFs::new());
         return;
     };
     let stderr = String::from_utf8_lossy(&output.stderr);

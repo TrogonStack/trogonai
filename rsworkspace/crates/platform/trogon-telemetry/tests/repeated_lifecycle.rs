@@ -4,7 +4,7 @@
 //! calls run in a child process: the parent can then read the child's stderr to check that
 //! the second `init_logger` call did nothing beyond warning once.
 
-mod common;
+mod support;
 
 use opentelemetry_otlp::{
     OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
@@ -17,7 +17,7 @@ const CHILD_MARKER: &str = "TROGON_TELEMETRY_REPEATED_LIFECYCLE_CHILD";
 
 #[test]
 fn a_repeated_init_is_a_no_op_and_a_second_shutdown_reports_every_provider() {
-    let Some(output) = common::rerun_as_child(CHILD_MARKER, |command| {
+    let Some(output) = support::rerun_as_child(CHILD_MARKER, |command| {
         // The lifecycle checks need OpenTelemetry setup to succeed, so the exporters get a
         // valid endpoint and no signal-specific override may leak in from the caller.
         command
@@ -28,7 +28,7 @@ fn a_repeated_init_is_a_no_op_and_a_second_shutdown_reports_every_provider() {
     }) else {
         let fs = MemFs::new();
         for _ in 0..2 {
-            common::init_test_logger("/tmp/test-repeated-lifecycle", &fs);
+            support::init_test_logger("/tmp/test-repeated-lifecycle", &fs);
         }
 
         assert!(
