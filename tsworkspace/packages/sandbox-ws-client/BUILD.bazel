@@ -12,6 +12,7 @@ js_library(name = "package_metadata", srcs = ["package.json"])
 filegroup(name = "sources", srcs = glob(["src/**/*.ts"]))
 filegroup(name = "public_api_types", srcs = glob(["tests/types/**/*.ts"]))
 filegroup(name = "unit_tests", srcs = glob(["tests/**/*.test.ts", "tests/harness.ts"]))
+filegroup(name = "gateway_tests", srcs = glob(["tests/gateway/**/*.gateway.ts"]))
 
 ts_project(
     name = "build",
@@ -29,7 +30,7 @@ ts_project(
 
 ts_project(
     name = "typecheck",
-    srcs = ["scripts/check-doc-snippets.ts", "vitest.config.ts", ":public_api_types", ":sources"],
+    srcs = ["scripts/check-doc-snippets.ts", "vitest.config.ts", ":gateway_tests", ":public_api_types", ":sources"],
     declaration = True,
     declaration_map = True,
     extends = "tsconfig.json",
@@ -78,7 +79,7 @@ oxlint_bin.oxlint_test(
     name = "lint",
     args = ["--deny-warnings", "."],
     chdir = package_name(),
-    data = ["scripts/check-doc-snippets.ts", "tests/build-smoke.mjs", "vitest.config.ts", ":public_api_types", ":sources", ":unit_tests"],
+    data = ["scripts/check-doc-snippets.ts", "tests/build-smoke.mjs", "vitest.config.ts", ":gateway_tests", ":public_api_types", ":sources", ":unit_tests"],
 )
 
 npm_package(

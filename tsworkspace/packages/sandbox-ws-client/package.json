@@ -31,6 +31,7 @@
     "dev": "tsc --watch",
     "test:coverage": "vitest run --coverage",
     "test:built": "pnpm build && node --test tests/build-smoke.mjs",
+    "test:gateway": "pnpm build && node --test tests/gateway/*.gateway.ts",
     "lint": "oxlint --deny-warnings ."
   },
   "dependencies": {
