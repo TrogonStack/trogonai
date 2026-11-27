@@ -62,7 +62,7 @@ trogon-jwks-publisher = { path = "crates/platform/trogon-jwks-publisher" }
 trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
 trogon-sandbox-aca-worker = { path = "crates/sandbox/trogon-sandbox-aca-worker" }
-trogon-sandbox-actor-agent = { path = "crates/sandbox/trogon-sandbox-actor-agent" }
+trogon-sandbox-actor-agent = { path = "crates/sandbox/trogon-sandbox-actor-agent", default-features = false }
 trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-client = { path = "crates/sandbox/trogon-sandbox-client" }
 trogon-sandbox-conformance = { path = "crates/sandbox/trogon-sandbox-conformance" }
@@ -87,6 +87,7 @@ trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-providers = { path = "crates/sandbox/trogon-sandbox-providers" }
 trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
 trogon-sandbox-ssh-gateway = { path = "crates/sandbox/trogon-sandbox-ssh-gateway" }
+trogon-sandbox-substrate-worker = { path = "crates/sandbox/trogon-sandbox-substrate-worker" }
 trogon-sandbox-v8-wasm-worker = { path = "crates/sandbox/trogon-sandbox-v8-wasm-worker" }
 trogon-sandbox-vercel-worker = { path = "crates/sandbox/trogon-sandbox-vercel-worker" }
 trogon-sandbox-volumes = { path = "crates/sandbox/trogon-sandbox-volumes" }
@@ -210,6 +211,8 @@ thiserror = "=2.0.21"
 # SpiceDB / authzed gRPC (feature-gated SpiceDB-backed import gate)
 authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
 tonic = { version = "=0.14.9", default-features = false, features = ["transport", "codegen", "router"] }
+tonic-prost = "=0.14.5"
+tonic-prost-build = "=0.14.6"
 moka = { version = "=0.12.16", features = ["future"] }
 
 # Object storage
@@ -280,7 +283,9 @@ url = "=2.5.8"
 deno_core = "=0.410.0"
 walkdir = "=2.5.0"
 uuid = { version = "=1.24.0", features = ["v4", "v7"] }
+prost = "=0.14.3"
 prost-reflect = "=0.14.7"
+prost-types = "=0.14.3"
 serde_urlencoded = "=0.7.1"
 serde_yaml = "=0.9.34"
 wasmtime-wasi = "=47.0.3"
