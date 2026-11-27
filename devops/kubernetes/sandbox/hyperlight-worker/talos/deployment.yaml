@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-hyperlight-worker
+  namespace: sandbox-hyperlight
+  labels:
+    app: sandbox-hyperlight-worker
+spec:
+  # Guests live in the worker process, so each replica owns its own guests.
+  # Scale by adding replicas.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: sandbox-hyperlight-worker
+  template:
+    metadata:
+      labels:
+        app: sandbox-hyperlight-worker
+    spec:
+      # Label the nodes that expose /dev/kvm by hand:
+      #   kubectl label node <node> sandbox.trogonai.io/kvm=true
+      nodeSelector:
+        sandbox.trogonai.io/kvm: "true"
+      containers:
+        - name: worker
+          image: <registry>/trogon-sandbox-hyperlight-worker:<tag>
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: sandbox-hyperlight-worker
+          ports:
+            - containerPort: 9102
+              name: metrics
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+          securityContext:
+            # Opening /dev/kvm needs the device in the container's device
+            # cgroup, which a hostPath mount only gets in a privileged
+            # container.
+            privileged: true
+            runAsNonRoot: false
+            runAsUser: 0
+          volumeMounts:
+            - name: kvm
+              mountPath: /dev/kvm
+            - name: components
+              mountPath: /srv/components
+              readOnly: true
+      volumes:
+        - name: kvm
+          hostPath:
+            path: /dev/kvm
+            type: CharDevice
+        - name: components
+          persistentVolumeClaim:
+            claimName: sandbox-hyperlight-components
+            readOnly: true

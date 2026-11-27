@@ -1,0 +1,14 @@
+# Holds the Wasm components the worker loads. A lease that names image
+# <name> runs <name>.wasm from this volume.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sandbox-hyperlight-components
+  namespace: sandbox-hyperlight
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName: <storage-class>

@@ -1,0 +1,30 @@
+# Kata (Cloud Hypervisor), Kata (QEMU) and gVisor RuntimeClasses for Talos
+# nodes running the siderolabs/kata-containers and siderolabs/gvisor system
+# extensions. Each class schedules only onto nodes labelled for its runtime.
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata
+handler: kata
+scheduling:
+  nodeSelector:
+    sandbox.trogonai.io/kata: "true"
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-qemu
+handler: kata-qemu
+scheduling:
+  nodeSelector:
+    sandbox.trogonai.io/kata: "true"
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
+scheduling:
+  nodeSelector:
+    sandbox.trogonai.io/gvisor: "true"

@@ -1,0 +1,11 @@
+# The worker opens /dev/kvm, which needs a privileged container, so the
+# namespace allows the privileged Pod Security profile. Keep it to this
+# namespace only.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandbox-hyperlight
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

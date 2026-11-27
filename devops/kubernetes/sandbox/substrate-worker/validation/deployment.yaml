@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-substrate-worker
+  namespace: trogon-sandbox
+  labels:
+    app: sandbox-substrate-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sandbox-substrate-worker
+  template:
+    metadata:
+      labels:
+        app: sandbox-substrate-worker
+    spec:
+      serviceAccountName: sandbox-substrate-worker
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: <registry>/trogon-sandbox-substrate-worker@sha256:<digest>
+          env:
+            - name: SANDBOX_NATS_URL
+              value: nats://<nats-host>:4222
+            - name: SANDBOX_SUBSTRATE_API_ENDPOINT
+              value: https://<ate-api-server-host>:443
+            - name: SANDBOX_SUBSTRATE_TLS_CA_FILE
+              value: /var/run/secrets/substrate-api-ca/ca.pem
+            - name: SANDBOX_SUBSTRATE_BEARER_TOKEN_FILE
+              value: /var/run/secrets/substrate-token/token
+            - name: SANDBOX_SUBSTRATE_ROUTER_ENDPOINT
+              value: atenet-router.ate-system.svc:8444
+            - name: SANDBOX_SUBSTRATE_ROUTER_TLS_CA_FILE
+              value: /var/run/secrets/substrate-router-tls/ca.pem
+            - name: SANDBOX_SUBSTRATE_ROUTER_TLS_CLIENT_CERT_FILE
+              value: /var/run/secrets/substrate-router-tls/tls.crt
+            - name: SANDBOX_SUBSTRATE_ROUTER_TLS_CLIENT_KEY_FILE
+              value: /var/run/secrets/substrate-router-tls/tls.key
+            - name: SANDBOX_SUBSTRATE_AGENT_IMAGE
+              value: <registry>/trogon-sandbox-actor-agent@sha256:<digest>
+            - name: SANDBOX_SUBSTRATE_SANDBOX_CLASS
+              value: gvisor
+            - name: SANDBOX_SUBSTRATE_SIZE_CLASS
+              value: small=2048,medium=8192,large=32768
+            - name: SANDBOX_SUBSTRATE_SNAPSHOTS_LOCATION
+              value: <snapshot-store-url>
+            - name: SANDBOX_METRICS_ADDR
+              value: 0.0.0.0:9108
+            - name: RUST_LOG
+              value: info
+          ports:
+            - containerPort: 9108
+              name: metrics
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: substrate-token
+              mountPath: /var/run/secrets/substrate-token
+              readOnly: true
+            - name: substrate-api-ca
+              mountPath: /var/run/secrets/substrate-api-ca
+              readOnly: true
+            - name: substrate-router-tls
+              mountPath: /var/run/secrets/substrate-router-tls
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        # A short-lived token for ate-api-server. The worker rereads the file
+        # on every call, so rotation needs no restart.
+        - name: substrate-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: <ate-api-server-audience>
+                  expirationSeconds: 3600
+                  path: token
+        # The CA that signed ate-api-server's certificate, as key ca.pem.
+        - name: substrate-api-ca
+          configMap:
+            name: substrate-api-ca
+        # Router mTLS material: the router CA as ca.pem and this worker's
+        # client certificate as tls.crt and tls.key.
+        - name: substrate-router-tls
+          secret:
+            secretName: substrate-router-tls
