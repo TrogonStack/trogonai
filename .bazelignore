@@ -12,3 +12,4 @@ tsworkspace/packages/proto/node_modules
 tsworkspace/packages/slack-bolt-fixtures/node_modules
 tsworkspace/packages/sandbox-ws-client/node_modules
 tsworkspace/packages/sandbox-agent-tools/node_modules
+tsworkspace/packages/sandbox-cli/node_modules
