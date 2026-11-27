@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+#MISE description="Install the pinned protoc release for IMAGE_ARCH and export PROTOC through GITHUB_ENV"
+set -euo pipefail
+
+: "${IMAGE_ARCH:?IMAGE_ARCH is required}"
+: "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+: "${GITHUB_ENV:?GITHUB_ENV is required}"
+
+# Matches the pin in devops/docker/images/trogon-sandbox-substrate-worker/Dockerfile.
+# Ubuntu's protobuf-compiler predates the `debug_redact` option ateapi.proto uses.
+version=36.2
+case "$IMAGE_ARCH" in
+    amd64) protoc_arch=x86_64; protoc_sha256=121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278 ;;
+    arm64) protoc_arch=aarch_64; protoc_sha256=8b8f18bd2b30346efbc698dd5a73dd7c805f3ef8380f6dfc95c768f3f1852f6a ;;
+    *) echo "unsupported IMAGE_ARCH: ${IMAGE_ARCH}" >&2; exit 1 ;;
+esac
+
+archive="$RUNNER_TEMP/protoc.zip"
+destination="$RUNNER_TEMP/protoc"
+curl -fsSL --retry 5 -o "$archive" \
+    "https://github.com/protocolbuffers/protobuf/releases/download/v${version}/protoc-${version}-linux-${protoc_arch}.zip"
+echo "${protoc_sha256}  ${archive}" | sha256sum -c -
+rm -rf "$destination"
+unzip -q "$archive" -d "$destination"
+rm "$archive"
+echo "PROTOC=${destination}/bin/protoc" >>"$GITHUB_ENV"

@@ -1,8 +1,9 @@
 # Default values for sandbox-stack.
 # Release name `sandbox` yields services like sandbox-nats and sandbox-zot.
 # Service images are named after the binary they run, for example
-# <imageRegistry>/trogon-sandbox-broker. They are not published yet: build them
-# and push them to the registry imageRegistry points at.
+# <imageRegistry>/trogon-sandbox-broker. Each push to main publishes them under
+# the `canary` tag and its commit SHA, and never as `latest`, so set imageTag to
+# one of those or push your own builds to the registry imageRegistry points at.
 
 global:
   imageRegistry: ghcr.io/trogonstack/images/trogonai

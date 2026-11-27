@@ -41,6 +41,23 @@ jobs:
       matrix:
         service:
           - trogon-gateway
+          - trogon-sandbox-aca-worker
+          - trogon-sandbox-actor-agent
+          - trogon-sandbox-broker
+          - trogon-sandbox-credential-broker
+          - trogon-sandbox-dashboard
+          - trogon-sandbox-daytona-worker
+          - trogon-sandbox-docker-worker
+          - trogon-sandbox-egress-proxy
+          - trogon-sandbox-hyperlight-worker
+          - trogon-sandbox-k8s-worker
+          - trogon-sandbox-kubevirt-worker
+          - trogon-sandbox-modal-worker
+          - trogon-sandbox-snapshot-builder
+          - trogon-sandbox-ssh-gateway
+          - trogon-sandbox-subprocess-worker
+          - trogon-sandbox-substrate-worker
+          - trogon-sandbox-ws-gateway
         arch:
           - amd64
           - arm64
@@ -49,6 +66,15 @@ jobs:
             runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
+          # Images whose binaries are not one binary named after the image.
+          - service: trogon-sandbox-egress-proxy
+            binaries: trogon-sandbox-egress-proxy:trogon-sandbox-egress-proxyd
+          - service: trogon-sandbox-subprocess-worker
+            binaries: >-
+              trogon-sandbox-subprocess-worker:trogon-sandbox-subprocess-worker
+              trogon-sandbox-egress-proxy:trogon-sandbox-egress-proxyd
+          - service: trogon-sandbox-substrate-worker
+            protoc: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,11 +124,18 @@ jobs:
           shared-key: build
           workspaces: rsworkspace -> target
 
+      - name: Install protoc
+        if: steps.published.outputs.published == 'false' && matrix.protoc
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: mise run --skip-tools github:workflows:canary-container-images:install-protoc
+
       - name: Build release binary
         if: steps.published.outputs.published == 'false'
         env:
           SERVICE: ${{ matrix.service }}
           IMAGE_ARCH: ${{ matrix.arch }}
+          IMAGE_BINARIES: ${{ matrix.binaries }}
           OUTPUT_DIR: ${{ runner.temp }}/image-binaries
         run: mise run --skip-tools github:workflows:canary-container-images:image-binary
 
@@ -118,6 +151,9 @@ jobs:
   build-and-push:
     name: Build and push (${{ matrix.service }})
     needs: binary
+    # One image's failed binary must not hold back the others. An image whose
+    # binary is missing fails at its own build step.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/trogonstack/images/trogonai/${{ matrix.service }}
@@ -126,6 +162,23 @@ jobs:
       matrix:
         service:
           - trogon-gateway
+          - trogon-sandbox-aca-worker
+          - trogon-sandbox-actor-agent
+          - trogon-sandbox-broker
+          - trogon-sandbox-credential-broker
+          - trogon-sandbox-dashboard
+          - trogon-sandbox-daytona-worker
+          - trogon-sandbox-docker-worker
+          - trogon-sandbox-egress-proxy
+          - trogon-sandbox-hyperlight-worker
+          - trogon-sandbox-k8s-worker
+          - trogon-sandbox-kubevirt-worker
+          - trogon-sandbox-modal-worker
+          - trogon-sandbox-snapshot-builder
+          - trogon-sandbox-ssh-gateway
+          - trogon-sandbox-subprocess-worker
+          - trogon-sandbox-substrate-worker
+          - trogon-sandbox-ws-gateway
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

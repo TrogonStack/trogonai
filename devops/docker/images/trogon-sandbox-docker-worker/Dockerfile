@@ -35,7 +35,9 @@ RUN --mount=type=bind,source=rsworkspace,target=/src,rw \
     && CARGO_PROFILE_RELEASE_STRIP=symbols cargo build --locked --release --package trogon-sandbox-docker-worker --bin trogon-sandbox-docker-worker \
     && install -D /cargo-target/release/trogon-sandbox-docker-worker /out/trogon-sandbox-docker-worker
 
-FROM debian:trixie-20261104-slim
+# Trixie's glibc is newer than the one on the CI runners that compile the
+# prebuilt binaries, so those binaries load here.
+FROM debian:trixie-20261104-slim AS base
 
 ARG OCI_REVISION
 LABEL org.opencontainers.image.source="https://github.com/TrogonStack/trogonai" \
@@ -48,8 +50,17 @@ RUN apt-get update \
     && groupadd --gid 65532 trogon \
     && useradd --uid 65532 --gid 65532 --no-create-home --shell /usr/sbin/nologin trogon
 
-COPY --from=builder /out/trogon-sandbox-docker-worker /usr/local/bin/trogon-sandbox-docker-worker
-
 STOPSIGNAL SIGTERM
 
 ENTRYPOINT ["/usr/local/bin/trogon-sandbox-docker-worker"]
+
+# CI compiles each architecture natively and passes the binaries in as the
+# `binaries` build context.
+FROM base AS prebuilt
+
+ARG TARGETARCH
+COPY --from=binaries --chmod=0755 ${TARGETARCH}/trogon-sandbox-docker-worker /usr/local/bin/trogon-sandbox-docker-worker
+
+FROM base AS runtime
+
+COPY --from=builder /out/trogon-sandbox-docker-worker /usr/local/bin/trogon-sandbox-docker-worker
