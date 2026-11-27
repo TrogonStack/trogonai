@@ -148,6 +148,7 @@ impl LiveFlows {
         match resolver.confirm_binding(&name, port, facts.dest_ip).await {
             Ok(()) => None,
             Err(NameBindingError::NotAnAnswer) => Some(EgressViolationReason::SniDestinationMismatch),
+            Err(NameBindingError::CarriesSentinel) => Some(EgressViolationReason::PolicyDenied),
             Err(NameBindingError::Unresolved(_)) => resolver
                 .bindings()
                 .is_bound(&name, facts.dest_ip)

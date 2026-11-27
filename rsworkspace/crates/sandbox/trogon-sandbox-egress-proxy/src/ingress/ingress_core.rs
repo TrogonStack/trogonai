@@ -16,7 +16,7 @@ use crate::deny_explanation::{deny_explanation, standard_reason};
 use crate::dial;
 use crate::host_kind::{HostClassification, HostKind};
 use crate::policy::{Ruling, allows_by_address, refuses_address, rule, rule_host};
-use crate::resolve::{AllowRanges, ResolveError, VettedAddr, VettingResolver};
+use crate::resolve::{AllowRanges, ResolveError, VettedAddr, VettingResolver, carries_sentinel};
 use crate::tunnel_gate::TunnelGate;
 use crate::violation_store::resolved_to_words;
 use trogon_sandbox_protocol::{StandardDenyReason, unlisted_destinations_refuse};
@@ -106,8 +106,12 @@ impl Ingress {
     /// policy's `allow_ranges` carve them out; only those are dialed, in
     /// order, and an address a rule would deny is dropped. A destination the policy leaves unlisted goes to the decider
     /// when there is one: a name before it is resolved, unless an allow range
-    /// might still cover it, and everything else once its address is known.
-    /// An explicit deny and the SSRF floor are never put to the decider.
+    /// open on its port might still cover it, and everything else once its
+    /// address is known. An explicit deny and the SSRF floor are never put to
+    /// the decider. A name is resolved only when a rule allows it or an allow
+    /// range open on its port might, so a name about to be refused never
+    /// reaches DNS, and a name carrying a secret sentinel is refused before
+    /// anything else.
     pub(super) async fn admit(
         &self,
         policy: &NetworkPolicy,
@@ -127,6 +131,15 @@ impl Ingress {
                 !matches!(method, DecideMethod::Http(_)),
                 port,
             );
+        if let HostKind::Domain(name) = target.host().kind()
+            && carries_sentinel(name.as_str())
+        {
+            return Admission::Denied {
+                dest_ip: None,
+                reason: EgressViolationReason::PolicyDenied,
+                explanation: None,
+            };
+        }
         let mut decided = false;
         match rule_host(policy, target.host(), port) {
             Ruling::Deny => {
@@ -137,7 +150,7 @@ impl Ingress {
                 };
             }
             Ruling::Allow(_) => {}
-            Ruling::Unlisted if literal_ip.is_none() && !by_name && allows_by_address(policy) => {}
+            Ruling::Unlisted if literal_ip.is_none() && !by_name && allows_by_address(policy, port) => {}
             Ruling::Unlisted => {
                 if let Err(refused) = self.consult(target, method.clone(), routed).await {
                     return Admission::Denied {
@@ -187,6 +200,13 @@ impl Ingress {
                     };
                 }
                 Ok(Err(ResolveError::Unresolved(err))) => return Admission::Unresolved(err),
+                Ok(Err(ResolveError::CarriesSentinel)) => {
+                    return Admission::Denied {
+                        dest_ip: None,
+                        reason: EgressViolationReason::PolicyDenied,
+                        explanation: None,
+                    };
+                }
                 Err(_) => return unresolved(io::ErrorKind::TimedOut),
             }
         };

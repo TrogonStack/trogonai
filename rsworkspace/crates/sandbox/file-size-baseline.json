@@ -13,7 +13,7 @@
     "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/decider_stream/tests.rs": 1472,
     "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/http_intercept.rs": 3227,
     "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/http_intercept/tests.rs": 1360,
-    "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/proxy.rs": 1024,
+    "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/proxy.rs": 1023,
     "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/proxy/tests.rs": 2295,
     "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/sigv4_resign_tests.rs": 1270,
     "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/tls_intercept/tests.rs": 1606,

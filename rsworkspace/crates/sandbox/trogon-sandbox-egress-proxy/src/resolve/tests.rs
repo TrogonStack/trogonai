@@ -695,3 +695,80 @@ async fn an_address_outside_the_listed_ranges_is_judged_as_before() -> Result<()
     assert!(outcome.is_ok());
     Ok(())
 }
+
+/// Records every name it is asked, so a test can prove a name never reached DNS.
+#[derive(Default)]
+struct RecordingLookup(std::sync::Mutex<Vec<String>>);
+
+impl RecordingLookup {
+    fn asked(&self) -> Vec<String> {
+        match self.0.lock() {
+            Ok(asked) => asked.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+}
+
+#[async_trait]
+impl NameLookup for RecordingLookup {
+    async fn lookup(&self, name: &str, _port: Port) -> io::Result<Vec<IpAddr>> {
+        match self.0.lock() {
+            Ok(mut asked) => asked.push(name.to_string()),
+            Err(poisoned) => poisoned.into_inner().push(name.to_string()),
+        }
+        Ok(vec![ip("203.0.113.7").map_err(|_| io::ErrorKind::InvalidData)?])
+    }
+}
+
+const SENTINEL_NAMES: [&str; 3] = [
+    "fake_value_6f1c2d0e-1a2b-4c3d-8e9f-0a1b2c3d4e5f.attacker.example",
+    "x-FAKE_VALUE_6f1c2d0e.attacker.example",
+    "eyjhbgcioijfuzi1nij9.e30.zmfrzs1zawduyxr1cmu.attacker.example",
+];
+
+#[tokio::test]
+async fn a_name_carrying_a_sentinel_is_never_looked_up_to_resolve() -> Result<(), Box<dyn std::error::Error>> {
+    let lookup = Arc::new(RecordingLookup::default());
+    let resolver = VettingResolver::new(lookup.clone(), floor(&[])?);
+    for name in SENTINEL_NAMES {
+        let outcome = resolver
+            .resolve_all(&Host::new(name)?, port()?, &AllowRanges::default())
+            .await;
+        assert!(
+            matches!(outcome, Err(ResolveError::CarriesSentinel)),
+            "{name}: {outcome:?}"
+        );
+    }
+    assert!(lookup.asked().is_empty(), "looked up: {:?}", lookup.asked());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_name_carrying_a_sentinel_is_never_looked_up_to_confirm_a_binding() -> Result<(), Box<dyn std::error::Error>>
+{
+    let lookup = Arc::new(RecordingLookup::default());
+    let resolver = VettingResolver::new(lookup.clone(), floor(&[])?);
+    for name in SENTINEL_NAMES {
+        let outcome = resolver
+            .confirm_binding(&Host::new(name)?, port()?, ip("203.0.113.7")?)
+            .await;
+        assert!(
+            matches!(outcome, Err(NameBindingError::CarriesSentinel)),
+            "{name}: {outcome:?}"
+        );
+    }
+    assert!(lookup.asked().is_empty(), "looked up: {:?}", lookup.asked());
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_ordinary_name_is_still_looked_up() -> Result<(), Box<dyn std::error::Error>> {
+    let lookup = Arc::new(RecordingLookup::default());
+    let resolver = VettingResolver::new(lookup.clone(), floor(&[])?);
+    let outcome = resolver
+        .resolve_all(&Host::new("api.example.com")?, port()?, &AllowRanges::default())
+        .await;
+    assert!(outcome.is_ok(), "{outcome:?}");
+    assert_eq!(lookup.asked(), vec!["api.example.com".to_string()]);
+    Ok(())
+}

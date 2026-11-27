@@ -711,10 +711,29 @@ fn rule_host_denies_a_deny_range_ip_literal() -> Result<(), Box<dyn std::error::
 
 #[test]
 fn allows_by_address_needs_a_user_defined_policy_with_allow_ranges() -> Result<(), Box<dyn std::error::Error>> {
-    assert!(allows_by_address(&user_defined(&[], &[], &["10.0.0.0/8"], &[])?));
-    assert!(!allows_by_address(&user_defined(&[], &[], &[], &[])?));
-    assert!(!allows_by_address(&NetworkPolicy::AllowAll));
-    assert!(!allows_by_address(&NetworkPolicy::DenyAll));
+    assert!(allows_by_address(&user_defined(&[], &[], &["10.0.0.0/8"], &[])?, 443));
+    assert!(!allows_by_address(&user_defined(&[], &[], &[], &[])?, 443));
+    assert!(!allows_by_address(&NetworkPolicy::AllowAll, 443));
+    assert!(!allows_by_address(&NetworkPolicy::DenyAll, 443));
+    Ok(())
+}
+
+#[test]
+fn allows_by_address_needs_an_allow_range_open_on_the_port() -> Result<(), Box<dyn std::error::Error>> {
+    let policy = user_defined(&[], &[], &["203.0.113.7:8443"], &[])?;
+    assert!(allows_by_address(&policy, 8443));
+    assert!(!allows_by_address(&policy, 443));
+    assert!(!allows_by_address(&policy, 80));
+    Ok(())
+}
+
+#[test]
+fn decide_host_denies_an_unlisted_name_no_allow_range_could_admit_on_its_port() -> Result<(), Box<dyn std::error::Error>>
+{
+    let policy = user_defined(&[], &[], &["203.0.113.7:8443"], &[])?;
+    let name = Host::new("data.attacker.example")?;
+    assert_eq!(decide_host(&policy, &name, 443), Decision::Deny);
+    assert_eq!(decide_host(&policy, &name, 8443), Decision::Allow);
     Ok(())
 }
 

@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ipnet::IpNet;
-use trogon_sandbox_contract::{AddressDenialClass, IpRange, NetworkPolicy};
+use trogon_sandbox_contract::{AddressDenialClass, EgressViolationReason, IpRange, NetworkPolicy};
 use trogon_sandbox_contract::{Host, Port};
-use trogon_sandbox_protocol::is_loopback_name;
+use trogon_sandbox_protocol::{Sentinel, is_loopback_name};
 #[cfg(windows)]
 use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS};
 #[cfg(windows)]
@@ -433,6 +433,10 @@ pub enum ResolveError {
     },
     #[error("name did not resolve: {0}")]
     Unresolved(io::Error),
+    /// The name carries a secret sentinel, so it was never sent to DNS: the
+    /// query alone would carry the sentinel to whoever answers for the zone.
+    #[error("name carries a secret sentinel and is never resolved")]
+    CarriesSentinel,
 }
 
 /// Resolves a destination once and returns the one vetted address the caller
@@ -520,6 +524,7 @@ impl VettingResolver {
     ) -> Result<Vec<VettedAddr>, ResolveError> {
         let candidates = match host.kind() {
             HostKind::Ip(ip) => vec![ip],
+            HostKind::Domain(name) if carries_sentinel(name.as_str()) => return Err(ResolveError::CarriesSentinel),
             HostKind::Domain(name) => self
                 .lookup
                 .lookup(name.as_str(), port)
@@ -620,6 +625,20 @@ impl VettingResolver {
 pub enum NameBindingError {
     Unresolved(io::Error),
     NotAnAnswer,
+    /// The name carries a secret sentinel and was never looked up.
+    CarriesSentinel,
+}
+
+impl NameBindingError {
+    /// The reason a connection is refused when the name its TLS handshake
+    /// presented fails this check.
+    pub(crate) fn sni_violation(&self) -> EgressViolationReason {
+        match self {
+            Self::NotAnAnswer => EgressViolationReason::SniDestinationMismatch,
+            Self::Unresolved(_) => EgressViolationReason::SniResolutionFailed,
+            Self::CarriesSentinel => EgressViolationReason::PolicyDenied,
+        }
+    }
 }
 
 impl VettingResolver {
@@ -633,6 +652,9 @@ impl VettingResolver {
     pub async fn confirm_binding(&self, name: &Host, port: Port, original: IpAddr) -> Result<(), NameBindingError> {
         let answers = match name.kind() {
             HostKind::Ip(ip) => vec![ip],
+            HostKind::Domain(domain) if carries_sentinel(domain.as_str()) => {
+                return Err(NameBindingError::CarriesSentinel);
+            }
             HostKind::Domain(domain) => self
                 .lookup
                 .lookup(domain.as_str(), port)
@@ -655,6 +677,12 @@ impl VettingResolver {
             Err(NameBindingError::NotAnAnswer)
         }
     }
+}
+
+/// Whether `name` must never be resolved because it carries a secret
+/// sentinel. Every lookup this resolver makes passes through it.
+pub fn carries_sentinel(name: &str) -> bool {
+    Sentinel::appears_in(name)
 }
 
 #[cfg(test)]

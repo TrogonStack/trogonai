@@ -100,10 +100,8 @@ pub fn decide_host(policy: &NetworkPolicy, host: &Host, port: u16) -> Decision {
     match rule_host(policy, host, port) {
         Ruling::Allow(_) => Decision::Allow,
         Ruling::Deny => Decision::Deny,
-        Ruling::Unlisted => match (policy, host.kind()) {
-            (NetworkPolicy::UserDefined { allow_ranges, .. }, HostKind::Domain(_)) if !allow_ranges.is_empty() => {
-                Decision::Allow
-            }
+        Ruling::Unlisted => match host.kind() {
+            HostKind::Domain(_) if allows_by_address(policy, port) => Decision::Allow,
             _ => Decision::Deny,
         },
     }
@@ -140,9 +138,15 @@ pub fn rule_host(policy: &NetworkPolicy, host: &Host, port: u16) -> Ruling {
 }
 
 /// Whether resolving a name the policy does not list can still end in an
-/// allow, because an allow range might cover the address it resolves to.
-pub fn allows_by_address(policy: &NetworkPolicy) -> bool {
-    matches!(policy, NetworkPolicy::UserDefined { allow_ranges, .. } if !allow_ranges.is_empty())
+/// allow on `port`, because an allow range open on that port might cover the
+/// address it resolves to. When none can, the name is refused unresolved: a
+/// DNS query for a name about to be denied would carry the name, and anything
+/// a workload encoded in it, to whoever answers for its zone.
+pub fn allows_by_address(policy: &NetworkPolicy, port: u16) -> bool {
+    matches!(
+        policy,
+        NetworkPolicy::UserDefined { allow_ranges, .. } if allow_ranges.iter().any(|range| range.allows_port(port))
+    )
 }
 
 /// Whether the policy forbids dialing `addr` on `port` whatever name led
