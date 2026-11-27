@@ -1,9 +1,7 @@
 use crate::agent_launch::{AgentLaunch, AgentLaunchError};
+use crate::constants::ENV_AGENT;
 use acp_nats::{AcpPrefix, AcpPrefixError, Config, NatsConfig};
 use trogon_std::env::ReadEnv;
-
-/// The agent to launch, as a command line or Zed `agent_servers` JSON.
-pub const ENV_AGENT: &str = "ACP_HOST_AGENT";
 
 /// Why the environment did not describe a host.
 #[derive(Debug, thiserror::Error)]

@@ -1,4 +1,5 @@
 use super::*;
+use acp_nats::nats::AcpStream;
 use trogon_nats::jetstream::MockJetStreamContext;
 
 #[tokio::test]

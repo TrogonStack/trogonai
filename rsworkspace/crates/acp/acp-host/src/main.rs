@@ -13,6 +13,7 @@
 
 mod agent_launch;
 mod config;
+mod constants;
 mod initialized_agent;
 mod restart_policy;
 mod session_routed_client;

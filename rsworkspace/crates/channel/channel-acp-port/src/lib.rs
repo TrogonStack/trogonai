@@ -17,10 +17,10 @@
 
 mod acp_port;
 mod buffered_render_client;
+mod constants;
 mod pipeline;
 
 pub use acp_port::{AcpBridge, AcpPort, AcpPortError, SessionMethod, SessionMethods};
 pub use buffered_render_client::BufferedRenderClient;
-pub use pipeline::{
-    DecodeInbound, NEW_SESSION_ACKNOWLEDGEMENT, Pipeline, PipelineError, SendText, SendTyping, sender_endpoint,
-};
+pub use constants::NEW_SESSION_ACKNOWLEDGEMENT;
+pub use pipeline::{DecodeInbound, Pipeline, PipelineError, SendText, SendTyping, sender_endpoint};

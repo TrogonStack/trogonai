@@ -121,21 +121,27 @@ async fn handle_agent_dispatch<C: ClientHandler + Send + Sync + 'static>(
                 _ => responder.respond_with_error(Error::method_not_found()),
             }
         }
-        Dispatch::Notification(notification) => match notification {
-            AgentNotification::SessionNotification(notif) => cx.spawn(async move {
-                log_notification_error("session/update", client.session_notification(notif).await);
-                Ok(())
-            }),
-            AgentNotification::CompleteElicitationNotification(notif) => cx.spawn(async move {
-                log_notification_error("elicitation/complete", client.elicitation_complete(notif).await);
-                Ok(())
-            }),
-            AgentNotification::ExtNotification(notif) => cx.spawn(async move {
-                log_notification_error("ext notification", client.ext_notification(notif).await);
-                Ok(())
-            }),
-            _ => Ok(()),
-        },
+        // Notifications are forwarded inline, unlike requests: the agent writes
+        // a turn's `session/update`s before its `session/prompt` response, and
+        // the dispatch loop only reaches that response once these return. A
+        // spawned forward could still be queued when the response goes out,
+        // so the client would end the turn before its text arrived and the
+        // late chunks would land in the next one.
+        Dispatch::Notification(notification) => {
+            match notification {
+                AgentNotification::SessionNotification(notif) => {
+                    log_notification_error("session/update", client.session_notification(notif).await);
+                }
+                AgentNotification::CompleteElicitationNotification(notif) => {
+                    log_notification_error("elicitation/complete", client.elicitation_complete(notif).await);
+                }
+                AgentNotification::ExtNotification(notif) => {
+                    log_notification_error("ext notification", client.ext_notification(notif).await);
+                }
+                _ => {}
+            }
+            Ok(())
+        }
         Dispatch::Response(result, router) => router.route_with_result(result),
     }
 }

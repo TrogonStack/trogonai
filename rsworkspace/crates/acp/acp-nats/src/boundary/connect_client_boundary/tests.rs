@@ -38,7 +38,6 @@ impl AgentHandler for ChattyAgent {
     }
 
     async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
-        use crate::client_handler::ClientHandler as _;
         let client = self.client()?;
         client
             .session_notification(SessionNotification::new(
@@ -69,6 +68,8 @@ impl AgentHandler for ChattyAgent {
 struct RecordingClient {
     updates: Mutex<Vec<SessionNotification>>,
     permission_asks: Mutex<u32>,
+    /// How long relaying each update takes, standing in for a slow NATS publish.
+    update_delay: std::time::Duration,
 }
 
 #[async_trait::async_trait]
@@ -79,6 +80,7 @@ impl ClientHandler for RecordingClient {
     }
 
     async fn session_notification(&self, args: SessionNotification) -> Result<()> {
+        tokio::time::sleep(self.update_delay).await;
         self.updates.lock().map_err(|_| Error::internal_error())?.push(args);
         Ok(())
     }
@@ -139,6 +141,37 @@ async fn a_spawned_agents_updates_and_permission_asks_reach_the_client_handler()
     assert_eq!(response.stop_reason, StopReason::Cancelled);
     assert_eq!(client.updates.lock().expect("lock").len(), 1);
     assert_eq!(*client.permission_asks.lock().expect("lock"), 1);
+}
+
+/// The agent writes a turn's updates before its prompt response, and a client
+/// reads the turn's text once the response arrives. However slowly an update is
+/// relayed, it has to have reached the client by then.
+#[tokio::test]
+async fn updates_are_relayed_before_the_prompt_they_belong_to_answers() {
+    let client = Arc::new(RecordingClient {
+        update_delay: std::time::Duration::from_millis(100),
+        ..RecordingClient::default()
+    });
+
+    let exit = connect_client_boundary_with(client.clone(), spawn_chatty_agent(), async move |cx| {
+        let agent = ConnectionAgent::new(cx);
+        agent.initialize(InitializeRequest::new(ProtocolVersion::V1)).await?;
+        let session = agent.new_session(NewSessionRequest::new("/tmp")).await?;
+        agent
+            .prompt(PromptRequest::new(
+                session.session_id,
+                vec![ContentBlock::Text(TextContent::new("hi"))],
+            ))
+            .await?;
+        Ok(client.updates.lock().map_err(|_| Error::internal_error())?.len())
+    })
+    .await
+    .expect("boundary runs");
+
+    let BoundaryExit::Main(updates_when_answered) = exit else {
+        panic!("connection closed before the prompt answered");
+    };
+    assert_eq!(updates_when_answered, 1);
 }
 
 #[tokio::test]

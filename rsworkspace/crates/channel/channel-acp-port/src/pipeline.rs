@@ -12,11 +12,7 @@ use trogon_nats::jetstream::{ClaimResolveError, ClaimResolver, ObjectStoreGet};
 use trogon_std::NowV7;
 
 use crate::BufferedRenderClient;
-
-/// What the bridge says back when a command has nothing else to do. A reset
-/// with no follow-up prompt produces no agent output, so without this the user
-/// gets silence.
-pub const NEW_SESSION_ACKNOWLEDGEMENT: &str = "Started a new session.";
+use crate::constants::NEW_SESSION_ACKNOWLEDGEMENT;
 
 /// Normalize one platform's raw inbound payload into the channel-neutral event
 /// and the place its reply goes.
