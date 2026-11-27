@@ -1,7 +1,7 @@
 use std::ops::Deref;
-use trogon_peer::PeerState;
 use trogon_peer::{
-    AcceptedMessage, CollaborationRef, EnrollmentFacts, IdempotencyKey, PeerHistory, PeerId, TrustedPeerOwner,
+    AcceptedMessage, CollaborationRef, EnrollmentFacts, IdempotencyKey, IntakenMessage, PeerHistory, PeerId, PeerState,
+    TrustedPeerOwner,
 };
 
 pub(crate) struct ScopedPeerHistory {
@@ -20,6 +20,10 @@ impl ScopedPeerHistory {
 
     pub(crate) fn collaboration(&self) -> &CollaborationRef {
         self.enrollment.collaboration()
+    }
+
+    pub(crate) fn inbox_entries(&self) -> std::slice::Iter<'_, IntakenMessage> {
+        self.history.inbox()
     }
 
     pub(crate) fn accepted(&self, key: &IdempotencyKey) -> Option<&AcceptedMessage> {
