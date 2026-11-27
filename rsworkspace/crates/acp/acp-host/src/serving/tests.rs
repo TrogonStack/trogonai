@@ -121,7 +121,13 @@ impl Host {
             Arc::new(ClientHandshake::default()),
             Arc::new(Notify::new()),
         );
-        tokio::task::spawn_local(serve(agent, nats.clone(), factory, AcpPrefix::new("acp").unwrap()));
+        tokio::task::spawn_local(serve(
+            agent,
+            nats.clone(),
+            factory,
+            AcpPrefix::new("acp").unwrap(),
+            std::future::pending(),
+        ));
         Self {
             nats,
             global,

@@ -6,12 +6,12 @@ use crate::restart_policy::RestartPolicy;
 use acp_nats::boundary::{BoundaryExit, ConnectionAgent, connect_client_boundary_with};
 use acp_nats::{AgentHandler, ClientHandler};
 use agent_client_protocol::{AcpAgent, Client, ConnectTo};
-use std::convert::Infallible;
 use std::fmt::Display;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 /// Produces the transport to a fresh agent. One operation, so tests can hand
@@ -115,10 +115,11 @@ where
     }
 }
 
-/// Keeps one agent running behind `serve` for as long as the future is polled,
-/// relaunching it per `policy` whenever a run ends. The caller stops it by
-/// dropping the future (on shutdown), which also drops the child: the SDK
-/// shuts a spawned agent down when its connection goes away.
+/// Keeps one agent running behind `serve`, relaunching it per `policy`
+/// whenever a run ends, until `shutdown` is cancelled. `serve` is expected to
+/// end its run on the same signal (see [`crate::serving::serve`]); the run
+/// that ends then is not relaunched, and this returns. Its child goes with it:
+/// the SDK shuts a spawned agent down when its connection goes away.
 ///
 /// The one [`ClientClaim`] spans every run, so the client a host serves stays
 /// the same across relaunches, and so does the client's `initialize`: every
@@ -136,8 +137,8 @@ pub async fn supervise<L, C, S, F, E>(
     claim: Arc<ClientClaim>,
     serve: S,
     policy: RestartPolicy,
-) -> Infallible
-where
+    shutdown: &CancellationToken,
+) where
     L: LaunchAgent,
     C: ClientHandler + Send + Sync + 'static,
     S: Fn(InitializedAgent<ConnectionAgent>) -> F,
@@ -146,10 +147,14 @@ where
 {
     let handshake = Arc::new(ClientHandshake::default());
     let mut delay = None;
-    loop {
+    while !shutdown.is_cancelled() {
         let started = Instant::now();
         let exit = run_once(launcher, client.clone(), claim.clone(), handshake.clone(), &serve).await;
         let uptime = started.elapsed();
+        if shutdown.is_cancelled() {
+            info!(%exit, uptime_ms = uptime.as_millis(), "agent run ended for shutdown");
+            return;
+        }
         if matches!(exit, RunExit::Reinitialize) {
             info!(%exit, uptime_ms = uptime.as_millis(), "relaunching the agent");
             delay = None;
@@ -157,7 +162,10 @@ where
         }
         let next = policy.next_delay(delay, uptime);
         warn!(%exit, uptime_ms = uptime.as_millis(), restart_in_ms = next.as_millis(), "agent run ended; relaunching");
-        tokio::time::sleep(next).await;
+        tokio::select! {
+            () = tokio::time::sleep(next) => {}
+            () = shutdown.cancelled() => return,
+        }
         delay = Some(next);
     }
 }

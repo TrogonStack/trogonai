@@ -13,12 +13,18 @@ use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 /// checks as the connection's gate, so a refused client's `session/new`,
 /// `session/prompt` and the rest never reach the child.
 ///
+/// Serving ends when `stop` resolves, once every COMMANDS message this run
+/// holds has been handed back for redelivery (see
+/// [`AgentSideNatsConnection::with_jetstream_gated_until`]), so a host that is
+/// shutting down leaves no command waiting out `ack_wait`.
+///
 /// Runs `!Send` tasks: call it inside a `LocalSet`.
 pub fn serve<A, N, J>(
     agent: InitializedAgent<A>,
     nats: N,
     js: J,
     prefix: AcpPrefix,
+    stop: impl Future<Output = ()> + 'static,
 ) -> impl Future<Output = Result<(), ConnectionError>>
 where
     A: AgentHandler + Send + Sync + 'static,
@@ -27,9 +33,17 @@ where
     JsMessageOf<J>: JsDispatchMessage,
 {
     let gate = agent.claim();
-    let (_connection, serving) = AgentSideNatsConnection::with_jetstream_gated(agent, gate, nats, js, prefix, |task| {
-        tokio::task::spawn_local(task);
-    });
+    let (_connection, serving) = AgentSideNatsConnection::with_jetstream_gated_until(
+        agent,
+        gate,
+        nats,
+        js,
+        prefix,
+        |task| {
+            tokio::task::spawn_local(task);
+        },
+        stop,
+    );
     serving
 }
 

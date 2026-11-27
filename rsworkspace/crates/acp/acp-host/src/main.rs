@@ -27,11 +27,13 @@ use acp_nats::boundary::ConnectionAgent;
 use acp_nats::nats;
 use client_claim::ClientClaim;
 use config::HostConfig;
+use constants::SHUTDOWN_GRACE;
 use initialized_agent::InitializedAgent;
 use restart_policy::RestartPolicy;
 use session_routed_client::SessionRoutedClient;
 use std::sync::Arc;
-use tracing::{error, info};
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
 use trogon_nats::jetstream::NatsJetStreamClient;
 use trogon_std::env::SystemEnv;
 use trogon_std::fs::SystemFs;
@@ -60,21 +62,58 @@ async fn main() -> anyhow::Result<()> {
         acp.acp_prefix_ref().clone(),
         acp.operation_timeout(),
     ));
-    let prefix = acp.acp_prefix_ref().clone();
-    let serve = move |agent: InitializedAgent<ConnectionAgent>| {
-        serving::serve(agent, nats_client.clone(), js_client.clone(), prefix.clone())
+    let shutdown = CancellationToken::new();
+    let serve = {
+        let nats_client = nats_client.clone();
+        let prefix = acp.acp_prefix_ref().clone();
+        let shutdown = shutdown.clone();
+        move |agent: InitializedAgent<ConnectionAgent>| {
+            serving::serve(
+                agent,
+                nats_client.clone(),
+                js_client.clone(),
+                prefix.clone(),
+                shutdown.clone().cancelled_owned(),
+            )
+        }
     };
 
     // The NATS agent side runs `!Send` tasks on the current thread.
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
+            let supervised = supervisor::supervise(
+                &config.agent,
+                client,
+                Arc::new(ClientClaim::default()),
+                serve,
+                RestartPolicy::DEFAULT,
+                &shutdown,
+            );
+            tokio::pin!(supervised);
             tokio::select! {
-                _ = supervisor::supervise(&config.agent, client, Arc::new(ClientClaim::default()), serve, RestartPolicy::DEFAULT) => {}
-                () = shutdown_signal() => info!("ACP host shutting down (signal received)"),
+                () = &mut supervised => {}
+                () = shutdown_signal() => {
+                    info!("ACP host shutting down (signal received)");
+                    // Stop pulling commands and hand back the ones in flight
+                    // before anything slow, so none waits out `ack_wait`.
+                    shutdown.cancel();
+                    if tokio::time::timeout(SHUTDOWN_GRACE, supervised).await.is_err() {
+                        warn!("the agent run did not stop in time; commands it holds are redelivered after ack_wait");
+                    }
+                }
             }
         })
         .await;
+
+    // Send the nacks before closing, and close before telemetry shutdown,
+    // which can take a second or more.
+    if let Err(e) = nats_client.flush().await {
+        warn!(error = %e, "failed to flush NATS on shutdown");
+    }
+    if let Err(e) = nats_client.drain().await {
+        warn!(error = %e, "failed to drain NATS on shutdown");
+    }
 
     if let Err(e) = trogon_telemetry::shutdown_otel() {
         error!(error = %e, "OpenTelemetry shutdown failed");

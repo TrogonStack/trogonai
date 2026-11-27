@@ -10,6 +10,7 @@ use agent_client_protocol::{ByteStreams, Error, Result};
 use async_compat::Compat;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
+use tokio_util::sync::CancellationToken;
 
 /// The child: it records every `initialize` exactly as it arrives over the
 /// pipe, so a test sees what a real child process would.
@@ -206,12 +207,14 @@ async fn an_agent_that_keeps_exiting_is_relaunched_with_growing_delays() {
 
     // Delays run 1s, 2s, 4s, 8s: four launches fit in 10s of paused time, a
     // fifth would need 15s.
+    let shutdown = CancellationToken::new();
     let supervised = supervise(
         &launcher,
         Arc::new(NoopClient),
         Arc::default(),
         serve,
         RestartPolicy::DEFAULT,
+        &shutdown,
     );
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), supervised).await;
 
@@ -373,14 +376,44 @@ async fn a_relaunch_the_client_asks_for_happens_at_once() {
     };
 
     // A crash relaunch would wait a second first.
+    let shutdown = CancellationToken::new();
     let supervised = supervise(
         &launcher,
         Arc::new(NoopClient),
         Arc::default(),
         serve,
         RestartPolicy::DEFAULT,
+        &shutdown,
     );
     let _ = tokio::time::timeout(std::time::Duration::from_millis(100), supervised).await;
 
     assert_eq!(launcher.agent.initializes(), vec![discord("1"), discord("2")]);
 }
+
+#[tokio::test(start_paused = true)]
+async fn shutdown_during_the_restart_delay_ends_supervision_without_another_launch() {
+    let launcher = ExitingLauncher::default();
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>| {
+        std::future::pending::<std::result::Result<(), Error>>().await
+    };
+    let shutdown = CancellationToken::new();
+    let supervised = supervise(
+        &launcher,
+        Arc::new(NoopClient),
+        Arc::default(),
+        serve,
+        RestartPolicy::DEFAULT,
+        &shutdown,
+    );
+    tokio::pin!(supervised);
+
+    // The first run exits at once; the next launch is a second away.
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), &mut supervised).await;
+    shutdown.cancel();
+
+    tokio::time::timeout(std::time::Duration::from_millis(1), supervised)
+        .await
+        .expect("supervision returns as soon as shutdown is asked for");
+    assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
+}
+

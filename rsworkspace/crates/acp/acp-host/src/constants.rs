@@ -28,3 +28,9 @@ pub const FALLBACK_PROTOCOL_VERSION: agent_client_protocol::schema::ProtocolVers
 /// for to answer. Longer than the bridge's default operation timeout, so the
 /// client gives up first and this only bounds a task nobody is waiting on.
 pub const REINITIALIZE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long a shutting-down host waits for its agent run to hand back the
+/// COMMANDS messages it holds before it closes the NATS connection anyway.
+/// Handing them back is a nack each, so this only bounds a run that is stuck
+/// launching or initializing its child.
+pub const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
