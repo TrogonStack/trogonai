@@ -32,18 +32,8 @@ const visible = computed(() =>
     <span class="visually-hidden" aria-live="polite">{{ visible.length }} providers shown</span>
     <ul class="provider-grid">
       <li v-for="provider in visible" :key="provider.kind">
-        <a
-          v-if="provider.logo"
-          class="provider-mark"
-          :href="provider.logo.website"
-          :aria-label="`Visit ${provider.logo.owner ?? provider.name}`"
-          :title="`Visit ${provider.logo.owner ?? provider.name}`"
-        >
-          <img v-if="provider.logo.file" :src="withBase(`/brand/sandbox/${provider.logo.file}`)" alt="" width="40" height="32">
-          <span v-else class="brand-kit-link">Brand kit</span>
-        </a>
         <a class="provider-card" :href="withBase(`/reference/sandbox-providers#${provider.kind}`)">
-          <span class="provider-title">
+          <span class="provider-title" :class="{ 'provider-title--marked': provider.icon }">
             <span v-if="provider.icon" class="provider-mark provider-mark--builtin">
               <Icon :name="provider.icon" :size="24" />
             </span>
@@ -88,7 +78,6 @@ const visible = computed(() =>
   color: var(--vp-c-bg);
 }
 .provider-filters button:focus-visible,
-.provider-mark:focus-visible,
 .provider-card:focus-visible {
   outline: 2px solid var(--vp-c-brand-1);
   outline-offset: 2px;
@@ -122,10 +111,12 @@ const visible = computed(() =>
   display: flex;
   align-items: center;
   gap: 9px;
-  min-height: 48px;
-  padding-left: 64px;
   font-size: 15px;
   line-height: 1.25;
+}
+.provider-title--marked {
+  min-height: 48px;
+  padding-left: 64px;
 }
 .provider-mark {
   position: absolute;
@@ -139,19 +130,6 @@ const visible = computed(() =>
   border: 1px solid #e4e6ea;
   border-radius: 9px;
   background: #fff;
-}
-.provider-mark img {
-  display: block;
-  width: 40px;
-  height: 32px;
-  object-fit: contain;
-}
-a.provider-mark:hover { border-color: var(--vp-c-brand-1); }
-.brand-kit-link {
-  color: #384457;
-  font-size: 11px;
-  font-weight: 600;
-  text-decoration: underline;
 }
 .provider-mark--builtin {
   color: var(--vp-c-text-2);

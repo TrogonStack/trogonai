@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, useId, watch } from "vue";
-import { withBase } from "vitepress";
 import Icon from "./Icon.vue";
 
 const eventTypes = {
@@ -177,7 +176,7 @@ watch([playback, current, playhead], (_, __, onCleanup) => {
 <template>
   <figure ref="figure" class="run" aria-label="Illustrated Daytona sandbox run">
     <figcaption class="run-bar">
-      <span class="project"><img :src="withBase('/brand/sandbox/daytona.svg')" alt="" width="22" height="22">Daytona <span class="slash">/</span> checkout</span>
+      <span class="project">Daytona <span class="slash">/</span> checkout</span>
       <div class="playback-tools">
         <span class="example">Illustrative run</span>
         <button class="playback" type="button" @click="togglePlayback">
@@ -304,7 +303,6 @@ watch([playback, current, playhead], (_, __, onCleanup) => {
 }
 .playback:hover { border-color: var(--cyan); }
 .playback:focus-visible { outline: 2px solid #f6d982; outline-offset: 2px; }
-.project img { padding: 3px; border-radius: 4px; background: white; }
 .slash { color: #7d9699; }
 .example, .position, .pane-heading, .station-label, .instruments dt, .code-area, .output {
   font-family: var(--vp-font-family-mono);

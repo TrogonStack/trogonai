@@ -50,30 +50,6 @@ execution model and advertised features. A suite run against the memory worker
 exercises the protocol. Isolation and cleanup for a native workload require
 running the checks against the intended backend. [Provider conformance suite][conformance]
 
-## Logo sources
-
-| Gallery entry | Artwork |
-| --- | --- |
-| Agent Substrate | Nan Hockin designed the [Agent Substrate mark](https://github.com/agent-substrate/substrate/tree/main/logo). |
-| Azure Container Apps | Microsoft's Azure architecture set calls the Container Apps service icon “Worker Container App.” [Azure icons](https://learn.microsoft.com/en-us/azure/architecture/icons/) |
-| Daytona | [Daytona brand kit](https://www.daytona.io/brand) |
-| Direct Firecracker | [Firecracker project icon](https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/docs/images/fc_logo_icon.svg) |
-| E2B | [E2B small symbol](https://e2b.dev/brand/e2b-symbol-black-s.svg) |
-| Fly.io | The [Fly.io brand kit](https://docs.fly.io/about/brand) includes the color balloon mark and its written-authorization terms. |
-| Hyperlight | [CNCF Hyperlight artwork](https://github.com/cncf/artwork/tree/main/projects/hyperlight) |
-| Kubernetes | [CNCF Kubernetes artwork](https://github.com/cncf/artwork/tree/main/projects/kubernetes) |
-| KubeVirt | [CNCF KubeVirt artwork](https://github.com/cncf/artwork/tree/main/projects/kubevirt) |
-| Local Docker | [Docker symbol and usage guide](https://www.docker.com/company/newsroom/media-resources/) |
-| Modal | [Modal brand kit](https://modal.com/brand) |
-| Proxmox | [Proxmox symbol](https://www.proxmox.com/favicon.svg) · [Media kit](https://www.proxmox.com/en/about/company-details/media-kit) |
-| SPACE | Perplexity publishes [SPACE](https://github.com/perplexityai/SPACE). Its card uses the [Perplexity mark](https://www.perplexity.ai/favicon.svg). |
-| V8 / Wasmtime | The shared worker uses the [V8 logo](https://v8.dev/logo). |
-| Vercel | [Vercel brand assets](https://vercel.com/geist/brands) |
-
-Subprocess and Memory use terminal and database icons for their built-in runtimes.
-
-Vercel, the Vercel design, Next.js and related marks, designs and logos are trademarks or registered trademarks of Vercel, Inc. or its affiliates in the US and other countries.
-
 [aca]: https://github.com/TrogonStack/trogonai/tree/main/rsworkspace/crates/sandbox/trogon-sandbox-aca-worker
 [conformance]: https://github.com/TrogonStack/trogonai/tree/main/rsworkspace/crates/sandbox/trogon-sandbox-conformance
 [e2b]: https://github.com/TrogonStack/trogonai/tree/main/rsworkspace/crates/sandbox/trogon-sandbox-e2b-worker

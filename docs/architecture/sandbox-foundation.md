@@ -30,7 +30,7 @@ Sandbox broker
     |
     | worker dispatch (signing configurable)
     v
-Provider worker and its sandbox runtime
+Provider worker and its provider backend
   native resources and lifecycle
 ```
 
