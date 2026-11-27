@@ -26,10 +26,14 @@ unused=(
   /usr/share/swift
 )
 
+pids=()
 for path in "${unused[@]}"; do
   sudo rm -rf "$path" &
+  pids+=("$!")
 done
-wait
+for pid in "${pids[@]}"; do
+  wait "$pid"
+done
 
 sudo docker image prune --all --force >/dev/null
 
