@@ -8,19 +8,20 @@ workspace_crate(
         "nats_bus": {"tags": ["requires-network"]},
         # These reach a live sandbox stack (a broker and a worker on a real provider)
         # that a smoke script or the operator starts first. Every test is ignored, so
-        # they run only through Cargo with --ignored.
-        "docker_stack_smoke": {"tags": ["manual", "requires-network"]},
-        "firecracker_credential_smoke": {"tags": ["manual", "requires-network"]},
-        "firecracker_network_smoke": {"tags": ["manual", "requires-network"]},
-        "firecracker_stack_failures": {"tags": ["manual", "requires-network"]},
-        "firecracker_stack_smoke": {"tags": ["manual", "requires-network"]},
-        "firecracker_stack_snapshots": {"tags": ["manual", "requires-network"]},
-        "firecracker_stack_timings": {"tags": ["manual", "requires-network"]},
-        "hyperlight_stack_smoke": {"tags": ["manual", "requires-network"]},
-        "k8s_stack_live": {"tags": ["manual", "requires-network"]},
-        "provider_stack_smoke": {"tags": ["manual", "requires-network"]},
-        "proxmox_stack_smoke": {"tags": ["manual", "requires-network"]},
-        "stack_leak_sweep": {"tags": ["manual", "requires-network"]},
-        "substrate_stack_smoke": {"tags": ["manual", "requires-network"]},
+        # Bazel only proves they build, and they run through Cargo with --ignored. They
+        # are not tagged manual, since the Cargo-only CI task needs a manual test to pass.
+        "docker_stack_smoke": {"tags": ["requires-network"]},
+        "firecracker_credential_smoke": {"tags": ["requires-network"]},
+        "firecracker_network_smoke": {"tags": ["requires-network"]},
+        "firecracker_stack_failures": {"tags": ["requires-network"]},
+        "firecracker_stack_smoke": {"tags": ["requires-network"]},
+        "firecracker_stack_snapshots": {"tags": ["requires-network"]},
+        "firecracker_stack_timings": {"tags": ["requires-network"]},
+        "hyperlight_stack_smoke": {"tags": ["requires-network"]},
+        "k8s_stack_live": {"tags": ["requires-network"]},
+        "provider_stack_smoke": {"tags": ["requires-network"]},
+        "proxmox_stack_smoke": {"tags": ["requires-network"]},
+        "stack_leak_sweep": {"tags": ["requires-network"]},
+        "substrate_stack_smoke": {"tags": ["requires-network"]},
     },
 )
