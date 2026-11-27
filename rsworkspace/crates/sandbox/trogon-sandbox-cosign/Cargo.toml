@@ -1,0 +1,30 @@
+[package]
+name = "trogon-sandbox-cosign"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Cosign signing and verification for sandbox snapshot artifacts"
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes = { workspace = true }
+oci-client = { workspace = true }
+secrecy = { workspace = true }
+serde_json = { workspace = true }
+sigstore = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
+tracing = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-oci = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
