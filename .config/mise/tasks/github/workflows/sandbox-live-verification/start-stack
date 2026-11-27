@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#MISE description="Start NATS, the broker and the worker under test, then check the worker is connected"
+set -euo pipefail
+
+: "${RUNNER_TEMP:?}" "${WORKER:?}" "${SANDBOX_NATS_PORT:?}" "${SANDBOX_NATS_MONITOR_PORT:?}"
+compose_file=devops/docker/compose/sandbox/compose.yml
+
+# The broker signs every dispatch with a key made for this run and the worker
+# refuses anything unsigned, the same as a deployment.
+# shellcheck source=devops/docker/compose/sandbox/dispatch-keys.sh
+source devops/docker/compose/sandbox/dispatch-keys.sh
+
+docker compose -f "$compose_file" down --remove-orphans
+docker compose -f "$compose_file" up -d --build
+
+healthz="http://127.0.0.1:${SANDBOX_NATS_MONITOR_PORT}/healthz"
+for _ in $(seq 1 60); do
+  curl -fsS "$healthz" >/dev/null 2>&1 && break
+  sleep 1
+done
+curl -fsS "$healthz" >/dev/null
+
+# An empty repository variable still arrives set, and would replace the
+# worker's default instead of falling back to it.
+for name in DAYTONA_BASE_URL DAYTONA_ORGANIZATION_ID; do
+  if [[ -z "${!name:-}" ]]; then
+    unset "$name"
+  fi
+done
+
+if [[ "$WORKER" == trogon-sandbox-docker-worker ]]; then
+  # The default state directory is under /var/lib, which the runner user
+  # cannot create.
+  export SANDBOX_DOCKER_STATE_DIR="$RUNNER_TEMP/docker-worker-state"
+  mkdir -p "$SANDBOX_DOCKER_STATE_DIR"
+fi
+
+target_dir="$(cd rsworkspace && cargo metadata --locked --format-version 1 --no-deps | jq -r .target_directory)"
+export SANDBOX_NATS_URL="nats://127.0.0.1:${SANDBOX_NATS_PORT}"
+nohup "$target_dir/release/$WORKER" >"$RUNNER_TEMP/worker.log" 2>&1 &
+echo "$!" >"$RUNNER_TEMP/worker.pid"
+
+# A worker that rejects its configuration or cannot reach NATS exits within
+# one heartbeat, so waiting that long fails here instead of as a lease timeout
+# inside the test.
+sleep 12
+if ! kill -0 "$(cat "$RUNNER_TEMP/worker.pid")" 2>/dev/null; then
+  echo "::error::$WORKER exited during startup"
+  exit 1
+fi
+
+if [[ -z "$(docker compose -f "$compose_file" ps --status running -q trogon-sandbox-broker)" ]]; then
+  echo "::error::the broker is not running"
+  exit 1
+fi
+
+# The broker and the worker each hold a NATS connection.
+connections="$(curl -fsS "http://127.0.0.1:${SANDBOX_NATS_MONITOR_PORT}/connz" | jq .num_connections)"
+if ((connections < 2)); then
+  echo "::error::expected the broker and the worker on NATS, found $connections connection(s)"
+  exit 1
+fi

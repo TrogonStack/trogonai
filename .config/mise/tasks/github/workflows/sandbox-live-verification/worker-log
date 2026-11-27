@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Print the worker log so a failed run can be diagnosed"
+set -euo pipefail
+
+if [[ -f "${RUNNER_TEMP:?}/worker.log" ]]; then
+  cat "$RUNNER_TEMP/worker.log"
+else
+  echo "the worker was never started"
+fi

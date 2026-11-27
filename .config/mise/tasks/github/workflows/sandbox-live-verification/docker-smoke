@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Lease, use and release a sandbox through the broker and the docker worker"
+set -euo pipefail
+
+cd rsworkspace
+cargo test --locked -p trogon-sandbox-client --test docker_stack_smoke -- \
+  --ignored --nocapture lease_alpine_via_broker_and_docker_worker

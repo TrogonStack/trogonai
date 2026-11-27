@@ -1,0 +1,255 @@
+name: Sandbox Live Verification
+
+# Brings up the real stack on a schedule and proves a sandbox can be created,
+# used and destroyed, so a worker that silently stops working is found here
+# before users find it. Provider jobs are opt-in through repository variables
+# and fail loudly when their credentials are missing.
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+    inputs:
+      daytona:
+        description: Also verify the Daytona worker (needs the DAYTONA_API_KEY secret)
+        type: boolean
+        default: false
+      vercel:
+        description: Also verify the Vercel worker (needs the VERCEL_TOKEN secret)
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: sandbox-live-verification
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+  CARGO_NET_RETRY: '10'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  # The ports the compose stack publishes; the stack tests read the same ones.
+  SANDBOX_NATS_PORT: '24222'
+  SANDBOX_NATS_MONITOR_PORT: '28222'
+
+jobs:
+  docker:
+    name: Docker worker on the compose stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      WORKER: trogon-sandbox-docker-worker
+      SMOKE_TEST: docker_stack_smoke
+      # The smoke lease names its own image and opens no egress, so one small
+      # public image fills both required settings without building the agent
+      # and proxy images.
+      SANDBOX_IMAGE: alpine:3.20
+      SANDBOX_EGRESS_PROXY_IMAGE: alpine:3.20
+      # Every container the worker makes carries this owner, so the leak sweep
+      # and the teardown touch this run's containers and nothing else.
+      SANDBOX_DOCKER_WORKER_OWNER: sandbox-live-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-sandbox-live
+          shared-key: docker
+          workspaces: rsworkspace -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Require Docker
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:require-docker
+
+      - name: Build the worker and the stack tests
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:build
+
+      - name: Start the stack and the worker
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:start-stack
+
+      - name: Run the docker smoke test
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:docker-smoke
+
+      - name: Leak sweep, leases
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:lease-sweep
+
+      - name: Leak sweep, containers
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:container-sweep
+
+      - name: Worker log
+        if: always()
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:worker-log
+
+      - name: Tear down
+        if: always()
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:teardown
+
+  daytona:
+    name: Daytona worker
+    # Opt in with the SANDBOX_LIVE_DAYTONA repository variable set to true, or
+    # tick the box on a manual run. Once opted in the job cannot skip quietly.
+    if: ${{ vars.SANDBOX_LIVE_DAYTONA == 'true' || inputs.daytona }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      WORKER: trogon-sandbox-daytona-worker
+      SMOKE_TEST: provider_stack_smoke
+      SANDBOX_SMOKE_PROVIDER: daytona
+      # Daytona takes a snapshot name where other providers take an image.
+      SANDBOX_SMOKE_IMAGE: ${{ vars.SANDBOX_LIVE_DAYTONA_IMAGE || 'daytona-small' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Require Daytona credentials
+        env:
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:require-credentials
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-sandbox-live
+          shared-key: daytona
+          workspaces: rsworkspace -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Require Docker
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:require-docker
+
+      - name: Build the worker and the stack tests
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:build
+
+      - name: Start the stack and the worker
+        env:
+          DAYTONA_API_KEY: ${{ secrets.DAYTONA_API_KEY }}
+          DAYTONA_BASE_URL: ${{ vars.DAYTONA_BASE_URL }}
+          DAYTONA_ORGANIZATION_ID: ${{ vars.DAYTONA_ORGANIZATION_ID }}
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:start-stack
+
+      - name: Run the provider smoke test
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:provider-smoke
+
+      - name: Leak sweep, leases
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:lease-sweep
+
+      - name: Worker log
+        if: always()
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:worker-log
+
+      - name: Tear down
+        if: always()
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:teardown
+
+  vercel:
+    name: Vercel worker
+    # Opt in with the SANDBOX_LIVE_VERCEL repository variable set to true, or
+    # tick the box on a manual run. Once opted in the job cannot skip quietly.
+    if: ${{ vars.SANDBOX_LIVE_VERCEL == 'true' || inputs.vercel }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      WORKER: trogon-sandbox-vercel-worker
+      SMOKE_TEST: provider_stack_smoke
+      SANDBOX_SMOKE_PROVIDER: vercel
+      # Vercel takes a runtime name where other providers take an image.
+      SANDBOX_SMOKE_IMAGE: ${{ vars.SANDBOX_LIVE_VERCEL_RUNTIME || 'node24' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+
+      - name: Require Vercel credentials
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:require-credentials
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: v1-sandbox-live
+          shared-key: vercel
+          workspaces: rsworkspace -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Require Docker
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:require-docker
+
+      - name: Build the worker and the stack tests
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:build
+
+      - name: Start the stack and the worker
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:start-stack
+
+      - name: Run the provider smoke test
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:provider-smoke
+
+      - name: Leak sweep, leases
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:lease-sweep
+
+      - name: Worker log
+        if: always()
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:worker-log
+
+      - name: Tear down
+        if: always()
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:teardown
+
+  # A scheduled run nobody watches is only useful if its failure reaches a
+  # person. On main this opens one issue and then comments on it for each
+  # further failing run, so a long outage is one thread and not a flood.
+  notify-failure:
+    name: Report failure
+    needs: [docker, daytona, vercel]
+    # Skipped jobs do not count as failures; a cancelled run is not reported.
+    if: ${{ always() && github.ref == 'refs/heads/main' && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: mise run --skip-tools github:workflows:sandbox-live-verification:report-failure

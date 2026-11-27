@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Lease, use and release a sandbox through the broker and the provider worker"
+set -euo pipefail
+
+: "${SANDBOX_SMOKE_PROVIDER:?}"
+cd rsworkspace
+cargo test --locked -p trogon-sandbox-client --test provider_stack_smoke -- --ignored --nocapture

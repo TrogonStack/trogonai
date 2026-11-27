@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#MISE description="Fail when a container made for a lease outlives the smoke test"
+set -euo pipefail
+
+# Warm pool containers belong to no lease and are expected to stay, so only
+# containers that still name a lease count as leaked.
+leaked="$(docker ps -a \
+  --filter "label=sandbox.trogon.live/owner=${SANDBOX_DOCKER_WORKER_OWNER:?}" \
+  --filter label=sandbox.trogon.live/lease-id \
+  --format '{{.ID}} {{.Names}} {{.Status}}')"
+
+if [[ -n "$leaked" ]]; then
+  echo "::error::lease containers remain after the smoke test"
+  echo "$leaked"
+  exit 1
+fi

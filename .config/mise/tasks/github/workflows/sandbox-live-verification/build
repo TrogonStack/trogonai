@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+#MISE description="Build the worker under test and the stack tests that drive it"
+set -euo pipefail
+
+cd rsworkspace
+cargo build --locked --release -p "${WORKER:?}"
+# Compiled here so build time stays out of the steps that hold a lease.
+cargo test --locked -p trogon-sandbox-client --test "${SMOKE_TEST:?}" --test stack_leak_sweep --no-run

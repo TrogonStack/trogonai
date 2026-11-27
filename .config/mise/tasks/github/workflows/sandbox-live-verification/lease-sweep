@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Fail when the broker still holds a live lease for the smoke tenant"
+set -euo pipefail
+
+cd rsworkspace
+cargo test --locked -p trogon-sandbox-client --test stack_leak_sweep -- --ignored --nocapture
