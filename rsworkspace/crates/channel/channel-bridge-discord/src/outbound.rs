@@ -1,6 +1,5 @@
 use crate::constants::TEXT_CHUNK_LIMIT;
-use crate::render::chunk_text;
-use channel_acp_port::{SendText, SendTyping};
+use channel_acp_port::{SendText, SendTyping, chunk_utf16};
 use twilight_http::Client;
 use twilight_http::response::Response;
 use twilight_model::channel::Message;
@@ -35,6 +34,6 @@ impl SendText<Id<ChannelMarker>> for DiscordOutbound {
     }
 
     fn chunks<'t>(&self, text: &'t str) -> Vec<&'t str> {
-        chunk_text(text, TEXT_CHUNK_LIMIT)
+        chunk_utf16(text, TEXT_CHUNK_LIMIT)
     }
 }

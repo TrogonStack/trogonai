@@ -14,7 +14,6 @@ mod config;
 mod constants;
 mod outbound;
 mod parse;
-mod render;
 
 #[cfg(test)]
 mod main_tests;

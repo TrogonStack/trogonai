@@ -1,6 +1,5 @@
 use crate::constants::TEXT_CHUNK_LIMIT;
-use crate::render::chunk_text;
-use channel_acp_port::{SendText, SendTyping};
+use channel_acp_port::{SendText, SendTyping, chunk_utf16};
 use teloxide::Bot;
 use teloxide::requests::Requester;
 use teloxide::types::{ChatAction, ChatId, Message, True};
@@ -36,6 +35,6 @@ impl SendText<i64> for TelegramOutbound {
     }
 
     fn chunks<'t>(&self, text: &'t str) -> Vec<&'t str> {
-        chunk_text(text, TEXT_CHUNK_LIMIT)
+        chunk_utf16(text, TEXT_CHUNK_LIMIT)
     }
 }

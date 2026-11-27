@@ -1,9 +1,8 @@
 use crate::constants::TEXT_CHUNK_LIMIT;
 use crate::parse::TelegramDecoder;
-use crate::render::chunk_text;
 use acp_nats::ClientHandler;
 use agent_client_protocol::v1::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate, TextContent};
-use channel_acp_port::{BufferedRenderClient, Pipeline, PipelineError, SendText, SendTyping};
+use channel_acp_port::{BufferedRenderClient, Pipeline, PipelineError, SendText, SendTyping, chunk_utf16};
 use futures::StreamExt;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -229,7 +228,7 @@ impl SendText<i64> for FakeOutbound {
     }
 
     fn chunks<'t>(&self, text: &'t str) -> Vec<&'t str> {
-        chunk_text(text, TEXT_CHUNK_LIMIT)
+        chunk_utf16(text, TEXT_CHUNK_LIMIT)
     }
 }
 

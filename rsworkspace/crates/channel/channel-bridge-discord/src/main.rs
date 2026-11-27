@@ -14,7 +14,6 @@ mod config;
 mod constants;
 mod outbound;
 mod parse;
-mod render;
 
 use {
     acp_nats::AgentHandler,

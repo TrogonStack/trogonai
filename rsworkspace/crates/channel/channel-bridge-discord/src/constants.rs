@@ -8,6 +8,7 @@ pub const CHANNEL: &str = "discord";
 /// artifact name.
 pub const INBOUND_DURABLE: &str = "channel-bridge-discord";
 
-/// Discord's limit for one message's content, in characters (Unicode scalar
-/// values, which is how both Discord and `twilight-validate` count it).
+/// Discord's limit for one message's content. Discord documents it in
+/// characters; chunks are measured in UTF-16 code units, which is never fewer,
+/// so a chunk fits however Discord counts.
 pub const TEXT_CHUNK_LIMIT: usize = 2000;
