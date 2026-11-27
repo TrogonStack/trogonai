@@ -21,6 +21,7 @@ use agent_client_protocol::v1::schema::{
     StopReason,
 };
 use async_nats::jetstream::consumer::{PullConsumer, pull};
+use async_nats::jetstream::stream::Stream;
 use futures::StreamExt;
 use jsonrpc_nats::RequestId;
 use tokio::sync::Notify;
@@ -69,6 +70,19 @@ impl AgentHandler for StuckLoad {
     }
 }
 
+/// Waits until the agent side has created its consumer on COMMANDS. A durable
+/// consumer that only delivers new commands would skip one published before
+/// it exists.
+async fn wait_for_commands_consumer(stream: &mut Stream) {
+    tokio::time::timeout(PROMPTLY, async {
+        while stream.info().await.unwrap().state.consumer_count == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the agent side creates its COMMANDS consumer");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_command_in_flight_at_stop_is_redelivered_promptly() {
     let server = JetStreamTestServer::start().await;
@@ -79,6 +93,7 @@ async fn a_command_in_flight_at_stop_is_redelivered_promptly() {
     provision_selected_streams(&js, &prefix, [AcpStream::Commands, AcpStream::Responses])
         .await
         .expect("provision COMMANDS and RESPONSES");
+    let mut stream = jetstream.get_stream(commands_stream_name(&prefix)).await.unwrap();
 
     let agent = StuckLoad::default();
     let stop = Rc::new(Notify::new());
@@ -100,6 +115,7 @@ async fn a_command_in_flight_at_stop_is_redelivered_promptly() {
                 },
             );
             let serving = tokio::task::spawn_local(serving);
+            wait_for_commands_consumer(&mut stream).await;
 
             let command = encode_request(
                 "session/load",
@@ -128,7 +144,6 @@ async fn a_command_in_flight_at_stop_is_redelivered_promptly() {
     nats.flush().await.unwrap();
 
     // The next puller on the same consumer gets the command straight away.
-    let stream = jetstream.get_stream(commands_stream_name(&prefix)).await.unwrap();
     let mut names = stream.consumer_names();
     let name = names.next().await.expect("the agent side's consumer").unwrap();
     assert!(names.next().await.is_none(), "exactly one consumer on COMMANDS");
