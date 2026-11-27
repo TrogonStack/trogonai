@@ -12,8 +12,9 @@ use std::fmt::Display;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::oneshot;
 use tokio::time::Instant;
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 use tracing::{info, warn};
 
 /// Produces the transport to a fresh agent. One operation, so tests can hand
@@ -62,11 +63,8 @@ impl<E: Display> Display for RunExit<E> {
     }
 }
 
-/// How a run's serving ended, short of the agent going away.
-enum Served<E> {
-    Ended(Result<(), E>),
-    Reinitialize,
-}
+/// The future a run's serving is to stop on: see [`run_once`].
+pub type RunStop = WaitForCancellationFutureOwned;
 
 /// Launches the agent and hands it to `serve` until either side ends.
 ///
@@ -75,54 +73,84 @@ enum Served<E> {
 /// [`INITIALIZE_TIMEOUT`] to answer before the run fails. Otherwise the child is
 /// left for the first client `initialize` to reach it; see
 /// [`InitializedAgent`].
+///
+/// Serving is never dropped mid-command: it is handed a [`RunStop`] that
+/// resolves on `shutdown`, when the client asks for a relaunch, or when the
+/// child goes away, and the run waits for it to return. Serving then hands
+/// back every command it holds for redelivery (see [`crate::serving::serve`]),
+/// so the next child gets them at once instead of after `ack_wait`. A command
+/// the child was already working on may then run twice. On a relaunch the
+/// child keeps answering until serving has returned.
 pub async fn run_once<L, C, S, F, E>(
     launcher: &L,
     client: Arc<C>,
     claim: Arc<ClientClaim>,
     handshake: Arc<ClientHandshake>,
     serve: &S,
+    shutdown: &CancellationToken,
 ) -> RunExit<E>
 where
     L: LaunchAgent,
     C: ClientHandler + Send + Sync + 'static,
-    S: Fn(InitializedAgent<ConnectionAgent>) -> F,
+    S: Fn(InitializedAgent<ConnectionAgent>, RunStop) -> F,
     F: Future<Output = Result<(), E>>,
 {
+    let stop = shutdown.child_token();
+    let served = CancellationToken::new();
+    let (agent_tx, agent_rx) = oneshot::channel();
     // Set once this run chose to make way for a relaunch. The SDK shuts the
     // child down after that, and a child that exits abnormally on the way out
     // turns the run's result into an error; the run still ended because the
     // client asked for a relaunch, not because the child failed, so it must
     // not wait out the crash backoff with nothing serving the prefix.
-    let reinitialize = Arc::new(AtomicBool::new(false));
-    let reinitializing = reinitialize.clone();
-    let result = connect_client_boundary_with(client, launcher.launch(), async move |cx| {
-        let agent = ConnectionAgent::new(cx);
-        let initialized = match handshake.next() {
-            Some(request) => {
-                let response = initialize_relaunched(&agent, &handshake, &request).await?;
-                info!(agent = ?response.agent_info, "agent relaunched with the client's initialize");
-                Some(Handshake { request, response })
-            }
-            None => None,
-        };
-        let agent = InitializedAgent::new(agent, initialized, claim, handshake.clone());
-        Ok(tokio::select! {
-            result = serve(agent) => Served::Ended(result),
-            () = handshake.relaunch_requested() => {
-                reinitializing.store(true, Ordering::SeqCst);
-                Served::Reinitialize
-            }
-        })
-    })
-    .await;
+    let reinitialize = AtomicBool::new(false);
 
-    match result {
-        Ok(BoundaryExit::Main(Served::Reinitialize)) => RunExit::Reinitialize,
+    let boundary = async {
+        let result = connect_client_boundary_with(client, launcher.launch(), async |cx| {
+            let agent = ConnectionAgent::new(cx);
+            let initialized = match handshake.next() {
+                Some(request) => {
+                    let response = initialize_relaunched(&agent, &handshake, &request).await?;
+                    info!(agent = ?response.agent_info, "agent relaunched with the client's initialize");
+                    Some(Handshake { request, response })
+                }
+                None => None,
+            };
+            let _ = agent_tx.send(InitializedAgent::new(
+                agent,
+                initialized,
+                claim,
+                handshake.clone(),
+                served.clone(),
+            ));
+            tokio::select! {
+                () = served.cancelled() => {}
+                () = handshake.relaunch_requested() => {
+                    reinitialize.store(true, Ordering::SeqCst);
+                    stop.cancel();
+                    served.cancelled().await;
+                }
+            }
+            Ok(())
+        })
+        .await;
+        stop.cancel();
+        result
+    };
+    let serving = async {
+        let agent = agent_rx.await.ok()?;
+        let result = serve(agent, stop.clone().cancelled_owned()).await;
+        served.cancel();
+        Some(result)
+    };
+    let (result, served) = tokio::join!(boundary, serving);
+
+    match (result, served) {
         _ if reinitialize.load(Ordering::SeqCst) => RunExit::Reinitialize,
-        Ok(BoundaryExit::TransportClosed) => RunExit::AgentExited,
-        Ok(BoundaryExit::Main(Served::Ended(Ok(())))) => RunExit::ServeEnded,
-        Ok(BoundaryExit::Main(Served::Ended(Err(error)))) => RunExit::ServeFailed(error),
-        Err(error) => RunExit::AgentFailed(error),
+        (Ok(BoundaryExit::TransportClosed), _) => RunExit::AgentExited,
+        (Err(error), _) => RunExit::AgentFailed(error),
+        (Ok(BoundaryExit::Main(())), Some(Err(error))) => RunExit::ServeFailed(error),
+        (Ok(BoundaryExit::Main(())), _) => RunExit::ServeEnded,
     }
 }
 
@@ -143,8 +171,9 @@ async fn initialize_relaunched(
 
 /// Keeps one agent running behind `serve`, relaunching it per `policy`
 /// whenever a run ends, until `shutdown` is cancelled. `serve` is expected to
-/// end its run on the same signal (see [`crate::serving::serve`]); the run
-/// that ends then is not relaunched, and this returns. Its child goes with it:
+/// end its run when the [`RunStop`] it is handed resolves, which it does on
+/// the same signal (see [`run_once`]); the run that ends then is not
+/// relaunched, and this returns. Its child goes with it:
 /// the SDK shuts a spawned agent down when its connection goes away.
 ///
 /// The one [`ClientClaim`] spans every run, so the client a host serves stays
@@ -169,7 +198,7 @@ pub async fn supervise<L, C, S, F, E>(
 ) where
     L: LaunchAgent,
     C: ClientHandler + Send + Sync + 'static,
-    S: Fn(InitializedAgent<ConnectionAgent>) -> F,
+    S: Fn(InitializedAgent<ConnectionAgent>, RunStop) -> F,
     F: Future<Output = Result<(), E>>,
     E: Display,
 {
@@ -177,7 +206,15 @@ pub async fn supervise<L, C, S, F, E>(
     let mut delay = None;
     while !shutdown.is_cancelled() {
         let started = Instant::now();
-        let exit = run_once(launcher, client.clone(), claim.clone(), handshake.clone(), &serve).await;
+        let exit = run_once(
+            launcher,
+            client.clone(),
+            claim.clone(),
+            handshake.clone(),
+            &serve,
+            shutdown,
+        )
+        .await;
         let uptime = started.elapsed();
         if shutdown.is_cancelled() {
             info!(%exit, uptime_ms = uptime.as_millis(), "agent run ended for shutdown");

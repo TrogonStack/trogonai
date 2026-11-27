@@ -127,12 +127,15 @@ than in the spec. `Debug` output of the spec prints env names, never values.
   calls fail: first with "transport closed" from the dead connection, then
   with NATS "no responders" while nothing serves the prefix. Clients should
   retry rather than treat either as fatal.
-- **Shutdown hands commands back.** On SIGTERM or Ctrl-C the host stops
-  pulling from `COMMANDS` first, then nacks every command it holds, the ones
-  waiting to be dispatched and the ones the child is still working on, and
-  flushes and drains its NATS connection before it shuts telemetry down. The
-  next host to pull gets those commands at once instead of after the
-  consumer's `ack_wait`. Work the child had started on them is lost, so a
+- **Shutdown, relaunches and crashes hand commands back.** Whenever a run
+  ends (SIGTERM or Ctrl-C, a relaunch the client asked for, or the child
+  dying), the host stops pulling from `COMMANDS` first, then nacks every
+  command the run holds, the ones waiting to be dispatched and the ones the
+  child is still working on. A command the dead child was working on is not
+  answered with its "transport closed" error; it is nacked like the rest. On
+  shutdown the host then flushes and drains its NATS connection before it
+  shuts telemetry down. The next child or host to pull gets those commands at
+  once instead of after the consumer's `ack_wait`. Work the child had started on them is lost, so a
   command can run twice. The host waits at most 5s for this
   (`SHUTDOWN_GRACE`). A command the server delivers in the instant between the
   last read and the unsubscribe still waits out `ack_wait`. Separately, the

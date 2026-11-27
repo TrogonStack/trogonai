@@ -32,6 +32,7 @@ use initialized_agent::InitializedAgent;
 use restart_policy::RestartPolicy;
 use session_routed_client::SessionRoutedClient;
 use std::sync::Arc;
+use supervisor::RunStop;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use trogon_nats::jetstream::NatsJetStreamClient;
@@ -68,15 +69,8 @@ async fn main() -> anyhow::Result<()> {
     let serve = {
         let nats_client = nats_client.clone();
         let prefix = acp.acp_prefix_ref().clone();
-        let shutdown = shutdown.clone();
-        move |agent: InitializedAgent<ConnectionAgent>| {
-            serving::serve_and_reprovision(
-                agent,
-                nats_client.clone(),
-                js_client.clone(),
-                prefix.clone(),
-                shutdown.clone().cancelled_owned(),
-            )
+        move |agent: InitializedAgent<ConnectionAgent>, stop: RunStop| {
+            serving::serve_and_reprovision(agent, nats_client.clone(), js_client.clone(), prefix.clone(), stop)
         }
     };
 

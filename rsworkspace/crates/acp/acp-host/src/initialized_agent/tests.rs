@@ -62,12 +62,17 @@ struct Harness {
 }
 
 fn harness(initialized: Option<Handshake>) -> Harness {
+    harness_with(RecordingAgent::default(), initialized)
+}
+
+fn harness_with(child: RecordingAgent, initialized: Option<Handshake>) -> Harness {
     let handshake = Arc::new(ClientHandshake::default());
     let agent = Arc::new(InitializedAgent::new(
-        RecordingAgent::default(),
+        child,
         initialized,
         Arc::default(),
         handshake.clone(),
+        Default::default(),
     ));
     Harness { agent, handshake }
 }
@@ -210,12 +215,11 @@ fn zed() -> InitializeRequest {
 #[tokio::test]
 async fn a_client_that_loses_the_race_for_the_claim_is_refused_instead_of_relaunching_the_winner() {
     let paused = Arc::new(tokio::sync::Semaphore::new(0));
-    let handshake = Arc::new(ClientHandshake::default());
     let child = RecordingAgent {
         paused: Some(paused.clone()),
         ..RecordingAgent::default()
     };
-    let agent = Arc::new(InitializedAgent::new(child, None, Arc::default(), handshake.clone()));
+    let Harness { agent, handshake } = harness_with(child, None);
 
     let winner = tokio::spawn({
         let agent = agent.clone();
@@ -273,17 +277,19 @@ async fn a_client_that_asks_for_a_relaunch_claims_the_host_before_another_can() 
 
 #[tokio::test]
 async fn an_initialize_the_child_refuses_claims_nothing() {
-    let claim = Arc::new(ClientClaim::default());
     let child = RecordingAgent {
         refuses_initialize: true,
         ..RecordingAgent::default()
     };
-    let agent = InitializedAgent::new(child, None, claim.clone(), Arc::default());
+    let h = harness_with(child, None);
     let squatter = InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("squatter", "1"));
 
-    agent.initialize(squatter).await.expect_err("refused by the child");
+    h.agent.initialize(squatter).await.expect_err("refused by the child");
 
-    claim.claim(&discord("1")).expect("the real client is not locked out");
+    h.agent
+        .claim()
+        .claim(&discord("1"))
+        .expect("the real client is not locked out");
 }
 
 #[tokio::test]

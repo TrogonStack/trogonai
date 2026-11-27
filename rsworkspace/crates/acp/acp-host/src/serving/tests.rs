@@ -118,6 +118,7 @@ impl Host {
             None,
             Arc::new(ClientClaim::default()),
             Arc::new(ClientHandshake::default()),
+            Default::default(),
         );
         tokio::task::spawn_local(serve(
             agent,
@@ -472,7 +473,13 @@ async fn a_request_naming_a_client_before_any_initialize_does_not_lock_out_the_r
 }
 
 fn unserved_agent() -> InitializedAgent<Child> {
-    InitializedAgent::new(Child::default(), None, Arc::default(), Arc::default())
+    InitializedAgent::new(
+        Child::default(),
+        None,
+        Arc::default(),
+        Arc::default(),
+        Default::default(),
+    )
 }
 
 #[tokio::test]

@@ -233,7 +233,13 @@ fn superseded() -> Error {
 /// Whether the child answered with this error, as opposed to going away
 /// before it answered.
 fn refused(error: &Error) -> bool {
-    !is_incoming_transport_closed(error) && !is_connection_terminated(error)
+    !child_gone(error)
+}
+
+/// Whether a call failed because the child went away, not because the child
+/// answered it with an error.
+pub fn child_gone(error: &Error) -> bool {
+    is_incoming_transport_closed(error) || is_connection_terminated(error)
 }
 
 /// A client `initialize` waiting for a relaunched child to answer it.

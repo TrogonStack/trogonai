@@ -57,8 +57,9 @@ where
 ///
 /// Serving ends when `stop` resolves, once every COMMANDS message this run
 /// holds has been handed back for redelivery (see
-/// [`AgentSideNatsConnection::with_jetstream_gated_until`]), so a host that is
-/// shutting down leaves no command waiting out `ack_wait`.
+/// [`AgentSideNatsConnection::with_jetstream_gated_until`]), so a run that
+/// ends (the host shutting down, a relaunch, the child dying; see
+/// [`crate::supervisor::run_once`]) leaves no command waiting out `ack_wait`.
 ///
 /// Runs `!Send` tasks: call it inside a `LocalSet`.
 pub fn serve<A, N, J>(

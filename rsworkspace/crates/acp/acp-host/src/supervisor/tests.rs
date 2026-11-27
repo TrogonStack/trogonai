@@ -102,10 +102,34 @@ impl LaunchAgent for ExitingLauncher {
     }
 }
 
+/// One run of `serve` on a child from `launcher`, for a test that neither
+/// shuts the host down nor looks at the client side.
+async fn run<L, S, F, E>(
+    launcher: &L,
+    claim: Arc<ClientClaim>,
+    handshake: Arc<ClientHandshake>,
+    serve: &S,
+) -> RunExit<E>
+where
+    L: LaunchAgent,
+    S: Fn(InitializedAgent<ConnectionAgent>, RunStop) -> F,
+    F: Future<Output = std::result::Result<(), E>>,
+{
+    run_once(
+        launcher,
+        Arc::new(NoopClient),
+        claim,
+        handshake,
+        serve,
+        &CancellationToken::new(),
+    )
+    .await
+}
+
 #[tokio::test]
 async fn a_client_that_initializes_twice_alike_initializes_the_child_once() {
     let launcher = InProcessLauncher::default();
-    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let serve = async |agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| -> std::result::Result<(), Error> {
         // The client initializes again, as it does after it restarts.
         agent.initialize(InitializeRequest::new(ProtocolVersion::V1)).await?;
         agent.initialize(InitializeRequest::new(ProtocolVersion::V1)).await?;
@@ -115,7 +139,7 @@ async fn a_client_that_initializes_twice_alike_initializes_the_child_once() {
         Ok(())
     };
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), Arc::default(), &serve).await;
+    let exit = run(&launcher, Arc::default(), Arc::default(), &serve).await;
 
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
     assert_eq!(launcher.agent.initializes().len(), 1);
@@ -124,7 +148,7 @@ async fn a_client_that_initializes_twice_alike_initializes_the_child_once() {
 #[tokio::test]
 async fn a_second_client_is_refused_and_the_first_keeps_working() {
     let launcher = InProcessLauncher::default();
-    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let serve = async |agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| -> std::result::Result<(), Error> {
         let first = InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("discord", "1.0.0"));
         let second = InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("zed", "1.0.0"));
         agent.initialize(first.clone()).await?;
@@ -140,7 +164,7 @@ async fn a_second_client_is_refused_and_the_first_keeps_working() {
         Ok(())
     };
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), Arc::default(), &serve).await;
+    let exit = run(&launcher, Arc::default(), Arc::default(), &serve).await;
 
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
 }
@@ -149,22 +173,22 @@ async fn a_second_client_is_refused_and_the_first_keeps_working() {
 async fn the_claim_outlives_a_relaunch() {
     let launcher = InProcessLauncher::default();
     let claim = Arc::new(ClientClaim::default());
-    let first = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let first = async |agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| -> std::result::Result<(), Error> {
         agent
             .initialize(InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("discord", "1")))
             .await?;
         Ok(())
     };
-    let second = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let second = async |agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| -> std::result::Result<(), Error> {
         agent
             .initialize(InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("zed", "1")))
             .await
             .map(|_| ())
     };
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), claim.clone(), Arc::default(), &first).await;
+    let exit = run(&launcher, claim.clone(), Arc::default(), &first).await;
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
-    let exit = run_once(&launcher, Arc::new(NoopClient), claim, Arc::default(), &second).await;
+    let exit = run(&launcher, claim, Arc::default(), &second).await;
 
     assert!(
         matches!(exit, RunExit::ServeFailed(ref e) if e.code == agent_client_protocol::ErrorCode::INVALID_REQUEST),
@@ -175,9 +199,9 @@ async fn the_claim_outlives_a_relaunch() {
 #[tokio::test]
 async fn a_serving_failure_is_reported_as_such() {
     let launcher = InProcessLauncher::default();
-    let serve = async |_agent: InitializedAgent<ConnectionAgent>| Err::<(), _>("nats down");
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| Err::<(), _>("nats down");
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), Arc::default(), &serve).await;
+    let exit = run(&launcher, Arc::default(), Arc::default(), &serve).await;
 
     assert!(matches!(exit, RunExit::ServeFailed("nats down")), "got {exit}");
 }
@@ -186,11 +210,12 @@ async fn a_serving_failure_is_reported_as_such() {
 async fn an_agent_that_exits_before_answering_ends_the_run() {
     let launcher = ExitingLauncher::default();
     // Serves until the agent goes away, as the NATS side does.
-    let serve = async |_agent: InitializedAgent<ConnectionAgent>| {
-        std::future::pending::<std::result::Result<(), Error>>().await
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>, stop: RunStop| {
+        stop.await;
+        Ok::<(), Error>(())
     };
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), Arc::default(), &serve).await;
+    let exit = run(&launcher, Arc::default(), Arc::default(), &serve).await;
 
     assert!(
         matches!(exit, RunExit::AgentExited | RunExit::AgentFailed(_)),
@@ -201,8 +226,9 @@ async fn an_agent_that_exits_before_answering_ends_the_run() {
 #[tokio::test(start_paused = true)]
 async fn an_agent_that_keeps_exiting_is_relaunched_with_growing_delays() {
     let launcher = ExitingLauncher::default();
-    let serve = async |_agent: InitializedAgent<ConnectionAgent>| {
-        std::future::pending::<std::result::Result<(), Error>>().await
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>, stop: RunStop| {
+        stop.await;
+        Ok::<(), Error>(())
     };
 
     // Delays run 1s, 2s, 4s, 8s: four launches fit in 10s of paused time, a
@@ -242,7 +268,7 @@ fn discord(version: &str) -> InitializeRequest {
 #[tokio::test]
 async fn the_child_receives_the_clients_initialize_as_sent() {
     let launcher = InProcessLauncher::default();
-    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let serve = async |agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| -> std::result::Result<(), Error> {
         let answer = agent.initialize(discord("1")).await?;
         assert_eq!(
             answer.agent_info,
@@ -252,7 +278,7 @@ async fn the_child_receives_the_clients_initialize_as_sent() {
         Ok(())
     };
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), Arc::default(), &serve).await;
+    let exit = run(&launcher, Arc::default(), Arc::default(), &serve).await;
 
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
     assert_eq!(launcher.agent.initializes(), vec![discord("1")]);
@@ -263,27 +289,22 @@ async fn a_relaunched_child_is_initialized_with_the_clients_last_initialize() {
     let launcher = InProcessLauncher::default();
     let handshake = Arc::new(ClientHandshake::default());
     let claim = Arc::new(ClientClaim::default());
-    let first_run = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
-        agent.initialize(discord("1")).await?;
-        Ok(())
-    };
+    let first_run =
+        async |agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| -> std::result::Result<(), Error> {
+            agent.initialize(discord("1")).await?;
+            Ok(())
+        };
     // The client does not initialize again: the host's child crashed, not the client.
-    let second_run = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
-        let session = agent.new_session(NewSessionRequest::new("/tmp")).await?;
-        agent.prompt(PromptRequest::new(session.session_id, vec![])).await?;
-        Ok(())
-    };
+    let second_run =
+        async |agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| -> std::result::Result<(), Error> {
+            let session = agent.new_session(NewSessionRequest::new("/tmp")).await?;
+            agent.prompt(PromptRequest::new(session.session_id, vec![])).await?;
+            Ok(())
+        };
 
-    let exit = run_once(
-        &launcher,
-        Arc::new(NoopClient),
-        claim.clone(),
-        handshake.clone(),
-        &first_run,
-    )
-    .await;
+    let exit = run(&launcher, claim.clone(), handshake.clone(), &first_run).await;
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
-    let exit = run_once(&launcher, Arc::new(NoopClient), claim, handshake, &second_run).await;
+    let exit = run(&launcher, claim, handshake, &second_run).await;
 
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
     assert_eq!(launcher.agent.initializes(), vec![discord("1"), discord("1")]);
@@ -295,7 +316,7 @@ async fn a_different_initialize_relaunches_the_child_with_it() {
     let handshake = Arc::new(ClientHandshake::default());
     let claim = Arc::new(ClientClaim::default());
     let (answered_tx, answered_rx) = std::sync::mpsc::channel();
-    let first_run = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let first_run = async |agent: InitializedAgent<ConnectionAgent>, stop: RunStop| -> std::result::Result<(), Error> {
         let agent = Arc::new(agent);
         agent.initialize(discord("1")).await?;
         // The client restarted with a new version. Its initialize runs as a
@@ -305,20 +326,15 @@ async fn a_different_initialize_relaunches_the_child_with_it() {
         tokio::spawn(async move {
             let _ = answered.send(reinitialize.initialize(discord("2")).await);
         });
-        std::future::pending().await
+        stop.await;
+        Ok(())
     };
-    let second_run = async |_agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> { Ok(()) };
+    let second_run =
+        async |_agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| -> std::result::Result<(), Error> { Ok(()) };
 
-    let exit = run_once(
-        &launcher,
-        Arc::new(NoopClient),
-        claim.clone(),
-        handshake.clone(),
-        &first_run,
-    )
-    .await;
+    let exit = run(&launcher, claim.clone(), handshake.clone(), &first_run).await;
     assert!(matches!(exit, RunExit::Reinitialize), "got {exit}");
-    let exit = run_once(&launcher, Arc::new(NoopClient), claim, handshake, &second_run).await;
+    let exit = run(&launcher, claim, handshake, &second_run).await;
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
 
     assert_eq!(launcher.agent.initializes(), vec![discord("1"), discord("2")]);
@@ -336,12 +352,12 @@ async fn a_different_initialize_relaunches_the_child_with_it() {
 #[tokio::test]
 async fn before_any_client_initializes_the_child_gets_defaults_on_its_first_request() {
     let launcher = InProcessLauncher::default();
-    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let serve = async |agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| -> std::result::Result<(), Error> {
         agent.new_session(NewSessionRequest::new("/tmp")).await?;
         Ok(())
     };
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), Arc::default(), &serve).await;
+    let exit = run(&launcher, Arc::default(), Arc::default(), &serve).await;
 
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
     assert_eq!(
@@ -353,9 +369,9 @@ async fn before_any_client_initializes_the_child_gets_defaults_on_its_first_requ
 #[tokio::test]
 async fn a_launched_child_waits_for_the_client_instead_of_initializing_itself() {
     let launcher = InProcessLauncher::default();
-    let serve = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| Ok::<(), Error>(());
 
-    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), Arc::default(), &serve).await;
+    let exit = run(&launcher, Arc::default(), Arc::default(), &serve).await;
 
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
     assert!(launcher.agent.initializes().is_empty());
@@ -365,14 +381,15 @@ async fn a_launched_child_waits_for_the_client_instead_of_initializing_itself() 
 async fn a_relaunch_the_client_asks_for_skips_the_restart_delay() {
     let launcher = InProcessLauncher::default();
     let runs = AtomicU32::new(0);
-    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let serve = async |agent: InitializedAgent<ConnectionAgent>, stop: RunStop| -> std::result::Result<(), Error> {
         if runs.fetch_add(1, Ordering::SeqCst) == 0 {
             let agent = Arc::new(agent);
             agent.initialize(discord("1")).await?;
             let reinitialize = agent.clone();
             tokio::spawn(async move { reinitialize.initialize(discord("2")).await });
         }
-        std::future::pending().await
+        stop.await;
+        Ok(())
     };
 
     // A crash relaunch would wait a second first.
@@ -393,8 +410,9 @@ async fn a_relaunch_the_client_asks_for_skips_the_restart_delay() {
 #[tokio::test(start_paused = true)]
 async fn shutdown_during_the_restart_delay_ends_supervision_without_another_launch() {
     let launcher = ExitingLauncher::default();
-    let serve = async |_agent: InitializedAgent<ConnectionAgent>| {
-        std::future::pending::<std::result::Result<(), Error>>().await
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>, stop: RunStop| {
+        stop.await;
+        Ok::<(), Error>(())
     };
     let shutdown = CancellationToken::new();
     let supervised = supervise(
@@ -474,21 +492,16 @@ async fn capabilities_the_schema_does_not_name_reach_every_child() {
         },
         "clientInfo": {"name": "discord", "version": "1"},
     });
-    let first = async |agent: InitializedAgent<ConnectionAgent>| agent.initialize_raw(sent.clone()).await.map(drop);
-    let relaunched = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
+    let first = async |agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| {
+        agent.initialize_raw(sent.clone()).await.map(drop)
+    };
+    let relaunched = async |_agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| Ok::<(), Error>(());
 
-    let exit = run_once(
-        &launcher,
-        Arc::new(NoopClient),
-        Arc::default(),
-        handshake.clone(),
-        &first,
-    )
-    .await;
+    let exit = run(&launcher, Arc::default(), handshake.clone(), &first).await;
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
     // A relaunch (after a crash, say) initializes the next child with the
     // same params.
-    let exit = run_once(&launcher, Arc::new(NoopClient), Arc::default(), handshake, &relaunched).await;
+    let exit = run(&launcher, Arc::default(), handshake, &relaunched).await;
     assert!(matches!(exit, RunExit::ServeEnded), "got {exit}");
 
     assert_eq!(launcher.initialize_params(), vec![sent.clone(), sent]);
@@ -516,16 +529,9 @@ async fn a_relaunched_child_that_never_answers_initialize_fails_the_run_and_keep
     let handshake = Arc::new(ClientHandshake::default());
     // The client asked for a relaunch with it.
     let _pending = handshake.relaunch_with(discord("1").into());
-    let serve = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| Ok::<(), Error>(());
 
-    let exit = run_once(
-        &SilentLauncher,
-        Arc::new(NoopClient),
-        Arc::default(),
-        handshake.clone(),
-        &serve,
-    )
-    .await;
+    let exit = run(&SilentLauncher, Arc::default(), handshake.clone(), &serve).await;
 
     assert!(
         matches!(&exit, RunExit::AgentFailed(_)) && exit.to_string().contains("did not answer initialize"),
@@ -543,16 +549,9 @@ async fn a_relaunched_child_that_exits_before_answering_keeps_the_handshake() {
     let handshake = Arc::new(ClientHandshake::default());
     // The client asked for a relaunch with it.
     let _pending = handshake.relaunch_with(discord("1").into());
-    let serve = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>, _stop: RunStop| Ok::<(), Error>(());
 
-    let exit = run_once(
-        &ExitingLauncher::default(),
-        Arc::new(NoopClient),
-        Arc::default(),
-        handshake.clone(),
-        &serve,
-    )
-    .await;
+    let exit = run(&ExitingLauncher::default(), Arc::default(), handshake.clone(), &serve).await;
 
     assert!(
         matches!(exit, RunExit::AgentExited | RunExit::AgentFailed(_)),
@@ -566,7 +565,7 @@ async fn concurrent_different_initializes_are_all_answered_by_one_relaunch() {
     let launcher = InProcessLauncher::default();
     let (answers_tx, mut answers) = tokio::sync::mpsc::unbounded_channel();
     let runs = AtomicU32::new(0);
-    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let serve = async |agent: InitializedAgent<ConnectionAgent>, stop: RunStop| -> std::result::Result<(), Error> {
         if runs.fetch_add(1, Ordering::SeqCst) == 0 {
             let agent = Arc::new(agent);
             agent.initialize(discord("0")).await?;
@@ -579,7 +578,8 @@ async fn concurrent_different_initializes_are_all_answered_by_one_relaunch() {
                 });
             }
         }
-        std::future::pending().await
+        stop.await;
+        Ok(())
     };
     let shutdown = CancellationToken::new();
     let supervised = supervise(
@@ -628,7 +628,7 @@ async fn a_request_naming_a_client_before_any_initialize_does_not_lock_out_the_r
     let (answer_tx, answer) = tokio::sync::oneshot::channel();
     let answer_tx = std::sync::Mutex::new(Some(answer_tx));
     let runs = AtomicU32::new(0);
-    let serve = async |agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), Error> {
+    let serve = async |agent: InitializedAgent<ConnectionAgent>, stop: RunStop| -> std::result::Result<(), Error> {
         if runs.fetch_add(1, Ordering::SeqCst) == 0 {
             // A stray client's request comes first. The gate lets it through
             // without claiming, and it initializes the child with defaults.
@@ -641,7 +641,8 @@ async fn a_request_naming_a_client_before_any_initialize_does_not_lock_out_the_r
                 let _ = answer_tx.send(agent.initialize(discord("1")).await);
             });
         }
-        std::future::pending().await
+        stop.await;
+        Ok(())
     };
     let shutdown = CancellationToken::new();
     let supervised = supervise(
@@ -673,11 +674,12 @@ async fn a_serving_failure_ends_the_run_and_serving_starts_again() {
     let serves = AtomicU32::new(0);
     // The first run's serving fails, as it does when NATS lost the COMMANDS
     // stream; the next run's serving (which provisions again) holds.
-    let serve = async |_agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), &str> {
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>, stop: RunStop| -> std::result::Result<(), &str> {
         if serves.fetch_add(1, Ordering::SeqCst) == 0 {
             return Err("commands stream missing");
         }
-        std::future::pending().await
+        stop.await;
+        Ok(())
     };
     let shutdown = CancellationToken::new();
     let supervised = supervise(
@@ -693,3 +695,5 @@ async fn a_serving_failure_ends_the_run_and_serving_starts_again() {
 
     assert_eq!(serves.load(Ordering::SeqCst), 2);
 }
+
+mod redelivery;

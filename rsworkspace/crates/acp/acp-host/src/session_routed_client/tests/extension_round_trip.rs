@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::initialized_agent::InitializedAgent;
-use crate::supervisor::{LaunchAgent, run_once};
+use crate::supervisor::{LaunchAgent, RunStop, run_once};
 use acp_nats::boundary::{ConnectionAgent, connect_agent_boundary};
 use acp_nats::{AgentHandler, Bridge, Config, NatsConfig};
 use agent_client_protocol::v1::schema::{
@@ -16,6 +16,7 @@ use serde_json::json;
 use std::sync::{Arc, Mutex};
 use tokio::io::{DuplexStream, ReadHalf, WriteHalf};
 use tokio::sync::{Notify, oneshot};
+use tokio_util::sync::CancellationToken;
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_std::time::SystemClock;
 
@@ -150,8 +151,12 @@ async fn a_childs_extension_calls_reach_the_client_by_exact_name_and_the_answer_
         answer: Mutex::new(Some(answer_tx)),
     };
     let host = Arc::new(SessionRoutedClient::new(nats.clone(), prefix, Duration::from_secs(5)));
-    let serve = async |_agent: InitializedAgent<ConnectionAgent>| std::future::pending::<Result<()>>().await;
-    let run = run_once(&launcher, host, Arc::default(), Arc::default(), &serve);
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>, stop: RunStop| {
+        stop.await;
+        Ok::<(), agent_client_protocol::Error>(())
+    };
+    let shutdown = CancellationToken::new();
+    let run = run_once(&launcher, host, Arc::default(), Arc::default(), &serve, &shutdown);
 
     let answer = tokio::select! {
         exit = run => panic!("the run ended: {exit}"),
