@@ -39,6 +39,9 @@ pub const FAIL_LIST_LABEL: &str = "fail-list";
 
 pub const EXPORT_BYTES: &[u8] = b"rootfs-tar-bytes";
 
+/// Where the egress sidecar writes its readiness marker once its rules are installed.
+const SIDECAR_READY_PATH: &str = "/etc/sandbox-egress-proxy-ready";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordedRequest {
     pub method: String,
@@ -53,6 +56,7 @@ struct Container {
     status: String,
     exit_code: i64,
     ports: Vec<String>,
+    config: Value,
 }
 
 #[derive(Default)]
@@ -61,6 +65,7 @@ struct State {
     requests: Vec<RecordedRequest>,
     checkpoints: Vec<String>,
     fail_sidecars: bool,
+    fail_sidecar_rules: bool,
     fail_kills: bool,
     fail_creates: bool,
 }
@@ -160,6 +165,12 @@ impl FakeDocker {
         lock(&self.state).fail_sidecars = true;
     }
 
+    /// Makes every `*-egress-proxy` container exit at start, as its shell does when a firewall rule fails, without
+    /// writing its readiness marker.
+    pub fn fail_sidecar_rules(&self) {
+        lock(&self.state).fail_sidecar_rules = true;
+    }
+
     /// Makes every kill fail.
     pub fn fail_kills(&self) {
         lock(&self.state).fail_kills = true;
@@ -205,6 +216,7 @@ impl FakeDocker {
                 status: "running".to_string(),
                 exit_code: 0,
                 ports: vec![],
+                config: Value::Null,
             },
         );
     }
@@ -296,6 +308,7 @@ fn create(state: &Mutex<State>, name: &str, body: &str) -> Response<Full<Bytes>>
             status: "created".to_string(),
             exit_code: 0,
             ports,
+            config,
         },
     );
     json_reply(StatusCode::CREATED, &json!({ "Id": id, "Warnings": [] }))
@@ -303,6 +316,7 @@ fn create(state: &Mutex<State>, name: &str, body: &str) -> Response<Full<Bytes>>
 
 fn start(state: &Mutex<State>, id: &str, checkpoint: &str) -> Response<Full<Bytes>> {
     let mut state = lock(state);
+    let fail_sidecar_rules = state.fail_sidecar_rules;
     let Some(container) = state.containers.get_mut(id) else {
         return error_reply(StatusCode::NOT_FOUND, "no such container");
     };
@@ -310,7 +324,38 @@ fn start(state: &Mutex<State>, id: &str, checkpoint: &str) -> Response<Full<Byte
         return error_reply(StatusCode::INTERNAL_SERVER_ERROR, "start refused");
     }
     container.status = "running".to_string();
+    if container.name.ends_with("-egress-proxy") {
+        if fail_sidecar_rules {
+            container.status = "exited".to_string();
+            container.exit_code = 1;
+        } else {
+            write_sidecar_ready_marker(&container.config);
+        }
+    }
     no_content()
+}
+
+/// Plays the sidecar shell's last step before the proxy starts: the nonce its command writes to the readiness
+/// marker lands in the host file bound there.
+fn write_sidecar_ready_marker(config: &Value) {
+    let target = format!(":{SIDECAR_READY_PATH}");
+    let host_path = config["HostConfig"]["Binds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .find_map(|bind| bind.strip_suffix(&target));
+    let script = config["Cmd"]
+        .as_array()
+        .and_then(|cmd| cmd.last())
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let nonce = script
+        .split_once(&format!(" > {SIDECAR_READY_PATH}"))
+        .and_then(|(before, _)| before.rsplit(' ').next());
+    if let (Some(host_path), Some(nonce)) = (host_path, nonce) {
+        let _ = std::fs::write(host_path, nonce);
+    }
 }
 
 fn inspect(state: &Mutex<State>, id: &str) -> Response<Full<Bytes>> {

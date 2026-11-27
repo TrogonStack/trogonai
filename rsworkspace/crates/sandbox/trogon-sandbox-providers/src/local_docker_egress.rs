@@ -5,14 +5,17 @@ use serde::Serialize;
 use trogon_sandbox_contract::{LeaseId, NetworkPolicy, ProxyUid};
 
 use crate::docker::constants::{
-    DOCKER_HOST_ALIAS, PROXY_BINARY, PROXY_CA_OUT_FILE_ENV, PROXY_LISTEN_ADDR_ENV, PROXY_POLICY_FILE_ENV,
-    SIDECAR_CA_PATH, SIDECAR_CAPABILITIES, SIDECAR_LISTEN_ADDR, SIDECAR_LISTEN_PORT, SIDECAR_PIDS_LIMIT,
-    SIDECAR_POLICY_PATH, SIDECAR_TMPFS_OPTIONS,
+    DOCKER_HOST_ALIAS, PROXY_BINARY, PROXY_CA_OUT_FILE_ENV, PROXY_LISTEN_ADDR_ENV, PROXY_MUX_LISTEN_ADDR_ENV,
+    PROXY_MUX_TOKEN_ENV, PROXY_POLICY_FILE_ENV, SIDECAR_CA_PATH, SIDECAR_CAPABILITIES, SIDECAR_LISTEN_ADDR,
+    SIDECAR_LISTEN_PORT, SIDECAR_MUX_LISTEN_ADDR, SIDECAR_PIDS_LIMIT, SIDECAR_POLICY_PATH, SIDECAR_READY_PATH,
+    SIDECAR_READY_POLL, SIDECAR_READY_TIMEOUT, SIDECAR_TMPFS_OPTIONS, WORKLOAD_NO_PROXY, WORKLOAD_NO_PROXY_ENV,
+    WORKLOAD_PROXY_ENV, WORKLOAD_PROXY_USER,
 };
 use crate::local_docker_sidecar_launch::EgressSidecarLaunch;
+use crate::local_docker_sidecar_ready::SidecarReadyMarker;
 use crate::{
-    ContainerHardening, ContainerRunSpec, DockerError, EgressViolationEvents, LocalDockerProvider,
-    egress_redirect_command, exempt_uid_env_pair, rewrite_loopback_host,
+    ContainerHardening, ContainerRunSpec, DockerError, EgressProxyToken, EgressRulesFailure, EgressViolationEvents,
+    InspectStatus, LocalDockerProvider, egress_lockdown_command, exempt_uid_env_pair, rewrite_loopback_host,
 };
 
 pub(crate) fn utf8_path<'a>(what: &'static str, path: &'a Path) -> Result<&'a str, DockerError> {
@@ -24,6 +27,24 @@ pub(crate) fn utf8_path<'a>(what: &'static str, path: &'a Path) -> Result<&'a st
 
 fn policy_json<T: Serialize + ?Sized>(policy: &T) -> Result<String, DockerError> {
     serde_json::to_string(policy).map_err(DockerError::PolicySerialize)
+}
+
+/// The environment that points a workload's HTTP clients at its sidecar's explicit proxy. The workload has no DNS
+/// (the sidecar's firewall refuses it), so a name reaches the network only through the proxy, which resolves it.
+pub(crate) fn workload_proxy_env(token: &EgressProxyToken) -> Vec<String> {
+    let url = format!(
+        "http://{WORKLOAD_PROXY_USER}:{}@{SIDECAR_MUX_LISTEN_ADDR}",
+        token.expose()
+    );
+    WORKLOAD_PROXY_ENV
+        .iter()
+        .map(|name| format!("{name}={url}"))
+        .chain(
+            WORKLOAD_NO_PROXY_ENV
+                .iter()
+                .map(|name| format!("{name}={WORKLOAD_NO_PROXY}")),
+        )
+        .collect()
 }
 
 /// Writes the sidecar's initial policy into a fresh file under `dir`.
@@ -46,18 +67,26 @@ impl LocalDockerProvider {
         policy: &NetworkPolicy,
         ca_host_path: Option<&Path>,
         lease_id: Option<&LeaseId>,
+        proxy_token: &EgressProxyToken,
     ) -> Result<EgressSidecarLaunch, DockerError> {
         let policy_file_path = write_policy_file(&std::env::temp_dir(), &policy_json(policy)?).await?;
 
         let policy_file_str = utf8_path("policy file", &policy_file_path)?;
+        let ready = SidecarReadyMarker::create(&std::env::temp_dir()).await?;
+        let ready_str = utf8_path("readiness marker", ready.path())?;
 
         let (exempt_uid_key, exempt_uid) = exempt_uid_env_pair();
         let mut env = vec![
             format!("{PROXY_LISTEN_ADDR_ENV}={SIDECAR_LISTEN_ADDR}"),
             format!("{PROXY_POLICY_FILE_ENV}={SIDECAR_POLICY_PATH}"),
+            format!("{PROXY_MUX_LISTEN_ADDR_ENV}={SIDECAR_MUX_LISTEN_ADDR}"),
+            format!("{PROXY_MUX_TOKEN_ENV}={}", proxy_token.expose()),
             format!("{exempt_uid_key}={exempt_uid}"),
         ];
-        let mut binds = vec![format!("{policy_file_str}:{SIDECAR_POLICY_PATH}:ro")];
+        let mut binds = vec![
+            format!("{policy_file_str}:{SIDECAR_POLICY_PATH}:ro"),
+            format!("{ready_str}:{SIDECAR_READY_PATH}"),
+        ];
         if let Some(ca_host_path) = ca_host_path {
             let ca_host_path_str = utf8_path("ca file", ca_host_path)?;
             env.push(format!("{PROXY_CA_OUT_FILE_ENV}={SIDECAR_CA_PATH}"));
@@ -75,7 +104,8 @@ impl LocalDockerProvider {
                 env.push(format!("{key}={value}"));
             }
         }
-        let redirect = egress_redirect_command(SIDECAR_LISTEN_PORT);
+        let lockdown = egress_lockdown_command(SIDECAR_LISTEN_PORT);
+        let nonce = ready.nonce();
         let proxy_uid = ProxyUid::EGRESS_PROXY;
 
         let sidecar_spec = ContainerRunSpec {
@@ -91,7 +121,7 @@ impl LocalDockerProvider {
                 "sh".to_string(),
                 "-c".to_string(),
                 format!(
-                    "{redirect} && exec setpriv --reuid={proxy_uid} --regid={proxy_uid} --clear-groups --bounding-set=-all --no-new-privs {PROXY_BINARY}"
+                    "{lockdown} && printf %s {nonce} > {SIDECAR_READY_PATH} && exec setpriv --reuid={proxy_uid} --regid={proxy_uid} --clear-groups --bounding-set=-all --no-new-privs {PROXY_BINARY}"
                 ),
             ]),
             working_dir: None,
@@ -114,17 +144,73 @@ impl LocalDockerProvider {
             labels: self.owner_labels("egress-sidecar", lease_id.map(LeaseId::as_str)),
         };
 
-        let container_id = self
+        let started = self
             .engine
             .create_and_start(sidecar_spec)
             .await
-            .map_err(|error| error.during("docker run failed for egress sidecar"))?
-            .container_id;
+            .map_err(|error| error.during("docker run failed for egress sidecar"));
+        let container_id = match started {
+            Ok(started) => started.container_id,
+            Err(error) => {
+                ready.remove().await;
+                return Err(error);
+            }
+        };
+
+        let confirmed = self.await_sidecar_firewall(&container_id, &ready).await;
+        ready.remove().await;
+        if let Err(error) = confirmed {
+            if let Err(kill_error) = self.engine.kill(&container_id).await {
+                tracing::warn!(error = %kill_error, "failed to kill an egress sidecar whose firewall is missing");
+            }
+            return Err(error);
+        }
 
         Ok(EgressSidecarLaunch {
             container_id,
             policy_file_path,
         })
+    }
+
+    /// Waits until the sidecar has written the marker's nonce, which its shell does only after every firewall rule
+    /// installed. A sidecar that stops first, or that takes longer than [`SIDECAR_READY_TIMEOUT`], fails the launch.
+    async fn await_sidecar_firewall(&self, sidecar_id: &str, ready: &SidecarReadyMarker) -> Result<(), DockerError> {
+        let deadline = tokio::time::Instant::now() + SIDECAR_READY_TIMEOUT;
+        loop {
+            if ready.is_written().await? {
+                return Ok(());
+            }
+            let cause = match self
+                .engine
+                .inspect(sidecar_id)
+                .await
+                .map_err(|error| error.during("inspect egress sidecar"))?
+            {
+                InspectStatus::Running | InspectStatus::Pending => None,
+                InspectStatus::Exited(code) => Some(EgressRulesFailure::SidecarExited { code }),
+                InspectStatus::Failed(state) => Some(EgressRulesFailure::SidecarFailed { state }),
+            };
+            // The shell writes the nonce and then execs the proxy, so a sidecar seen stopping may still have
+            // written it just before; only a stop with no nonce is a failure.
+            if let Some(cause) = cause {
+                if ready.is_written().await? {
+                    return Ok(());
+                }
+                return Err(DockerError::EgressRulesNotInstalled {
+                    sidecar_id: sidecar_id.to_string(),
+                    cause,
+                });
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(DockerError::EgressRulesNotInstalled {
+                    sidecar_id: sidecar_id.to_string(),
+                    cause: EgressRulesFailure::TimedOut {
+                        waited: SIDECAR_READY_TIMEOUT,
+                    },
+                });
+            }
+            tokio::time::sleep(SIDECAR_READY_POLL).await;
+        }
     }
 
     /// Atomically overwrites `policy_file_path` with the JSON serialization of

@@ -17,8 +17,11 @@ mod docker_engine_container_run_spec;
 mod docker_engine_container_start_result;
 mod docker_engine_inspect_status;
 mod docker_error;
+mod egress_lockdown_rules;
 mod egress_policy;
+mod egress_proxy_token;
 mod egress_redirect;
+mod egress_rules_failure;
 mod egress_violation_events;
 mod git_command;
 mod git_provider;
@@ -60,6 +63,7 @@ mod local_docker_launch;
 mod local_docker_policy;
 mod local_docker_provider;
 mod local_docker_sidecar_launch;
+mod local_docker_sidecar_ready;
 mod local_docker_snapshot;
 mod local_docker_workspace;
 mod noop_artifact_sink;
@@ -107,12 +111,15 @@ pub use docker_engine_container_run_spec::ContainerRunSpec;
 pub use docker_engine_container_start_result::ContainerStartResult;
 pub use docker_engine_inspect_status::InspectStatus;
 pub use docker_error::DockerError;
+pub use egress_lockdown_rules::EgressLockdownRules;
 pub use egress_policy::EgressPolicy;
+pub(crate) use egress_proxy_token::EgressProxyToken;
 pub use egress_redirect::{
     EGRESS_PROXY_EXEMPT_UID_ENV, EGRESS_PROXY_LEASE_ID_ENV, EGRESS_PROXY_VIOLATION_NATS_URL_ENV,
-    UID_CHANGE_CAPABILITIES, egress_redirect_command, exempt_uid_env_pair, reject_proxy_uid_workload,
-    rewrite_loopback_host,
+    UID_CHANGE_CAPABILITIES, egress_lockdown_command, egress_lockdown_rules, egress_redirect_command,
+    exempt_uid_env_pair, reject_proxy_uid_workload, rewrite_loopback_host,
 };
+pub use egress_rules_failure::EgressRulesFailure;
 pub use egress_violation_events::EgressViolationEvents;
 pub use git_provider::GitProvider;
 pub use git_step::GitStep;
