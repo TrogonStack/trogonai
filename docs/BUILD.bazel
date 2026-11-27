@@ -46,3 +46,10 @@ vitepress_bin.vitepress_binary(
     ],
     tags = ["manual"],
 )
+
+# Pages whose Rust code the sandbox doc-snippets crate compiles as doc tests.
+filegroup(
+    name = "sandbox_doc_snippets",
+    srcs = ["get-started/sandbox/first-sandbox-lease.md"],
+    visibility = ["//rsworkspace/crates/sandbox/trogon-sandbox-doc-snippets:__pkg__"],
+)

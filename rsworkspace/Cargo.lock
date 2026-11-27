@@ -11020,6 +11020,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-doc-snippets"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "trogon-sandbox-client",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-protocol",
+]
+
+[[package]]
 name = "trogon-sandbox-docker-worker"
 version = "0.1.0"
 dependencies = [
