@@ -1,0 +1,33 @@
+[package]
+name = "trogon-sandbox-auth"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "API key store and authorization checks shared by the sandbox services"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+async-trait = { workspace = true }
+authzed = { workspace = true }
+bytes = { workspace = true }
+hex = { workspace = true }
+rand_core = { workspace = true }
+secrecy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tonic = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-stream = { version = "=0.1.18", features = ["net"] }
+tonic-prost = "=0.14.5"
+trogon-nats = { workspace = true, features = ["test-support"] }

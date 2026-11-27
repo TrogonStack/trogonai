@@ -1,0 +1,43 @@
+[package]
+name = "trogon-sandbox-credential-broker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "NATS service that stores provider credentials and issues short-lived scoped tokens"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_credential_broker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-credential-broker"
+path = "src/main.rs"
+
+[dependencies]
+aes-gcm = { workspace = true }
+anyhow = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+hex = { workspace = true }
+rand_core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+tracing = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "process", "io-util", "net"] }
+trogon-nats = { workspace = true, features = ["test-support"] }

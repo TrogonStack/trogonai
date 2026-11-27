@@ -1485,6 +1485,45 @@ impl JetStreamGetStream for MockJetStreamConsumerFactory {
     }
 }
 
+/// A JetStream client that both publishes and opens streams, for code that needs
+/// `JetStreamPublisher + JetStreamGetStream` from one value. It is not a stand-in for
+/// `NatsJetStreamClient`: it implements only those two traits, not `JetStreamContext`
+/// or the KV traits.
+#[derive(Clone, Default)]
+pub struct MockJetStreamClient {
+    pub publisher: MockJetStreamPublisher,
+    pub consumer_factory: MockJetStreamConsumerFactory,
+}
+
+impl MockJetStreamClient {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl JetStreamPublisher for MockJetStreamClient {
+    type PublishError = <MockJetStreamPublisher as JetStreamPublisher>::PublishError;
+    type AckFuture = <MockJetStreamPublisher as JetStreamPublisher>::AckFuture;
+
+    async fn publish_with_headers<S: ToSubject + Send>(
+        &self,
+        subject: S,
+        headers: HeaderMap,
+        payload: Bytes,
+    ) -> Result<Self::AckFuture, Self::PublishError> {
+        self.publisher.publish_with_headers(subject, headers, payload).await
+    }
+}
+
+impl JetStreamGetStream for MockJetStreamClient {
+    type Error = GetStreamError;
+    type Stream = MockJetStreamStream;
+
+    async fn get_stream<T: AsRef<str> + Send>(&self, stream_name: T) -> Result<MockJetStreamStream, GetStreamError> {
+        self.consumer_factory.get_stream(stream_name).await
+    }
+}
+
 impl JetStreamCreateConsumer for MockJetStreamStream {
     type Error = MockError;
     type Consumer = MockJetStreamConsumer;
