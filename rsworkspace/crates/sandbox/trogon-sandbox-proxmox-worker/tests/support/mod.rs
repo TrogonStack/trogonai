@@ -64,6 +64,12 @@ pub struct Host {
     pub next_id_reply: Option<Value>,
     pub extra_vms: HashMap<u32, String>,
     pub fail_destroy: bool,
+    /// Once a delete task is polled, the journal at this path is moved aside and replaced by a directory, so the
+    /// worker cannot record the destroy it just confirmed.
+    pub destroy_bookkeeping_fault: Option<PathBuf>,
+    /// Every task stops with a failed exit status.
+    pub failed_tasks: bool,
+    pub snapshots: Vec<String>,
     pub binary_command: bool,
     pub capture_reply: Option<String>,
     pub file_missing: bool,
@@ -280,11 +286,36 @@ fn lifecycle(host: &mut Host, request: &Incoming) -> Option<Response> {
         return Some(data(json!("UPID:node:clone:1")));
     }
     if path.contains("/tasks/") {
+        if path.contains("delete")
+            && !host.task_running
+            && let Some(journal) = host.destroy_bookkeeping_fault.take()
+            && (std::fs::rename(&journal, journal.with_extension("fault-backup")).is_err()
+                || std::fs::create_dir(&journal).is_err())
+        {
+            return Some(status(StatusCode::INTERNAL_SERVER_ERROR));
+        }
         return Some(data(if host.task_running {
             json!({"status": "running"})
+        } else if host.failed_tasks {
+            json!({"status": "stopped", "exitstatus": "task failed"})
         } else {
             json!({"status": "stopped", "exitstatus": "OK"})
         }));
+    }
+    if request.method == Method::POST && path.ends_with("/snapshot") {
+        let name = request.body["snapname"].as_str()?.to_owned();
+        if request.body["vmstate"] != 1 {
+            return Some(status(StatusCode::BAD_REQUEST));
+        }
+        host.snapshots.push(name);
+        return Some(data(json!("UPID:node:snapshot:1")));
+    }
+    if request.method == Method::POST && path.ends_with("/rollback") {
+        let name = path.rsplit('/').nth(1)?;
+        if !host.snapshots.iter().any(|snapshot| snapshot == name) {
+            return Some(failure("snapshot does not exist"));
+        }
+        return Some(data(json!("UPID:node:rollback:1")));
     }
     if path.ends_with("/status/start") && host.fail_start {
         return Some(status(StatusCode::INTERNAL_SERVER_ERROR));
@@ -562,6 +593,30 @@ pub fn request_with(change: impl FnOnce(&mut Value)) -> Boxed<LeaseRequest> {
     Ok(serde_json::from_value(wire)?)
 }
 
+/// `length` bytes counting up and wrapping at 256.
+pub fn pattern(length: usize) -> Vec<u8> {
+    (0..length).map(|index| (index % 256) as u8).collect()
+}
+
+/// The capture a guest that passes every check of the spike reports: exit 7 with one line on each stream.
+pub fn spike_capture() -> String {
+    let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    format!(
+        "7\n13\n{}\n\n13\n{}\n\n",
+        encode(b"spike-stdout\n"),
+        encode(b"spike-stderr\n")
+    )
+}
+
+/// A fake host whose guest passes every check of the spike.
+pub fn spike_host() -> Host {
+    Host {
+        capture_reply: Some(spike_capture()),
+        file_data: pattern(512 * 1024),
+        ..Default::default()
+    }
+}
+
 /// A throwaway NATS server running in a container.
 pub struct Nats {
     inner: CoreTestServer,
@@ -599,16 +654,16 @@ impl Running {
     }
 
     pub async fn start_with(env: Env) -> Boxed<Self> {
-        let nats = Nats::start().await;
+        Self::serve(env, Nats::start().await, AuthorityConfig::new(AuthorityMode::Off)).await
+    }
+
+    /// Serves `env` on an already running NATS server with the given authority check.
+    pub async fn serve(env: Env, nats: Nats, authority: AuthorityConfig) -> Boxed<Self> {
         let client = nats.client().await?;
         let worker_id = env.provider.dispatch_ledger().worker_id().clone();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-        let worker = ProxmoxWorker::new(
-            client.clone(),
-            env.provider.clone(),
-            AuthorityConfig::new(AuthorityMode::Off),
-        )
-        .with_drain_timeout(Duration::from_secs(30));
+        let worker = ProxmoxWorker::new(client.clone(), env.provider.clone(), authority)
+            .with_drain_timeout(Duration::from_secs(30));
         let task = tokio::spawn(async move {
             worker
                 .run(async {

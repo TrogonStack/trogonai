@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use support::*;
 use trogon_sandbox_contract::{
     CancelIntent, LeaseId, ProviderCleanupRequest, ProviderCleanupResponse, ProviderDispatchPayload, ProviderKind,
+    RunCommandRequest, SandboxSpec,
 };
 use trogon_sandbox_protocol::{Provider, ProviderError};
 use trogon_sandbox_proxmox_worker::{
@@ -64,6 +65,14 @@ async fn a_linked_clone_loses_every_inherited_nic_and_is_released_idempotently()
     assert_eq!(receipt.sandbox_id.as_str(), "201");
     assert!(env.journal("test-lease").exists());
     assert_eq!(env.provider.kind(), ProviderKind::Proxmox);
+    let command: RunCommandRequest = serde_json::from_value(json!({
+        "lease_id": "test-lease",
+        "command": ["uname", "-a"],
+        "timeout_seconds": 5,
+    }))?;
+    let output = env.provider.run_command(&command).await?;
+    assert_eq!(output.exit_code, 0);
+    assert_eq!(output.stdout, b"guest-output\n");
     env.provider.cancel(&lease).await?;
     env.provider.cancel(&lease).await?;
     assert_eq!(env.provider.current_leases().await, 0);
@@ -355,6 +364,48 @@ async fn unsupported_requests_are_refused_before_allocation() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn an_oversized_env_cannot_be_requested() {
+    let env: serde_json::Map<String, Value> = (0..=SandboxSpec::MAX_ENV_ENTRIES)
+        .map(|index| (format!("K{index}"), json!("v")))
+        .collect();
+    assert!(request_with(|wire| wire["spec"]["env"] = Value::Object(env)).is_err());
+}
+
+#[tokio::test]
+async fn a_full_env_is_still_leased() -> TestResult {
+    let env_entries: serde_json::Map<String, Value> = (0..SandboxSpec::MAX_ENV_ENTRIES)
+        .map(|index| (format!("K{index}"), json!("v")))
+        .collect();
+    let request = request_with(|wire| wire["spec"]["env"] = Value::Object(env_entries))?;
+    let env = Env::start().await?;
+    env.provider.lease(&request, &lease_id("full-env")).await?;
+    assert!(env.fake.clone_exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn unsupported_platform_constraints_are_refused_before_allocation() -> TestResult {
+    let env = Env::start().await?;
+    let request = request_with(|wire| wire["spec"]["platform"] = json!({"macos": {"allow_pty": true}}))?;
+    assert!(env.provider.lease(&request, &lease_id("platform")).await.is_err());
+    assert!(env.fake.calls().is_empty());
+    Ok(())
+}
+
+#[test]
+fn the_antispoof_flag_parses_both_modes_and_rejects_others() {
+    assert_eq!(
+        <AntiSpoof as clap::ValueEnum>::from_str("require", false),
+        Ok(AntiSpoof::Require)
+    );
+    assert_eq!(
+        <AntiSpoof as clap::ValueEnum>::from_str("warn", false),
+        Ok(AntiSpoof::Warn)
+    );
+    assert!(<AntiSpoof as clap::ValueEnum>::from_str("off", false).is_err());
+}
+
 #[tokio::test]
 async fn a_lease_beyond_capacity_is_refused() -> TestResult {
     let env = Env::start().await?;
@@ -604,6 +655,50 @@ async fn a_targeted_cleanup_releases_the_vm_and_is_repeatable() -> TestResult {
     }
     assert!(!env.fake.clone_exists());
     assert!(!env.provider.holds_lease(&lease_id("targeted")).await);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_cleanup_retry_settles_local_state_after_a_confirmed_destroy_whose_journal_write_failed() -> TestResult {
+    let env = Env::start().await?;
+    let lease = lease_id("bookkeeping");
+    let mut target = target_json(&env, "bookkeeping-attempt");
+    target["epoch"] = json!(7);
+    let payload: ProviderDispatchPayload = serde_json::from_value(json!({
+        "lease_id": lease.as_str(),
+        "request": request_json(),
+        "target": target,
+    }))?;
+    env.provider.lease_dispatch(&payload).await?;
+    let journal = env.journal("bookkeeping");
+    env.fake
+        .with(|host| host.destroy_bookkeeping_fault = Some(journal.clone()));
+    assert!(
+        env.provider.release(&lease).await.is_err(),
+        "the fault interrupts local bookkeeping"
+    );
+    assert!(!env.fake.clone_exists(), "the backend destroy is already confirmed");
+    assert!(env.provider.holds_lease(&lease).await);
+    let proof = env.state_dir().join("attempts").join("bookkeeping-attempt.json");
+    let saved: Value = serde_json::from_slice(&std::fs::read(&proof)?)?;
+    assert_eq!(
+        saved["phase"]["phase"], "destroyed",
+        "the confirmed destroy is durable before the failed local write"
+    );
+    std::fs::remove_dir(&journal)?;
+    std::fs::rename(journal.with_extension("fault-backup"), &journal)?;
+    let mut cleanup = cleanup_request(&env, "bookkeeping", "bookkeeping-attempt", "purge")?;
+    cleanup.identity.target.epoch = payload.target.as_ref().and_then(|target| target.epoch);
+    let response = env.provider.cleanup_dispatch(&cleanup).await;
+    assert!(
+        matches!(&response, ProviderCleanupResponse::Cleaned { identity, intent: CancelIntent::Purge } if *identity == cleanup.identity),
+        "{response:?}"
+    );
+    assert!(!env.provider.holds_lease(&lease).await);
+    assert!(!journal.exists());
+    assert_eq!(env.provider.current_leases().await, 0);
+    assert!(!proof.exists());
+    assert_eq!(deletes(&env), 1);
     Ok(())
 }
 

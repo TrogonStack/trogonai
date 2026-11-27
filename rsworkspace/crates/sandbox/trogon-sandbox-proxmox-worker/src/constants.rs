@@ -98,6 +98,21 @@ pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long the commands and file transfers of the live host check may take together.
+pub(crate) const SPIKE_BODY_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The size of the binary file the live host check writes and reads back.
+pub(crate) const SPIKE_FILE_BYTES: usize = 512 * 1024;
+
+/// A guest path with a space, a semicolon and quotes, so file transfer must quote it.
+pub(crate) const SPIKE_PATH: &str = "/workspace/spike binary; 'file'";
+
+/// Proves the guest runs as root without a network, keeps the command environment and starts in the workspace,
+/// then reports distinct output on both streams and a non-zero exit.
+pub(crate) const SPIKE_SCRIPT: &str = "set -eu; test \"$(id -u)\" = 0; test \"$(ls /sys/class/net)\" = lo; \
+     test \"$SPIKE_MARKER\" = preserved; test \"$PWD\" = /workspace; printf 'spike-stdout\\n'; \
+     printf 'spike-stderr\\n' >&2; exit 7";
+
 pub(crate) const STATE_LOCK_FILE: &str = "worker.lock";
 
 pub(crate) const TASK_POLL: Duration = Duration::from_millis(200);
