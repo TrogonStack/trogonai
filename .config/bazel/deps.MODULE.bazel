@@ -256,6 +256,7 @@ npm.npm_translate_lock(
         "//tsworkspace/packages/proto:package.json",
         "//tsworkspace/packages/sandbox-agent-tools:package.json",
         "//tsworkspace/packages/sandbox-cli:package.json",
+        "//tsworkspace/packages/sandbox-example-ai-app-builder:package.json",
         "//tsworkspace/packages/sandbox-example-hono:package.json",
         "//tsworkspace/packages/sandbox-example-nextjs:package.json",
         "//tsworkspace/packages/sandbox-examples:package.json",

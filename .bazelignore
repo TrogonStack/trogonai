@@ -16,3 +16,4 @@ tsworkspace/packages/sandbox-cli/node_modules
 tsworkspace/packages/sandbox-example-hono/node_modules
 tsworkspace/packages/sandbox-example-nextjs/node_modules
 tsworkspace/packages/sandbox-examples/node_modules
+tsworkspace/packages/sandbox-example-ai-app-builder/node_modules
