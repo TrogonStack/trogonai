@@ -10805,6 +10805,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-capability-matrix"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "object_store",
+ "serde_json",
+ "thiserror 2.0.21",
+ "trogon-sandbox-aca-worker",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-daytona-worker",
+ "trogon-sandbox-docker-worker",
+ "trogon-sandbox-e2b-worker",
+ "trogon-sandbox-firecracker-worker",
+ "trogon-sandbox-hyperlight-worker",
+ "trogon-sandbox-k8s-worker",
+ "trogon-sandbox-kubevirt-worker",
+ "trogon-sandbox-memory-worker",
+ "trogon-sandbox-modal-worker",
+ "trogon-sandbox-subprocess-worker",
+ "trogon-sandbox-substrate-worker",
+ "trogon-sandbox-v8-wasm-worker",
+ "trogon-sandbox-vercel-worker",
+ "trogon-sandbox-volumes",
+]
+
+[[package]]
 name = "trogon-sandbox-client"
 version = "0.1.0"
 dependencies = [
