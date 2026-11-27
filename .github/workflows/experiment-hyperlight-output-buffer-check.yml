@@ -1,0 +1,60 @@
+# Throwaway: runs the hyperlight worker's ignored hypervisor tests on a KVM runner, with the
+# output-buffer fix and with it removed, to show the new test fails without it.
+name: Experiment hyperlight output buffer check
+
+on:
+  push:
+    branches: [experiments/hyperlight-output-buffer-check]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [with-fix, without-fix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Open /dev/kvm to the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: Hypervisor tests
+        working-directory: rsworkspace
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal -c rust-src -t wasm32-unknown-unknown
+          export RUSTUP_TOOLCHAIN=1.96.0
+          crate=crates/sandbox/trogon-sandbox-hyperlight-worker
+          guest=$crate/tests/fixtures/passthrough-guest
+          cargo build --release --target wasm32-unknown-unknown --manifest-path $guest/Cargo.toml
+          rev=$(sed -n 's/^hyperlight-wasm = .*rev = "\([0-9a-f]*\)".*/\1/p' Cargo.toml)
+          cargo install --locked --root "$RUNNER_TEMP/tools" \
+            --git https://github.com/yordis/hyperlight-wasm.git --rev "$rev" hyperlight-wasm-aot
+          "$RUNNER_TEMP/tools/bin/hyperlight-wasm-aot" compile \
+            $guest/target/wasm32-unknown-unknown/release/passthrough_guest.wasm "$RUNNER_TEMP/guest.aot"
+          if [ "${{ matrix.variant }}" = without-fix ]; then
+            # Hyperlight's own 16 KiB default, which the worker used before the fix.
+            sed -i 's/^\(pub(crate) const DEFAULT_GUEST_OUTPUT_BUFFER_BYTES: usize =\).*/\1 16 * 1024;/' $crate/src/constants.rs
+            grep -n DEFAULT_GUEST_OUTPUT_BUFFER_BYTES $crate/src/constants.rs
+          fi
+          export HYPERLIGHT_TEST_MODULE="$RUNNER_TEMP/guest.aot" RUSTC_BOOTSTRAP=1 RUSTFLAGS="--cfg trogon_hyperlight_wasm"
+          # Must compile in both variants, so a build failure cannot pass for the expected test failure.
+          cargo test --locked -p trogon-sandbox-hyperlight-worker --test wasm_backend --test units --no-run
+          if [ "${{ matrix.variant }}" = with-fix ]; then
+            cargo test --locked -p trogon-sandbox-hyperlight-worker --test wasm_backend --test units -- --include-ignored
+          else
+            # Expect exactly the 64 KiB test to fail.
+            ! cargo test --locked -p trogon-sandbox-hyperlight-worker --test wasm_backend \
+              a_guest_returns_more_than_hyperlights_default_output_buffer -- --ignored --exact
+          fi
