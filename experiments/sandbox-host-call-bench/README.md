@@ -24,7 +24,10 @@ The Hyperlight sandbox uses the `trogon-sandbox-hyperlight-worker` defaults (256
 ## Running
 
 `./run.sh` on x86_64 Linux. With a readable and writable `/dev/kvm` it also builds the AOT guest and
-the Hyperlight rows; without one it prints the two wasmtime hosts only. Hyperlight's guest target is
+the Hyperlight rows; without one it prints the two wasmtime hosts only, or fails when
+`REQUIRE_HYPERLIGHT=1` (CI sets it). The toolchain comes from `rsworkspace/rust-toolchain.toml` and the
+AOT compiler from the revision `host/Cargo.toml` pins. `host/Cargo.lock` was seeded from
+`rsworkspace/Cargo.lock`, so shared dependencies resolve as the worker's do. Hyperlight's guest target is
 `x86_64-unknown-none`, so arm64 hosts get no Hyperlight rows.
 
 CI: `.github/workflows/experiment-sandbox-host-call-bench.yml` runs it on `ubuntu-latest` (which

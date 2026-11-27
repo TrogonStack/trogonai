@@ -1,5 +1,6 @@
 # Experiment: runs experiments/sandbox-host-call-bench on a KVM-capable GitHub runner.
-# Triggers only on pushes to its own branch and is not meant to merge.
+# Triggers only on pushes to its own branch and is not meant to merge, so it calls the
+# experiment's script directly rather than a mise task.
 name: Experiment sandbox host-call bench
 
 on:
@@ -21,7 +22,13 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          ls -l /dev/kvm || echo "no /dev/kvm on this runner"
-          grep -c -w -E 'vmx|svm' /proc/cpuinfo || true
+          ls -l /dev/kvm
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            experiments/sandbox-host-call-bench/guest
+            experiments/sandbox-host-call-bench/host
       - name: Bench
+        env:
+          REQUIRE_HYPERLIGHT: "1"
         run: experiments/sandbox-host-call-bench/run.sh | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1,13 +1,14 @@
 //! Boundary cost of one guest on three hosts: wasmtime in process, wasmtime in a child process
 //! whose host imports are served over pipes, and hyperlight-wasm in a KVM/MSHV micro-VM.
 //!
-//! Usage: `bench-host all <guest.wasm> [<guest.aot>]` prints a Markdown table.
-//! `bench-host child <guest.cwasm>` is the subprocess side and is not meant to be run by hand.
+//! Usage: `bench-host all <guest.wasm> [<guest.aot>]` prints Markdown table rows; the AOT guest is
+//! required when built with the `hyperlight` feature. `bench-host child <guest.cwasm>` is the
+//! subprocess side and is not meant to be run by hand.
 
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{Result, anyhow, bail};
 
@@ -18,6 +19,7 @@ const LOOP_RUNS: usize = 50;
 const CREATE_RUNS: usize = 100;
 const SPAWN_RUNS: usize = 30;
 const HL_CREATE_RUNS: usize = 30;
+const HL_SNAPSHOT_RUNS: usize = 100;
 const HL_RESTORE_RUNS: usize = 1_000;
 
 const OP_RESULT: u8 = 0;
@@ -48,9 +50,10 @@ fn main() -> Result<()> {
         Some("child") => child(Path::new(arg(&args, 2)?)),
         Some("all") => {
             let wasm = Path::new(arg(&args, 2)?);
+            timer_floor();
             wasmtime_in_process(wasm)?;
             wasmtime_subprocess(wasm)?;
-            hyperlight(args.get(3).map(Path::new))
+            hyperlight(&args)
         }
         _ => bail!("usage: bench-host all <guest.wasm> [<guest.aot>]"),
     }
@@ -63,17 +66,35 @@ fn arg(args: &[String], index: usize) -> Result<&str> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Reporting
+// Timing and reporting
+
+/// Runs `f` and returns its output with the time it took, in nanoseconds.
+fn timed<T>(f: impl FnOnce() -> Result<T>) -> Result<(T, f64)> {
+    let start = Instant::now();
+    let out = f()?;
+    Ok((out, start.elapsed().as_nanos() as f64))
+}
+
+/// Times `runs` calls of `f`, passing each its run index. Whatever `f` returns is dropped after
+/// the clock stops, so teardown stays out of the sample.
+fn sample<T>(runs: usize, mut f: impl FnMut(i32) -> Result<T>) -> Result<Vec<f64>> {
+    (0..runs as i32).map(|i| Ok(timed(|| f(i))?.1)).collect()
+}
+
+/// Nearest-rank percentile, as `trogon-sandbox-conformance`'s latency report computes it.
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    let rank = ((p / 100.0) * sorted.len() as f64).ceil() as usize;
+    sorted[rank.clamp(1, sorted.len()) - 1]
+}
 
 fn row(host: &str, metric: &str, mut samples: Vec<f64>) {
     samples.sort_by(f64::total_cmp);
-    let pick = |p: f64| samples[((p / 100.0) * (samples.len() - 1) as f64).round() as usize];
     let mean = samples.iter().sum::<f64>() / samples.len() as f64;
     println!(
         "| {host} | {metric} | {} | {} | {} | {} |",
         samples.len(),
-        fmt(pick(50.0)),
-        fmt(pick(99.0)),
+        fmt(percentile(&samples, 50.0)),
+        fmt(percentile(&samples, 99.0)),
         fmt(mean)
     );
 }
@@ -86,8 +107,15 @@ fn fmt(ns: f64) -> String {
     }
 }
 
-fn ns(d: Duration) -> f64 {
-    d.as_nanos() as f64
+/// What an empty `Instant` pair costs: the floor under every single-call sample.
+fn timer_floor() {
+    let samples = (0..PING_CALLS)
+        .map(|_| {
+            let start = Instant::now();
+            start.elapsed().as_nanos() as f64
+        })
+        .collect();
+    row("—", "timer overhead (empty `Instant` pair)", samples);
 }
 
 /// Times `PING_CALLS` single host-to-guest calls, then `LOOP_RUNS` batches of `LOOP_COUNT`
@@ -98,27 +126,18 @@ fn measure_calls(host: &str, guest: &mut impl Guest) -> Result<()> {
     }
     guest.noop_loop(LOOP_COUNT)?;
 
-    let mut ping = Vec::with_capacity(PING_CALLS);
-    for i in 0..PING_CALLS as i32 {
-        let start = Instant::now();
-        let got = guest.ping(i)?;
-        ping.push(ns(start.elapsed()));
-        if got != i {
-            bail!("{host}: ping({i}) returned {got}");
-        }
-    }
+    let ping = sample(PING_CALLS, |i| match guest.ping(i)? {
+        got if got == i => Ok(()),
+        got => bail!("{host}: ping({i}) returned {got}"),
+    })?;
     row(host, "host→guest call (`ping`)", ping);
 
-    let mut per_call = Vec::with_capacity(LOOP_RUNS);
-    for _ in 0..LOOP_RUNS {
-        let start = Instant::now();
-        let got = guest.noop_loop(LOOP_COUNT)?;
-        per_call.push(ns(start.elapsed()) / f64::from(LOOP_COUNT));
-        if got != LOOP_COUNT {
-            bail!("{host}: noop_loop returned {got}");
-        }
-    }
-    row(host, "guest→host call (amortized over 10k)", per_call);
+    let batches = sample(LOOP_RUNS, |_| match guest.noop_loop(LOOP_COUNT)? {
+        LOOP_COUNT => Ok(()),
+        got => bail!("{host}: noop_loop returned {got}"),
+    })?;
+    let per_call = batches.into_iter().map(|t| t / f64::from(LOOP_COUNT)).collect();
+    row(host, &format!("guest→host call (amortized over {LOOP_COUNT})"), per_call);
     Ok(())
 }
 
@@ -161,13 +180,11 @@ fn instance_pre(config: &wasmtime::Config, wasm: &Path) -> Result<wasmtime::Inst
 }
 
 fn measure_instantiate(host: &str, metric: &str, pre: &wasmtime::InstancePre<()>) -> Result<()> {
-    let mut samples = Vec::with_capacity(CREATE_RUNS);
-    for i in 0..CREATE_RUNS as i32 {
-        let start = Instant::now();
+    let samples = sample(CREATE_RUNS, |i| {
         let mut guest = InProcess::new(pre)?;
         guest.ping(i)?;
-        samples.push(ns(start.elapsed()));
-    }
+        Ok(guest)
+    })?;
     row(host, metric, samples);
     Ok(())
 }
@@ -187,17 +204,25 @@ fn wasmtime_in_process(wasm: &Path) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// wasmtime, in a child process. Every host import crosses the pipe to the parent and back.
+// wasmtime, in a child process. Every message, host import calls included, is one 5-byte frame
+// over a pipe: an op byte and a little-endian i32.
 
-fn frame(op: u8, value: i32) -> [u8; 5] {
+fn send(to: &mut impl Write, op: u8, value: i32) -> std::io::Result<()> {
     let v = value.to_le_bytes();
-    [op, v[0], v[1], v[2], v[3]]
+    to.write_all(&[op, v[0], v[1], v[2], v[3]])?;
+    to.flush()
+}
+
+fn receive(from: &mut impl Read) -> std::io::Result<(u8, i32)> {
+    let mut b = [0u8; 5];
+    from.read_exact(&mut b)?;
+    Ok((b[0], i32::from_le_bytes([b[1], b[2], b[3], b[4]])))
 }
 
 struct Subprocess {
     child: Child,
     to_child: BufWriter<ChildStdin>,
-    from_child: BufReader<ChildStdout>,
+    from_child: ChildStdout,
 }
 
 impl Subprocess {
@@ -209,26 +234,18 @@ impl Subprocess {
             .stdout(Stdio::piped())
             .spawn()?;
         let to_child = BufWriter::new(child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?);
-        let mut from_child = BufReader::new(child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?);
-        let mut ready = [0u8; 1];
-        from_child.read_exact(&mut ready)?;
+        let mut from_child = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
+        receive(&mut from_child)?;
         Ok(Self { child, to_child, from_child })
     }
 
     fn call(&mut self, op: u8, value: i32) -> Result<i32> {
-        self.to_child.write_all(&frame(op, value))?;
-        self.to_child.flush()?;
+        send(&mut self.to_child, op, value)?;
         loop {
-            let mut buf = [0u8; 5];
-            self.from_child.read_exact(&mut buf)?;
-            let got = i32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]);
-            match buf[0] {
-                OP_RESULT => return Ok(got),
-                OP_HOST_CALL => {
-                    self.to_child.write_all(&got.wrapping_add(1).to_le_bytes())?;
-                    self.to_child.flush()?;
-                }
-                other => bail!("unexpected frame {other}"),
+            match receive(&mut self.from_child)? {
+                (OP_RESULT, got) => return Ok(got),
+                (OP_HOST_CALL, got) => send(&mut self.to_child, OP_RESULT, got.wrapping_add(1))?,
+                (other, _) => bail!("unexpected frame {other}"),
             }
         }
     }
@@ -257,26 +274,19 @@ fn wasmtime_subprocess(wasm: &Path) -> Result<()> {
     let cwasm = std::env::temp_dir().join("bench-guest.cwasm");
     std::fs::write(&cwasm, module.serialize().ctx()?)?;
 
-    let mut spawn = Vec::with_capacity(SPAWN_RUNS);
-    for i in 0..SPAWN_RUNS as i32 {
-        let start = Instant::now();
+    let spawn = sample(SPAWN_RUNS, |i| {
         let mut guest = Subprocess::spawn(&cwasm)?;
         guest.ping(i)?;
-        spawn.push(ns(start.elapsed()));
-    }
+        Ok(guest)
+    })?;
     row(host, "spawn + instantiate + first call", spawn);
 
     measure_calls(host, &mut Subprocess::spawn(&cwasm)?)
 }
 
 struct ChildIo {
-    from_parent: BufReader<std::io::Stdin>,
-    to_parent: BufWriter<std::io::Stdout>,
-}
-
-/// Exits the child on a broken pipe: the parent has gone, so there is nobody to report to.
-fn or_exit<T>(result: std::io::Result<T>) -> T {
-    result.unwrap_or_else(|_| std::process::exit(2))
+    from_parent: std::io::StdinLock<'static>,
+    to_parent: BufWriter<std::io::StdoutLock<'static>>,
 }
 
 fn child(cwasm: &Path) -> Result<()> {
@@ -290,52 +300,46 @@ fn child(cwasm: &Path) -> Result<()> {
             "HostNoop",
             |mut caller: wasmtime::Caller<'_, ChildIo>, value: i32| -> i32 {
                 let io = caller.data_mut();
-                or_exit(io.to_parent.write_all(&frame(OP_HOST_CALL, value)));
-                or_exit(io.to_parent.flush());
-                let mut reply = [0u8; 4];
-                or_exit(io.from_parent.read_exact(&mut reply));
-                i32::from_le_bytes(reply)
+                send(&mut io.to_parent, OP_HOST_CALL, value)
+                    .and_then(|()| receive(&mut io.from_parent))
+                    // A broken pipe means the parent is gone: nobody is left to report to.
+                    .unwrap_or_else(|_| std::process::exit(2))
+                    .1
             },
         )
         .ctx()?;
     let io = ChildIo {
-        from_parent: BufReader::new(std::io::stdin()),
-        to_parent: BufWriter::new(std::io::stdout()),
+        from_parent: std::io::stdin().lock(),
+        to_parent: BufWriter::new(std::io::stdout().lock()),
     };
     let mut store = wasmtime::Store::new(&engine, io);
     let instance = linker.instantiate(&mut store, &module).ctx()?;
     let ping = instance.get_typed_func::<i32, i32>(&mut store, "ping").ctx()?;
     let noop_loop = instance.get_typed_func::<i32, i32>(&mut store, "noop_loop").ctx()?;
 
-    store.data_mut().to_parent.write_all(&[1])?;
-    store.data_mut().to_parent.flush()?;
-    loop {
-        let mut request = [0u8; 5];
-        if store.data_mut().from_parent.read_exact(&mut request).is_err() {
-            return Ok(());
-        }
-        let value = i32::from_le_bytes([request[1], request[2], request[3], request[4]]);
-        let result = match request[0] {
+    send(&mut store.data_mut().to_parent, OP_RESULT, 0)?;
+    while let Ok((op, value)) = receive(&mut store.data_mut().from_parent) {
+        let result = match op {
             OP_PING => ping.call(&mut store, value).ctx()?,
             OP_LOOP => noop_loop.call(&mut store, value).ctx()?,
             other => bail!("unexpected request {other}"),
         };
-        store.data_mut().to_parent.write_all(&frame(OP_RESULT, result))?;
-        store.data_mut().to_parent.flush()?;
+        send(&mut store.data_mut().to_parent, OP_RESULT, result)?;
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------------------------
 // hyperlight-wasm
 
 #[cfg(not(feature = "hyperlight"))]
-fn hyperlight(_aot: Option<&Path>) -> Result<()> {
+fn hyperlight(_args: &[String]) -> Result<()> {
     eprintln!("hyperlight: skipped (built without the `hyperlight` feature)");
     Ok(())
 }
 
 #[cfg(feature = "hyperlight")]
-fn hyperlight(aot: Option<&Path>) -> Result<()> {
+fn hyperlight(args: &[String]) -> Result<()> {
     use std::sync::Arc;
 
     use hyperlight_wasm::{LoadedWasmSandbox, SandboxBuilder, WasmSandbox, is_hypervisor_present};
@@ -363,7 +367,7 @@ fn hyperlight(aot: Option<&Path>) -> Result<()> {
     }
 
     let host = "hyperlight-wasm (KVM)";
-    let aot = aot.ok_or_else(|| anyhow!("hyperlight needs the AOT-compiled guest"))?;
+    let aot = Path::new(arg(args, 3)?);
     if !is_hypervisor_present() {
         bail!("hyperlight: no hypervisor (/dev/kvm or /dev/mshv) on this host");
     }
@@ -371,40 +375,39 @@ fn hyperlight(aot: Option<&Path>) -> Result<()> {
     let mut cold = Vec::with_capacity(HL_CREATE_RUNS);
     let mut load = Vec::with_capacity(HL_CREATE_RUNS);
     for _ in 0..HL_CREATE_RUNS {
-        let start = Instant::now();
-        let sandbox = warm()?;
-        cold.push(ns(start.elapsed()));
-        let start = Instant::now();
-        let mut guest = Hyperlight(sandbox.load_module(aot).ctx()?);
-        guest.ping(1)?;
-        load.push(ns(start.elapsed()));
+        let (sandbox, built) = timed(warm)?;
+        let (_guest, loaded) = timed(|| {
+            let mut guest = Hyperlight(sandbox.load_module(aot).ctx()?);
+            guest.ping(1)?;
+            Ok(guest)
+        })?;
+        cold.push(built);
+        load.push(loaded);
     }
     row(host, "micro-VM build + runtime load", cold);
     row(host, "module load + first call (warm VM)", load);
 
     let mut guest = Hyperlight(warm()?.load_module(aot).ctx()?);
-    let mut snap_times = Vec::with_capacity(100);
-    let mut clean = guest.0.snapshot().ctx()?;
-    for _ in 0..100 {
-        let start = Instant::now();
-        clean = guest.0.snapshot().ctx()?;
-        snap_times.push(ns(start.elapsed()));
+    let mut snapshots = Vec::with_capacity(HL_SNAPSHOT_RUNS);
+    let mut clean = None;
+    for _ in 0..HL_SNAPSHOT_RUNS {
+        let (snapshot, took) = timed(|| guest.0.snapshot().ctx())?;
+        snapshots.push(took);
+        // Replacing frees the previous snapshot here, after the clock stopped.
+        clean = Some(snapshot);
     }
-    row(host, "snapshot", snap_times);
+    let clean = clean.ok_or_else(|| anyhow!("no snapshot"))?;
+    row(host, "snapshot", snapshots);
 
     let mut restore = Vec::with_capacity(HL_RESTORE_RUNS);
-    let mut restore_call = Vec::with_capacity(HL_RESTORE_RUNS);
+    let mut first_call = Vec::with_capacity(HL_RESTORE_RUNS);
     for i in 0..HL_RESTORE_RUNS as i32 {
         guest.ping(i)?;
-        let start = Instant::now();
-        guest.0.restore(Arc::clone(&clean)).ctx()?;
-        restore.push(ns(start.elapsed()));
-        let start = Instant::now();
-        guest.ping(i)?;
-        restore_call.push(ns(start.elapsed()));
+        restore.push(timed(|| guest.0.restore(Arc::clone(&clean)).ctx())?.1);
+        first_call.push(timed(|| guest.ping(i))?.1);
     }
     row(host, "restore to clean snapshot", restore);
-    row(host, "first call after restore", restore_call);
+    row(host, "first call after restore", first_call);
 
     measure_calls(host, &mut guest)
 }
