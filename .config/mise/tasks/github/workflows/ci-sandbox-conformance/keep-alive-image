@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Build the image the docker conformance run leases"
+set -euo pipefail
+
+: "${CONFORMANCE_IMAGE:?CONFORMANCE_IMAGE is required}"
+
+# The docker worker execs into the container the image starts, so the image has
+# to keep running. Plain alpine exits at once.
+printf 'FROM alpine:3.20\nCMD ["sleep","infinity"]\n' | docker build --quiet --tag "$CONFORMANCE_IMAGE" -

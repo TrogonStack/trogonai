@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#MISE description="Build the worker under test and the conformance suite"
+set -euo pipefail
+
+: "${WORKER:?WORKER is required (docker or subprocess)}"
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/rsworkspace"
+
+case "$WORKER" in
+    docker) packages=(--package trogon-sandbox-docker-worker) ;;
+    # A subprocess lease is the agent process the worker launches.
+    subprocess) packages=(--package trogon-sandbox-subprocess-worker --package trogon-sandbox-actor-agent) ;;
+    *) echo "WORKER must be docker or subprocess, got '$WORKER'" >&2; exit 1 ;;
+esac
+
+cargo build --locked "${packages[@]}"
+cargo test --locked --package trogon-sandbox-conformance --test conformance --no-run

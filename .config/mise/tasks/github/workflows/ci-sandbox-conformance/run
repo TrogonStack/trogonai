@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+#MISE description="Start NATS and the worker under test, then run its ignored conformance test"
+set -euo pipefail
+
+: "${WORKER:?WORKER is required (docker or subprocess)}"
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/rsworkspace"
+
+nats_port="${CONFORMANCE_NATS_PORT:-24555}"
+monitor_port="${CONFORMANCE_NATS_MONITOR_PORT:-28555}"
+nats_url="nats://127.0.0.1:${nats_port}"
+work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/sandbox-conformance-${WORKER}.XXXXXX")"
+target_dir="$(cargo metadata --format-version 1 --no-deps --locked | jq -r .target_directory)"
+
+case "$WORKER" in
+    docker)
+        : "${CONFORMANCE_IMAGE:?CONFORMANCE_IMAGE is required for the docker worker}"
+        test_name=local_docker_worker_conforms
+        image="$CONFORMANCE_IMAGE"
+        worker_env=(
+            SANDBOX_IMAGE="$CONFORMANCE_IMAGE"
+            SANDBOX_EGRESS_PROXY_IMAGE="$CONFORMANCE_IMAGE"
+            # The default state dir is under /var/lib, which the runner user cannot create.
+            SANDBOX_DOCKER_STATE_DIR="$work/state"
+            # The worker removes every container carrying its owner at startup, so
+            # a fixed owner would remove another run's containers on a shared daemon.
+            SANDBOX_DOCKER_WORKER_OWNER="conformance-$$"
+        )
+        ;;
+    subprocess)
+        test_name=subprocess_worker_conforms
+        # A lease spec needs an image, and the subprocess worker runs a path
+        # image as the agent binary.
+        image="$target_dir/debug/trogon-sandbox-actor-agent"
+        mkdir -p "$work/workspaces"
+        worker_env=(
+            SANDBOX_AGENT_BINARY="$image"
+            SANDBOX_WORKSPACE_ROOT="$work/workspaces"
+            # Bubblewrap needs unprivileged user namespaces, which hosted Ubuntu
+            # runners deny, so this checks the lease protocol without isolation.
+            SANDBOX_ISOLATION_BACKEND=none
+        )
+        ;;
+    *) echo "WORKER must be docker or subprocess, got '$WORKER'" >&2; exit 1 ;;
+esac
+
+nats_pid=''
+worker_pid=''
+finish() {
+    local status=$?
+    for pid in "$worker_pid" "$nats_pid"; do
+        [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+    if [ "$status" -ne 0 ]; then
+        for log in nats worker; do
+            [ -f "$work/$log.log" ] || continue
+            echo "::group::$log log"
+            cat "$work/$log.log"
+            echo "::endgroup::"
+        done
+    fi
+    exit "$status"
+}
+trap finish EXIT
+
+# Polls until the check passes, failing early when the process it waits on exits.
+wait_until() {
+    local what="$1" pid="$2" seconds="$3"
+    shift 3
+    local deadline=$((SECONDS + seconds))
+    until "$@"; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo "$what exited before it was ready" >&2
+            return 1
+        fi
+        if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "$what was not ready after ${seconds}s" >&2
+            return 1
+        fi
+        sleep 0.2
+    done
+}
+
+nats-server -js -a 127.0.0.1 -p "$nats_port" -m "$monitor_port" -sd "$work/jetstream" >"$work/nats.log" 2>&1 &
+nats_pid=$!
+wait_until NATS "$nats_pid" 30 \
+    curl -fs -o /dev/null "http://127.0.0.1:${monitor_port}/healthz?js-enabled-only=true"
+
+# Runs the worker the way a deployment does: it refuses unsigned requests and
+# holds only the public key, while the suite signs with the broker's key.
+# shellcheck source=devops/docker/compose/sandbox/dispatch-keys.sh
+source "$ROOT/devops/docker/compose/sandbox/dispatch-keys.sh"
+
+env -u SANDBOX_DISPATCH_SIGNING_KEY SANDBOX_NATS_URL="$nats_url" "${worker_env[@]}" \
+    "$target_dir/debug/trogon-sandbox-${WORKER}-worker" >"$work/worker.log" 2>&1 &
+worker_pid=$!
+wait_until "the ${WORKER} worker" "$worker_pid" 60 grep -q 'worker ready' "$work/worker.log"
+
+env -u SANDBOX_DISPATCH_PUBLIC_KEYS -u SANDBOX_DISPATCH_VERIFY \
+    SANDBOX_CONFORMANCE_NATS_URL="$nats_url" SANDBOX_CONFORMANCE_IMAGE="$image" \
+    cargo test --locked --package trogon-sandbox-conformance --test conformance -- \
+    --ignored --exact "$test_name" --nocapture
