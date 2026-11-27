@@ -1,33 +1,28 @@
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::time::Duration;
 
 use oci_client::config::{Architecture, ConfigFile, Os};
 use oci_client::manifest::{
     IMAGE_CONFIG_MEDIA_TYPE, IMAGE_LAYER_GZIP_MEDIA_TYPE, IMAGE_LAYER_MEDIA_TYPE, OCI_IMAGE_INDEX_MEDIA_TYPE,
     OCI_IMAGE_MEDIA_TYPE, OciImageManifest, OciManifest,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::time::Instant;
 use trogon_sandbox_contract::{Digest, OciImageRef};
 
+use crate::constants::{
+    CONTAINER_DEADLINE, CONTAINER_MAX_CONFIG_BYTES, DOCKER_LAYER, DOCKER_LAYER_GZIP, MAX_ENTRIES, MAX_INDEX_DEPTH,
+    MAX_MANIFEST_BYTES, SOURCE_NAME_ANNOTATION,
+};
 use crate::descriptor::{descriptor_size, has_foreign_urls};
 use crate::digests::{sha256_digest, verify_sha256};
 use crate::limited_writer::LimitedWriter;
 use crate::references::image_reference;
+use crate::source_index::{SourceIndex, SourceManifest};
 use crate::transport::BoundedRegistry;
 use crate::{
     ContainerPullLimits, OciClient, OciError, RegistryHost, ResolvedContainerImage, ResolvedContainerImageError,
 };
-
-const CONTAINER_DEADLINE: Duration = Duration::from_secs(120);
-const MAX_CONFIG_BYTES: i64 = 1024 * 1024;
-const MAX_MANIFEST_BYTES: i64 = 1024 * 1024;
-const MAX_ENTRIES: usize = 512;
-const MAX_INDEX_DEPTH: usize = 4;
-const DOCKER_LAYER_GZIP: &str = "application/vnd.docker.image.rootfs.diff.tar.gzip";
-const DOCKER_LAYER: &str = "application/vnd.docker.image.rootfs.diff.tar";
-const SOURCE_NAME_ANNOTATION: &str = "org.opencontainers.image.ref.name";
 
 impl From<ResolvedContainerImageError> for OciError {
     fn from(error: ResolvedContainerImageError) -> Self {
@@ -37,7 +32,10 @@ impl From<ResolvedContainerImageError> for OciError {
 
 /// The sum of the declared blob sizes, after checking the manifest against `limits`.
 fn manifest_bytes(manifest: &OciImageManifest, limits: ContainerPullLimits) -> Result<u64, OciError> {
-    if manifest.config.size < 0 || manifest.config.size > MAX_CONFIG_BYTES || manifest.layers.len() > MAX_ENTRIES {
+    if manifest.config.size < 0
+        || manifest.config.size > CONTAINER_MAX_CONFIG_BYTES
+        || manifest.layers.len() > MAX_ENTRIES
+    {
         return Err(OciError::Config(
             "OCI image exceeds config or layer-count limits".into(),
         ));
@@ -263,16 +261,16 @@ impl OciClient {
         let normalized = serde_json::to_vec(&manifest).map_err(|error| OciError::Layout(error.to_string()))?;
         let normalized_digest = Digest::new(sha256_digest(&normalized))?;
         tokio::fs::write(blobs.join(normalized_digest.hex()), &normalized).await?;
-        let index = json!({
-            "schemaVersion": 2,
-            "mediaType": OCI_IMAGE_INDEX_MEDIA_TYPE,
-            "manifests": [{
-                "mediaType": OCI_IMAGE_MEDIA_TYPE,
-                "digest": normalized_digest.as_str(),
-                "size": normalized.len(),
-                "annotations": {SOURCE_NAME_ANNOTATION: "source"},
+        let index = SourceIndex {
+            media_type: OCI_IMAGE_INDEX_MEDIA_TYPE,
+            manifests: [SourceManifest {
+                annotations: BTreeMap::from([(SOURCE_NAME_ANNOTATION, "source")]),
+                digest: normalized_digest.as_str(),
+                media_type: OCI_IMAGE_MEDIA_TYPE,
+                size: normalized.len(),
             }],
-        });
+            schema_version: 2,
+        };
         tokio::fs::write(
             destination.join("index.json"),
             serde_json::to_vec(&index).map_err(|error| OciError::Layout(error.to_string()))?,

@@ -2,10 +2,9 @@ use oci_client::secrets::RegistryAuth;
 use tracing::instrument;
 use trogon_sandbox_contract::OciArtifactRef;
 
+use crate::constants::ERROR_BODY_SNIPPET_CHARS;
 use crate::references::digest_reference;
 use crate::{OciClient, OciError};
-
-const ERROR_BODY_SNIPPET_CHARS: usize = 256;
 
 impl OciClient {
     /// Deletes the manifest the artifact is pinned to.

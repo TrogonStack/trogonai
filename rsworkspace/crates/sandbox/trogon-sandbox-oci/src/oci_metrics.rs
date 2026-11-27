@@ -1,32 +1,6 @@
+use crate::constants::{LABELS, PULL_BYTES, PULL_DURATION, PUSH_BYTES, PUSH_DURATION, REFERRERS_FALLBACK};
+use crate::metric::Metric;
 use prometheus::{Encoder, HistogramOpts, HistogramVec, IntCounterVec, Opts, Registry, TextEncoder};
-
-const LABELS: [&str; 2] = ["registry", "artifact_type"];
-
-struct Metric {
-    name: &'static str,
-    help: &'static str,
-}
-
-const PUSH_BYTES: Metric = Metric {
-    name: "trogon_sandbox_oci_push_bytes_total",
-    help: "Bytes uploaded to OCI registries by artifact type",
-};
-const PULL_BYTES: Metric = Metric {
-    name: "trogon_sandbox_oci_pull_bytes_total",
-    help: "Bytes downloaded from OCI registries by artifact type",
-};
-const PUSH_DURATION: Metric = Metric {
-    name: "trogon_sandbox_oci_push_duration_seconds",
-    help: "Duration of OCI artifact push operations",
-};
-const PULL_DURATION: Metric = Metric {
-    name: "trogon_sandbox_oci_pull_duration_seconds",
-    help: "Duration of OCI artifact pull operations",
-};
-const REFERRERS_FALLBACK: Metric = Metric {
-    name: "trogon_sandbox_oci_referrers_fallback_total",
-    help: "Referrers API fallbacks to tag-index discovery",
-};
 
 /// Prometheus instruments for registry transfers, held in a registry of their own.
 #[derive(Clone)]

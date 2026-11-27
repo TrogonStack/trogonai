@@ -1,16 +1,14 @@
-use std::time::Duration;
-
 use oci_client::Reference;
 use oci_client::client::{Client, ClientConfig, ClientProtocol};
 use oci_client::secrets::RegistryAuth;
 use tokio::time::Instant;
 use tracing::warn;
+use trogon_std::env::SystemEnv;
 
 use crate::auth::AuthResolver;
+use crate::constants::METADATA_DEADLINE;
 use crate::transport::BoundedRegistry;
 use crate::{OciClientConfig, OciError, OciMetrics, RegistryHost};
-
-const METADATA_DEADLINE: Duration = Duration::from_secs(120);
 
 /// A digest-verifying client for OCI registries.
 ///
@@ -33,7 +31,7 @@ impl OciClient {
 
     /// Like [`Self::new`], recording transfer metrics when `metrics` is set.
     pub fn with_metrics(config: OciClientConfig, metrics: Option<OciMetrics>) -> Self {
-        let auth = AuthResolver::new(&config).unwrap_or_else(|error| {
+        let auth = AuthResolver::new(&config, &SystemEnv).unwrap_or_else(|error| {
             warn!(%error, "ignoring unreadable docker credentials");
             AuthResolver::default()
         });
@@ -42,7 +40,7 @@ impl OciClient {
 
     /// A client that fails when stored Docker credentials cannot be read.
     pub fn try_new(config: OciClientConfig) -> Result<Self, OciError> {
-        let auth = AuthResolver::new(&config)?;
+        let auth = AuthResolver::new(&config, &SystemEnv)?;
         Ok(Self::assemble(config, auth, None))
     }
 

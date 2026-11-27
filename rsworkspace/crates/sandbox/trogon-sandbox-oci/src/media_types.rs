@@ -1,13 +1,5 @@
+use crate::constants::ARTIFACT_TYPES;
 use trogon_sandbox_contract::ArtifactType;
-
-const ARTIFACT_TYPES: [ArtifactType; 6] = [
-    ArtifactType::SandboxRootfsV1,
-    ArtifactType::HyperlightSnapshotV1,
-    ArtifactType::FirecrackerSnapshotV1,
-    ArtifactType::KubevirtDiskV1,
-    ArtifactType::SbomV1,
-    ArtifactType::ScanReportV1,
-];
 
 pub(crate) fn artifact_type_from_media_type(media_type: &str) -> Option<ArtifactType> {
     ARTIFACT_TYPES

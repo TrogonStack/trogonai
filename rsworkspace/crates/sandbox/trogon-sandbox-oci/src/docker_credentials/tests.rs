@@ -2,12 +2,15 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use super::{DockerCredentials, config_path};
+use trogon_std::env::InMemoryEnv;
+
 use crate::DockerConfigSource;
 
 #[test]
 fn the_environment_source_reads_without_failing_on_absent_files() {
-    // The result depends on the machine; only the lookup path is exercised.
-    let _ = DockerCredentials::load(&DockerConfigSource::Environment);
+    let env = InMemoryEnv::new();
+    env.set("DOCKER_CONFIG", "/nonexistent-docker-config");
+    assert!(DockerCredentials::load(&DockerConfigSource::Environment, &env).is_ok());
 }
 
 #[test]

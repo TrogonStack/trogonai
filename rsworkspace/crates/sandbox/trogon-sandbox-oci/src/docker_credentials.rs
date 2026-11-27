@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use secrecy::SecretString;
 use serde::Deserialize;
+use trogon_std::env::ReadEnv;
 
 use crate::{DockerConfigSource, OciError, RegistryCredentials};
 
@@ -40,11 +41,11 @@ pub(crate) struct DockerCredentials {
 }
 
 impl DockerCredentials {
-    pub(crate) fn load(source: &DockerConfigSource) -> Result<Self, OciError> {
+    pub(crate) fn load(source: &DockerConfigSource, env: &impl ReadEnv) -> Result<Self, OciError> {
         let path = match source {
             DockerConfigSource::Disabled => return Ok(Self::default()),
             DockerConfigSource::Directory(directory) => directory.join("config.json"),
-            DockerConfigSource::Environment => config_path(std::env::var_os("DOCKER_CONFIG"), std::env::var_os("HOME")),
+            DockerConfigSource::Environment => config_path(env.var_os("DOCKER_CONFIG"), env.var_os("HOME")),
         };
         Self::load_file(&path)
     }

@@ -2,28 +2,24 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use oci_client::manifest::{
     ImageIndexEntry, OCI_IMAGE_INDEX_MEDIA_TYPE, OCI_IMAGE_MEDIA_TYPE, OciImageIndex, OciImageManifest,
 };
-use serde_json::json;
 use tokio::fs;
 use tokio::time::Instant;
 use tracing::instrument;
 use trogon_sandbox_contract::{Digest, OciArtifactRef};
 
+use crate::constants::{
+    DEFAULT_REPOSITORY, EXPORT_DEADLINE, LAYOUT_MAX_CONFIG_BYTES, OCI_LAYOUT_FILE, REPO_ANNOTATION,
+};
 use crate::descriptor::descriptor_size;
 use crate::digests::verify_sha256;
 use crate::limited_writer::LimitedWriter;
 use crate::media_types::artifact_type_from_media_type;
 use crate::references::digest_reference;
 use crate::{Layer, OciClient, OciError, PulledArtifact, RegistryHost, build_push_target};
-
-const REPO_ANNOTATION: &str = "org.opencontainers.image.ref.name";
-const DEFAULT_REPOSITORY: &str = "imported";
-const EXPORT_DEADLINE: Duration = Duration::from_secs(120);
-const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
 /// Writes `target` and its referrers into `dir` as an OCI image layout.
 #[instrument(skip(client), fields(registry = %target.registry, repository = %target.repository))]
@@ -157,7 +153,9 @@ async fn store_pulled_artifact(
             inner: Vec::new(),
             remaining: descriptor_size(&manifest.config)?,
         };
-        transport.blob(&manifest.config, MAX_CONFIG_BYTES, &mut writer).await?;
+        transport
+            .blob(&manifest.config, LAYOUT_MAX_CONFIG_BYTES, &mut writer)
+            .await?;
         verify_sha256(&writer.inner, &manifest.config.digest)?;
         write_blob_at(&config_path, &writer.inner).await?;
     }
@@ -175,11 +173,7 @@ async fn store_pulled_artifact(
 }
 
 async fn write_layout_files(dir: &Path, index: &OciImageIndex) -> Result<(), OciError> {
-    fs::write(
-        dir.join("oci-layout"),
-        json!({"imageLayoutVersion": "1.0.0"}).to_string(),
-    )
-    .await?;
+    fs::write(dir.join("oci-layout"), OCI_LAYOUT_FILE).await?;
     fs::write(
         dir.join("index.json"),
         serde_json::to_string_pretty(index).map_err(|error| OciError::Layout(error.to_string()))?,

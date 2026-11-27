@@ -7,7 +7,8 @@ use secrecy::SecretString;
 use serde_json::{Value, json};
 use support::gated::{gated_registry, gated_registry_with_native_status};
 use support::{
-    TestResult, artifact, body_has, body_lacks, calls, config_for, digest_of, limits, no_authorization, sha256,
+    RejectionMessage, TestResult, artifact, body_has, body_lacks, calls, config_for, digest_of, limits,
+    no_authorization, sha256,
 };
 use trogon_sandbox_contract::{ArtifactType, Digest};
 use trogon_sandbox_oci::{
@@ -53,7 +54,7 @@ async fn refuses_before_eof(token: bool) -> TestResult {
     tokio::time::timeout(Duration::from_secs(5), server.sent.notified()).await?;
     let result = tokio::time::timeout(Duration::from_secs(1), &mut pull).await;
     pull.abort();
-    let error = result??.err().ok_or("pull must fail")?.to_string();
+    let error = result??.err().ok_or("pull must fail")?.rejection_message()?.to_owned();
     assert!(error.contains("budget"), "{error}");
     Ok(())
 }
@@ -100,7 +101,11 @@ async fn oversized_metadata(operation: Metadata, fallback: bool) -> TestResult {
     tokio::time::timeout(Duration::from_secs(5), server.sent.notified()).await?;
     let result = tokio::time::timeout(Duration::from_secs(1), &mut request).await;
     request.abort();
-    let error = result??.err().ok_or("operation must fail")?.to_string();
+    let error = result??
+        .err()
+        .ok_or("operation must fail")?
+        .rejection_message()?
+        .to_owned();
     assert!(error.contains("budget"), "{error}");
     Ok(())
 }
@@ -149,7 +154,8 @@ async fn invalid_digest_header_is_not_echoed_into_errors() -> TestResult {
         .await
         .err()
         .ok_or("must fail")?
-        .to_string();
+        .rejection_message()?
+        .to_owned();
     assert!(!error.contains("fixture-token-value"), "{error}");
     Ok(())
 }
@@ -313,7 +319,7 @@ async fn cross_origin_blob_redirect_strips_credentials_and_preserves_before_eof_
     tokio::time::timeout(Duration::from_secs(5), cdn.sent.notified()).await?;
     let result = tokio::time::timeout(Duration::from_secs(1), &mut pull).await;
     pull.abort();
-    let error = result??.err().ok_or("pull must fail")?.to_string();
+    let error = result??.err().ok_or("pull must fail")?.rejection_message()?.to_owned();
     assert!(!cdn.credentials_received.load(std::sync::atomic::Ordering::SeqCst));
     assert!(!error.contains("fixture-signed-secret"), "{error}");
     assert!(error.contains("budget"), "{error}");
@@ -367,12 +373,12 @@ async fn credential_urls_and_manifest_or_auth_redirects_fail_without_following()
         if case == 4 {
             target.registry = format!("user:fixture-secret@{registry}");
         }
-        let error = support::client_for(&registry)?
+        let failure = support::client_for(&registry)?
             .pull_artifact_bounded(&target, limits())
             .await
             .err()
-            .ok_or("pull must fail")?
-            .to_string();
+            .ok_or("pull must fail")?;
+        let error = format!("{failure:?}");
         assert!(!error.contains("fixture-secret"), "{error}");
         assert_eq!(calls(&server, "GET", "/stolen").await, 0);
         assert_eq!(calls(&server, "GET", "/token").await, usize::from(case == 2));

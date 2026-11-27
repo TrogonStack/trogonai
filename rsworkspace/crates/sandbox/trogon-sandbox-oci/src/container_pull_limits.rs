@@ -1,4 +1,4 @@
-const DEFAULT_BYTE_BUDGET: u64 = 1024 * 1024 * 1024;
+use crate::constants::DEFAULT_BYTE_BUDGET;
 
 /// Byte budgets for resolving and exporting a container image.
 #[derive(Debug, Clone, Copy)]

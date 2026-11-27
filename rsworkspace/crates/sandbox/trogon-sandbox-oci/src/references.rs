@@ -1,6 +1,7 @@
 use oci_client::Reference;
 use trogon_sandbox_contract::{Digest, OciArtifactRef, OciImageRef};
 
+use crate::constants::STAGING_TAG_PREFIX;
 use crate::{OciError, RegistryHost};
 
 fn parse_reference(reference: String) -> Result<Reference, OciError> {
@@ -42,8 +43,6 @@ pub(crate) fn image_reference(image: &OciImageRef) -> Result<Reference, OciError
 pub(crate) fn artifact_staging_tag(digest: &Digest) -> String {
     format!("{STAGING_TAG_PREFIX}{}", digest.as_str().replace(':', "-"))
 }
-
-pub(crate) const STAGING_TAG_PREFIX: &str = "sandbox-artifact-";
 
 pub(crate) fn referrers_tag(digest: &Digest) -> String {
     digest.as_str().replace(':', "-")

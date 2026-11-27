@@ -1,7 +1,7 @@
 mod support;
 
 use serde_json::json;
-use support::{TestResult, artifact, limits, no_authorization, sha256};
+use support::{RejectionMessage, TestResult, artifact, limits, no_authorization, sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use wiremock::matchers::{header, method, path};
@@ -30,7 +30,8 @@ async fn pull_fails(
         .await
         .err()
         .ok_or("pull must fail")?
-        .to_string())
+        .rejection_message()?
+        .to_owned())
 }
 
 #[tokio::test]
@@ -242,6 +243,6 @@ async fn chunked_blobs_shorter_than_declared_are_refused() -> TestResult {
         .await
         .err()
         .ok_or("pull must fail")?;
-    assert!(error.to_string().contains("length differs"), "{error}");
+    assert!(error.rejection_message()?.contains("length differs"), "{error}");
     Ok(())
 }

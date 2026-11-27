@@ -28,9 +28,11 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "time"] }
 tracing = { workspace = true }
 trogon-sandbox-contract = { workspace = true }
+trogon-std = { workspace = true }
 walkdir = { workspace = true }
 
 [dev-dependencies]
+trogon-std = { workspace = true, features = ["test-support"] }
 axum = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "time"] }
 wiremock = { workspace = true }

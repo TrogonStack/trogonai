@@ -8,9 +8,16 @@ use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::{BoundedRegistry, authorization};
-use crate::RegistryHost;
+use crate::{OciError, RegistryHost};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+fn rejection(error: &OciError) -> Result<&str, Box<dyn std::error::Error>> {
+    match error {
+        OciError::RegistryRejected(message) => Ok(message),
+        other => Err(format!("expected a registry rejection, got {other:?}").into()),
+    }
+}
 
 fn registry(address: &str, deadline: Duration) -> Result<BoundedRegistry, Box<dyn std::error::Error>> {
     let reference: Reference = format!("{address}/acme/app:latest").parse()?;
@@ -59,7 +66,7 @@ async fn slow_responses_hit_the_deadline() -> TestResult {
         .await;
     let mut transport = registry(&server.address().to_string(), Duration::from_millis(150))?;
     let error = transport.manifest("latest").await.err().ok_or("must fail")?;
-    assert!(error.to_string().contains("deadline exceeded"), "{error}");
+    assert!(rejection(&error)?.contains("deadline exceeded"), "{error}");
     Ok(())
 }
 
@@ -70,7 +77,7 @@ async fn unreachable_registries_fail_without_leaking_the_url() -> TestResult {
     drop(listener);
     let mut transport = registry(&address, Duration::from_secs(5))?;
     let error = transport.manifest("latest").await.err().ok_or("must fail")?;
-    assert!(error.to_string().contains("transport failed"), "{error}");
-    assert!(!error.to_string().contains(&address), "{error}");
+    assert!(rejection(&error)?.contains("transport failed"), "{error}");
+    assert!(!rejection(&error)?.contains(&address), "{error}");
     Ok(())
 }

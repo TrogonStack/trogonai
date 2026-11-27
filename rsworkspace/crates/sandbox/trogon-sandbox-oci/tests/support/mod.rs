@@ -13,7 +13,7 @@ use sha2::{Digest as _, Sha256};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use trogon_sandbox_contract::{ArtifactType, Digest, OciArtifactRef};
-use trogon_sandbox_oci::{DockerConfigSource, OciClient, OciClientConfig, RegistryHost};
+use trogon_sandbox_oci::{DockerConfigSource, OciClient, OciClientConfig, OciError, RegistryHost};
 
 pub fn config_for(address: &str) -> Result<OciClientConfig, Box<dyn Error>> {
     Ok(OciClientConfig {
@@ -25,6 +25,19 @@ pub fn config_for(address: &str) -> Result<OciClientConfig, Box<dyn Error>> {
 
 pub fn client_for(address: &str) -> Result<OciClient, Box<dyn Error>> {
     Ok(OciClient::new(config_for(address)?))
+}
+
+pub trait RejectionMessage {
+    fn rejection_message(&self) -> Result<&str, Box<dyn Error>>;
+}
+
+impl RejectionMessage for OciError {
+    fn rejection_message(&self) -> Result<&str, Box<dyn Error>> {
+        match self {
+            Self::RegistryRejected(message) => Ok(message),
+            other => Err(format!("expected a registry rejection, got {other:?}").into()),
+        }
+    }
 }
 
 pub type TestResult = Result<(), Box<dyn Error>>;

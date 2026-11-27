@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use oci_client::secrets::RegistryAuth;
 use secrecy::ExposeSecret;
 use trogon_sandbox_contract::OciArtifactRef;
+use trogon_std::env::ReadEnv;
 
 use crate::docker_credentials::DockerCredentials;
 use crate::{OciClientConfig, OciError, RegistryCredentials, RegistryHost};
@@ -14,9 +15,9 @@ pub(crate) struct AuthResolver {
 }
 
 impl AuthResolver {
-    pub(crate) fn new(config: &OciClientConfig) -> Result<Self, OciError> {
+    pub(crate) fn new(config: &OciClientConfig, env: &impl ReadEnv) -> Result<Self, OciError> {
         Ok(Self {
-            docker: DockerCredentials::load(&config.docker_config)?,
+            docker: DockerCredentials::load(&config.docker_config, env)?,
             overrides: config.credentials.clone(),
         })
     }

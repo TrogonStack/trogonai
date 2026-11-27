@@ -3,10 +3,9 @@ use oci_client::client::{Config, ImageLayer};
 use oci_client::manifest::{IMAGE_MANIFEST_MEDIA_TYPE, OciImageManifest};
 use trogon_sandbox_contract::{ArtifactType, OciArtifactRef};
 
+use crate::constants::EMPTY_CONFIG_MEDIA_TYPE;
 use crate::digests::compute_manifest_digest;
 use crate::{Annotations, Layer, OciError};
-
-const EMPTY_CONFIG_MEDIA_TYPE: &str = "application/vnd.oci.empty.v1+json";
 
 pub(crate) fn empty_config() -> Config {
     Config::new(Bytes::from_static(b"{}"), EMPTY_CONFIG_MEDIA_TYPE.to_string(), None)

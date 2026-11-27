@@ -1,6 +1,6 @@
 use trogon_sandbox_contract::Digest;
 
-use crate::references::STAGING_TAG_PREFIX;
+use crate::constants::STAGING_TAG_PREFIX;
 
 /// Digest an artifact staging tag was derived from, or `None` for any other tag.
 pub fn digest_from_staging_tag(tag: &str) -> Option<Digest> {

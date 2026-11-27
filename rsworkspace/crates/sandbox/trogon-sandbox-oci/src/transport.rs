@@ -8,16 +8,11 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::time::Instant;
 use trogon_sandbox_contract::Digest;
 
+use crate::constants::{
+    AUTH_HEADER_BUDGET, BLOB_REDIRECTS, MANIFEST_LIMIT, TAGS_MAX_PAGES, TAGS_PAGE_LIMIT, TAGS_PAGE_SIZE, TOKEN_LIMIT,
+};
 use crate::descriptor::descriptor_size;
 use crate::{OciError, RegistryHost};
-
-const MANIFEST_LIMIT: u64 = 1024 * 1024;
-const TOKEN_LIMIT: u64 = 64 * 1024;
-const TAGS_PAGE_LIMIT: u64 = 4 * 1024 * 1024;
-const TAGS_PAGE_SIZE: u32 = 1000;
-const TAGS_MAX_PAGES: usize = 1000;
-const AUTH_HEADER_BUDGET: usize = 16 * 1024;
-const BLOB_REDIRECTS: usize = 5;
 
 #[derive(Deserialize)]
 struct Token {
