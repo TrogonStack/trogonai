@@ -80,3 +80,20 @@ answered with the gate's JSON-RPC error, and a refused notification is
 dropped. `acp-host` uses this to serve the one client that claimed it. The
 header is a label, not a credential, so the gate guards against a
 misconfigured prefix, not a hostile client.
+
+## Stopping without stranding commands
+
+`AgentSideNatsConnection::with_jetstream_gated_until` serves until a `stop`
+future resolves. It then stops pulling from `COMMANDS`, nacks every command it
+was handed (waiting or in progress, whose work is dropped), and returns, so a
+process that is shutting down can flush and close its NATS connection without
+leaving commands to wait out the consumer's `ack_wait`. `acp-host` uses it on
+SIGTERM.
+
+## Relaying `initialize`
+
+`initialize` reaches the agent through `AgentHandler::initialize_raw`, with the
+client's params as sent. Its default reads them as the typed request, which
+keeps only the members the ACP schema names. An agent that relays the
+handshake to another agent, such as `acp-host`, overrides it to pass the
+params on whole.

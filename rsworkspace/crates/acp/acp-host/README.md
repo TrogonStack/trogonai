@@ -53,24 +53,30 @@ than in the spec. `Debug` output of the spec prints env names, never values.
   clients apart for real with NATS permissions per prefix.
 - **The child sees the client's own `initialize`.** The host does not
   initialize the child with defaults of its own. The client's `initialize`
-  goes to the child as sent: its protocol version, `clientCapabilities` (with
-  their `_meta`, where fx reads the host tools a client offers), `clientInfo`
-  and `_meta`. The client gets the child's real answer, and the host keeps the
-  request:
+  params go to the child exactly as sent: its protocol version,
+  `clientCapabilities`, `clientInfo` and `_meta`, including members the ACP
+  schema does not name. fx reads the host tools a client offers from one of
+  those, `clientCapabilities.libtrogonai`. The client gets the child's real
+  answer, and the host keeps the request:
   - the same `initialize` again is answered from the child's first reply,
     without bothering the child;
   - an `initialize` with different parameters is not sent a second time on
     the same connection, which ACP does not allow for. The host relaunches the
     child at once, initializes the new one with the new request, and answers
-    with that child's reply;
+    with that child's reply. **That relaunch ends every session the old child
+    had open**: the client has to load or open its sessions again (see
+    [Relaunch on exit](#behavior) for which agents can load them);
   - a child relaunched after a crash is initialized with the claiming
     client's last `initialize` before it serves anything, so it comes back with
     the same capabilities and `_meta`;
-  - if no client has initialized since the host started (the host restarted
-    and its client carried on without initializing again), the first request
-    initializes the child with protocol v1 and no capabilities, as before. The
-    client's next `initialize` then relaunches the child with its own
-    parameters.
+  - the host keeps that `initialize` in memory only. **After the host itself
+    restarts it has none**, so if its client carries on without initializing
+    again, the first request initializes the child with protocol v1 and no
+    capabilities (no host tools, for fx). When the client does initialize
+    again, that `initialize` differs from the default, so it relaunches the
+    child as above, and any session the client loaded in between is dropped
+    with it. A client that restarts with the host avoids this by initializing
+    before anything else.
 
   Protocol v1 is all that is negotiated today, because `acp-nats` speaks only
   v1. The host passes the client's offered version through rather than fixing
@@ -78,6 +84,16 @@ than in the spec. `Debug` output of the spec prints env names, never values.
 - **Callbacks are routed per session.** `session/update`,
   `session/request_permission`, `fs/*` and `terminal/*` from the child go to
   `{prefix}.v1.session.{id}.client.*` for the session they name.
+- **Extension calls are routed by their `sessionId`.** A child's extension
+  request or notification (a method starting with `_`, such as fx's
+  `_libtrogonai/tool_call` and `_libtrogonai/hook`) goes to
+  `{prefix}.v1.session.{id}.client.ext.{method}` with the method name exactly
+  as the child sent it, for the session named by the `sessionId` member of
+  its params; a request's answer goes back to the child. One without a
+  `sessionId` is refused with `-32602 Invalid params` (a notification is
+  logged and dropped): the host has exactly one client, but the client
+  bridges only listen on per-session subjects, so there is nowhere to deliver
+  it.
 - **Bridge signals stay on NATS.** The client-side bridge publishes
   `{prefix}.v1.session.{id}.agent.ext.ready` when a session is set up. That
   subject sits under the `agent.ext.>` space the host serves, but it is the
@@ -94,6 +110,18 @@ than in the spec. `Debug` output of the spec prints env names, never values.
   calls fail: first with "transport closed" from the dead connection, then
   with NATS "no responders" while nothing serves the prefix. Clients should
   retry rather than treat either as fatal.
+- **Shutdown hands commands back.** On SIGTERM or Ctrl-C the host stops
+  pulling from `COMMANDS` first, then nacks every command it holds, the ones
+  waiting to be dispatched and the ones the child is still working on, and
+  flushes and drains its NATS connection before it shuts telemetry down. The
+  next host to pull gets those commands at once instead of after the
+  consumer's `ack_wait`. Work the child had started on them is lost, so a
+  command can run twice. The host waits at most 5s for this
+  (`SHUTDOWN_GRACE`). A command the server delivers in the instant between the
+  last read and the unsubscribe still waits out `ack_wait`. Separately, the
+  agent side runs each JetStream command in its own task, so commands for one
+  session are not guaranteed to run in the order they were sent; that is not
+  specific to shutdown and is not addressed here.
 - **Streams.** The host creates only `COMMANDS` and `RESPONSES`, which the
   JetStream prompt path needs. `GLOBAL`, `GLOBAL_EXT` and `CLIENT_OPS` capture
   subjects that are also used for core request/reply; if any of them exists,

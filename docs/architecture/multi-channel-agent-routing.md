@@ -488,14 +488,22 @@ them change the topology above.
   clients apart. Filtering callbacks by session in `acp-nats` would lift the
   rule, and nothing does that yet.
 - **The host's child is initialized with the client's `initialize`.** The
-  child receives the claiming client's own request, with its protocol version,
-  capabilities, `clientInfo` and `_meta`. That is how fx learns which host
-  tools a client offers. The host keeps the request and re-sends it to every
-  relaunched child. A client that initializes again with different parameters
-  gets a fresh child initialized with them, because ACP has a client
-  initialize once per connection. Until a client initializes (the host
-  restarted and the client carried on), the child runs on a protocol v1
-  default.
+  child receives the claiming client's own request params, exactly as sent:
+  protocol version, capabilities, `clientInfo` and `_meta`, including members
+  the ACP schema does not name. That is how fx learns which host tools a
+  client offers (`clientCapabilities.libtrogonai`). The host keeps the request
+  and re-sends it to every relaunched child. A client that initializes again
+  with different parameters gets a fresh child initialized with them, because
+  ACP has a client initialize once per connection, and that relaunch ends
+  every session the old child had open. The host keeps the request in memory
+  only: after the host restarts, the child runs on a protocol v1 default until
+  the client initializes again, and that `initialize` then relaunches the
+  child, dropping any session the client loaded in between.
+- **Extension calls from the host's child are routed by `sessionId`.** A
+  child's extension requests and notifications reach the client on
+  `{prefix}.v1.session.{id}.client.ext.{method}`, with the exact method name,
+  for the `sessionId` in their params. One without a `sessionId` is refused:
+  the client bridges listen only per session.
 
 ## End-to-end walkthrough
 
