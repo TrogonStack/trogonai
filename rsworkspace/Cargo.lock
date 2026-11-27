@@ -6629,6 +6629,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07dd1d452d2c3dc94a4e1c5c3c9a3cc88c2ef5926674b75881e454c4dc3a14c4"
 
 [[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+]
+
+[[package]]
 name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8085,6 +8095,23 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "windows",
+]
+
+[[package]]
+name = "trogon-sandbox-file-ops"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "libc",
+ "regex",
+ "rustix 1.1.4",
+ "sha2 0.11.1",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-protocol",
 ]
 
 [[package]]
