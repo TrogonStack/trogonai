@@ -312,6 +312,69 @@ credentials. `CredentialIssueRequest` asks for a token with a
 `rotated`, and `CredentialProvider` parses its wire names. These types describe
 the broker's messages; they do not store, mint, or verify credentials.
 
+The network egress contracts carry a lease's outbound policy and what the proxy
+reports. `NetworkPolicy` is `allow_all`, `deny_all`, or `user_defined` with
+`DomainRule` entries, `IpRange` allow and deny lists in CIDR notation, `DeniedDomain` patterns, an
+`OpaqueTunnelPolicy`, and `RequestRule` entries. A `DomainPattern` is a host, a
+`*.` wildcard, or `*`, with an optional `Port`; a `Host` is a lowercase DNS name
+or an IP address in WHATWG form, and an IPv4-mapped IPv6 address reads as IPv4.
+`HttpMethod`, `HeaderName`, `HeaderValue`, and `PathPrefix` bound and normalize
+what a request rule names, and the matcher DSL and credential injection reuse
+`HttpMethod` and `HeaderName`. A `ForwardUrl` is a URL with no query or
+fragment, a `Base64Data` is standard base64, and a `RefusedRequest` cuts the
+query and fragment of its target on deserialization too. `DeniedDomain` exposes
+its `target` and `port` rather than a `DomainPattern`, and `PortAccess` and
+`SshAccess` redact secrets in `Debug`. `DecideRequest` and `DecideResponse` carry a
+connection verdict, and `RequestDecideRequest` and `RequestDecideResponse` carry
+a per-request one, whose `Debug` shows header names but never values.
+`EgressViolation` and `FsViolation` report a refusal, using a `SecretName` or a
+canonical `LiteralPath`. `GetSandboxDomainRequest`, `NativeHandleRequest`, and
+`SshAccessRequest` and their responses are tagged by `outcome`. Every flag on
+these types is a two-variant enum, such as `BodyTruncation`, serialized as a
+JSON boolean. These types describe messages and policy; they do not match a
+request, enforce a rule, or open a connection.
+
+The filesystem policy contracts carry what a sandbox may read and write. An
+`FsPolicy` holds six lists of `FsPathEntry`: `deny_read`, `credential_deny_read`,
+`allow_read_within_deny`, `own_allow_within_deny`, `allow_write`, and
+`deny_write`. Each list holds at most 1024 entries. An entry is tagged by `kind`
+as `literal`, a `LiteralPath` with an optional `DirectoryMarker`, or `glob`, a
+`GlobPattern`. A `GlobPattern` is absolute, has at least one wildcard, and
+refuses a `..` that follows a wildcard segment. It is a JSON string, or an
+object with an `anchor` and a `tail` when the anchor is a plain name. A deny
+glob that ends in a separator is refused, because it could match nothing. These
+types describe the policy; they do not decide whether a path is allowed.
+
+`PlatformOptions` carries the opt-ins only some platforms can enforce, in
+`MacosOptions`, `LinuxOptions`, `FilesystemOptions`, and `ContainerOverrides`,
+plus a list of git safe directories. Every group is left out of the wire when it
+holds its defaults. Each flag is a two-variant enum, such as `PtyAccess`,
+serialized as a JSON boolean. A `MachServiceName` allows only a single trailing
+`*`. `ContainerOverrides` bounds a `PidsLimit` and a `ShmSizeMib`, and an
+`ExtraCapability` is an upper case name that is never on the forbidden list.
+A `MandatoryDenySearchDepth` is from 1 to 10.
+
+`FileOpRequest` carries a `LeaseId`, an optional `SandboxUserName`, and one `FileOp`, a
+structured file operation tagged by `op` as `list`, `stat`, `read`, `write`, `edit`,
+`search`, `remove`, `mkdir`, `rename`, `archive_get`, `archive_put`, `checkpoint`,
+`changes`, `watch_start`, `watch_poll`, `watch_stop`, or `checksum`. A worker answers
+with a `FileOpResponse` tagged by `outcome`, whose failures carry a `FileOpErrorKind`.
+Payload bytes are a `Base64Data` string, and a checksum is a
+`FileSha256`, 64 lowercase hexadecimal characters. Every boolean option or result
+flag, such as `recursive`, `truncated`, or `existed`, is a two-variant enum that still
+serializes as a JSON boolean and keeps the same default when omitted. These types
+describe the messages only; they do not read, write, search, or watch files, and the
+size limits on `FileOp` are constants a worker enforces.
+
+`NetworkOptions` gathers the optional egress proxy settings as public fields with everything off by default.
+Its on/off flags are two-variant enums such as `LoopbackNames`, serialized as JSON booleans. `DenyReason`,
+`TunnelCap`, `UnlistedDestinations`, `DeniedDomainReasons` (an object keyed by deny list entry, dropping keys that
+are no entry), `MitmUnixSocket`, `UpstreamCaCertificates`, and `ResponseHeaderStrip` carry a JSON shape. The remaining
+configuration types, among them `ParentProxy`, `ParentProxyUrl`, `NoProxy`, `CaFiles`, `TlsExclusions`,
+`ExternalProxy`, and `RequestBodyCap`, are parsed on construction and have no JSON form. `ParentProxyUrl` keeps
+URL userinfo as a `Basic` authorization value that `Debug` prints as `[REDACTED]`, and it has no `Display`. These
+types do not match a host, resolve a proxy, or read the environment.
+
 `OperationKind` uses the JSON strings `create`, `restore`, `fork`, `snapshot`,
 `pause`, `resume`, `suspend`, `wake`, `stop`, `delete`, and `rollback`. A kind's
 presence in the contract does not establish runtime support for that operation.
@@ -332,9 +395,32 @@ The `running` self-transition permits takeover of a stale claim, while returning
 to `queued` permits retry after a transient failure. Terminal states are immutable,
 including self-transitions.
 
+`SecretBinding` describes one credential the broker holds and the sandbox must never see in the clear: its
+name, its target (an environment variable or a file), whether it is masked or denied, an optional extract rule,
+the hosts it may be injected at, and an optional path, method, and port scope. The binding never holds the
+credential value. It accepts only a coherent set of fields: a `deny` binding takes no extract rule, response header
+stripping, or request scope, an environment variable target takes only a regex or jwt rule, and a no-match policy
+needs an extract rule. `SecretBindings` holds at most 64 bindings with distinct names and targets, and
+`AwsCredentialPairs` links masked bindings into an AWS credential. `ExtractPattern` accepts only an ECMAScript
+regular expression with at least one capture group. Construction and deserialization enforce every rule, and the
+JSON shape omits each defaulted field. Rules that need the sandbox spec, such as environment name collisions and
+inject hosts that the network policy denies, are not checked here.
+
+`SandboxSpec` is the wire description of one sandbox: its image, workspace, environment, CPU and memory limits, network policy, mounts, drives, exposed ports, secret bindings, idle policy, and retention toggles. Construction and deserialization enforce the rules that span fields: environment size and key limits, a single idle setting, no unbounded lease without an idle release, snapshot output only while snapshots are retained, distinct mount paths and exposed ports, at most four drives, and, for each secret binding, no environment collision, a user defined network policy, and inject hosts that an allowed domain covers and no denied domain fully covers. An omitted port on a version 2 binding means port 443. The `Debug` output shows environment names and redacts their values. Rules that need tenant policy or runtime state, such as quotas, image and snapshot existence, drive ownership, and provider capabilities, are not checked here.
+
+`SandboxEntityId` is the 26 character Crockford base32 ULID of a persistent sandbox entity. It accepts either case, stores the uppercase form, and rejects the letters `I`, `L`, `O`, and `U`. `SandboxEntityRecord` is the durable record of an entity and `SandboxEntityRow` is the client-readable view without the spec template. `EntityState` serializes as a lowercase string for states with no payload and as a one-key object for states that carry a lease or a failure reason. `GetEntityRequest`, `ListEntitiesRequest`, and `DeleteEntityRequest` name an entity by `EntityRef`, and each response is tagged by `outcome`. `EntityLifecycleEvent` is the entity event stream payload, tagged by `event`. `LeaseGranted` and `LeaseResponse` carry the broker's reply to a lease request, with `created` kept as a JSON boolean, and `NetworkPolicyUpdateRequest` replaces the egress policy of a running lease. Entity transition rules are not part of this crate.
+
+`LeaseRequest` is the tenant's request for a lease: tenant, provider preference, `SandboxSpec`, `ttl_seconds`, a `LeaseRequestKey`, and optional isolation tier, host imports, capability requirements, tags, `LeaseName`, opaque `native` provider JSON, `region`, `fallback_regions`, and `operation_id`. `prewarm` and `persistent` stay JSON booleans and are always written; an omitted `prewarm` reads as regular and an omitted `persistent` reads as persistent. `ProviderDispatchPayload` wraps a request with its lease id, correlation id, resolved drives, and dispatch target. `LeaseRecord` is the broker's durable lease record, where `sandbox_id` stays plain text because records written before the field existed hold an empty string.
+
+`OperationRequest` is tagged by `kind` (`pause`, `resume`, `suspend`, `wake`, `delete`, `rollback`, `create`), `OperationResult` by `result`, `CreateQuotaStep` by `step`, and `GetOperationResponse` and `CancelOperationResponse` by `outcome`. `OperationRecord` carries the request, state, claim, allocation, compensation, result, and error of one durable operation. `OperationCapabilities.supports_create_cancellation` and `CancelOperationRequest.compensate_created` are JSON booleans, and an omitted `compensate_created` reads as false. Transition rules and request classification are not part of this crate.
+
+`ProviderLease` is a worker's grant of a dispatch, and `ProviderDispatchReply` is untagged, told apart by `sandbox_id`, `provider_error`, `decode_error`, or `native_error`. `SnapshotReceipt` reports a snapshot export and `SnapshotExportOutcome` is tagged by `outcome` (`ok`, `native`, `err`). `DispatchAuth` is the envelope the broker adds to a dispatch, carrying the key id, operation, tenant, lease, optional worker, attempt, nonce, and epoch, an expiry in seconds, and the lowercase hex SHA-256 of the body. It does not sign or verify anything. `LifecycleEvent` is tagged by `status` and carries `SandboxPhase` values for phase progress.
+
 This package defines values and allowed transitions. It does not execute
 operations, persist state, authorize transitions, enforce claim ownership, or
 provide worker, provider, transport, or lease-generation behavior.
+
+`TerminalId` serializes as a JSON string of 1 to 64 ASCII letters, digits, `-`, or `_`, and `TerminalDimension` serializes as a JSON number from 1 to 1000. Both are enforced by construction and deserialization. `TerminalRequest` carries `lease_id` and `terminal_id` with a flattened `TerminalOp` tagged by `op` (`open`, `input`, `resize`, `close`). `TerminalResponse` is tagged by `outcome` (`opened`, `done`, `failed`, `unsupported`, `denied`) and wraps `TerminalError`, tagged by `kind`, or `LeaseError`. `TerminalOutput` frames are tagged by `type` (`data`, `exit`, `resync`). `TerminalInput` wraps `Base64Data` and caps the decoded write at 65536 bytes, refusing longer encoded text before decoding. `TerminalArgument` rejects NUL, and `open` carries a list of them as `cmd`. Output frames carry `Base64Data`. The contract does not buffer output or open terminals.
 
 `SubstrateSizeClass` pairs a non-empty label with non-zero memory in MiB, and
 serializes as `{"label", "memory_mib"}`. A label cannot contain `,` or `=` or

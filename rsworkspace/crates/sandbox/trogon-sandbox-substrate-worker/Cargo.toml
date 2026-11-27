@@ -1,0 +1,65 @@
+[package]
+name = "trogon-sandbox-substrate-worker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "NATS-subscribed worker that fulfills sandbox lease requests as Agent Substrate actors"
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_substrate_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-substrate-worker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+futures = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true }
+oci-client = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+rustls-pemfile = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time", "sync", "net", "io-util"] }
+tokio-rustls = { workspace = true, features = ["tls12"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tonic = { workspace = true, features = ["tls-aws-lc"] }
+tonic-prost = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+# The protocol types only: the worker speaks the agent's HTTP contract but must not link the agent's own server.
+trogon-sandbox-actor-agent = { workspace = true, default-features = false }
+trogon-std = { workspace = true }
+uuid = { workspace = true }
+
+[build-dependencies]
+tonic-prost-build = { workspace = true }
+
+[dev-dependencies]
+# A stand-in for the in-actor agent, so the worker's half of the HTTP contract can be exercised (including responses
+# the real agent would never produce) without a substrate cluster or a running sandbox.
+axum = { workspace = true }
+rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs", "pem"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }

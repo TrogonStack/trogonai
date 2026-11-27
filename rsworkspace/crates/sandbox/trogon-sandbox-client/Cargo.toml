@@ -1,0 +1,31 @@
+[package]
+name = "trogon-sandbox-client"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "Typed NATS client SDK for the sandbox broker"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "time"] }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-file-ops = { workspace = true }
