@@ -73,6 +73,7 @@ trogon-sandbox-credential-client = { path = "crates/sandbox/trogon-sandbox-crede
 trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
 trogon-sandbox-daytona-worker = { path = "crates/sandbox/trogon-sandbox-daytona-worker" }
 trogon-sandbox-dev = { path = "crates/sandbox/trogon-sandbox-dev" }
+trogon-sandbox-e2b-worker = { path = "crates/sandbox/trogon-sandbox-e2b-worker" }
 trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-helper" }
 trogon-sandbox-file-ops = { path = "crates/sandbox/trogon-sandbox-file-ops" }
 trogon-sandbox-fly-worker = { path = "crates/sandbox/trogon-sandbox-fly-worker" }
