@@ -1,0 +1,59 @@
+[package]
+name = "trogon-sandbox-k8s-worker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "NATS-subscribed worker that fulfills sandbox lease requests through Kubernetes microVM pods"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_k8s_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-k8s-worker"
+path = "src/main.rs"
+
+[dependencies]
+async-nats = { workspace = true, features = ["jetstream"] }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+k8s-openapi = { workspace = true }
+kube = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "io-util", "fs"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+trogon-nats = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-cosign = { workspace = true }
+trogon-sandbox-observability = { workspace = true }
+trogon-sandbox-oci = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-sandbox-providers = { workspace = true }
+trogon-sandbox-ssh-gateway = { workspace = true }
+trogon-sandbox-volumes = { workspace = true }
+trogon-std = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+base64 = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util", "net", "process"] }
+tokio-tungstenite = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-conformance = { workspace = true }
+trogon-std = { workspace = true, features = ["test-support"] }
