@@ -119,6 +119,7 @@ export default async () => {
                   { text: "Sign Worker Dispatches", link: "/how-to/sandbox/sign-worker-dispatches" },
                   { text: "Migrate Sandbox Identities", link: "/how-to/sandbox/migrate-sandbox-identities" },
                   { text: "Change a Wire Type Safely", link: "/how-to/sandbox/guard-the-wire-contract" },
+                  { text: "Measure Sandbox Latency", link: "/how-to/sandbox/measure-latency" },
                   { text: "Firecracker Worker", link: "/how-to/sandbox/firecracker-worker" },
                   { text: "Daytona Worker", link: "/how-to/sandbox/daytona-worker" },
                   { text: "E2B Worker", link: "/how-to/sandbox/e2b-worker" },
