@@ -1,5 +1,5 @@
 # Experiment: runs experiments/sandbox-host-call-bench (Wasm boundary costs, and hluk's Linux
-# binaries in Hyperlight) on KVM-capable GitHub runners.
+# binaries in Hyperlight against Firecracker) on KVM-capable GitHub runners.
 # Triggers only on pushes to its own branch and is not meant to merge, so it calls the
 # experiment's script directly rather than a mise task.
 name: Experiment sandbox host-call bench
@@ -40,13 +40,18 @@ jobs:
           REQUIRE_HYPERLIGHT: "1"
         run: experiments/sandbox-host-call-bench/run.sh | tee -a "$GITHUB_STEP_SUMMARY"
 
+  # hluk and Firecracker on the same runner, so their rows compare directly.
   hluk:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - *open-kvm
-      - name: Python in hluk vs native vs Docker
+      - name: Workloads in hluk vs native vs Docker
         run: |
-          { echo "### Python hello world: hluk vs native vs Docker"; experiments/sandbox-host-call-bench/hluk.sh; } \
+          { echo "### hluk vs native vs Docker"; experiments/sandbox-host-call-bench/hluk.sh; } \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Python in Firecracker
+        run: |
+          { echo "### Firecracker"; experiments/sandbox-host-call-bench/firecracker.sh; } \
             | tee -a "$GITHUB_STEP_SUMMARY"
