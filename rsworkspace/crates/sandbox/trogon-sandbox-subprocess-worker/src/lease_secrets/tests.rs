@@ -14,11 +14,20 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_egress_proxy::credential_source::CredentialSource;
 use trogon_sandbox_protocol::{SentinelRegistry, is_jwt};
+use trogon_std::{CapturedEvent, CapturedEvents, log_capture::LevelFilter};
 
 use super::*;
 use crate::credential_sources::{CredentialSources, FixedCredentialSources, FixedSource};
 
 type TestResult = Result<(), Box<dyn Error>>;
+
+/// The one warning `events` caught, or an error naming what was caught instead.
+fn only_warning(events: &CapturedEvents) -> Result<CapturedEvent, Box<dyn Error>> {
+    match events.at(tracing::Level::WARN).as_slice() {
+        [warning] => Ok(warning.clone()),
+        other => Err(format!("one warning expected, got {other:?}").into()),
+    }
+}
 
 fn real() -> String {
     format!("tok_{}", "realsecretvalue0123456789")
@@ -266,6 +275,57 @@ async fn on_no_match_warn_leaves_the_env_value_visible() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_warned_env_value_logs_that_it_is_unprotected_without_leaking_it() -> TestResult {
+    let events = CapturedEvents::new();
+    let guard = events.install(LevelFilter::WARN);
+    prepare(&[env_regex_binding(r"^zzz_(\w+)$", ExtractNoMatch::Warn)?]).await?;
+    drop(guard);
+    let warning = only_warning(&events)?;
+    assert!(
+        warning.message().is_some_and(|m| m.contains("UNPROTECTED")),
+        "{warning:?}"
+    );
+    assert!(
+        warning.field("subject").is_some_and(|s| s.contains("GH_TOKEN")),
+        "{warning:?}"
+    );
+    assert!(!format!("{warning:?}").contains(&real()), "{warning:?}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_warned_file_logs_that_it_is_unprotected_without_leaking_it() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("creds");
+    fs::write(&path, format!("nothing to find {}\n", real()))?;
+    let b = file_binding(
+        "creds",
+        &path,
+        Tweaks {
+            extract: regex(r"password\s+(\S+)")?,
+            on_no_match: ExtractNoMatch::Warn,
+            ..Tweaks::default()
+        },
+    )?;
+    let events = CapturedEvents::new();
+    let guard = events.install(LevelFilter::WARN);
+    prepare(&[b]).await?;
+    drop(guard);
+    let warning = only_warning(&events)?;
+    let shown = path.to_str().ok_or("the path is not UTF-8")?;
+    assert!(
+        warning.message().is_some_and(|m| m.contains("UNPROTECTED")),
+        "{warning:?}"
+    );
+    assert!(
+        warning.field("subject").is_some_and(|s| s.contains(shown)),
+        "{warning:?}"
+    );
+    assert!(!format!("{warning:?}").contains(&real()), "{warning:?}");
+    Ok(())
+}
+
+#[tokio::test]
 async fn on_no_match_deny_withholds_the_env_variable() -> TestResult {
     let secrets = prepare(&[env_regex_binding(r"^zzz_(\w+)$", ExtractNoMatch::Deny)?]).await?;
     assert!(secrets.env().is_empty());
@@ -310,6 +370,35 @@ async fn the_no_match_policy_is_decided_per_binding() -> TestResult {
     )?;
     let secrets = prepare(&[warned, denied]).await?;
     assert_eq!(secrets.env(), [("GH_TOKEN".to_string(), real())]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn the_no_match_policy_of_each_file_binding_applies_to_that_file_alone() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let warned_path = dir.path().join("warned");
+    let denied_path = dir.path().join("denied");
+    fs::write(&warned_path, "nothing\n")?;
+    fs::write(&denied_path, "nothing\n")?;
+    let netrc_rule = |on_no_match| -> Result<Tweaks, Box<dyn Error>> {
+        Ok(Tweaks {
+            extract: regex(r"password\s+(\S+)")?,
+            on_no_match,
+            ..Tweaks::default()
+        })
+    };
+    let warned = file_binding("warned", &warned_path, netrc_rule(ExtractNoMatch::Warn)?)?;
+    let denied = file_binding("denied", &denied_path, netrc_rule(ExtractNoMatch::Deny)?)?;
+    let secrets = prepare(&[warned, denied]).await?;
+    assert!(secrets.binds().is_empty());
+    let policy = secrets.apply_to_fs_policy(None)?.ok_or("a policy")?;
+    assert_eq!(
+        policy.credential_deny_read(),
+        [FsPathEntry::Literal {
+            path: LiteralPath::new(denied_path.to_str().ok_or("utf-8")?)?,
+            directory: Default::default(),
+        }]
+    );
     Ok(())
 }
 

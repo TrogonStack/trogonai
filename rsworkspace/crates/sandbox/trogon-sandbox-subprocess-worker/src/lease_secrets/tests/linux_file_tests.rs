@@ -104,6 +104,26 @@ async fn mask_duplicates_gives_each_distinct_value_a_sentinel_the_proxy_can_swap
 }
 
 #[tokio::test]
+async fn two_distinct_captures_in_a_file_get_two_sentinels_each_swapping_to_its_own_value() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join(".netrc");
+    let original = "machine a login u password first-secret-1111\nmachine b login u password second-secret-2222\n";
+    fs::write(&path, original)?;
+    let mut secrets = prepare_with("first-secret-1111", &[netrc(&path, ExtractNoMatch::Error, false)?]).await?;
+    let content = bound_content(&secrets)?;
+    assert!(!content.contains("first-secret-1111") && !content.contains("second-secret-2222"));
+    let sentinels: Vec<&str> = content
+        .split_whitespace()
+        .filter(|w| w.starts_with("fake_value_"))
+        .collect();
+    assert_eq!(sentinels.len(), 2);
+    assert_ne!(sentinels[0], sentinels[1]);
+    let registry = secrets.take_handoff().ok_or("a handoff")?.into_registry()?;
+    assert_eq!(swapped_back(&registry, &content, "api.example.com")?, original);
+    Ok(())
+}
+
+#[tokio::test]
 async fn on_no_match_warn_leaves_the_file_unmasked_and_unbound() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("creds");
@@ -271,5 +291,37 @@ async fn two_jwts_in_one_file_each_get_their_own_fake_and_claim_sentinels() -> T
     for claim in ["alice-the-user", "bob-the-builder"] {
         assert!(pairs.iter().any(|(_, real)| real == claim), "{claim}");
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn mask_duplicates_with_decode_masks_a_verified_token_everywhere_and_leaves_an_unverified_one() -> TestResult {
+    let token = real_jwt("alice-the-user", "real-signature");
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("tokens");
+    fs::write(
+        &path,
+        format!("t={token}\nnote eyJhbc.def.ghi\n# {token}\nagain eyJhbc.def.ghi\n"),
+    )?;
+    let b = file_binding(
+        "jwt",
+        &path,
+        Tweaks {
+            extract: jwt_extract(&[])?,
+            mask_duplicates: true,
+            ..Tweaks::default()
+        },
+    )?;
+    let secrets = prepare_with(&token, &[b]).await?;
+    let content = bound_content(&secrets)?;
+    assert!(!content.contains(&token));
+    assert_eq!(content.matches("eyJhbc.def.ghi").count(), 2);
+    let fakes: Vec<&str> = content
+        .lines()
+        .filter_map(|line| line.strip_prefix("t=").or_else(|| line.strip_prefix("# ")))
+        .collect();
+    assert_eq!(fakes.len(), 2);
+    assert_eq!(fakes[0], fakes[1]);
+    assert!(is_jwt(fakes[0]));
     Ok(())
 }
