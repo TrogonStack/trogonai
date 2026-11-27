@@ -6,11 +6,9 @@ use bytes::Bytes;
 use trogon_sandbox_contract::{LeaseId, PullSecretId, TenantId};
 use trogon_sandbox_protocol::COMMITTED_POLICY_BUCKET;
 
+use crate::constants::DEFAULT_COMMIT_ATTEMPTS;
 use crate::stored_policy::StoredPolicy;
 use crate::{BackendError, CommittedPolicy, CommittedPolicyStore, CommittedPolicyWriter, PolicyStoreError};
-
-/// How many times a commit retries after losing a race for the same lease.
-const DEFAULT_COMMIT_ATTEMPTS: usize = 8;
 
 /// Committed policies in a NATS KV bucket, one key per tenant and lease.
 #[derive(Clone)]

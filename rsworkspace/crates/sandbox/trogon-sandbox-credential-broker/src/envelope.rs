@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use trogon_sandbox_contract::TenantId;
 
-use crate::aead_cipher::{KEY_LEN, aead_decrypt, aead_encrypt, random_bytes};
+use crate::aead_cipher::{aead_decrypt, aead_encrypt, random_bytes};
+use crate::constants::{KEY_LEN, NONCE_LEN};
 use crate::record_binding::{RecordBinding, push_field};
-use crate::{KmsError, KmsProvider, NONCE_LEN};
+use crate::{KmsError, KmsProvider};
 
 /// AAD for wrapping a data key under the root key: binds the wrap to the tenant.
 fn wrap_aad(tenant: &TenantId) -> Vec<u8> {

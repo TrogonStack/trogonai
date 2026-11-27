@@ -11,7 +11,7 @@ use trogon_sandbox_contract::{
 
 use crate::{
     AuditLogger, BrokerSetupError, CommittedPolicyStore, CredentialMaterial, CredentialStore, CredentialStoreError,
-    CredentialSummary, FenceMode, FenceRefusal, JetStreamAuditLogger, KmsProvider, MigrationReport,
+    CredentialSummary, FenceMode, FenceRefusalError, JetStreamAuditLogger, KmsProvider, MigrationReport,
     NatsKvCommittedPolicies, NatsKvCredentialStore, NatsKvTokenStore, TokenStore, check_fence,
 };
 
@@ -93,7 +93,7 @@ impl CredentialBroker {
         )
         .await
         .map_err(|refusal| {
-            if refusal == FenceRefusal::Missing {
+            if refusal == FenceRefusalError::Missing {
                 warn!(%provider, %tenant, "refused an unfenced credential request");
             }
             CredentialError::PolicyFenceRefused {

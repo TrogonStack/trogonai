@@ -1,4 +1,4 @@
-use crate::{BackendError, StaleCommit};
+use crate::{BackendError, StaleCommitError};
 
 /// A committed-policy store could not be read or written.
 #[derive(Debug, thiserror::Error)]
@@ -10,5 +10,5 @@ pub enum PolicyStoreError {
     #[error("the committed policy for the lease kept changing; giving up")]
     Contended,
     #[error(transparent)]
-    Stale(#[from] StaleCommit),
+    Stale(#[from] StaleCommitError),
 }

@@ -1,14 +1,11 @@
-use std::time::Duration;
-
 use async_nats::jetstream::{self, stream};
 use async_trait::async_trait;
 use bytes::Bytes;
 use trogon_sandbox_contract::CredentialAuditEvent;
 use trogon_sandbox_protocol::subjects::{CREDENTIAL_AUDIT_STREAM, credential_audit_stream_name};
 
+use crate::constants::RETENTION;
 use crate::{AuditError, AuditLogger, BackendError};
-
-const RETENTION: Duration = Duration::from_secs(60 * 60 * 24 * 365);
 
 /// Audit events published to a JetStream stream, kept for a year.
 pub struct JetStreamAuditLogger {

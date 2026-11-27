@@ -2,14 +2,8 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
-use crate::NONCE_LEN;
+use crate::constants::{FORMAT_ENVELOPE, FORMAT_LEGACY, NONCE_LEN};
 use crate::envelope::Envelope;
-
-/// Record format 1: AES-256-GCM under the process key, no associated data.
-pub(crate) const FORMAT_LEGACY: u32 = 1;
-/// Record format 2: per-record data key wrapped under the root key with the tenant as AAD; the payload AAD binds
-/// provider, tenant, credential id and version.
-pub(crate) const FORMAT_ENVELOPE: u32 = 2;
 
 fn legacy_format() -> u32 {
     FORMAT_LEGACY

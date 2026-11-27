@@ -4,7 +4,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use async_trait::async_trait;
 use trogon_sandbox_contract::{LeaseId, PullSecretId, TenantId};
 
-use crate::{CommittedPolicy, CommittedPolicyStore, CommittedPolicyWriter, PolicyStoreError, StaleCommit};
+use crate::{CommittedPolicy, CommittedPolicyStore, CommittedPolicyWriter, PolicyStoreError, StaleCommitError};
 
 type PolicyKey = (TenantId, LeaseId);
 
@@ -31,13 +31,13 @@ impl InMemoryCommittedPolicies {
         lease: LeaseId,
         revision: u64,
         references: impl IntoIterator<Item = PullSecretId>,
-    ) -> Result<(), StaleCommit> {
+    ) -> Result<(), StaleCommitError> {
         let mut policies = self.lock();
         let key = (tenant, lease);
         if let Some(current) = policies.get(&key)
             && revision <= current.revision
         {
-            return Err(StaleCommit {
+            return Err(StaleCommitError {
                 current: current.revision,
                 offered: revision,
             });

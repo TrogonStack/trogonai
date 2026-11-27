@@ -8,11 +8,10 @@ use serde::{Deserialize, Serialize};
 use trogon_sandbox_contract::{CredentialId, CredentialProvider, PullSecretId, TenantId};
 use trogon_sandbox_protocol::subjects::credential_kv_bucket;
 
+use crate::constants::PULL_SECRET_PREFIX;
 use crate::record_codec::RecordCodec;
 use crate::stored_credential::StoredCredential;
 use crate::{BackendError, CredentialMaterial, CredentialStore, CredentialStoreError, CredentialSummary, KmsProvider};
-
-const PULL_SECRET_PREFIX: &str = "pull_secret.";
 
 #[derive(Serialize, Deserialize)]
 struct PullSecretMapping {

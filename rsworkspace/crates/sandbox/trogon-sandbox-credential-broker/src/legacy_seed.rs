@@ -3,7 +3,8 @@ use std::time::SystemTime;
 
 use trogon_sandbox_contract::{CredentialId, CredentialProvider};
 
-use crate::stored_credential::{FORMAT_LEGACY, StoredCredential};
+use crate::constants::FORMAT_LEGACY;
+use crate::stored_credential::StoredCredential;
 use crate::{CredentialMaterial, InMemoryCredentialStore};
 
 /// Writes a record exactly as the format before envelopes did: no associated data and no envelope.

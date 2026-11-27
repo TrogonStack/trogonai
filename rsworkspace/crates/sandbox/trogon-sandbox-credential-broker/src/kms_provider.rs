@@ -1,9 +1,7 @@
 use async_trait::async_trait;
 
 use crate::KmsError;
-
-/// Length of the nonce that accompanies every ciphertext, in bytes.
-pub const NONCE_LEN: usize = 12;
+use crate::constants::NONCE_LEN;
 
 /// Root-key operations.
 ///

@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
-use crate::{InProcessKey, KmsError, KmsProvider, NONCE_LEN};
+use crate::constants::NONCE_LEN;
+use crate::{InProcessKey, KmsError, KmsProvider};
 
 /// A root-key provider that delegates to an [`InProcessKey`].
 ///

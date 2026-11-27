@@ -5,8 +5,9 @@ use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 
-use crate::aead_cipher::{KEY_LEN, aead_decrypt, aead_encrypt};
-use crate::{KmsError, KmsProvider, NONCE_LEN};
+use crate::aead_cipher::{aead_decrypt, aead_encrypt};
+use crate::constants::{KEY_LEN, NONCE_LEN};
+use crate::{KmsError, KmsProvider};
 
 /// A root key held in process memory.
 ///

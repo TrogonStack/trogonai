@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 use trogon_sandbox_contract::{LeaseId, PolicyFence, PullSecretId, SandboxSpec, TenantId};
 use trogon_sandbox_credential_broker::{
     BackendError, CommittedFence, CommittedFenceError, CommittedPolicy, CommittedPolicyStore, CommittedPolicyWriter,
-    FenceMode, FenceModeError, FenceRefusal, InMemoryCommittedPolicies, PolicyStoreError, StaleCommit, check_fence,
+    FenceMode, FenceModeError, FenceRefusalError, InMemoryCommittedPolicies, PolicyStoreError, StaleCommitError,
+    check_fence,
 };
 
 struct DownPolicies;
@@ -94,13 +95,16 @@ fn fence_modes_parse_and_default_to_optional() {
 
 #[test]
 fn refusals_and_errors_explain_themselves() -> Result<(), Box<dyn Error>> {
-    assert_eq!(FenceRefusal::Missing.to_string(), "a policy fence is required");
+    assert_eq!(FenceRefusalError::Missing.to_string(), "a policy fence is required");
     assert_eq!(
-        FenceRefusal::NotCommitted.to_string(),
+        FenceRefusalError::NotCommitted.to_string(),
         "credential reference is not named by the committed policy"
     );
-    assert_eq!(FenceRefusal::Unavailable.to_string(), "the policy store is unavailable");
-    let stale = StaleCommit { current: 3, offered: 2 };
+    assert_eq!(
+        FenceRefusalError::Unavailable.to_string(),
+        "the policy store is unavailable"
+    );
+    let stale = StaleCommitError { current: 3, offered: 2 };
     assert_eq!(
         stale.to_string(),
         "revision 2 is not newer than the committed revision 3"
@@ -138,29 +142,29 @@ async fn check_fence_decides_by_mode_store_lease_revision_and_reference() -> Res
     assert_eq!(go(store, FenceMode::Optional, None, "a").await, Ok(()));
     assert_eq!(
         go(store, FenceMode::Required, None, "a").await,
-        Err(FenceRefusal::Missing)
+        Err(FenceRefusalError::Missing)
     );
     assert_eq!(go(store, FenceMode::Optional, Some(&fence(2)), "a").await, Ok(()));
     assert_eq!(
         go(store, FenceMode::Optional, Some(&fence(1)), "a").await,
-        Err(FenceRefusal::NotCommitted)
+        Err(FenceRefusalError::NotCommitted)
     );
     assert_eq!(
         go(store, FenceMode::Optional, Some(&fence(3)), "a").await,
-        Err(FenceRefusal::NotCommitted)
+        Err(FenceRefusalError::NotCommitted)
     );
     assert_eq!(
         go(store, FenceMode::Optional, Some(&fence(2)), "b").await,
-        Err(FenceRefusal::NotCommitted)
+        Err(FenceRefusalError::NotCommitted)
     );
     assert_eq!(
         go(None, FenceMode::Optional, Some(&fence(2)), "a").await,
-        Err(FenceRefusal::NotCommitted)
+        Err(FenceRefusalError::NotCommitted)
     );
     let down: Option<&dyn CommittedPolicyStore> = Some(&DownPolicies);
     assert_eq!(
         go(down, FenceMode::Optional, Some(&fence(2)), "a").await,
-        Err(FenceRefusal::Unavailable)
+        Err(FenceRefusalError::Unavailable)
     );
     Ok(())
 }
@@ -186,7 +190,7 @@ async fn a_replayed_revision_is_stale() -> Result<(), Box<dyn Error>> {
     let policies = InMemoryCommittedPolicies::new();
     policies.commit_revision(tenant()?, lease(), 2, [reference("a")])?;
     let stale = policies.commit_revision(tenant()?, lease(), 2, [reference("b")]);
-    assert_eq!(stale, Err(StaleCommit { current: 2, offered: 2 }));
+    assert_eq!(stale, Err(StaleCommitError { current: 2, offered: 2 }));
     Ok(())
 }
 

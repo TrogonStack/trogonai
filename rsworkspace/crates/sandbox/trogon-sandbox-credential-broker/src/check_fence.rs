@@ -1,6 +1,6 @@
 use trogon_sandbox_contract::{PolicyFence, PullSecretId, TenantId};
 
-use crate::{CommittedPolicyStore, FenceMode, FenceRefusal};
+use crate::{CommittedPolicyStore, FenceMode, FenceRefusalError};
 
 /// Decides whether `reference` may be resolved for `tenant` under `fence`.
 ///
@@ -15,23 +15,23 @@ pub async fn check_fence(
     tenant: &TenantId,
     fence: Option<&PolicyFence>,
     reference: &PullSecretId,
-) -> Result<(), FenceRefusal> {
+) -> Result<(), FenceRefusalError> {
     let Some(fence) = fence else {
         return match mode {
             FenceMode::Optional => Ok(()),
-            FenceMode::Required => Err(FenceRefusal::Missing),
+            FenceMode::Required => Err(FenceRefusalError::Missing),
         };
     };
     let Some(store) = store else {
-        return Err(FenceRefusal::NotCommitted);
+        return Err(FenceRefusalError::NotCommitted);
     };
     let committed = store
         .committed(tenant, &fence.lease_id)
         .await
-        .map_err(|_| FenceRefusal::Unavailable)?
-        .ok_or(FenceRefusal::NotCommitted)?;
+        .map_err(|_| FenceRefusalError::Unavailable)?
+        .ok_or(FenceRefusalError::NotCommitted)?;
     if committed.revision != fence.policy_revision || !committed.references.contains(reference) {
-        return Err(FenceRefusal::NotCommitted);
+        return Err(FenceRefusalError::NotCommitted);
     }
     Ok(())
 }

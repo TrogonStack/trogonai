@@ -3,9 +3,10 @@ use std::time::SystemTime;
 
 use trogon_sandbox_contract::{CredentialId, CredentialProvider, TenantId};
 
+use crate::constants::FORMAT_ENVELOPE;
 use crate::envelope::Envelope;
 use crate::record_binding::RecordBinding;
-use crate::stored_credential::{FORMAT_ENVELOPE, StoredCredential};
+use crate::stored_credential::StoredCredential;
 use crate::{CredentialMaterial, CredentialStoreError, KmsProvider};
 
 /// Seals and opens records for every store implementation.

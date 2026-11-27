@@ -2,9 +2,8 @@ use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use rand_core::{OsRng, RngCore};
 
-use crate::{KmsError, NONCE_LEN};
-
-pub(crate) const KEY_LEN: usize = 32;
+use crate::KmsError;
+use crate::constants::{KEY_LEN, NONCE_LEN};
 
 pub(crate) fn random_bytes<const N: usize>() -> [u8; N] {
     let mut bytes = [0u8; N];
