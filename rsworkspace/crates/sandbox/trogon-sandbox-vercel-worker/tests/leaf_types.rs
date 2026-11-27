@@ -31,7 +31,9 @@ fn spec(vcpu_millis: Option<u32>, memory_mib: u32, disk_mib: Option<u32>) -> Res
 }
 
 fn policy(change: impl FnOnce(&mut Value)) -> Result<NetworkPolicy, serde_json::Error> {
-    let mut wire = json!({"user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": []}});
+    // The vendor firewall cannot refuse opaque tunnels, so every policy it serves has to opt in.
+    let mut wire =
+        json!({"user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": [], "opaque_tunnels": "allow"}});
     change(&mut wire["user_defined"]);
     serde_json::from_value(wire)
 }
@@ -388,4 +390,15 @@ fn provider_errors_become_backend_errors_unless_the_protocol_names_them() {
     assert!(matches!(api, ProviderError::Backend(_)));
     let mounts: ProviderError = VercelProviderError::MountsUnsupported.into();
     assert!(matches!(mounts, ProviderError::Backend(_)));
+}
+
+#[test]
+fn a_policy_that_does_not_opt_in_to_opaque_tunnels_is_refused() -> TestResult {
+    let silent = policy(|wire| {
+        if let Some(wire) = wire.as_object_mut() {
+            wire.remove("opaque_tunnels");
+        }
+    })?;
+    assert!(is_invalid_policy(&silent), "{silent:?}");
+    Ok(())
 }

@@ -21,7 +21,9 @@ pub enum NetworkPolicy {
         deny_ranges: Vec<IpRange>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         denied_domains: Vec<DeniedDomain>,
-        #[serde(default, skip_serializing_if = "OpaqueTunnelPolicy::is_allow")]
+        /// Refused when omitted; always serialized, so an older reader that took omission to mean `Allow` never
+        /// widens a policy written by a newer one.
+        #[serde(default)]
         opaque_tunnels: OpaqueTunnelPolicy,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         request_rules: Vec<RequestRule>,

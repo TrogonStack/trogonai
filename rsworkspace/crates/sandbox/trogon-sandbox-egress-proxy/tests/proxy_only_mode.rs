@@ -35,7 +35,7 @@ fn policy() -> TestResult<NetworkPolicy> {
         allow_ranges: vec![loopback_range()?],
         deny_ranges: vec![],
         denied_domains: vec!["blocked.test".parse()?],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -422,7 +422,7 @@ async fn a_connect_to_a_denied_port_is_refused_even_when_an_allowed_entry_covers
         allow_ranges: vec![loopback_range()?],
         deny_ranges: vec![],
         denied_domains: vec!["denied.test:443".parse()?],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let listener = Listener::bind(&ListenAddress::parse("127.0.0.1:0")).await?;

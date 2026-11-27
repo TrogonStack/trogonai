@@ -209,7 +209,7 @@ fn user_defined_policy_parses() -> TestResult {
 }
 
 #[test]
-fn policy_file_opaque_tunnels_refuse_is_parsed_and_defaults_to_allow() -> TestResult {
+fn policy_file_opaque_tunnels_default_to_refuse_and_allow_is_an_explicit_opt_in() -> TestResult {
     let parse = |json: &str| -> Result<NetworkPolicy, String> {
         let get_env = env_map(&[(POLICY_FILE_ENV_VAR, "/policy.json")]);
         let files = [("/policy.json", json)];
@@ -219,11 +219,10 @@ fn policy_file_opaque_tunnels_refuse_is_parsed_and_defaults_to_allow() -> TestRe
         NetworkPolicy::UserDefined { opaque_tunnels, .. } => opaque_tunnels.refuses(),
         _ => false,
     };
-    let refusing =
-        parse(r#"{"user_defined":{"rules":[],"allow_ranges":[],"deny_ranges":[],"opaque_tunnels":"refuse"}}"#)?;
-    assert!(refuses(&refusing));
-    let default = parse(r#"{"user_defined":{"rules":[],"allow_ranges":[],"deny_ranges":[]}}"#)?;
-    assert!(!refuses(&default));
+    let base = r#"{"user_defined":{"rules":[],"allow_ranges":[],"deny_ranges":[]"#;
+    assert!(refuses(&parse(&format!(r#"{base},"opaque_tunnels":"refuse"}}}}"#))?));
+    assert!(refuses(&parse(&format!("{base}}}}}"))?));
+    assert!(!refuses(&parse(&format!(r#"{base},"opaque_tunnels":"allow"}}}}"#))?));
     Ok(())
 }
 
@@ -498,7 +497,7 @@ async fn hot_reload_applies_updated_policy_without_restart() -> TestResult {
     let updated_policy_file = unique_temp_path("sandbox-egress-policy-hot-reload-test-swap");
     std::fs::write(
         &updated_policy_file,
-        r#"{"user_defined": {"rules": [], "allow_ranges": ["127.0.0.0/8"], "deny_ranges": []}}"#,
+        r#"{"user_defined": {"rules": [], "allow_ranges": ["127.0.0.0/8"], "deny_ranges": [], "opaque_tunnels": "allow"}}"#,
     )?;
     std::fs::rename(&updated_policy_file, &policy_file)?;
 

@@ -40,7 +40,7 @@ fn policy_for(providers: &[CredentialProvider]) -> Result<NetworkPolicy, Box<dyn
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -236,7 +236,7 @@ fn forwarding_is_detected_only_for_forward_rules() -> TestResult {
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     assert!(forwards_requests(&forward));

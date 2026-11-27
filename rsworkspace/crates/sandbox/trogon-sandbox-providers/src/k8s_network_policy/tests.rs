@@ -28,7 +28,7 @@ fn user_defined(
         allow_ranges: allow_ranges.into_iter().map(AllowRange::from).collect(),
         deny_ranges,
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     }
 }
@@ -148,7 +148,7 @@ fn an_allow_range_with_a_port_allows_tcp_to_that_port_only() -> TestResult {
         allow_ranges: vec![AllowRange::new("10.0.0.5:8080")?, AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let egress = manifest(&policy)?.spec.ok_or("spec")?.egress.ok_or("egress")?;

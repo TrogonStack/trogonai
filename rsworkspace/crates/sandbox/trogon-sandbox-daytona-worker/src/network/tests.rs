@@ -5,7 +5,9 @@ use super::*;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 fn policy(change: impl FnOnce(&mut Value)) -> Result<NetworkPolicy, serde_json::Error> {
-    let mut wire = json!({"user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": []}});
+    // The vendor firewall cannot refuse opaque tunnels, so every policy it serves has to opt in.
+    let mut wire =
+        json!({"user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": [], "opaque_tunnels": "allow"}});
     change(&mut wire["user_defined"]);
     serde_json::from_value(wire)
 }
@@ -121,5 +123,16 @@ fn admission_refuses_every_restricting_policy_with_the_unverified_reason() -> Te
 fn admission_lets_unrestricted_egress_through() -> TestResult {
     require_unrestricted_egress(None)?;
     require_unrestricted_egress(Some(&NetworkPolicy::AllowAll))?;
+    Ok(())
+}
+
+#[test]
+fn a_policy_that_does_not_opt_in_to_opaque_tunnels_is_refused() -> TestResult {
+    let silent = policy(|wire| {
+        if let Some(wire) = wire.as_object_mut() {
+            wire.remove("opaque_tunnels");
+        }
+    })?;
+    assert!(is_invalid(&silent), "{silent:?}");
     Ok(())
 }

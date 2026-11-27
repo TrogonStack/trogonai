@@ -166,7 +166,7 @@ fn user_policy(allow_ranges: &[&str]) -> Result<NetworkPolicy, Box<dyn std::erro
             .collect::<Result<Vec<_>, _>>()?,
         deny_ranges: vec![IpRange::new("10.0.0.0/8")?],
         denied_domains: vec!["blocked.test".parse()?],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -380,7 +380,7 @@ fn name_matched_policy(allowed: &[&str], denied: &[&str]) -> Result<NetworkPolic
             .iter()
             .map(|domain| domain.parse())
             .collect::<Result<Vec<_>, _>>()?,
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -581,7 +581,7 @@ async fn an_address_a_deny_range_covers_is_denied_after_resolution() -> Result<(
         allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![IpRange::new("203.0.113.0/24")?],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let f = fixture(policy, Ok(ALLOW_ONCE), covered, false)?;

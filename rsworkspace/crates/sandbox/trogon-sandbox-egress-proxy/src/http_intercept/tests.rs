@@ -118,7 +118,7 @@ fn checked_guard(
         allow_ranges: Vec::new(),
         deny_ranges: Vec::new(),
         denied_domains: Vec::new(),
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![rule],
     };
     let observer = Arc::new(CountingObserver(Default::default()));

@@ -8,7 +8,7 @@
     "rsworkspace/crates/sandbox/trogon-sandbox-docker-worker/src/worker/tests/named_cancellation_tests.rs": 1064,
     "rsworkspace/crates/sandbox/trogon-sandbox-docker-worker/tests/composed_named_cancellation.rs": 1239,
     "rsworkspace/crates/sandbox/trogon-sandbox-e2b-worker/src/adapter/tests.rs": 1096,
-    "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/bin/trogon-sandbox-egress-proxyd/tests.rs": 1286,
+    "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/bin/trogon-sandbox-egress-proxyd/tests.rs": 1285,
     "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/decider_stream.rs": 1028,
     "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/decider_stream/tests.rs": 1472,
     "rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/src/http_intercept.rs": 3227,

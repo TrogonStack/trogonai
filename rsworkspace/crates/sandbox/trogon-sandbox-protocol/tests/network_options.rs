@@ -327,7 +327,7 @@ fn only_a_user_defined_policy_has_a_deny_list_reason() -> TestResult {
         allow_ranges: Vec::new(),
         deny_ranges: Vec::new(),
         denied_domains: entries,
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: Vec::new(),
     };
     let reason = deny_list_reason(&options, &policy, &host("blocked.test")?, 443)?;

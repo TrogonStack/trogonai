@@ -116,7 +116,7 @@ fn policy() -> TestResult<NetworkPolicy> {
         allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![IpRange::new("10.0.0.0/8")?],
         denied_domains: vec!["blocked.test".parse()?],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -127,7 +127,7 @@ fn policy_without_ranges() -> TestResult<NetworkPolicy> {
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec!["blocked.test".parse()?],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }

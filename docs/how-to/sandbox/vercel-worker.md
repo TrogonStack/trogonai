@@ -142,8 +142,10 @@ against a loopback server, so it runs with the normal suite.
 
 The worker refuses these with `InvalidNetworkPolicy`: denied domains, request
 rules, a policy that refuses opaque tunnels, any rule that is not pass-through,
-and any rule that names a port. Changing the policy of a running lease is
-refused. The worker applies it at create time only.
+and any rule that names a port. A user defined policy refuses opaque tunnels
+unless it sets `"opaque_tunnels": "allow"`, so one sent to this worker has to
+say so. Changing the policy of a running lease is refused. The worker applies it
+at create time only.
 
 ## Commands, files and ports
 

@@ -25,7 +25,7 @@ fn loopback_policy() -> Result<NetworkPolicy, Box<dyn std::error::Error>> {
         allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }

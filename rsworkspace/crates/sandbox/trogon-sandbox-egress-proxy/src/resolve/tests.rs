@@ -47,7 +47,7 @@ fn allow(ranges: &[&str]) -> Result<AllowRanges, Box<dyn std::error::Error>> {
         allow_ranges: ranges.iter().map(|r| AllowRange::new(*r)).collect::<Result<_, _>>()?,
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     }))
 }
@@ -392,7 +392,7 @@ fn an_explicit_catch_all_range_lifts_the_floor() -> Result<(), Box<dyn std::erro
         allow_ranges: vec![AllowRange::new("0.0.0.0/0")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let exceptions = AllowRanges::from_policy(&policy);
