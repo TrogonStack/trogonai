@@ -195,6 +195,34 @@ fn a_plain_lease_is_accepted_with_its_own_memory() -> anyhow::Result<()> {
 }
 
 #[test]
+fn zero_memory_never_reaches_the_worker_as_a_lease() -> anyhow::Result<()> {
+    let mut wire = serde_json::to_value(request(|_| Ok(()))?)?;
+    let spec = wire
+        .get_mut("spec")
+        .and_then(serde_json::Value::as_object_mut)
+        .context("a lease request carries its spec")?;
+    spec.insert("memory_mib".to_string(), serde_json::json!(0));
+    assert!(serde_json::from_value::<LeaseRequest>(wire).is_err());
+    Ok(())
+}
+
+#[test]
+fn an_oversized_env_is_refused() -> anyhow::Result<()> {
+    let refused = request(|parts| {
+        for i in 0..=SandboxSpec::MAX_ENV_ENTRIES {
+            parts.env.insert(format!("K{i}"), "v".to_string());
+        }
+        Ok(())
+    });
+    let error = match refused {
+        Ok(request) => bail!("the oversized env was accepted: {:?}", request.spec.env().len()),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("env"), "{error}");
+    Ok(())
+}
+
+#[test]
 fn an_explicit_deny_all_policy_is_the_only_policy_accepted() -> anyhow::Result<()> {
     accept(
         &config(),

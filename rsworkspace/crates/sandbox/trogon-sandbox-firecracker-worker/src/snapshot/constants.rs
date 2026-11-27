@@ -2,7 +2,8 @@ pub const METADATA_FILE: &str = "snapshot.json";
 
 pub const ROOTFS_FILE: &str = "rootfs.ext4";
 
-pub const ROLE: &str = "io.sandbox.firecracker.file";
+/// Layer annotation naming which snapshot file a layer carries; the snapshot builder reads the same key.
+pub const ROLE: &str = "io.trogon.sandbox.firecracker.file";
 
 pub const MAX_TRANSFER_BYTES: u64 = 512 * 1024 * 1024;
 
