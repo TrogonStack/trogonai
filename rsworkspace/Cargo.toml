@@ -96,6 +96,7 @@ trogon-sandbox-proxmox-worker = { path = "crates/sandbox/trogon-sandbox-proxmox-
 trogon-sandbox-snapshot-builder = { path = "crates/sandbox/trogon-sandbox-snapshot-builder" }
 trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
 trogon-sandbox-ssh-gateway = { path = "crates/sandbox/trogon-sandbox-ssh-gateway" }
+trogon-sandbox-subprocess-worker = { path = "crates/sandbox/trogon-sandbox-subprocess-worker" }
 trogon-sandbox-substrate-worker = { path = "crates/sandbox/trogon-sandbox-substrate-worker" }
 trogon-sandbox-v8-wasm-worker = { path = "crates/sandbox/trogon-sandbox-v8-wasm-worker" }
 trogon-sandbox-vercel-worker = { path = "crates/sandbox/trogon-sandbox-vercel-worker" }
@@ -253,6 +254,9 @@ rrule = "=0.14.0"
 rustix = { version = "=1.1.4", default-features = false, features = ["fs", "std"] }
 russh = { version = "=0.61.2", default-features = false, features = ["aws-lc-rs", "flate2"] }
 sha2 = "=0.11.1"
+which = "=8.0.6"
+landlock = "=0.4.7"
+seccompiler = "=0.5.0"
 wiremock = "=0.6.5"
 windows = { version = "=0.62.2", features = [
   "Wdk_Foundation",

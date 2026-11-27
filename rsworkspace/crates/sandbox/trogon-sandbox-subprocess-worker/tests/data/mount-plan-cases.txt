@@ -1,0 +1,2000 @@
+# Cases for the bubblewrap mount planner. See tests/mount_plan_cases.rs for the
+# format.
+
+case: a policy with no entries leaves every base mount read-only
+bind: /workspace /h/ws rw
+bind: /usr /h/usr ro
+deny_read: /nowhere
+expect: bind ro /usr | bind ro /workspace
+expect-tmp: readonly
+
+case: a granted workspace stays writable and a denied file inside it becomes a stub
+bind: /workspace /h/ws rw
+file: /h/ws/secret
+allow_write: /workspace
+deny_read: /workspace/secret
+expect: bind rw /workspace | stub /workspace/secret
+
+case: a denied directory becomes an empty tmpfs that is remounted read-only last
+bind: /workspace /h/ws rw
+dir: /h/ws/vault
+file: /h/ws/vault/key
+allow_write: /workspace
+deny_read: /workspace/vault
+expect: bind rw /workspace | tmpfs /workspace/vault | remount-ro /workspace/vault
+
+case: ancestors of a protected path are pinned so a rename cannot walk around it
+bind: /workspace /h/ws rw
+file: /h/ws/a/b/denied
+allow_write: /workspace
+deny_read: /workspace/a/b/denied
+expect: bind rw /workspace | bind rw /workspace/a | bind rw /workspace/a/b | stub /workspace/a/b/denied
+
+case: nothing is pinned when the region is read-only
+bind: /workspace /h/ws ro
+file: /h/ws/a/b/denied
+deny_read: /workspace/a/b/denied
+expect: bind ro /workspace | stub /workspace/a/b/denied
+
+case: a file on the way to a denied path is held read-only so it cannot become a directory
+bind: /workspace /h/ws rw
+file: /h/ws/blocker
+allow_write: /workspace
+deny_read: /workspace/blocker/inner
+expect: bind rw /workspace | bind ro /workspace/blocker
+
+case: one mount per destination whatever lists name it
+bind: /workspace /h/ws rw
+file: /h/ws/x.env
+allow_write: /workspace
+deny_read: /workspace/x.env | /workspace/x.env | glob:/workspace/*.env
+deny_write: /workspace/x.env
+expect: bind rw /workspace | stub /workspace/x.env
+
+case: the plan does not depend on the order of the entries
+bind: /workspace /h/ws rw
+file: /h/ws/a
+file: /h/ws/b
+allow_write: /workspace
+deny_read: /workspace/b | /workspace/a
+expect: bind rw /workspace | stub /workspace/a | stub /workspace/b
+
+case: the plan does not depend on the order of the entries (reversed)
+bind: /workspace /h/ws rw
+file: /h/ws/a
+file: /h/ws/b
+allow_write: /workspace
+deny_read: /workspace/a | /workspace/b
+expect: bind rw /workspace | stub /workspace/a | stub /workspace/b
+
+case: a denied path that does not exist yet gets a guard at its first missing component
+bind: /workspace /h/ws rw
+allow_write: /workspace
+deny_read: /workspace/later/.env
+expect: bind rw /workspace | stub /workspace/later
+expect-placeholders: /h/ws/later
+
+case: a guard is not needed where the sandbox cannot write
+bind: /workspace /h/ws ro
+deny_read: /workspace/later/.env
+expect: bind ro /workspace
+expect-placeholders:
+
+case: a deny_write guard that the worker cannot create is refused
+bind: /workspace /h/ws rw
+nocreate: /h/ws
+allow_write: /workspace
+deny_write: /workspace/.git/hooks/pre-commit
+expect-error: unguardable-deny-write
+
+case: a deny_read guard that the worker cannot create is reported instead of dropped
+bind: /workspace /h/ws rw
+nocreate: /h/ws
+file: /h/ws/.gitconfig
+file: /h/ws/.gitmodules
+file: /h/ws/.bashrc
+file: /h/ws/.bash_profile
+file: /h/ws/.zshrc
+file: /h/ws/.zprofile
+file: /h/ws/.profile
+file: /h/ws/.ripgreprc
+file: /h/ws/.mcp.json
+dir: /h/ws/.vscode
+dir: /h/ws/.idea
+dir: /h/ws/.agent/commands
+dir: /h/ws/.agent/agents
+allow_write: /workspace
+deny_read: /workspace/later
+expect: bind rw /workspace | bind rw /workspace/.agent
+expect-unguarded: /workspace/later
+
+case: a denied symlink protects its target
+bind: /workspace /h/ws rw
+file: /h/ws/real
+link: /h/ws/alias -> real
+allow_write: /workspace
+deny_read: /workspace/alias
+expect: bind rw /workspace | stub /workspace/real
+
+case: an absolute link target is read in the guest, not on the host
+bind: /workspace /h/ws rw
+file: /h/ws/secret
+link: /h/ws/abs -> /workspace/secret
+allow_write: /workspace
+deny_read: /workspace/abs
+expect: bind rw /workspace | stub /workspace/secret
+
+case: a link in the middle of a path is followed
+bind: /workspace /h/ws rw
+dir: /h/ws/real
+file: /h/ws/real/key
+link: /h/ws/dir -> real
+allow_write: /workspace
+deny_read: /workspace/dir/key
+expect: bind rw /workspace | bind rw /workspace/real | stub /workspace/real/key
+
+case: a write grant reached through a link is not honoured
+bind: /workspace /h/ws rw
+dir: /h/ws/real
+link: /h/ws/alias -> real
+allow_write: /workspace/alias
+expect: bind ro /workspace
+expect-suppressed: allow_write /workspace/real via-symlink
+
+case: a write grant through an absolute link cannot escape to another mount
+bind: /workspace /h/ws rw
+bind: /usr /h/usr ro
+dir: /h/usr/lib
+link: /h/ws/out -> /usr/lib
+allow_write: /workspace/out
+expect: bind ro /usr | bind ro /workspace
+expect-suppressed: allow_write /usr/lib via-symlink
+
+case: a link loop is refused
+bind: /workspace /h/ws rw
+link: /h/ws/a -> b
+link: /h/ws/b -> a
+deny_read: /workspace/a
+expect-error: symlink-loop
+
+case: a deny inside a private region is refused
+bind: /workspace /h/ws rw
+deny_read: /proc/self/environ
+expect-error: private-region
+
+case: a write allow inside /tmp is refused
+bind: /workspace /h/ws rw
+allow_write: /tmp/cache
+expect-error: private-region
+
+case: allow_write of exactly /tmp opens the tmpfs
+bind: /workspace /h/ws rw
+allow_write: /tmp
+expect: bind ro /workspace
+expect-tmp: writable
+
+case: deny_write of /tmp closes the tmpfs again
+bind: /workspace /h/ws rw
+allow_write: /tmp
+deny_write: /tmp
+expect: bind ro /workspace
+expect-tmp: readonly
+
+case: an allow inside a deny is bound back over the stub
+bind: /workspace /h/ws rw
+dir: /h/ws/vault/open
+file: /h/ws/vault/open/ok
+file: /h/ws/vault/inner
+deny_read: /workspace/vault
+allow_read: /workspace/vault/open
+expect: bind ro /workspace | tmpfs /workspace/vault | bind ro /workspace/vault/open | remount-ro /workspace/vault
+
+case: a write grant strictly beneath a hidden directory is dropped, not bound back writable
+bind: /workspace /h/ws rw
+dir: /h/ws/vault/out
+allow_write: /workspace/vault/out
+deny_read: /workspace/vault
+expect: bind ro /workspace | tmpfs /workspace/vault | remount-ro /workspace/vault
+expect-suppressed: allow_write /workspace/vault/out hidden
+
+case: a write grant inside a hidden directory is dropped
+bind: /workspace /h/ws rw
+dir: /h/ws/vault
+allow_write: /workspace/vault
+deny_read: /workspace/vault
+expect: bind ro /workspace | tmpfs /workspace/vault | remount-ro /workspace/vault
+expect-suppressed: allow_write /workspace/vault hidden
+
+case: a write grant on a read-only mount is reported
+bind: /workspace /h/ws ro
+dir: /h/ws/out
+allow_write: /workspace/out
+expect: bind ro /workspace
+expect-suppressed: allow_write /workspace/out read-only-mount
+
+case: a write deny inside a write grant becomes a read-only bind
+bind: /workspace /h/ws rw
+dir: /h/ws/out/locked
+allow_write: /workspace/out
+deny_write: /workspace/out/locked
+expect: bind ro /workspace | bind rw /workspace/out | bind ro /workspace/out/locked
+
+case: a write deny on a path that is already read-only adds nothing
+bind: /workspace /h/ws rw
+dir: /h/ws/frozen
+deny_write: /workspace/frozen
+expect: bind ro /workspace
+
+case: a write deny pattern that overlaps a grant is refused
+bind: /workspace /h/ws rw
+allow_write: /workspace
+deny_write: glob:/workspace/*.lock
+expect-error: unenforceable-write-glob
+
+case: a write deny pattern away from every grant is a no-op
+bind: /workspace /h/ws rw
+dir: /h/ws/out
+allow_write: /workspace/out
+deny_write: glob:/workspace/frozen/*.lock
+expect: bind ro /workspace | bind rw /workspace/out
+
+case: a read deny pattern is expanded against the tree
+bind: /workspace /h/ws rw
+file: /h/ws/a.env
+file: /h/ws/b.env
+file: /h/ws/c.txt
+dir: /h/ws/sub
+file: /h/ws/sub/d.env
+allow_write: /workspace
+deny_read: glob:/workspace/*.env
+expect: bind rw /workspace | stub /workspace/a.env | stub /workspace/b.env
+
+case: a recursive read deny pattern reaches nested files
+bind: /workspace /h/ws rw
+file: /h/ws/a.env
+dir: /h/ws/sub
+file: /h/ws/sub/d.env
+allow_write: /workspace
+deny_read: glob:/workspace/**/*.env
+expect: bind rw /workspace | stub /workspace/a.env | bind rw /workspace/sub | stub /workspace/sub/d.env
+
+case: a write allow pattern grants only what exists now
+bind: /workspace /h/ws rw
+dir: /h/ws/out1
+dir: /h/ws/out2
+dir: /h/ws/other
+allow_write: glob:/workspace/out*
+expect: bind ro /workspace | bind rw /workspace/out1 | bind rw /workspace/out2
+
+case: a pattern whose literal base is a symlink protects the target
+bind: /workspace /h/ws rw
+dir: /h/ws/real
+file: /h/ws/real/k.env
+link: /h/ws/alias -> real
+allow_write: /workspace
+deny_read: glob:/workspace/alias/*.env
+expect: bind rw /workspace | bind rw /workspace/real | stub /workspace/real/k.env
+
+case: a pattern follows a symlink inside the walk and denies what it reaches where it lives
+bind: /workspace /h/ws rw
+bind: /usr /h/usr ro
+dir: /h/usr/s
+file: /h/usr/s/k.env
+link: /h/ws/alias -> /usr/s
+allow_write: /workspace
+deny_read: glob:/workspace/**/*.env
+expect: bind ro /usr | bind rw /workspace | stub /usr/s/k.env
+
+case: denying a base mount hides it
+bind: /workspace /h/ws rw
+bind: /usr /h/usr ro
+deny_read: /workspace
+expect: bind ro /usr | tmpfs /workspace | remount-ro /workspace
+
+case: a path that is not in the guest composes nothing
+bind: /workspace /h/ws rw
+deny_read: /home/someone/.ssh
+expect: bind ro /workspace
+
+case: system symlinks are recreated before the binds
+bind: /usr /h/usr ro
+bind: /workspace /h/ws rw
+symlink: /bin usr/bin
+deny_read: /nowhere
+expect: symlink usr/bin /bin | bind ro /usr | bind ro /workspace
+
+
+# Mandatory read-only paths. The mandatory deny list
+# applies under every writable root; the cases below show the operations.
+
+case: every mandatory path is guarded at the top of a writable root that has none of them
+mandatory: show
+bind: /workspace /h/ws rw
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc
+expect-placeholders: /h/ws/.gitconfig | /h/ws/.gitmodules | /h/ws/.bashrc | /h/ws/.bash_profile | /h/ws/.zshrc | /h/ws/.zprofile | /h/ws/.profile | /h/ws/.ripgreprc | /h/ws/.mcp.json | /h/ws/.vscode | /h/ws/.idea | /h/ws/.agent
+
+case: nothing is added where nothing is writable
+mandatory: show
+bind: /workspace /h/ws ro
+file: /h/ws/.bashrc
+dir: /h/ws/.git/hooks
+file: /h/ws/.git/config
+deny_read: /nowhere
+expect: bind ro /workspace
+expect-mandatory:
+
+case: existing mandatory files and directories are bound read-only inside the writable root
+mandatory: show
+bind: /workspace /h/ws rw
+file: /h/ws/.bashrc
+file: /h/ws/.mcp.json
+dir: /h/ws/.vscode
+dir: /h/ws/.agent/commands
+dir: /h/ws/.agent/agents
+file: /h/ws/.agent/settings.json
+allow_write: /workspace
+expect: bind rw /workspace | bind rw /workspace/.agent | stub /workspace/.bash_profile | bind ro /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | bind ro /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | bind ro /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind ro /workspace/.agent/agents | bind ro /workspace/.agent/commands
+
+case: a git directory gets read-only hooks and config and nothing else
+mandatory: show
+bind: /workspace /h/ws rw
+dir: /h/ws/.git/hooks
+file: /h/ws/.git/config
+file: /h/ws/.git/index
+dir: /h/ws/.git/objects
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | bind rw /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind ro /workspace/.git/config | stub /workspace/.git/config.worktree | bind ro /workspace/.git/hooks
+
+case: allowGitConfig frees the git config and keeps hooks protected
+mandatory: show
+options: allow-git-config
+bind: /workspace /h/ws rw
+dir: /h/ws/.git/hooks
+file: /h/ws/.git/config
+file: /h/ws/.git/index
+dir: /h/ws/.git/objects
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | bind rw /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | stub /workspace/.git/config.worktree | bind ro /workspace/.git/hooks
+
+case: the search depth limits how far down protected names are found
+mandatory: show
+options: search-depth=2
+bind: /workspace /h/ws rw
+file: /h/ws/a/.bashrc
+file: /h/ws/a/b/.mcp.json
+dir: /h/ws/a/.vscode
+dir: /h/ws/a/b/.vscode
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind rw /workspace/a | bind ro /workspace/a/.bashrc
+
+case: turning the filesystem rules off plans no mandatory protection
+mandatory: show
+options: disabled
+bind: /workspace /h/ws rw
+dir: /h/ws/.git/hooks
+file: /h/ws/.git/config
+file: /h/ws/.bashrc
+allow_write: /workspace
+expect: bind rw /workspace
+
+case: hooks missing from a git directory are guarded so they cannot be created
+mandatory: show
+bind: /workspace /h/ws rw
+file: /h/ws/.git/config
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | bind rw /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind ro /workspace/.git/config | stub /workspace/.git/config.worktree | stub /workspace/.git/hooks
+
+case: a missing .git is left alone so git init keeps working
+mandatory: show
+bind: /workspace /h/ws rw
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc
+
+case: nested repositories are found down to the search depth
+mandatory: show
+options: search-depth=10
+bind: /workspace /h/ws rw
+dir: /h/ws/a/b/c/d/e/f/.git/hooks
+file: /h/ws/a/b/c/d/e/f/.git/config
+file: /h/ws/a/b/c/d/e/f/.bashrc
+dir: /h/ws/a/b/c/d/e/f/.vscode
+allow_write: /workspace
+expect-mandatory: /workspace/.agent | /workspace/.bash_profile | /workspace/.bashrc | /workspace/.gitconfig | /workspace/.gitmodules | /workspace/.idea | /workspace/.mcp.json | /workspace/.profile | /workspace/.ripgreprc | /workspace/.vscode | /workspace/.zprofile | /workspace/.zshrc | /workspace/a/b/c/d/e/f/.bashrc | /workspace/a/b/c/d/e/f/.git/config | /workspace/a/b/c/d/e/f/.git/config.worktree | /workspace/a/b/c/d/e/f/.git/hooks | /workspace/a/b/c/d/e/f/.vscode
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind rw /workspace/a | bind rw /workspace/a/b | bind rw /workspace/a/b/c | bind rw /workspace/a/b/c/d | bind rw /workspace/a/b/c/d/e | bind rw /workspace/a/b/c/d/e/f | bind ro /workspace/a/b/c/d/e/f/.bashrc | bind rw /workspace/a/b/c/d/e/f/.git | bind ro /workspace/a/b/c/d/e/f/.vscode | bind ro /workspace/a/b/c/d/e/f/.git/config | stub /workspace/a/b/c/d/e/f/.git/config.worktree | bind ro /workspace/a/b/c/d/e/f/.git/hooks
+
+case: the list cannot be overridden by an allow_write that names a mandatory path
+mandatory: show
+bind: /workspace /h/ws rw
+dir: /h/ws/.git/hooks
+file: /h/ws/.git/config
+file: /h/ws/.bashrc
+allow_write: /workspace | /workspace/.git/hooks | /workspace/.bashrc | glob:/workspace/.git/**
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | bind ro /workspace/.bashrc | bind rw /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind ro /workspace/.git/config | stub /workspace/.git/config.worktree | bind ro /workspace/.git/hooks
+
+case: the list cannot be overridden by allow_read
+mandatory: show
+bind: /workspace /h/ws rw
+file: /h/ws/.bashrc
+allow_write: /workspace
+deny_read: /workspace/.bashrc
+allow_read: /workspace/.bashrc
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | bind ro /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc
+
+case: a worktree gitfile is bound read-only and its resolved gitdir is protected
+mandatory: show
+bind: /workspace /h/ws rw
+text: /h/ws/.git = gitdir: /workspace/.main/.git/worktrees/w
+dir: /h/ws/.main/.git/worktrees/w
+text: /h/ws/.main/.git/worktrees/w/commondir = ../..
+dir: /h/ws/.main/.git/hooks
+file: /h/ws/.main/.git/config
+allow_write: /workspace
+expect-mandatory: /workspace/.agent | /workspace/.bash_profile | /workspace/.bashrc | /workspace/.git | /workspace/.gitconfig | /workspace/.gitmodules | /workspace/.idea | /workspace/.main/.git/config | /workspace/.main/.git/config.worktree | /workspace/.main/.git/hooks | /workspace/.main/.git/worktrees/w/config | /workspace/.main/.git/worktrees/w/config.worktree | /workspace/.main/.git/worktrees/w/hooks | /workspace/.mcp.json | /workspace/.profile | /workspace/.ripgreprc | /workspace/.vscode | /workspace/.zprofile | /workspace/.zshrc
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | bind ro /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | bind rw /workspace/.main | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind rw /workspace/.main/.git | bind ro /workspace/.main/.git/config | stub /workspace/.main/.git/config.worktree | bind ro /workspace/.main/.git/hooks | bind rw /workspace/.main/.git/worktrees | bind rw /workspace/.main/.git/worktrees/w | stub /workspace/.main/.git/worktrees/w/config | stub /workspace/.main/.git/worktrees/w/config.worktree | stub /workspace/.main/.git/worktrees/w/hooks
+
+case: a relative gitfile pointer is resolved against the directory that holds it
+mandatory: show
+bind: /workspace /h/ws rw
+text: /h/ws/.git = gitdir: real.git
+dir: /h/ws/real.git/hooks
+file: /h/ws/real.git/config
+allow_write: /workspace
+expect-mandatory: /workspace/.agent | /workspace/.bash_profile | /workspace/.bashrc | /workspace/.git | /workspace/.gitconfig | /workspace/.gitmodules | /workspace/.idea | /workspace/.mcp.json | /workspace/.profile | /workspace/.ripgreprc | /workspace/.vscode | /workspace/.zprofile | /workspace/.zshrc | /workspace/real.git/config | /workspace/real.git/config.worktree | /workspace/real.git/hooks
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | bind ro /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind rw /workspace/real.git | bind ro /workspace/real.git/config | stub /workspace/real.git/config.worktree | bind ro /workspace/real.git/hooks
+
+case: a gitfile pointing outside the guest leaves only the file protected
+mandatory: show
+bind: /workspace /h/ws rw
+text: /h/ws/.git = gitdir: /home/user/repo/.git/worktrees/w
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | bind ro /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc
+
+case: a gitfile that is not a pointer leaves only the file protected
+mandatory: show
+bind: /workspace /h/ws rw
+text: /h/ws/.git = hello
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | bind ro /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc
+
+case: a gitdir under a read-only mount needs no protection of its own
+mandatory: show
+bind: /workspace /h/ws rw
+bind: /main /h/main ro
+text: /h/ws/.git = gitdir: /main/.git/worktrees/w
+dir: /h/main/.git/worktrees/w
+text: /h/main/.git/worktrees/w/commondir = ../..
+dir: /h/main/.git/hooks
+allow_write: /workspace
+expect: bind ro /main | bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | bind ro /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc
+
+case: submodule and bare git directories are recognised by their layout
+mandatory: show
+options: search-depth=10
+bind: /workspace /h/ws rw
+dir: /h/ws/.git/hooks
+file: /h/ws/.git/config
+file: /h/ws/.git/HEAD
+dir: /h/ws/.git/objects
+dir: /h/ws/.git/refs
+file: /h/ws/.git/modules/sub/HEAD
+dir: /h/ws/.git/modules/sub/objects
+dir: /h/ws/.git/modules/sub/refs
+dir: /h/ws/.git/modules/sub/hooks
+file: /h/ws/bare.git/HEAD
+dir: /h/ws/bare.git/objects
+dir: /h/ws/bare.git/refs
+dir: /h/ws/bare.git/hooks
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | bind rw /workspace/.git | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind rw /workspace/bare.git | bind ro /workspace/.git/config | stub /workspace/.git/config.worktree | bind ro /workspace/.git/hooks | bind rw /workspace/.git/modules | stub /workspace/bare.git/config | stub /workspace/bare.git/config.worktree | bind ro /workspace/bare.git/hooks | bind rw /workspace/.git/modules/sub | stub /workspace/.git/modules/sub/config | stub /workspace/.git/modules/sub/config.worktree | bind ro /workspace/.git/modules/sub/hooks
+
+case: names match whatever their case
+mandatory: show
+bind: /workspace /h/ws rw
+file: /h/ws/sub/.BashRC
+dir: /h/ws/sub/.VSCode
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind rw /workspace/sub | bind ro /workspace/sub/.BashRC | bind ro /workspace/sub/.VSCode
+
+case: a mandatory name that is a symlink protects the file it resolves to
+bind: /workspace /h/ws rw
+file: /h/ws/real-rc
+link: /h/ws/.bashrc -> real-rc
+allow_write: /workspace
+expect: bind rw /workspace
+expect-mandatory-includes: /workspace/real-rc
+
+case: a git directory that is a symlink has its hooks protected at the target
+bind: /workspace /h/ws rw
+dir: /h/ws/real-git/hooks
+file: /h/ws/real-git/config
+link: /h/ws/.git -> real-git
+allow_write: /workspace
+expect: bind rw /workspace | bind rw /workspace/real-git
+expect-mandatory-includes: /workspace/real-git/hooks | /workspace/real-git/config
+
+case: a deny inside a literal allow stays denied
+bind: /workspace /h/ws rw
+file: /h/ws/a/secret
+file: /h/ws/a/other
+allow_write: /workspace
+deny_read: /workspace/a/secret
+allow_read: /workspace/a
+expect: bind rw /workspace | bind rw /workspace/a | stub /workspace/a/secret
+
+case: an allow inside a deny still opens the deny
+bind: /workspace /h/ws rw
+dir: /h/ws/vault
+file: /h/ws/vault/open/key
+file: /h/ws/vault/closed
+allow_write: /workspace
+deny_read: /workspace/vault
+allow_read: /workspace/vault/open
+expect: bind rw /workspace | tmpfs /workspace/vault | bind rw /workspace/vault/open | remount-ro /workspace/vault
+
+case: an allow read glob ending in a double star opens what it matches and not the directory before it
+bind: /workspace /h/ws rw
+file: /h/ws/vault/open/ok
+file: /h/ws/vault/open/inner/deep
+file: /h/ws/vault/closed
+allow_write: /workspace
+deny_read: /workspace/vault
+allow_read: glob:/workspace/vault/*/**
+expect: bind rw /workspace | tmpfs /workspace/vault | bind rw /workspace/vault/open/inner | bind rw /workspace/vault/open/ok | remount-ro /workspace/vault
+
+case: a leaf pattern survives an allow of its directory
+bind: /workspace /h/ws rw
+file: /h/ws/app/.env
+file: /h/ws/app/main
+allow_write: /workspace
+deny_read: glob:/workspace/**/.env
+allow_read: /workspace
+expect: bind rw /workspace | bind rw /workspace/app | stub /workspace/app/.env
+
+case: the sandbox always provides the standard stream devices
+bind: /workspace /h/ws rw
+allow_write: /workspace | /dev/stderr | /dev/null
+expect: bind rw /workspace
+expect-suppressed: allow_write /dev/stderr provided | allow_write /dev/null provided
+
+case: every writable root gets the guards, a nested one included
+mandatory: show
+bind: /workspace /h/ws rw
+dir: /h/ws/out
+allow_write: /workspace/out
+expect: bind ro /workspace | bind rw /workspace/out | stub /workspace/out/.agent | stub /workspace/out/.bash_profile | stub /workspace/out/.bashrc | stub /workspace/out/.gitconfig | stub /workspace/out/.gitmodules | stub /workspace/out/.idea | stub /workspace/out/.mcp.json | stub /workspace/out/.profile | stub /workspace/out/.ripgreprc | stub /workspace/out/.vscode | stub /workspace/out/.zprofile | stub /workspace/out/.zshrc
+
+case: mandatory paths inside a read-denied directory are not protected separately
+mandatory: show
+bind: /workspace /h/ws rw
+dir: /h/ws/vault
+file: /h/ws/vault/.bashrc
+allow_write: /workspace
+deny_read: /workspace/vault
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | tmpfs /workspace/vault | remount-ro /workspace/vault
+
+case: a guard the worker cannot create for a mandatory path is refused
+bind: /workspace /h/ws rw
+nocreate: /h/ws
+allow_write: /workspace
+expect-error: unguardable-deny-write
+
+case: a directory the scan cannot list is denied whole instead of skipped
+bind: /workspace /h/ws rw
+dir: /h/ws/locked/inner
+dir: /h/ws/open
+unlistable: /h/ws/locked
+allow_write: /workspace
+expect: bind rw /workspace | tmpfs /workspace/locked | remount-ro /workspace/locked
+
+case: an unreadable directory deep in the tree is denied whole and its siblings are scanned
+mandatory: show
+bind: /workspace /h/ws rw
+dir: /h/ws/a/locked
+file: /h/ws/a/.bashrc
+unlistable: /h/ws/a/locked
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind rw /workspace/a | bind ro /workspace/a/.bashrc | tmpfs /workspace/a/locked | remount-ro /workspace/a/locked
+
+case: an empty file already at a denied write path is bound onto itself and is not ours to remove
+bind: /workspace /h/ws rw
+file: /h/ws/repo/.git/config.lock
+allow_write: /workspace
+deny_write: /workspace/repo/.git/config.lock
+expect: bind rw /workspace | bind rw /workspace/repo | bind rw /workspace/repo/.git | bind ro /workspace/repo/.git/config.lock
+expect-placeholders:
+
+case: a file with content at a denied write path is bound onto itself and is not ours to remove
+bind: /workspace /h/ws rw
+text: /h/ws/repo/.git/config.lock = x
+allow_write: /workspace
+deny_write: /workspace/repo/.git/config.lock
+expect: bind rw /workspace | bind rw /workspace/repo | bind rw /workspace/repo/.git | bind ro /workspace/repo/.git/config.lock
+expect-placeholders:
+
+case: a denied path beneath a file lays nothing and holds the file read-only
+bind: /workspace /h/ws rw
+text: /h/ws/blocker = pointer
+allow_write: /workspace
+deny_write: /workspace/blocker/hooks
+expect: bind rw /workspace | bind ro /workspace/blocker
+expect-placeholders:
+
+case: one placeholder per destination when a deny and a mandatory deny share a missing directory
+bind: /workspace /h/ws rw
+dir: /h/ws
+allow_write: /workspace
+deny_write: /workspace/.agent
+mandatory: show
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc
+
+case: a read deny of a name with a backslash leaves the name that spells a path alone
+bind: /workspace /h/ws rw
+text: /h/ws/tree/a\b = one
+text: /h/ws/tree/a/b = two
+allow_write: /workspace
+deny_read: /workspace/tree/a\b
+expect: bind rw /workspace | bind rw /workspace/tree | stub /workspace/tree/a\b
+
+case: a write deny of an absent name with a backslash guards that name only
+bind: /workspace /h/ws rw
+dir: /h/ws/tree
+allow_write: /workspace
+deny_write: /workspace/tree/c\d/file
+expect: bind rw /workspace | bind rw /workspace/tree | stub /workspace/tree/c\d
+expect-placeholders: /h/ws/tree/c\d
+
+case: a deny pattern ending in a name with a backslash matches that name and not the path
+bind: /workspace /h/ws rw
+text: /h/ws/tree/c\d/file = one
+text: /h/ws/tree/c/d/file = two
+allow_write: /workspace
+deny_read: glob:/workspace/**/c\d/file
+expect: bind rw /workspace | bind rw /workspace/tree | bind rw /workspace/tree/c\d | stub /workspace/tree/c\d/file
+
+case: a deny reached through a link to a directory whose name holds a backslash
+bind: /workspace /h/ws rw
+text: /h/ws/tree/a\b = one
+text: /h/ws/tree/a/b = two
+link: /h/ws/link -> tree
+allow_write: /workspace
+deny_read: /workspace/link/a\b
+expect: bind rw /workspace | bind rw /workspace/tree | stub /workspace/tree/a\b
+
+case: a read deny pattern matches a file name with brackets
+bind: /workspace /h/ws rw
+file: /h/ws/a.env
+file: /h/ws/backup[2024-01-15].env
+allow_write: /workspace
+deny_read: glob:/workspace/**/*.env
+expect: bind rw /workspace | stub /workspace/a.env | stub /workspace/backup[2024-01-15].env
+
+case: a symlinked allow_read carve-out is restored at its own name from its vetted target
+bind: /workspace /h/ws rw
+dir: /h/ws/home/store/pages
+file: /h/ws/home/store/netrc
+file: /h/ws/home/store/pages/readme.md
+link: /h/ws/home/.netrc -> store/netrc
+link: /h/ws/home/docs -> store/pages
+deny_read: /workspace/home
+allow_read: /workspace/home/.netrc | /workspace/home/docs
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/.netrc | bind ro /workspace/home/docs | remount-ro /workspace/home
+expect-sources: /workspace/home/.netrc = /h/ws/home/store/netrc | /workspace/home/docs = /h/ws/home/store/pages
+
+case: a symlinked carve-out whose target is read-denied is dropped
+bind: /workspace /h/ws rw
+file: /h/ws/home/store/netrc
+link: /h/ws/home/.netrc -> store/netrc
+deny_read: /workspace/home | /workspace/home/store/netrc
+allow_read: /workspace/home/.netrc
+expect: bind ro /workspace | tmpfs /workspace/home | remount-ro /workspace/home
+expect-suppressed: allow_read_within_deny /workspace/home/store/netrc via-symlink
+
+case: a symlinked directory carve-out whose target holds a read deny is dropped
+bind: /workspace /h/ws rw
+file: /h/ws/home/store/pages/sec/x
+link: /h/ws/home/docs -> store/pages
+deny_read: /workspace/home | /workspace/home/store/pages/sec
+allow_read: /workspace/home/docs
+expect: bind ro /workspace | tmpfs /workspace/home | remount-ro /workspace/home
+expect-suppressed: allow_read_within_deny /workspace/home/store/pages via-symlink
+
+case: a symlinked carve-out whose target a deeper deny hides is dropped
+bind: /workspace /h/ws rw
+file: /h/ws/home/store/netrc
+link: /h/ws/home/.netrc -> store/netrc
+deny_read: /workspace/home | /workspace/home/store
+allow_read: /workspace/home/.netrc
+expect: bind ro /workspace | tmpfs /workspace/home | remount-ro /workspace/home
+expect-suppressed: allow_read_within_deny /workspace/home/store/netrc via-symlink
+
+case: a symlinked carve-out reached through more than one link is dropped when its target is denied
+bind: /workspace /h/ws rw
+file: /h/ws/home/store/netrc
+link: /h/ws/home/alias -> store
+link: /h/ws/home/.hop -> alias/netrc
+deny_read: /workspace/home | /workspace/home/store/netrc
+allow_read: /workspace/home/.hop
+expect: bind ro /workspace | tmpfs /workspace/home | remount-ro /workspace/home
+expect-suppressed: allow_read_within_deny /workspace/home/store/netrc via-symlink
+
+case: a carve-out whose link dangles restores nothing
+bind: /workspace /h/ws rw
+dir: /h/ws/home
+link: /h/ws/home/.gone -> store/gone
+deny_read: /workspace/home
+allow_read: /workspace/home/.gone
+expect: bind ro /workspace | tmpfs /workspace/home | remount-ro /workspace/home
+
+case: an ordinary directory carve-out keeps its restore with the deeper deny inside it
+bind: /workspace /h/ws rw
+file: /h/ws/home/plain/sec/x
+file: /h/ws/home/plain/readme.md
+deny_read: /workspace/home | /workspace/home/plain/sec
+allow_read: /workspace/home/plain
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/plain | tmpfs /workspace/home/plain/sec | remount-ro /workspace/home | remount-ro /workspace/home/plain/sec
+
+case: a read deny pattern match beneath a carve-out stays denied inside the carve-out
+bind: /workspace /h/ws rw
+file: /h/ws/home/plain/x.key
+file: /h/ws/home/plain/readme.md
+deny_read: /workspace/home | glob:/workspace/home/**/*.key
+allow_read: /workspace/home/plain
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/plain | stub /workspace/home/plain/x.key | remount-ro /workspace/home
+
+case: a read deny directory match beneath a carve-out stays denied inside the carve-out
+bind: /workspace /h/ws rw
+file: /h/ws/home/plain/sec.d/x
+file: /h/ws/home/plain/readme.md
+deny_read: /workspace/home | glob:/workspace/home/**/sec.d
+allow_read: /workspace/home/plain
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/plain | tmpfs /workspace/home/plain/sec.d | remount-ro /workspace/home | remount-ro /workspace/home/plain/sec.d
+
+case: in the host view the ancestors of a protected path are pinned beneath the write root bind
+view: host
+bind: / /h rw
+dir: /h/base/proj/.git/hooks
+file: /h/base/proj/.git/config
+cwd: /base/proj
+allow_write: /base
+expect: bind ro / | bind rw /base/proj | bind rw /base/proj/.git | bind rw /base
+
+case: in the host view a root write grant pins the ancestors and covers them with their top-level directory
+view: host
+bind: / /h rw
+dir: /h/base/proj/.git/hooks
+file: /h/base/proj/.git/config
+cwd: /base/proj
+allow_write: /
+expect: bind rw / | bind rw /base/proj | bind rw /base/proj/.git | bind rw /base
+
+case: in the host view a protected path under sys with a root write grant gets neither pin nor cover
+view: host
+bind: / /h rw
+dir: /h/usr
+dir: /h/sys
+allow_write: /
+deny_write: /sys/probe | /usr/probe
+expect: bind rw / | stub /sys/probe | bind rw /usr | stub /usr/probe
+
+case: in the host view a nested write root is passed over when the ancestors are pinned
+view: host
+bind: / /h rw
+dir: /h/base/a/b/c/d/.git/hooks
+file: /h/base/a/b/c/d/.git/config
+cwd: /base/a/b/c/d
+allow_write: /base | /base/a/b/c
+expect: bind ro / | bind rw /base/a | bind rw /base/a/b | bind rw /base/a/b/c | bind rw /base/a/b/c/d | bind rw /base/a/b/c/d/.git | bind rw /base
+
+case: a symlinked carve-out around a read deny that is not there is restored
+bind: /workspace /h/ws rw
+dir: /h/ws/home/store/pages
+link: /h/ws/home/docs -> store/pages
+deny_read: /workspace/home | /workspace/home/store/pages/secret.txt
+allow_read: /workspace/home/docs
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/docs | remount-ro /workspace/home
+expect-sources: /workspace/home/docs = /h/ws/home/store/pages
+
+case: a symlinked carve-out around a file deny that another allow lifts is restored
+bind: /workspace /h/ws rw
+file: /h/ws/home/store/pages/readme.md
+link: /h/ws/home/docs -> store/pages
+deny_read: /workspace/home | /workspace/home/store/pages/readme.md
+allow_read: /workspace/home/docs | /workspace/home/store/pages/readme.md
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/docs | bind ro /workspace/home/store/pages/readme.md | remount-ro /workspace/home
+expect-sources: /workspace/home/docs = /h/ws/home/store/pages
+
+case: a symlinked carve-out whose target is a masked credential is served the stand-in
+bind: /workspace /h/ws rw
+bind: /workspace/home/store/netrc /h/fake ro
+file: /h/ws/home/store/netrc
+file: /h/fake
+link: /h/ws/home/.netrc -> store/netrc
+deny_read: /workspace/home
+allow_read: /workspace/home/.netrc
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/.netrc | remount-ro /workspace/home
+expect-sources: /workspace/home/.netrc = /h/fake
+
+case: a write deny does not cover a sibling that only shares its name as a prefix
+bind: /workspace /h/ws rw
+dir: /h/ws/ab
+dir: /h/ws/abc
+file: /h/ws/ab/f
+file: /h/ws/abc/f
+allow_write: /workspace
+deny_write: /workspace/ab
+expect: bind rw /workspace | bind ro /workspace/ab
+
+case: a chain of nested write-denied directories collapses to the outermost bind
+bind: /workspace /h/ws rw
+dir: /h/ws/a/b/c
+file: /h/ws/a/b/c/f
+allow_write: /workspace
+deny_write: /workspace/a | /workspace/a/b | /workspace/a/b/c
+expect: bind rw /workspace | bind ro /workspace/a
+
+case: a read-deny tmpfs under a write-denied directory is left as the last mount
+bind: /workspace /h/ws rw
+dir: /h/ws/d/v
+file: /h/ws/d/v/k
+allow_write: /workspace
+deny_write: /workspace/d
+deny_read: /workspace/d/v
+expect: bind rw /workspace | bind ro /workspace/d | tmpfs /workspace/d/v | remount-ro /workspace/d/v
+
+case: a directory denied for both reads and writes is one tmpfs, not a bind and a tmpfs
+bind: /workspace /h/ws rw
+dir: /h/ws/v
+file: /h/ws/v/k
+allow_write: /workspace
+deny_write: /workspace/v
+deny_read: /workspace/v
+expect: bind rw /workspace | tmpfs /workspace/v | remount-ro /workspace/v
+
+case: a write grant inside a read-allowed carve-out stays writable after the tmpfs
+bind: /workspace /h/ws rw
+dir: /h/ws/v/open
+file: /h/ws/v/open/k
+file: /h/ws/v/closed
+allow_write: /workspace/v/open
+deny_read: /workspace/v
+allow_read: /workspace/v/open
+expect: bind ro /workspace | tmpfs /workspace/v | bind rw /workspace/v/open | remount-ro /workspace/v
+
+case: a write deny on the carve-out under a read-denied directory is restored read-only
+bind: /workspace /h/ws rw
+dir: /h/ws/v/open
+file: /h/ws/v/open/k
+allow_write: /workspace
+deny_read: /workspace/v
+allow_read: /workspace/v/open
+deny_write: /workspace/v/open
+expect: bind rw /workspace | tmpfs /workspace/v | bind ro /workspace/v/open | remount-ro /workspace/v
+
+case: a deny whose parent is a file held by the write root lays nothing on a read-only mount
+bind: /workspace /h/ws ro
+file: /h/ws/blocker
+deny_write: /workspace/blocker/inner
+expect: bind ro /workspace
+
+case: a root write grant scans from the working directory and not from the root
+mandatory: show
+bind: / /h rw
+dir: /h/proj/.git/hooks
+file: /h/proj/.git/config
+dir: /h/other/.git/hooks
+file: /h/other/.git/config
+cwd: /proj
+allow_write: /
+expect: bind rw / | bind rw /proj | stub /proj/.agent | stub /proj/.bash_profile | stub /proj/.bashrc | bind rw /proj/.git | stub /proj/.gitconfig | stub /proj/.gitmodules | stub /proj/.idea | stub /proj/.mcp.json | stub /proj/.profile | stub /proj/.ripgreprc | stub /proj/.vscode | stub /proj/.zprofile | stub /proj/.zshrc | bind ro /proj/.git/config | stub /proj/.git/config.worktree | bind ro /proj/.git/hooks
+
+case: the scan from the working directory stops at the default depth
+mandatory: show
+bind: /workspace /h/ws rw
+dir: /h/ws/a/b/c/.git/hooks
+file: /h/ws/a/b/c/.git/config
+cwd: /workspace
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc
+
+case: a raised search depth finds the repository the default depth misses
+mandatory: show
+options: search-depth=5
+bind: /workspace /h/ws rw
+dir: /h/ws/a/b/c/.git/hooks
+file: /h/ws/a/b/c/.git/config
+cwd: /workspace
+allow_write: /workspace
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc | bind rw /workspace/a | bind rw /workspace/a/b | bind rw /workspace/a/b/c | bind rw /workspace/a/b/c/.git | bind ro /workspace/a/b/c/.git/config | stub /workspace/a/b/c/.git/config.worktree | bind ro /workspace/a/b/c/.git/hooks
+
+case: a working directory outside every writable root protects nothing
+mandatory: show
+bind: /workspace /h/ws rw
+bind: /elsewhere /h/el rw
+dir: /h/ws/.git/hooks
+file: /h/ws/.git/config
+dir: /h/el
+cwd: /elsewhere
+allow_write: /workspace
+expect: bind ro /elsewhere | bind rw /workspace
+
+case: only the working directory is guarded in a writable root above it
+mandatory: show
+bind: /workspace /h/ws rw
+dir: /h/ws/.git/hooks
+file: /h/ws/.git/config
+dir: /h/ws/sub/.git/hooks
+file: /h/ws/sub/.git/config
+cwd: /workspace/sub
+allow_write: /workspace
+expect: bind rw /workspace | bind rw /workspace/sub | stub /workspace/sub/.agent | stub /workspace/sub/.bash_profile | stub /workspace/sub/.bashrc | bind rw /workspace/sub/.git | stub /workspace/sub/.gitconfig | stub /workspace/sub/.gitmodules | stub /workspace/sub/.idea | stub /workspace/sub/.mcp.json | stub /workspace/sub/.profile | stub /workspace/sub/.ripgreprc | stub /workspace/sub/.vscode | stub /workspace/sub/.zprofile | stub /workspace/sub/.zshrc | bind ro /workspace/sub/.git/config | stub /workspace/sub/.git/config.worktree | bind ro /workspace/sub/.git/hooks
+
+case: with a root write grant every ancestor of the protected paths is pinned after the root bind
+bind: / /h rw
+dir: /h/base/proj/.git/hooks
+file: /h/base/proj/.git/config
+cwd: /base/proj
+allow_write: / | /base/proj
+expect: bind rw / | bind rw /base | bind rw /base/proj | bind rw /base/proj/.git
+
+case: a protected path directly in a top-level directory pins that directory under a root write grant
+bind: / /h rw
+dir: /h/usr
+allow_write: /
+deny_write: /usr/probe
+expect: bind rw / | bind rw /usr | stub /usr/probe
+
+case: a protected path under sys with a root write grant is pinned like any other top-level directory
+bind: / /h rw
+dir: /h/usr
+dir: /h/sys
+allow_write: /
+deny_write: /sys/probe | /usr/probe
+expect: bind rw / | bind rw /sys | bind rw /usr | stub /sys/probe | stub /usr/probe
+
+case: a top-level directory that is an ordinary write root gets one bind and no second pin
+bind: /base /h/base rw
+dir: /h/base/proj/.git/hooks
+file: /h/base/proj/.git/config
+cwd: /base/proj
+allow_write: /base
+expect: bind rw /base | bind rw /base/proj | bind rw /base/proj/.git
+
+case: a protected path under proc is refused even with a root write grant
+bind: / /h rw
+dir: /h/proc
+allow_write: /
+deny_write: /proc/probe
+expect-error: private-region
+
+case: a pattern naming a directory link denies the file where it really is
+bind: /workspace /h/ws rw
+file: /h/ws/real/key.txt
+link: /h/ws/lnk -> real
+allow_write: /workspace
+deny_read: glob:/workspace/l*/key.txt
+expect: bind rw /workspace | bind rw /workspace/real | stub /workspace/real/key.txt
+
+case: a match behind a link whose target is outside the pattern base is denied at its target
+bind: /workspace /h/ws rw
+file: /h/ws/out/shared/prod/key
+dir: /h/ws/out/config
+link: /h/ws/out/config/prod -> ../shared/prod
+allow_write: /workspace
+deny_read: glob:/workspace/out/config/*/key
+expect: bind rw /workspace | bind rw /workspace/out | bind rw /workspace/out/shared | bind rw /workspace/out/shared/prod | stub /workspace/out/shared/prod/key
+
+case: a match behind an absolute link outside the pattern base is denied at its target
+bind: /workspace /h/ws rw
+file: /h/ws/absout/elsewhere/prod/key
+dir: /h/ws/absout/config
+link: /h/ws/absout/config/prod -> /workspace/absout/elsewhere/prod
+allow_write: /workspace
+deny_read: glob:/workspace/absout/config/*/key
+expect: bind rw /workspace | bind rw /workspace/absout | bind rw /workspace/absout/elsewhere | bind rw /workspace/absout/elsewhere/prod | stub /workspace/absout/elsewhere/prod/key
+
+case: a pattern ending in a wildcard that matches a dangling link denies nothing
+bind: /workspace /h/ws rw
+file: /h/ws/build/1.out
+link: /h/ws/build/lost -> /workspace/gone
+allow_write: /workspace
+deny_read: glob:/workspace/**/build/lo*
+expect: bind rw /workspace
+
+case: links to their own directory and to each other do not stop the scan
+bind: /workspace /h/ws rw
+file: /h/ws/cycles/a/key.txt
+file: /h/ws/cycles/b/key.txt
+link: /h/ws/cycles/self -> .
+link: /h/ws/cycles/a/l1 -> ../b
+link: /h/ws/cycles/b/l2 -> ../a
+allow_write: /workspace
+deny_read: glob:/workspace/cycles/**/key.txt
+expect: bind rw /workspace | bind rw /workspace/cycles | bind rw /workspace/cycles/a | bind rw /workspace/cycles/b | stub /workspace/cycles/a/key.txt | stub /workspace/cycles/b/key.txt
+
+case: a link to the root inside a denied directory denies the directory holding it
+bind: /workspace /h/ws rw
+file: /h/ws/build/1.out
+link: /h/ws/build/root -> /
+allow_write: /workspace
+deny_read: glob:/workspace/**/build/**
+expect: bind rw /workspace | tmpfs /workspace/build | remount-ro /workspace/build
+
+case: a package linked out of node_modules is denied where it really is
+bind: /workspace /h/ws rw
+file: /h/ws/store/node_modules/other/index.js
+file: /h/ws/store/packages/pkg/index.js
+link: /h/ws/store/node_modules/pkg -> ../packages/pkg
+allow_write: /workspace
+deny_read: glob:/workspace/store/node_modules/**/index.js
+expect: bind rw /workspace | bind rw /workspace/store | bind rw /workspace/store/node_modules | bind rw /workspace/store/packages | bind rw /workspace/store/node_modules/other | bind rw /workspace/store/packages/pkg | stub /workspace/store/node_modules/other/index.js | stub /workspace/store/packages/pkg/index.js
+
+case: a link back to the tree inside a denied directory
+bind: /workspace /h/ws rw
+file: /h/ws/build/1.out
+link: /h/ws/build/up -> ..
+allow_write: /workspace
+deny_read: glob:/workspace/**/build/**
+expect: tmpfs /workspace | remount-ro /workspace
+
+case: a carve-out written through the link of a pnpm package is dropped because the deny hides its target
+bind: /workspace /h/ws rw
+file: /h/ws/.pnpm/foo@1/node_modules/foo/index.js
+file: /h/ws/.pnpm/foo@1/node_modules/foo/public/ok.txt
+dir: /h/ws/node_modules
+link: /h/ws/node_modules/foo -> ../.pnpm/foo@1/node_modules/foo
+allow_write: /workspace
+deny_read: glob:/workspace/**/node_modules/foo/**
+allow_read: /workspace/node_modules/foo/public
+expect: bind rw /workspace | bind rw /workspace/.pnpm | bind rw /workspace/.pnpm/foo@1 | bind rw /workspace/.pnpm/foo@1/node_modules | tmpfs /workspace/.pnpm/foo@1/node_modules/foo | remount-ro /workspace/.pnpm/foo@1/node_modules/foo
+
+case: a carve-out written against the resolved spelling of a pnpm package is kept where the package lives
+bind: /workspace /h/ws rw
+file: /h/ws/.pnpm/foo@1/node_modules/foo/index.js
+file: /h/ws/.pnpm/foo@1/node_modules/foo/public/ok.txt
+dir: /h/ws/node_modules
+link: /h/ws/node_modules/foo -> ../.pnpm/foo@1/node_modules/foo
+allow_write: /workspace
+deny_read: glob:/workspace/**/node_modules/foo/**
+allow_read: /workspace/.pnpm/foo@1/node_modules/foo/public
+expect: bind rw /workspace | bind rw /workspace/.pnpm | bind rw /workspace/.pnpm/foo@1 | bind rw /workspace/.pnpm/foo@1/node_modules | tmpfs /workspace/.pnpm/foo@1/node_modules/foo | bind rw /workspace/.pnpm/foo@1/node_modules/foo/public | stub /workspace/.pnpm/foo@1/node_modules/foo/public/ok.txt | remount-ro /workspace/.pnpm/foo@1/node_modules/foo
+
+case: a carve-out beneath a directory that only a second link leads to is bound back
+bind: /workspace /h/ws rw
+file: /h/ws/store/keep/pub/y.txt
+file: /h/ws/store/nm/z.out
+dir: /h/ws/proj
+link: /h/ws/proj/build -> /workspace/store/nm
+link: /h/ws/store/nm/keep -> ../keep
+allow_write: /workspace
+deny_read: glob:/workspace/proj/**/build/**
+allow_read: /workspace/store/keep/pub
+expect: bind rw /workspace | bind rw /workspace/store | tmpfs /workspace/store/keep | tmpfs /workspace/store/nm | bind rw /workspace/store/keep/pub | stub /workspace/store/keep/pub/y.txt | remount-ro /workspace/store/keep | remount-ro /workspace/store/nm
+
+case: a re-exposer above the package a pattern matches does not lift the mask beneath it
+bind: /workspace /h/ws rw
+file: /h/ws/.pnpm/foo@1/node_modules/foo/index.js
+file: /h/ws/.pnpm/foo@1/node_modules/foo/public/ok.txt
+dir: /h/ws/node_modules
+link: /h/ws/node_modules/foo -> ../.pnpm/foo@1/node_modules/foo
+allow_write: /workspace
+deny_read: glob:/workspace/**/node_modules/foo/**
+allow_read: /workspace
+expect: bind rw /workspace | bind rw /workspace/.pnpm | bind rw /workspace/.pnpm/foo@1 | bind rw /workspace/.pnpm/foo@1/node_modules | tmpfs /workspace/.pnpm/foo@1/node_modules/foo | remount-ro /workspace/.pnpm/foo@1/node_modules/foo
+
+case: a directory the pattern matches beneath a carve-out is masked while the carve-out stays readable
+bind: /workspace /h/ws ro
+file: /h/ws/pkg/build/1.out
+file: /h/ws/pkg/build/public/ok.txt
+file: /h/ws/pkg/build/public/inner/deep.txt
+deny_read: glob:/workspace/**/build/**
+allow_read: /workspace/pkg/build/public
+expect: bind ro /workspace | tmpfs /workspace/pkg/build | bind ro /workspace/pkg/build/public | tmpfs /workspace/pkg/build/public/inner | stub /workspace/pkg/build/public/ok.txt | remount-ro /workspace/pkg/build | remount-ro /workspace/pkg/build/public/inner
+
+case: a carve-out beneath a file pattern keeps the carve-out readable and masks the other matches
+bind: /workspace /h/ws ro
+file: /h/ws/pub/a.env
+file: /h/ws/pub/deep/b.env
+file: /h/ws/other/c.env
+deny_read: glob:/workspace/**/*.env
+allow_read: /workspace/pub
+expect: bind ro /workspace | stub /workspace/other/c.env | stub /workspace/pub/a.env | stub /workspace/pub/deep/b.env
+
+case: a carve-out that is itself a match of the pattern stays readable
+bind: /workspace /h/ws ro
+file: /h/ws/pub/a.env
+file: /h/ws/pub/b.env
+deny_read: glob:/workspace/**/*.env
+allow_read: /workspace/pub/a.env
+expect: bind ro /workspace | stub /workspace/pub/b.env
+
+case: in the host view the ancestors of a read-denied file are pinned beneath the write root bind
+view: host
+bind: / /h rw
+dir: /h/base/proj/creds
+file: /h/base/proj/creds/token.txt
+cwd: /base/proj
+allow_write: /base/proj
+deny_read: /base/proj/creds/token.txt
+expect: bind ro / | bind rw /base/proj/creds | bind rw /base/proj | stub /base/proj/creds/token.txt
+
+case: in the host view the ancestors of a credential mask are pinned beneath the mask, which is emitted once
+view: host
+bind: / /h rw
+bind: /base/proj/creds/token.txt /h/fake ro
+dir: /h/base/proj/creds
+file: /h/base/proj/creds/token.txt
+file: /h/fake
+cwd: /base/proj
+allow_write: /base/proj
+expect: bind ro / | bind rw /base/proj/creds | bind rw /base/proj | bind ro /base/proj/creds/token.txt
+
+case: in the host view a credential mask is pinned and covered when the filesystem rules are off
+view: host
+bind: / /h rw
+bind: /base/proj/creds/token.txt /h/fake ro
+dir: /h/base/proj/creds
+file: /h/base/proj/creds/token.txt
+file: /h/fake
+cwd: /base/proj
+allow_write: /
+options: disabled
+expect: bind rw / | bind rw /base/proj | bind rw /base/proj/creds | bind rw /base | bind ro /base/proj/creds/token.txt
+
+case: a credential mask beneath a write grant is bound read-only above the grant
+bind: /workspace /h/ws rw
+bind: /workspace/d/w/secret /h/fake ro
+file: /h/ws/d/w/secret
+file: /h/fake
+allow_write: /workspace
+expect: bind rw /workspace | bind rw /workspace/d | bind rw /workspace/d/w | bind ro /workspace/d/w/secret
+
+case: a write grant that is itself a masked file leaves the mask as the last mount
+bind: /workspace /h/ws rw
+bind: /workspace/d/w/secret /h/fake ro
+file: /h/ws/d/w/secret
+file: /h/fake
+allow_write: /workspace | /workspace/d/w/secret
+expect: bind rw /workspace | bind rw /workspace/d | bind rw /workspace/d/w | bind ro /workspace/d/w/secret
+
+case: a write grant that is itself a read-denied file leaves the stub as the last mount
+bind: /workspace /h/ws rw
+file: /h/ws/d/w/secret
+allow_write: /workspace | /workspace/d/w/secret
+deny_read: /workspace/d/w/secret
+expect: bind rw /workspace | bind rw /workspace/d | bind rw /workspace/d/w | stub /workspace/d/w/secret
+
+case: a read-denied file that a credential mask covers keeps the mask
+bind: /workspace /h/ws rw
+bind: /workspace/d/token /h/fake ro mask
+file: /h/ws/d/token
+file: /h/fake
+allow_write: /workspace
+deny_read: /workspace/d/token
+expect: bind rw /workspace | bind rw /workspace/d | bind ro /workspace/d/token
+
+case: a read-denied file that a plain file bind covers is still stubbed
+bind: /workspace /h/ws rw
+bind: /workspace/d/token /h/fake ro
+file: /h/ws/d/token
+file: /h/fake
+allow_write: /workspace
+deny_read: /workspace/d/token
+expect: bind rw /workspace | bind rw /workspace/d | stub /workspace/d/token
+
+case: a credential mask is re-applied above a write deny of the directory that holds it
+bind: /workspace /h/ws rw
+bind: /workspace/d/token /h/fake ro
+file: /h/ws/d/token
+file: /h/ws/d/other
+file: /h/fake
+allow_write: /workspace
+deny_write: /workspace/d
+expect: bind rw /workspace | bind ro /workspace/d | bind ro /workspace/d/token
+
+case: a read-denied file is stubbed above a write deny of the directory that holds it
+bind: /workspace /h/ws rw
+file: /h/ws/d/token
+file: /h/ws/d/other
+allow_write: /workspace
+deny_write: /workspace/d
+deny_read: /workspace/d/token
+expect: bind rw /workspace | bind ro /workspace/d | stub /workspace/d/token
+
+case: a file deny inside a directory deny gives the same mounts in either order
+bind: /workspace /h/ws rw
+file: /h/ws/d/token
+file: /h/ws/d/other
+deny_read: /workspace/d/token | /workspace/d
+expect: bind ro /workspace | tmpfs /workspace/d | remount-ro /workspace/d
+
+case: two credential masks naming one file keep the last fake
+bind: /workspace /h/ws rw
+bind: /workspace/d/token /h/fake1 ro
+bind: /workspace/d/token /h/fake2 ro
+file: /h/ws/d/token
+file: /h/fake1
+file: /h/fake2
+expect: bind ro /workspace | bind ro /workspace/d/token
+expect-sources: /workspace/d/token = /h/fake2
+
+case: a credential mask survives an allow read of the file it covers
+bind: /workspace /h/ws rw
+bind: /workspace/home/.netrc /h/fake ro
+file: /h/ws/home/.netrc
+file: /h/fake
+deny_read: /workspace/home
+allow_read: /workspace/home/.netrc
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/.netrc | remount-ro /workspace/home
+expect-sources: /workspace/home/.netrc = /h/fake
+
+case: a credential mask survives an allow read of the directory that holds it
+bind: /workspace /h/ws rw
+bind: /workspace/home/.netrc /h/fake ro
+file: /h/ws/home/.netrc
+file: /h/ws/home/other
+file: /h/fake
+deny_read: /workspace/home
+allow_read: /workspace/home
+expect: bind ro /workspace | bind ro /workspace/home/.netrc
+expect-sources: /workspace/home/.netrc = /h/fake
+
+case: a credential mask survives an allow read of a link to the file even when the deny list names the file
+bind: /workspace /h/ws rw
+bind: /workspace/home/store/netrc /h/fake ro
+file: /h/ws/home/store/netrc
+file: /h/fake
+link: /h/ws/home/.netrc -> store/netrc
+deny_read: /workspace/home | /workspace/home/store/netrc
+allow_read: /workspace/home/.netrc
+expect: bind ro /workspace | tmpfs /workspace/home | remount-ro /workspace/home
+
+case: a file deny inside a directory deny gives the same mounts when the file is listed last
+bind: /workspace /h/ws rw
+file: /h/ws/d/token
+file: /h/ws/d/other
+deny_read: /workspace/d | /workspace/d/token
+expect: bind ro /workspace | tmpfs /workspace/d | remount-ro /workspace/d
+
+case: a credential deny of a file is not lifted by an allow read of the file
+bind: /workspace /h/ws rw
+file: /h/ws/home/.netrc
+file: /h/ws/home/other
+credential_deny_read: /workspace/home/.netrc
+allow_read: /workspace/home/.netrc
+expect: bind ro /workspace | stub /workspace/home/.netrc
+
+case: a plain deny of a file is lifted by an allow read of the file
+bind: /workspace /h/ws rw
+file: /h/ws/home/.netrc
+file: /h/ws/home/other
+deny_read: /workspace/home/.netrc
+allow_read: /workspace/home/.netrc
+expect: bind ro /workspace
+
+case: a credential deny of a file is not lifted by an allow read of the directory that holds it
+bind: /workspace /h/ws rw
+file: /h/ws/home/.netrc
+file: /h/ws/home/other
+credential_deny_read: /workspace/home/.netrc
+allow_read: /workspace/home
+expect: bind ro /workspace | stub /workspace/home/.netrc
+
+case: a credential deny of a file is not lifted by an allow read of the whole workspace
+bind: /workspace /h/ws rw
+file: /h/ws/home/.netrc
+credential_deny_read: /workspace/home/.netrc
+allow_read: /workspace
+expect: bind ro /workspace | stub /workspace/home/.netrc
+
+case: a credential deny of a file is not lifted by an allow read glob that matches it
+bind: /workspace /h/ws rw
+file: /h/ws/home/.netrc
+file: /h/ws/home/other
+credential_deny_read: /workspace/home/.netrc
+allow_read: glob:/workspace/home/.*
+expect: bind ro /workspace | stub /workspace/home/.netrc
+
+case: a credential deny of a file is not lifted by an allow read of a link to the file
+bind: /workspace /h/ws rw
+file: /h/ws/home/store/netrc
+link: /h/ws/home/.netrc -> /h/ws/home/store/netrc
+credential_deny_read: /workspace/home/store/netrc
+allow_read: /workspace/home/.netrc
+expect: bind ro /workspace | stub /workspace/home/store/netrc
+
+case: a credential deny of a directory is not lifted by an allow read inside it
+bind: /workspace /h/ws rw
+file: /h/ws/home/.ssh/id
+file: /h/ws/home/.ssh/pub
+credential_deny_read: /workspace/home/.ssh
+allow_read: /workspace/home/.ssh/pub
+expect: bind ro /workspace | tmpfs /workspace/home/.ssh | remount-ro /workspace/home/.ssh
+
+case: a credential deny glob is not lifted by an allow read of the directory that holds a match
+bind: /workspace /h/ws rw
+file: /h/ws/home/a.pem
+file: /h/ws/home/b.txt
+credential_deny_read: glob:/workspace/home/*.pem
+allow_read: /workspace/home
+expect: bind ro /workspace | stub /workspace/home/a.pem
+
+case: a credential deny names a file the plain deny list also names and stays denied under an allow read
+bind: /workspace /h/ws rw
+file: /h/ws/home/.netrc
+file: /h/ws/home/other
+deny_read: /workspace/home/.netrc
+credential_deny_read: /workspace/home/.netrc
+allow_read: /workspace/home/.netrc
+expect: bind ro /workspace | stub /workspace/home/.netrc
+
+case: an own allow lifts a credential deny of the file it names
+bind: /workspace /h/ws rw
+file: /h/ws/home/ca.pem
+credential_deny_read: /workspace/home/ca.pem
+own_allow_read: /workspace/home/ca.pem
+expect: bind ro /workspace
+
+case: an own allow inside a credential deny of its directory keeps the rest hidden
+bind: /workspace /h/ws rw
+file: /h/ws/home/ca.pem
+file: /h/ws/home/.netrc
+credential_deny_read: /workspace/home
+own_allow_read: /workspace/home/ca.pem
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/ca.pem | remount-ro /workspace/home
+
+case: a directory a read pattern cannot list is denied whole and its siblings are still walked
+bind: /workspace /h/ws rw
+dir: /h/ws/locked/inner
+dir: /h/ws/open
+file: /h/ws/open/k.env
+unlistable: /h/ws/locked
+deny_read: glob:/workspace/**/*.env
+expect: bind ro /workspace | tmpfs /workspace/locked | stub /workspace/open/k.env | remount-ro /workspace/locked
+
+case: a directory the pattern cannot reach is never listed
+bind: /workspace /h/ws rw
+dir: /h/ws/proj
+file: /h/ws/proj/a.pem
+dir: /h/ws/other/deep
+unlistable: /h/ws/other
+deny_read: glob:/workspace/proj/*.pem
+expect: bind ro /workspace | stub /workspace/proj/a.pem
+
+case: a pattern with no directory before its first wildcard is not expanded
+bind: /workspace /h/ws rw
+file: /h/ws/k.env
+deny_read: glob:/**/*.env
+expect: bind ro /workspace
+
+case: a pattern whose base is absent matches nothing
+bind: /workspace /h/ws rw
+deny_read: glob:/workspace/missing/*.env
+expect: bind ro /workspace
+
+case: a question mark takes one character of a name
+bind: /workspace /h/ws rw
+file: /h/ws/a1.env
+file: /h/ws/a22.env
+file: /h/ws/a.env
+deny_read: glob:/workspace/a?.env
+expect: bind ro /workspace | stub /workspace/a1.env
+
+case: a pattern with a partial name stem matches names that start with it
+bind: /workspace /h/ws rw
+file: /h/ws/secret-a.env
+file: /h/ws/secret.env
+file: /h/ws/other.env
+deny_read: glob:/workspace/secret*.env
+expect: bind ro /workspace | stub /workspace/secret-a.env | stub /workspace/secret.env
+
+case: a double star alone reaches every entry beneath the base
+bind: /workspace /h/ws rw
+file: /h/ws/a
+dir: /h/ws/d
+file: /h/ws/d/b
+deny_read: glob:/workspace/**
+expect: bind ro /workspace | stub /workspace/a | tmpfs /workspace/d | remount-ro /workspace/d
+
+case: a single star matches directories too
+bind: /workspace /h/ws rw
+dir: /h/ws/vault1
+file: /h/ws/vault1/key
+file: /h/ws/vault2
+deny_read: glob:/workspace/vault*
+expect: bind ro /workspace | tmpfs /workspace/vault1 | stub /workspace/vault2 | remount-ro /workspace/vault1
+
+case: a file named with brackets is found by a recursive pattern
+bind: /workspace /h/ws rw
+dir: /h/ws/sub
+file: /h/ws/sub/backup[2024-01-15].env
+file: /h/ws/sub/plain.txt
+deny_read: glob:/workspace/**/*.env
+expect: bind ro /workspace | stub /workspace/sub/backup[2024-01-15].env
+
+case: a directory named with brackets is walked like any other
+bind: /workspace /h/ws rw
+dir: /h/ws/[user-id]
+file: /h/ws/[user-id]/k.env
+deny_read: glob:/workspace/**/*.env
+expect: bind ro /workspace | stub /workspace/[user-id]/k.env
+
+case: an empty directory matched by a pattern is still denied
+bind: /workspace /h/ws rw
+dir: /h/ws/empty-vault
+deny_read: glob:/workspace/*-vault
+expect: bind ro /workspace | tmpfs /workspace/empty-vault | remount-ro /workspace/empty-vault
+
+case: a double star glued to text spans directories through a link
+bind: /workspace /h/ws rw
+dir: /h/ws/proj
+dir: /h/ws/outside/deep
+file: /h/ws/outside/x.pem
+file: /h/ws/outside/deep/y.pem
+file: /h/ws/proj/z.pem
+link: /h/ws/proj/certs -> ../outside
+deny_read: glob:/workspace/proj/**.pem
+expect: bind ro /workspace | stub /workspace/outside/x.pem | stub /workspace/proj/z.pem | stub /workspace/outside/deep/y.pem
+
+case: a double star after a stem reaches through a link to one file
+bind: /workspace /h/ws rw
+dir: /h/ws/proj
+dir: /h/ws/outside/deep
+file: /h/ws/outside/x.pem
+file: /h/ws/outside/deep/y.pem
+file: /h/ws/proj/z.pem
+link: /h/ws/proj/certs -> ../outside
+deny_read: glob:/workspace/proj/ce**/x.pem
+expect: bind ro /workspace | stub /workspace/outside/x.pem
+
+case: a run of three stars before a separator is a star and a double star through a link
+bind: /workspace /h/ws rw
+dir: /h/ws/proj
+dir: /h/ws/outside/deep
+file: /h/ws/outside/x.pem
+file: /h/ws/outside/deep/y.pem
+file: /h/ws/proj/z.pem
+link: /h/ws/proj/certs -> ../outside
+deny_read: glob:/workspace/proj/***/y.pem
+expect: bind ro /workspace | stub /workspace/outside/deep/y.pem
+
+case: a set that holds a separator is followed through a link as a name and as a boundary
+bind: /workspace /h/ws rw
+dir: /h/ws/proj
+dir: /h/ws/outside/cert
+file: /h/ws/outside/cert/x.pem
+file: /h/ws/outside/certsx.pem
+link: /h/ws/proj/lnk -> ../outside
+deny_read: glob:/workspace/proj/*/cert[s/]x.pem
+expect: bind ro /workspace | stub /workspace/outside/certsx.pem | stub /workspace/outside/cert/x.pem
+
+case: a range that spans the separator is followed through a link
+bind: /workspace /h/ws rw
+dir: /h/ws/proj
+dir: /h/ws/outside/cert
+file: /h/ws/outside/cert/x.pem
+file: /h/ws/outside/cert9x.pem
+file: /h/ws/outside/certqx.pem
+link: /h/ws/proj/lnk -> ../outside
+deny_read: glob:/workspace/proj/*/cert[+-9]x.pem
+expect: bind ro /workspace | stub /workspace/outside/cert9x.pem | stub /workspace/outside/cert/x.pem
+
+case: a wildcard inside a set is a plain character through a link
+bind: /workspace /h/ws rw
+dir: /h/ws/proj
+file: /h/ws/outside/a*.pem
+file: /h/ws/outside/ab.pem
+link: /h/ws/proj/lnk -> ../outside
+deny_read: glob:/workspace/proj/**/?[*].pem
+expect: bind ro /workspace | stub /workspace/outside/a*.pem
+
+case: brackets that spell no set are followed a name at a time through a link
+bind: /workspace /h/ws rw
+dir: /h/ws/proj
+dir: /h/ws/store/[z-a]/x[b-a
+dir: /h/ws/store/z
+file: /h/ws/store/[z-a]/x[b-a/c]y.pem
+file: /h/ws/store/[z-a]/x[b-ac]y.pem
+file: /h/ws/store/z/id.pem
+file: /h/ws/store/[z-a]/id.pem
+link: /h/ws/proj/link -> /workspace/store
+deny_read: glob:/workspace/proj/**/[z-a]/*.pem
+expect: bind ro /workspace | stub /workspace/store/[z-a]/id.pem | stub /workspace/store/[z-a]/x[b-ac]y.pem
+
+case: a split no-set pattern reaches a name that holds a separator-like bracket through a link
+bind: /workspace /h/ws rw
+dir: /h/ws/proj
+dir: /h/ws/store/[z-a]/x[b-a
+file: /h/ws/store/[z-a]/x[b-a/c]y.pem
+file: /h/ws/store/[z-a]/x[b-ac]y.pem
+link: /h/ws/proj/link -> /workspace/store
+deny_read: glob:/workspace/proj/**/x[b-a/c]y.pem
+expect: bind ro /workspace | stub /workspace/store/[z-a]/x[b-a/c]y.pem
+
+case: a link that leads back up the tree is not entered again
+bind: /workspace /h/ws rw
+dir: /h/ws/build
+file: /h/ws/build/1.out
+link: /h/ws/build/up -> ..
+deny_read: glob:/workspace/**/build/*.out
+expect: bind ro /workspace | stub /workspace/build/1.out
+
+# A read deny whose path
+# cannot be inspected hides the deepest directory above it that can.
+case: a read deny that cannot be inspected hides the directory holding it
+bind: /workspace /h/ws rw
+dir: /h/ws/vault
+file: /h/ws/vault/key
+uninspectable: /h/ws/vault/key
+allow_write: /workspace
+deny_read: /workspace/vault/key
+expect: bind rw /workspace | tmpfs /workspace/vault | remount-ro /workspace/vault
+
+case: a read deny hides the deepest directory that can be inspected
+bind: /workspace /h/ws rw
+dir: /h/ws/a/b
+file: /h/ws/a/b/key
+uninspectable: /h/ws/a/b
+uninspectable: /h/ws/a/b/key
+allow_write: /workspace
+deny_read: /workspace/a/b/key
+expect: bind rw /workspace | tmpfs /workspace/a | remount-ro /workspace/a
+
+case: a read deny with nothing above it that can be inspected mounts nothing
+view: host
+bind: / /h ro
+dir: /h/top/a
+file: /h/top/a/key
+uninspectable: /h/top
+uninspectable: /h/top/a
+uninspectable: /h/top/a/key
+deny_read: /top/a/key
+expect: bind ro /
+
+case: a write deny that cannot be inspected fails the plan
+bind: /workspace /h/ws rw
+file: /h/ws/key
+uninspectable: /h/ws/key
+allow_write: /workspace
+deny_write: /workspace/key
+expect-error: host
+
+case: a gitfile one below the working directory is left to git
+mandatory: show
+bind: /workspace /h/ws rw
+text: /h/ws/sub/.git = gitdir: ../real.git
+dir: /h/ws/real.git/hooks
+file: /h/ws/real.git/config
+allow_write: /workspace
+expect-mandatory-includes: /workspace/.bashrc
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.vscode | stub /workspace/.zprofile | stub /workspace/.zshrc
+
+case: leaf denies stay enforced when a read-deny tmpfs sits between nested write roots
+view: host
+bind: / /h rw
+dir: /h/base/proj/x/y/z/.git/hooks
+file: /h/base/proj/x/y/z/.git/config
+cwd: /base/proj
+allow_write: /base/proj/x/y/z
+deny_read: /base/proj/x/y
+allow_read: /base/proj/x/y/z
+deny_write: /base/proj/x/y/z/.git/config
+expect: bind ro / | tmpfs /base/proj/x/y | bind rw /base/proj/x/y/z/.git | bind rw /base/proj/x/y/z | bind ro /base/proj/x/y/z/.git/config | remount-ro /base/proj/x/y
+
+case: a tmpfs inside a pinned ancestor still lands after the pin
+view: host
+bind: / /h rw
+dir: /h/base/proj/x/y/z/app/data
+file: /h/base/proj/x/y/z/app/data/secret.txt
+dir: /h/base/proj/x/y/z/app/repo/.git/hooks
+file: /h/base/proj/x/y/z/app/repo/.git/config
+cwd: /base/proj
+allow_write: /base/proj/x/y/z
+deny_read: /base/proj/x/y | /base/proj/x/y/z/app/data
+allow_read: /base/proj/x/y/z
+deny_write: /base/proj/x/y/z/app/repo/.git/config
+expect: bind ro / | tmpfs /base/proj/x/y | bind rw /base/proj/x/y/z/app | bind rw /base/proj/x/y/z/app/repo | bind rw /base/proj/x/y/z/app/repo/.git | bind rw /base/proj/x/y/z | tmpfs /base/proj/x/y/z/app/data | bind ro /base/proj/x/y/z/app/repo/.git/config | remount-ro /base/proj/x/y | remount-ro /base/proj/x/y/z/app/data
+
+case: the corridor below a write carve-out inside a read-denied directory is pinned once
+view: host
+bind: / /h rw
+dir: /h/base/proj/repo/sub/x
+file: /h/base/proj/repo/sub/x/secret
+file: /h/base/proj/repo/hidden.txt
+cwd: /base/proj
+allow_write: /base/proj/repo/sub
+deny_read: /base/proj/repo
+allow_read: /base/proj/repo/sub
+deny_write: /base/proj/repo/sub/x/secret
+expect: bind ro / | tmpfs /base/proj/repo | bind rw /base/proj/repo/sub/x | bind rw /base/proj/repo/sub | bind ro /base/proj/repo/sub/x/secret | remount-ro /base/proj/repo
+
+case: the ancestors of a read-denied directory are pinned once beneath its tmpfs
+view: host
+bind: / /h rw
+dir: /h/base/proj/other/secrets
+file: /h/base/proj/other/secrets/key.pem
+cwd: /base/proj
+allow_write: /base/proj
+deny_read: /base/proj/other/secrets
+expect: bind ro / | bind rw /base/proj/other | bind rw /base/proj | tmpfs /base/proj/other/secrets | remount-ro /base/proj/other/secrets
+
+case: a read-denied directory above a nested repository pins what lies between them before the tmpfs
+view: host
+bind: / /h rw
+dir: /h/base/proj/top/.git/hooks
+file: /h/base/proj/top/.git/config
+cwd: /base/proj
+allow_write: /base/proj
+deny_read: /base/proj/top
+expect: bind ro / | bind rw /base/proj | tmpfs /base/proj/top | remount-ro /base/proj/top
+
+case: two denies below one file are one bind
+view: host
+bind: / /h rw
+file: /h/base/proj/f
+cwd: /base/proj
+allow_write: /base/proj
+deny_write: /base/proj/f/x | /base/proj/f/y
+expect: bind ro / | bind rw /base/proj | bind ro /base/proj/f
+
+case: a file denied itself and a deny beneath it are one bind as listed
+view: host
+bind: / /h rw
+file: /h/base/proj/f
+cwd: /base/proj
+allow_write: /base/proj
+deny_write: /base/proj/f | /base/proj/f/x
+expect: bind ro / | bind rw /base/proj | bind ro /base/proj/f
+
+case: a file denied itself and a deny beneath it are one bind reversed
+view: host
+bind: / /h rw
+file: /h/base/proj/f
+cwd: /base/proj
+allow_write: /base/proj
+deny_write: /base/proj/f/x | /base/proj/f
+expect: bind ro / | bind rw /base/proj | bind ro /base/proj/f
+
+case: a file that alone may be written is not held
+view: host
+bind: / /h rw
+file: /h/base/proj/f
+cwd: /base/proj
+allow_write: /base/proj/f
+deny_write: /base/proj/f/x
+expect: bind ro / | bind rw /base/proj/f
+
+
+case: a link inside a read-denied directory that points outside it is not bound back
+view: host
+bind: / /h rw
+file: /h/base/proj/d/keep
+file: /h/base/proj/elsewhere/secret
+link: /h/base/proj/d/link -> /base/proj/elsewhere
+cwd: /base/proj
+deny_read: /base/proj/d
+allow_read: /base/proj/d/link
+expect: bind ro / | tmpfs /base/proj/d | bind ro /base/proj/d/link | remount-ro /base/proj/d
+
+case: a root read deny still hides a root child that an allow read link points at
+view: host
+bind: / /h rw
+dir: /h/etc
+file: /h/etc/passwd
+file: /h/base/proj/a
+link: /h/base/proj/docs -> /etc
+cwd: /base/proj
+allow_write: /base/proj
+deny_read: /
+allow_read: /base/proj/docs
+expect: tmpfs / | bind ro /base/proj/docs | remount-ro /
+
+case: a read deny link whose route an earlier tmpfs hid denies its target and drops the write deny under it
+view: host
+bind: / /h rw
+file: /h/base/work/proj/secrets/token
+file: /h/base/work/proj/src.js
+file: /h/base/home/u/other
+link: /h/base/home/u/sec -> /base/work/proj/secrets
+cwd: /base/work/proj
+allow_write: /base/work/proj
+deny_read: /base/home/u | /base/home/u/sec
+deny_write: /base/work/proj/secrets/token
+expect: bind ro / | tmpfs /base/home/u | bind rw /base/work/proj | tmpfs /base/work/proj/secrets | remount-ro /base/home/u | remount-ro /base/work/proj/secrets
+
+case: a read deny of a file behind a link whose route an earlier tmpfs hid masks the file where it is
+view: host
+bind: / /h rw
+file: /h/base/data/key
+file: /h/base/home/u/x
+link: /h/base/home/u/lnk -> /base/data
+cwd: /base/data
+allow_write: /base/data
+deny_read: /base/home/u | /base/home/u/lnk/key
+deny_write: /base/data/key
+expect: bind ro / | bind rw /base/data | stub /base/data/key | tmpfs /base/home/u | remount-ro /base/home/u
+
+case: a root that is both granted and denied for writing stubs no absent path
+view: host
+bind: / /h rw
+file: /h/base/proj/hidden/x
+cwd: /base/proj
+allow_write: /
+deny_read: /base/proj/hidden
+deny_write: /
+expect: bind ro / | tmpfs /base/proj/hidden | remount-ro /base/proj/hidden
+
+case: a descendant deny is skipped when the write path beneath the covering directory is buried by it
+bind: /workspace /h/ws rw
+file: /h/ws/area/proj/settings.json
+dir: /h/ws/area/proj/w
+allow_write: /workspace/area | /workspace/area/proj/w
+deny_write: /workspace/area/proj | /workspace/area/proj/settings.json
+expect: bind ro /workspace | bind rw /workspace/area | bind ro /workspace/area/proj
+
+case: a descendant deny is skipped when only a read-deny tmpfs sits under the covering directory
+bind: /workspace /h/ws rw
+file: /h/ws/area/proj/settings.json
+dir: /h/ws/area/proj/secrets
+allow_write: /workspace/area
+deny_read: /workspace/area/proj/secrets
+deny_write: /workspace/area/proj | /workspace/area/proj/settings.json
+expect: bind ro /workspace | bind rw /workspace/area | bind ro /workspace/area/proj | tmpfs /workspace/area/proj/secrets | remount-ro /workspace/area/proj/secrets
+
+case: a dangling link as the denied name masks the name it would create
+bind: /workspace /h/ws rw
+link: /h/ws/notes.json -> /workspace/nowhere.json
+allow_write: /workspace
+deny_write: /workspace/notes.json
+expect: bind rw /workspace | stub /workspace/nowhere.json
+
+case: a path beneath a dangling link is guarded where the link leads
+bind: /workspace /h/ws rw
+link: /h/ws/settings -> /workspace/nowhere
+allow_write: /workspace
+deny_write: /workspace/settings/.mcp.json
+expect: bind rw /workspace | stub /workspace/nowhere
+
+case: a deny whose link hop lacks a directory guards the directory
+bind: /workspace /h/ws rw
+link: /h/ws/hop -> lacking/in
+link: /h/ws/name -> hop/../made
+allow_write: /workspace
+deny_write: /workspace/name
+expect: bind rw /workspace | stub /workspace/lacking
+
+case: a deny reached through three dangling hops guards what the last lacks
+bind: /workspace /h/ws rw
+link: /h/ws/hop -> two/x
+link: /h/ws/two -> three/y
+link: /h/ws/three -> lacking/z
+link: /h/ws/name -> hop/made
+allow_write: /workspace
+deny_write: /workspace/name
+expect: bind rw /workspace | stub /workspace/lacking
+
+case: a deny whose way only leads down guards the first missing name
+bind: /workspace /h/ws rw
+link: /h/ws/name -> lacking/./in//deep/../../made
+allow_write: /workspace
+deny_write: /workspace/name
+expect: bind rw /workspace | stub /workspace/lacking
+
+case: a deny whose way goes up from a hop that is not there guards both names
+bind: /workspace /h/ws rw
+link: /h/ws/name -> hop/../made
+allow_write: /workspace
+deny_write: /workspace/name
+expect: bind rw /workspace | stub /workspace/hop
+
+case: a deny whose way goes up from several missing names guards each
+bind: /workspace /h/ws rw
+link: /h/ws/name -> one/../two/./../three/in
+allow_write: /workspace
+deny_write: /workspace/name
+expect: bind rw /workspace | stub /workspace/one
+
+case: a deny whose way leads past a missing name denies what is there
+bind: /workspace /h/ws rw
+dir: /h/ws/kept
+link: /h/ws/name -> hop/../kept
+allow_write: /workspace
+deny_write: /workspace/name
+expect: bind rw /workspace | stub /workspace/hop
+
+case: a deny whose way leads to the root past a missing name is held at the root
+bind: /workspace /h/ws rw
+link: /h/ws/name -> hop/../../../../../../../../../../../..
+allow_write: /workspace
+deny_write: /workspace/name
+expect: bind rw /workspace | stub /workspace/hop
+
+case: a mandatory name that is a dangling link guards the name it would create
+bind: /workspace /h/ws rw
+link: /h/ws/.vscode -> not-yet-built
+allow_write: /workspace
+cwd: /workspace
+mandatory: show
+expect: bind rw /workspace | stub /workspace/.agent | stub /workspace/.bash_profile | stub /workspace/.bashrc | stub /workspace/.gitconfig | stub /workspace/.gitmodules | stub /workspace/.idea | stub /workspace/.mcp.json | stub /workspace/.profile | stub /workspace/.ripgreprc | stub /workspace/.zprofile | stub /workspace/.zshrc | stub /workspace/not-yet-built
+
+# Special files and names that are no text. Every denied entry that is not a
+# directory is masked with /dev/null, and a name or link target that is no
+# text is unmatchable.
+
+case: a denied fifo is masked and its ancestors are pinned like a file's
+bind: /workspace /h/ws rw
+dir: /h/ws/secrets
+fifo: /h/ws/secrets/pipe.fifo
+allow_write: /workspace
+deny_read: /workspace/secrets/pipe.fifo
+expect: bind rw /workspace | bind rw /workspace/secrets | stub /workspace/secrets/pipe.fifo
+
+case: a denied socket is masked and nothing is pinned in a read-only region
+bind: /workspace /h/ws ro
+socket: /h/ws/run/app.sock
+deny_read: /workspace/run/app.sock
+expect: bind ro /workspace | stub /workspace/run/app.sock
+
+case: a pattern that matches a fifo and a socket masks each
+bind: /workspace /h/ws ro
+fifo: /h/ws/a.pipe
+socket: /h/ws/b.pipe
+file: /h/ws/c.pipe
+deny_read: glob:/workspace/*.pipe
+expect: bind ro /workspace | stub /workspace/a.pipe | stub /workspace/b.pipe | stub /workspace/c.pipe
+
+case: a denied directory holding special files is one tmpfs
+bind: /workspace /h/ws ro
+fifo: /h/ws/d/pipe
+socket: /h/ws/d/sock
+deny_read: /workspace/d | /workspace/d/pipe | /workspace/d/sock
+expect: bind ro /workspace | tmpfs /workspace/d | remount-ro /workspace/d
+
+case: a denied link to a fifo is masked at the fifo
+bind: /workspace /h/ws ro
+fifo: /h/ws/real.pipe
+link: /h/ws/alias -> real.pipe
+deny_read: /workspace/alias
+expect: bind ro /workspace | stub /workspace/real.pipe
+
+case: a name that is no text is left out of a pattern and the rest still match
+bind: /workspace /h/ws ro
+file: /h/ws/a.env
+file: /h/ws/b\xff.env
+deny_read: glob:/workspace/*.env
+expect: bind ro /workspace | stub /workspace/a.env
+
+case: a name that is no text inside a denied directory leaves one tmpfs
+bind: /workspace /h/ws ro
+file: /h/ws/d/\xff\xfe
+file: /h/ws/d/plain
+deny_read: /workspace/d | /workspace/d/plain
+expect: bind ro /workspace | tmpfs /workspace/d | remount-ro /workspace/d
+
+case: a deny of a link to a name that is no text is mounted on its spelling
+bind: /workspace /h/ws ro
+file: /h/ws/n\xff/file
+link: /h/ws/link -> n\xff
+deny_read: /workspace/link
+expect: bind ro /workspace | stub /workspace/link
+
+case: a pattern walking through a link to a name that is no text still lists the other entries
+bind: /workspace /h/ws ro
+file: /h/ws/n\xff/file
+file: /h/ws/plain/file
+link: /h/ws/link -> n\xff
+deny_read: glob:/workspace/*/file
+expect: bind ro /workspace | stub /workspace/plain/file
+
+# Exceptions spelled through links are judged by where the links lead.
+
+case: a write deny spelled through a link lands on the target of the link
+bind: /workspace /h/ws rw
+file: /h/ws/real/x
+link: /h/ws/alias -> real
+allow_write: /workspace/real
+deny_write: /workspace/alias/x
+expect: bind ro /workspace | bind rw /workspace/real | bind ro /workspace/real/x
+
+case: a read deny of a link to a directory leaves a carve-out written at the target
+bind: /workspace /h/ws rw
+file: /h/ws/real/sub/ok
+file: /h/ws/real/other
+link: /h/ws/lnk -> real
+allow_write: /workspace
+deny_read: /workspace/lnk
+allow_read: /workspace/real/sub
+expect: bind rw /workspace | tmpfs /workspace/real | bind rw /workspace/real/sub | remount-ro /workspace/real
+
+case: a carve-out through a link to a directory outside the deny is restored from its target
+bind: /workspace /h/ws ro
+file: /h/ws/store/pages/readme
+file: /h/ws/home/note
+link: /h/ws/home/docs -> ../store/pages
+deny_read: /workspace/home
+allow_read: /workspace/home/docs
+expect: bind ro /workspace | tmpfs /workspace/home | bind ro /workspace/home/docs | remount-ro /workspace/home
+expect-sources: /workspace/home/docs = /h/ws/store/pages
+
+case: a carve-out through a link to a directory that holds a read deny is dropped
+bind: /workspace /h/ws ro
+file: /h/ws/store/pages/readme
+file: /h/ws/store/pages/sec/x
+link: /h/ws/home/docs -> ../store/pages
+deny_read: /workspace/home | /workspace/store/pages/sec
+allow_read: /workspace/home/docs
+expect: bind ro /workspace | tmpfs /workspace/home | tmpfs /workspace/store/pages/sec | remount-ro /workspace/home | remount-ro /workspace/store/pages/sec
+
+case: a carve-out through a link into a directory a read deny pattern matches is dropped
+bind: /workspace /h/ws ro
+file: /h/ws/store/secret/x
+link: /h/ws/home/docs -> ../store/secret
+deny_read: /workspace/home | glob:/workspace/**/secret/**
+allow_read: /workspace/home/docs
+expect: bind ro /workspace | tmpfs /workspace/home | tmpfs /workspace/store/secret | remount-ro /workspace/home | remount-ro /workspace/store/secret
+
+case: a lone own carve-out through a link to a denied directory is dropped
+bind: /workspace /h/ws ro
+file: /h/ws/store/secret/x
+link: /h/ws/home/docs -> ../store/secret
+deny_read: /workspace/home | /workspace/store/secret
+own_allow_read: /workspace/home/docs
+expect: bind ro /workspace | tmpfs /workspace/home | tmpfs /workspace/store/secret | remount-ro /workspace/home | remount-ro /workspace/store/secret
+
+# Glob matches collapse onto the directory that holds them. There is no
+# per-directory mount cap beyond the bubblewrap argument limit, which
+# MAX_BWRAP_ARGUMENTS mirrors.
+
+case: a pattern ending in a double star mounts one tmpfs per matching directory
+bind: /workspace /h/ws ro
+file: /h/ws/pkg/a/build/1.out
+file: /h/ws/pkg/a/build/nested/deep.out
+file: /h/ws/pkg/a/index.js
+file: /h/ws/pkg/b/build/1.out
+file: /h/ws/pkg/b/build/nested/deep.out
+file: /h/ws/pkg/b/index.js
+file: /h/ws/pkg/build
+deny_read: glob:/workspace/**/build/**
+expect: bind ro /workspace | tmpfs /workspace/pkg/a/build | tmpfs /workspace/pkg/b/build | remount-ro /workspace/pkg/a/build | remount-ro /workspace/pkg/b/build
+
+case: a carve-out inside a collapsed directory is bound back over the one mount
+bind: /workspace /h/ws ro
+file: /h/ws/pkg/a/build/1.out
+file: /h/ws/pkg/a/build/nested/deep.out
+file: /h/ws/pkg/a/build/public/ok.txt
+deny_read: glob:/workspace/**/build/**
+allow_read: /workspace/pkg/a/build/public
+expect: bind ro /workspace | tmpfs /workspace/pkg/a/build | bind ro /workspace/pkg/a/build/public | stub /workspace/pkg/a/build/public/ok.txt | remount-ro /workspace/pkg/a/build
+
+case: a pattern that matches only files collapses nothing
+bind: /workspace /h/ws ro
+file: /h/ws/pkg/a/build/1.out
+file: /h/ws/pkg/a/build/2.out
+file: /h/ws/pkg/b/build/1.out
+file: /h/ws/pkg/b/index.js
+deny_read: glob:/workspace/**/*.out
+expect: bind ro /workspace | stub /workspace/pkg/a/build/1.out | stub /workspace/pkg/a/build/2.out | stub /workspace/pkg/b/build/1.out
+
+case: file denies beneath a collapsed directory keep their masks under a carve-out
+bind: /workspace /h/ws ro
+file: /h/ws/big/a.key
+file: /h/ws/big/b.key
+file: /h/ws/big/keep/c.key
+deny_read: /workspace/big | /workspace/big/a.key | /workspace/big/b.key | /workspace/big/keep/c.key
+allow_read: /workspace/big/keep
+expect: bind ro /workspace | tmpfs /workspace/big | bind ro /workspace/big/keep | stub /workspace/big/keep/c.key | remount-ro /workspace/big
+
+# A matched link whose target cannot be inspected
+# is kept under its own spelling and hides the directory above it, while every
+# other match of the pattern, links to other places included, is still denied.
+case: a matched link that cannot be inspected hides its directory and leaves the other matches denied
+bind: /workspace /h/ws rw
+file: /h/ws/priv/key
+file: /h/ws/d/a.txt
+file: /h/ws/other/k.txt
+link: /h/ws/d/lnk -> /workspace/priv/key
+link: /h/ws/d/out -> /workspace/other
+uninspectable: /h/ws/priv/key
+allow_write: /workspace
+deny_read: glob:/workspace/d/*
+expect: bind rw /workspace | tmpfs /workspace/d | tmpfs /workspace/other | tmpfs /workspace/priv | remount-ro /workspace/d | remount-ro /workspace/other | remount-ro /workspace/priv
