@@ -10649,6 +10649,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-daytona-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "clap",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-protocol",
+ "trogon-std",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "trogon-sandbox-dev"
 version = "0.1.0"
 dependencies = [
@@ -10669,6 +10697,42 @@ dependencies = [
  "trogon-sandbox-contract",
  "trogon-sandbox-protocol",
  "trogon-std",
+]
+
+[[package]]
+name = "trogon-sandbox-e2b-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "axum",
+ "base64 0.23.1",
+ "bytes",
+ "chrono",
+ "clap",
+ "futures",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-file-ops",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-protocol",
+ "trogon-sandbox-ssh-gateway",
+ "trogon-std",
+ "url",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -10764,6 +10828,44 @@ dependencies = [
  "trogon-sandbox-observability",
  "trogon-sandbox-oci",
  "trogon-sandbox-protocol",
+ "trogon-std",
+ "uuid",
+]
+
+[[package]]
+name = "trogon-sandbox-kubevirt-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "clap",
+ "futures",
+ "http",
+ "http-body-util",
+ "k8s-openapi",
+ "kube",
+ "libc",
+ "object_store",
+ "russh",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tower",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-cosign",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-oci",
+ "trogon-sandbox-protocol",
+ "trogon-sandbox-ssh-gateway",
+ "trogon-sandbox-volumes",
  "trogon-std",
  "uuid",
 ]
@@ -11166,6 +11268,42 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "trogon-std",
+]
+
+[[package]]
+name = "trogon-sandbox-ws-gateway"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "axum",
+ "base64 0.23.1",
+ "bytes",
+ "clap",
+ "futures",
+ "futures-util",
+ "hex",
+ "hmac 0.13.0",
+ "rand_core 0.6.4",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tower-http 0.7.1",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-auth",
+ "trogon-sandbox-client",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-file-ops",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-protocol",
  "trogon-std",
 ]
 
