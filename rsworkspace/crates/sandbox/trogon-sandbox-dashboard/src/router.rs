@@ -4,10 +4,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 
 use crate::DashboardConfig;
-
-const INDEX_HTML: &str = include_str!("../web/index.html");
-const APP_JS: &str = include_str!("../web/app.js");
-const STYLE_CSS: &str = include_str!("../web/style.css");
+use crate::constants::{APP_JS, INDEX_HTML, STYLE_CSS};
 
 fn asset(content_type: &'static str, body: &'static str) -> Response {
     ([(header::CONTENT_TYPE, HeaderValue::from_static(content_type))], body).into_response()

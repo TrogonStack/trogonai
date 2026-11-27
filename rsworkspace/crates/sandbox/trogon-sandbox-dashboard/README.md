@@ -31,7 +31,7 @@ cargo run -p trogon-sandbox-dashboard -- --listen 127.0.0.1:8080
 - `--listen <addr>` (default `127.0.0.1:8080`)
 - `--ws-gateway-url <url>` (default `ws://127.0.0.1:8443/v1/ws`, exposed to the app through `/config.json`)
 
-Open `http://127.0.0.1:8080/`, enter the gateway URL and a bearer token, and connect. Embedded mode accepts `?ws_gateway=<url>&token=<bearer-token>`.
+Open `http://127.0.0.1:8080/`, enter the gateway URL and a bearer token, and connect. Embedded mode accepts `?token=<bearer-token>`. The gateway URL is never taken from the page URL, so a crafted link cannot send a token to another server.
 
 ## Panels
 

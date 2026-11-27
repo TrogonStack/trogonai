@@ -1,5 +1,6 @@
 //! Read-only web dashboard for sandbox lease, snapshot, worker, and tag observability.
 
+mod constants;
 mod dashboard_args;
 mod dashboard_config;
 mod dashboard_error;

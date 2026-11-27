@@ -38,11 +38,7 @@
 
   function readQueryParams() {
     const params = new URLSearchParams(window.location.search);
-    const wsGateway = params.get("ws_gateway") || params.get("ws");
     const token = params.get("token") || params.get("bearer");
-    if (wsGateway) {
-      wsUrlInput.value = wsGateway;
-    }
     if (token) {
       tokenInput.value = token;
     }
