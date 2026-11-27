@@ -30,7 +30,7 @@ spec:
       {{- if eq .Values.datastore.engine "postgres" }}
       initContainers:
         - name: migrate
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.image "global" .Values.global "path" "spicedb.image") | quote }}
           args: ["datastore", "migrate", "head"]
           env:
             - name: SPICEDB_DATASTORE_ENGINE
@@ -43,7 +43,7 @@ spec:
       {{- end }}
       containers:
         - name: spicedb
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.image "global" .Values.global "path" "spicedb.image") | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           args: ["serve"]
           env:

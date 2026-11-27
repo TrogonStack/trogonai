@@ -1,0 +1,59 @@
+# Every image pinned: each service gets a placeholder tag and digest, so the
+# default render passes. A real install uses the commit's published charts or
+# a pins file from the chart-image-pins task.
+trogon-sandbox-aca-worker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-broker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-credential-broker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-dashboard:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-daytona-worker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-docker-worker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-hyperlight-worker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-k8s-worker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-kubevirt-worker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-modal-worker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-snapshot-builder:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-ssh-gateway:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-subprocess-worker:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+trogon-sandbox-ws-gateway:
+  serviceImage:
+    tag: ci
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

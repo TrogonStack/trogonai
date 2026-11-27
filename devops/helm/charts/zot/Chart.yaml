@@ -4,3 +4,7 @@ description: Minimal in-cluster Zot OCI registry for sandbox snapshots
 type: application
 version: 0.1.0
 appVersion: "2.1.2"
+dependencies:
+  - name: trogon-sandbox-library
+    repository: file://../trogon-sandbox-library
+    version: 0.1.0

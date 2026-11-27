@@ -4,3 +4,7 @@ description: Helm subchart for trogon-sandbox-credential-broker
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+dependencies:
+  - name: trogon-sandbox-library
+    repository: file://../trogon-sandbox-library
+    version: 0.1.0

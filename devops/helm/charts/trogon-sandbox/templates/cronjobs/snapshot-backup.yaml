@@ -34,7 +34,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: oras-backup
-              image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag }}"
+              image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.backup.image "global" .Values.global "path" "backup.image") | quote }}
               imagePullPolicy: IfNotPresent
               env:
                 - name: REGISTRY

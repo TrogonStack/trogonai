@@ -55,7 +55,7 @@ spec:
   serviceAccountName: {{ include "trogon-sandbox-k8s-worker.fullname" . }}
   containers:
     - name: worker
-      image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-k8s-worker:{{ .Values.global.imageTag }}"
+      image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.serviceImage "name" "trogon-sandbox-k8s-worker" "global" .Values.global "path" "trogon-sandbox-k8s-worker.serviceImage") | quote }}
       imagePullPolicy: {{ .Values.global.imagePullPolicy }}
       envFrom:
         - configMapRef:

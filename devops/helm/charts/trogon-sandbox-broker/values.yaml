@@ -20,3 +20,12 @@ metrics:
 # Write the committed credential policy per lease into the NATS KV bucket the credential
 # broker and workers fence against. Only effective with quotaBackend nats-kv.
 commitCredentialPolicies: true
+
+# The image this chart deploys, as <repository>:<tag>@<digest>. An empty
+# repository means <global.imageRegistry>/<chart name>. Tag and digest have no
+# default: the chart published for a commit carries that commit's image, and a
+# checkout must set both (see docs/how-to/sandbox/deploy.md).
+serviceImage:
+  repository: ""
+  tag: ""
+  digest: ""

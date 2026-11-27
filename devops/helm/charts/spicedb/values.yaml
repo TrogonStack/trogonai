@@ -1,7 +1,8 @@
 replicaCount: 1
 image:
-  repository: authzed/spicedb
+  repository: ghcr.io/trogonstack/mirrors/docker-hub/authzed/spicedb
   tag: v1.35.0
+  digest: sha256:7f1e18c18154ff0450e972d80d81828c1bfa513d82d181661d23012967a8a3d4
 service:
   grpcPort: 50051
 # `memory` keeps every relationship in the pod and loses them on restart: use it to evaluate the

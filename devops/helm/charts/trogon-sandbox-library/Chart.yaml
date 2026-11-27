@@ -1,0 +1,5 @@
+apiVersion: v2
+name: trogon-sandbox-library
+description: Shared template helpers for the sandbox charts
+type: library
+version: 0.1.0
