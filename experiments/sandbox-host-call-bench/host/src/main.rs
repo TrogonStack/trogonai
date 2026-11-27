@@ -44,14 +44,16 @@ impl<T, E: std::fmt::Debug> Ctx<T> for std::result::Result<T, E> {
 trait Guest {
     fn ping(&mut self, value: i32) -> Result<i32>;
     fn noop_loop(&mut self, count: i32) -> Result<i32>;
+}
+
+/// The hosts that get payload rows.
+trait PayloadGuest: Guest {
     /// Writes `message` into guest memory and has the guest `consume` it.
-    fn consume(&mut self, _message: Vec<u8>) -> Result<i32> {
-        bail!("this host has no payload path")
-    }
+    fn consume(&mut self, message: Vec<u8>) -> Result<i32>;
     /// Has the guest send a `len`-byte buffer to the host `count` times.
-    fn bytes_loop(&mut self, _count: i32, _len: i32) -> Result<i32> {
-        bail!("this host has no payload path")
-    }
+    fn bytes_loop(&mut self, count: i32, len: i32) -> Result<i32>;
+    /// Returns the guest to a clean state, so a size that broke it cannot fail the next series.
+    fn reset(&mut self) -> Result<()>;
 }
 
 fn main() -> Result<()> {
@@ -151,49 +153,61 @@ fn measure_calls(host: &str, guest: &mut impl Guest) -> Result<()> {
     Ok(())
 }
 
-/// Like `measure_calls`, with a payload of each `PAYLOAD_SIZES` size. A size the host refuses
-/// becomes an error row instead of ending the run, since a refused size is itself a result.
-fn measure_payloads(host: &str, guest: &mut impl Guest) -> Result<()> {
+/// Like `measure_calls`, with a payload of each `PAYLOAD_SIZES` size. A call the host refuses
+/// becomes a "failed" row instead of ending the run, since a refused size is itself a result; a
+/// wrong answer still panics, since that is a bug in the bench.
+fn measure_payloads(host: &str, guest: &mut impl PayloadGuest) -> Result<()> {
+    let count = PAYLOAD_CALLS as i32;
     for len in PAYLOAD_SIZES {
         let kib = len / 1024;
-        let into = format!("host→guest call with {kib} KiB");
-        let out = format!("guest→host call with {kib} KiB (amortized over {PAYLOAD_CALLS})");
-        // Built before the clock starts: hosts that take the message by value would otherwise
-        // pay for a copy the others do not.
-        let mut messages = vec![vec![7u8; len as usize]; PAYLOAD_CALLS + 1];
-        let result = guest.consume(messages.pop().unwrap_or_default()).and_then(|_| {
-            sample(PAYLOAD_CALLS, |i| match guest.consume(std::mem::take(&mut messages[i as usize]))? {
-                got if got == len => Ok(()),
-                got => bail!("{host}: consume returned {got}"),
+        let message = vec![7u8; len as usize];
+
+        guest.reset()?;
+        // Each message is cloned just before its call, like a freshly serialized one: cache-hot,
+        // and its allocation outside the clock.
+        let into = guest.consume(message.clone()).and_then(|_| {
+            (0..PAYLOAD_CALLS)
+                .map(|_| {
+                    let next = message.clone();
+                    let (got, took) = timed(|| guest.consume(next))?;
+                    assert_eq!(got, len, "{host}: consume");
+                    Ok(took)
+                })
+                .collect::<Result<Vec<f64>>>()
+        });
+        report(host, &format!("host→guest call with {kib} KiB"), into);
+
+        guest.reset()?;
+        let out = guest.bytes_loop(count, len).and_then(|_| {
+            sample(LOOP_RUNS, |_| {
+                assert_eq!(guest.bytes_loop(count, len)?, count, "{host}: bytes_loop");
+                Ok(())
             })
         });
-        match result {
-            Ok(samples) => row(host, &into, samples),
-            Err(e) => error_row(host, &into, &e),
-        }
-
-        let count = PAYLOAD_CALLS as i32;
-        let result = sample(LOOP_RUNS, |_| match guest.bytes_loop(count, len)? {
-            got if got == count => Ok(()),
-            got => bail!("{host}: bytes_loop delivered {got} of {count}"),
-        });
-        match result {
-            Ok(batches) => row(host, &out, batches.into_iter().map(|t| t / f64::from(count)).collect()),
-            Err(e) => error_row(host, &out, &e),
-        }
+        let out = out.map(|batches| batches.into_iter().map(|t| t / f64::from(count)).collect());
+        report(host, &format!("guest→host call with {kib} KiB (amortized over {count})"), out);
     }
     Ok(())
 }
 
-fn error_row(host: &str, metric: &str, error: &anyhow::Error) {
-    let error = format!("{error:#}").replace(['|', '\n'], " ");
-    println!("| {host} | {metric} | — | failed: {:.160} | | |", error);
+/// A row for `samples`, or a "failed" row with the error.
+fn report(host: &str, metric: &str, samples: Result<Vec<f64>>) {
+    match samples {
+        Ok(samples) => row(host, metric, samples),
+        Err(error) => {
+            let error = format!("{error:#}").replace(['|', '\n'], " ");
+            println!("| {host} | {metric} | — | failed: {error:.160} | | |");
+        }
+    }
 }
+
+/// In-process store data: the guest's memory, kept so `host_bytes` skips an export lookup.
+type Data = Option<wasmtime::Memory>;
 
 /// Copies `len` bytes at `ptr` out of the caller's memory, as Hyperlight's marshalling does,
 /// and returns how many arrived (-1 when the range is out of bounds).
-fn host_bytes<T>(mut caller: wasmtime::Caller<'_, T>, ptr: i32, len: i32) -> i32 {
-    let Some(memory) = caller.get_export("memory").and_then(wasmtime::Extern::into_memory) else {
+fn host_bytes(caller: wasmtime::Caller<'_, Data>, ptr: i32, len: i32) -> i32 {
+    let Some(memory) = *caller.data() else {
         return -1;
     };
     memory
@@ -207,7 +221,7 @@ fn host_bytes<T>(mut caller: wasmtime::Caller<'_, T>, ptr: i32, len: i32) -> i32
 // wasmtime, in process
 
 struct InProcess {
-    store: wasmtime::Store<()>,
+    store: wasmtime::Store<Data>,
     memory: wasmtime::Memory,
     ping: wasmtime::TypedFunc<i32, i32>,
     noop_loop: wasmtime::TypedFunc<i32, i32>,
@@ -217,8 +231,8 @@ struct InProcess {
 }
 
 impl InProcess {
-    fn new(pre: &wasmtime::InstancePre<()>) -> Result<Self> {
-        let mut store = wasmtime::Store::new(pre.module().engine(), ());
+    fn new(pre: &wasmtime::InstancePre<Data>) -> Result<Self> {
+        let mut store = wasmtime::Store::new(pre.module().engine(), None);
         let instance = pre.instantiate(&mut store).ctx()?;
         let ping = instance.get_typed_func(&mut store, "ping").ctx()?;
         let noop_loop = instance.get_typed_func(&mut store, "noop_loop").ctx()?;
@@ -228,6 +242,7 @@ impl InProcess {
         let memory = instance
             .get_memory(&mut store, "memory")
             .ok_or_else(|| anyhow!("guest exports no memory"))?;
+        *store.data_mut() = Some(memory);
         Ok(Self {
             store,
             memory,
@@ -247,6 +262,9 @@ impl Guest for InProcess {
     fn noop_loop(&mut self, count: i32) -> Result<i32> {
         self.noop_loop.call(&mut self.store, count).ctx()
     }
+}
+
+impl PayloadGuest for InProcess {
     fn consume(&mut self, message: Vec<u8>) -> Result<i32> {
         let len = message.len() as i32;
         let ptr = self.malloc.call(&mut self.store, len).ctx()?;
@@ -256,20 +274,24 @@ impl Guest for InProcess {
     fn bytes_loop(&mut self, count: i32, len: i32) -> Result<i32> {
         self.bytes_loop.call(&mut self.store, (count, len)).ctx()
     }
+    /// Each call already starts from the guest's own state; nothing to restore.
+    fn reset(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
-fn instance_pre(config: &wasmtime::Config, wasm: &Path) -> Result<wasmtime::InstancePre<()>> {
+fn instance_pre(config: &wasmtime::Config, wasm: &Path) -> Result<wasmtime::InstancePre<Data>> {
     let engine = wasmtime::Engine::new(config).ctx()?;
     let module = wasmtime::Module::from_file(&engine, wasm).ctx()?;
-    let mut linker = wasmtime::Linker::<()>::new(&engine);
+    let mut linker = wasmtime::Linker::<Data>::new(&engine);
     linker
         .func_wrap("env", "HostNoop", |value: i32| value.wrapping_add(1))
         .ctx()?;
-    linker.func_wrap("env", "HostBytes", host_bytes::<()>).ctx()?;
+    linker.func_wrap("env", "HostBytes", host_bytes).ctx()?;
     linker.instantiate_pre(&module).ctx()
 }
 
-fn measure_instantiate(host: &str, metric: &str, pre: &wasmtime::InstancePre<()>) -> Result<()> {
+fn measure_instantiate(host: &str, metric: &str, pre: &wasmtime::InstancePre<Data>) -> Result<()> {
     let samples = sample(CREATE_RUNS, |i| {
         let mut guest = InProcess::new(pre)?;
         guest.ping(i)?;
@@ -401,7 +423,7 @@ fn child(cwasm: &Path) -> Result<()> {
         )
         .ctx()?;
     // Imported by the guest but only exercised by the payload rows, which this host skips.
-    linker.func_wrap("env", "HostBytes", host_bytes::<ChildIo>).ctx()?;
+    linker.func_wrap("env", "HostBytes", |_: i32, _: i32| -1).ctx()?;
     let io = ChildIo {
         from_parent: std::io::stdin().lock(),
         to_parent: BufWriter::new(std::io::stdout().lock()),
@@ -436,9 +458,12 @@ fn hyperlight(_args: &[String]) -> Result<()> {
 fn hyperlight(args: &[String]) -> Result<()> {
     use std::sync::Arc;
 
-    use hyperlight_wasm::{LoadedWasmSandbox, SandboxBuilder, WasmSandbox, is_hypervisor_present};
+    use hyperlight_wasm::{
+        LoadedWasmSandbox, SandboxBuilder, Snapshot, WasmSandbox, is_hypervisor_present,
+    };
 
-    struct Hyperlight(LoadedWasmSandbox);
+    /// A loaded sandbox and, once taken, the clean snapshot `reset` rewinds to.
+    struct Hyperlight(LoadedWasmSandbox, Option<Arc<Snapshot>>);
 
     impl Guest for Hyperlight {
         fn ping(&mut self, value: i32) -> Result<i32> {
@@ -447,12 +472,21 @@ fn hyperlight(args: &[String]) -> Result<()> {
         fn noop_loop(&mut self, count: i32) -> Result<i32> {
             self.0.call_guest_function::<i32>("noop_loop", (count,)).ctx()
         }
+    }
+
+    impl PayloadGuest for Hyperlight {
         fn consume(&mut self, message: Vec<u8>) -> Result<i32> {
             let len = message.len() as i32;
             self.0.call_guest_function::<i32>("consume", (message, len)).ctx()
         }
         fn bytes_loop(&mut self, count: i32, len: i32) -> Result<i32> {
             self.0.call_guest_function::<i32>("bytes_loop", (count, len)).ctx()
+        }
+        fn reset(&mut self) -> Result<()> {
+            match &self.1 {
+                Some(clean) => self.0.restore(Arc::clone(clean)).ctx(),
+                None => Ok(()),
+            }
         }
     }
 
@@ -483,7 +517,7 @@ fn hyperlight(args: &[String]) -> Result<()> {
     for _ in 0..HL_CREATE_RUNS {
         let (sandbox, built) = timed(warm)?;
         let (_guest, loaded) = timed(|| {
-            let mut guest = Hyperlight(sandbox.load_module(aot).ctx()?);
+            let mut guest = Hyperlight(sandbox.load_module(aot).ctx()?, None);
             guest.ping(1)?;
             Ok(guest)
         })?;
@@ -493,7 +527,7 @@ fn hyperlight(args: &[String]) -> Result<()> {
     row(host, "micro-VM build + runtime load", cold);
     row(host, "module load + first call (warm VM)", load);
 
-    let mut guest = Hyperlight(warm()?.load_module(aot).ctx()?);
+    let mut guest = Hyperlight(warm()?.load_module(aot).ctx()?, None);
     let mut snapshots = Vec::with_capacity(HL_SNAPSHOT_RUNS);
     let mut clean = None;
     for _ in 0..HL_SNAPSHOT_RUNS {
@@ -514,6 +548,7 @@ fn hyperlight(args: &[String]) -> Result<()> {
     }
     row(host, "restore to clean snapshot", restore);
     row(host, "first call after restore", first_call);
+    guest.1 = Some(clean);
 
     measure_calls(host, &mut guest)?;
     measure_payloads(host, &mut guest)

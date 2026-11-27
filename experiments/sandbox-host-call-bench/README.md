@@ -26,7 +26,9 @@ native `python3` and `docker run`. It answers whether stateless Linux tool calls
 microVM tier.
 
 The Hyperlight sandbox uses the `trogon-sandbox-hyperlight-worker` defaults (256 KiB input buffer,
-1.25 MiB heap) and the same pinned `hyperlight-wasm` revision.
+1.25 MiB heap) and the same pinned `hyperlight-wasm` revision. The guest links with a 64 KiB stack and 128 KiB initial
+memory (`guest/build.rs`) so its linear memory fits that heap; a payload row that fails may be
+hitting these sizes rather than a Hyperlight limit.
 
 ## Running
 

@@ -11,6 +11,7 @@ python_image=python:3.13-slim
 bin=${RUNNER_TEMP:-$(mktemp -d)}/hluk-bin
 export PATH=$bin:$PATH
 
+# Nearest-rank percentiles and the same units as host/src/main.rs's `percentile` and `fmt`.
 row() { # host metric samples-in-µs...
   local host=$1 metric=$2; shift 2
   printf '%s\n' "$@" | sort -n | awk -v host="$host" -v metric="$metric" '
@@ -24,35 +25,30 @@ row() { # host metric samples-in-µs...
 failed() { echo "| $1 | $2 | — | failed: $3 | | |"; }
 
 # Runs "$@" $runs times (output discarded) and prints one row; the first failure ends the series.
+# Timestamps come from $EPOCHREALTIME (microseconds, no `date` process inside the sample).
 series() { # host metric cmd...
   local host=$1 metric=$2; shift 2
   local samples=() start end
   for _ in $(seq "$runs"); do
-    start=$(date +%s%N)
+    start=${EPOCHREALTIME/./}
     if ! "$@" >/dev/null 2>"$bin/err"; then
       failed "$host" "$metric" "$(tr '|\n' '  ' <"$bin/err" | cut -c1-160)"
       return
     fi
-    end=$(date +%s%N)
-    samples+=($(((end - start) / 1000)))
+    end=${EPOCHREALTIME/./}
+    samples+=($((end - start)))
   done
   row "$host" "$metric" "${samples[@]}"
 }
 
-once() { # host metric cmd...: a single timed run
-  local host=$1 metric=$2 start end; shift 2
-  start=$(date +%s%N)
-  if "$@" >/dev/null 2>"$bin/err"; then
-    end=$(date +%s%N)
-    row "$host" "$metric" $(((end - start) / 1000))
-  else
-    failed "$host" "$metric" "$(tr '|\n' '  ' <"$bin/err" | cut -c1-160)"
-  fi
-}
+once() { runs=1 series "$@"; }
 
 mkdir -p "$bin"
-curl -fsSL "https://raw.githubusercontent.com/hyperlight-dev/hyperlight-unikraft/$version/install.sh" \
-  | HLUK_VERSION=$version HLUK_INSTALL_DIR=$bin sh >&2
+if ! curl -fsSL "https://raw.githubusercontent.com/hyperlight-dev/hyperlight-unikraft/$version/install.sh" \
+  | HLUK_VERSION=$version HLUK_INSTALL_DIR=$bin sh >&2; then
+  failed "hluk $version" "install" "see job log"
+  exit 0
+fi
 { hluk --version; hluk --help; hluk run --help; } >&2 || true
 
 work=$(mktemp -d)
@@ -64,8 +60,9 @@ echo "| host | metric | n | p50 | p99 | mean |"
 echo "|---|---|---|---|---|---|"
 echo 'print("ok")' >hello.py
 series "native" "python3 hello.py" python3 hello.py
+# No network or log driver: neither of the other rows pays for a bridge or a log file.
 series "docker ($python_image)" "docker run --rm … python hello.py" \
-  docker run --rm -v "$work:/w:ro" "$python_image" python /w/hello.py
+  docker run --rm --network none --log-driver none -v "$work:/w:ro" "$python_image" python /w/hello.py
 
 # Project flow: `hluk init` pulls the Python rootfs; the first run boots and saves a snapshot,
 # later runs restore it.
