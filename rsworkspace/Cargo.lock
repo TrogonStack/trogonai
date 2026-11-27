@@ -10060,6 +10060,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-vercel-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "async-trait",
+ "axum",
+ "bytes",
+ "clap",
+ "flate2",
+ "futures",
+ "http",
+ "libc",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-nats",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-observability",
+ "trogon-sandbox-protocol",
+ "trogon-std",
+ "url",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "trogon-sandbox-volumes"
 version = "0.1.0"
 dependencies = [

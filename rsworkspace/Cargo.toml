@@ -82,6 +82,7 @@ trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
 trogon-sandbox-v8-wasm-worker = { path = "crates/sandbox/trogon-sandbox-v8-wasm-worker" }
+trogon-sandbox-vercel-worker = { path = "crates/sandbox/trogon-sandbox-vercel-worker" }
 trogon-sandbox-volumes = { path = "crates/sandbox/trogon-sandbox-volumes" }
 trogon-sandbox-windows-fence = { path = "crates/sandbox/trogon-sandbox-windows-fence" }
 trogon-std = { path = "crates/platform/trogon-std" }
@@ -210,6 +211,7 @@ nix = { version = "=0.31.2", default-features = false, features = ["fs", "signal
 chrono = "=0.4.45"
 chrono-tz = "=0.10.4"
 ed25519-dalek = { version = "=2.2.0", features = ["std", "rand_core"] }
+flate2 = "=1.1.10"
 toml = "=1.1.8"
 wasmtime = "=47.0.3"
 http = "=1.5.0"
