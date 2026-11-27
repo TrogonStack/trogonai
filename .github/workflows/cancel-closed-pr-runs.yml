@@ -15,20 +15,20 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: write
+      contents: read
     steps:
+      # The base branch, not the PR's merge ref, which no longer exists once
+      # the PR is merged and is the PR author's code when it is not.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
       - name: Cancel the PR's unfinished runs
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-        run: |
-          for status in queued pending waiting requested in_progress; do
-            gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/actions/runs" \
-              -f branch="$HEAD_REF" -f status="$status" -f per_page=100 \
-              --jq '.workflow_runs[] | "\(.id) \(.head_repository.full_name)"'
-          done | sort -u | while read -r id repo; do
-            # A fork can push a branch with the same name as one in this repo.
-            [ "$repo" = "$HEAD_REPO" ] && [ "$id" != "$GITHUB_RUN_ID" ] || continue
-            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent \
-              || echo "::notice::run $id already finished"
-          done
+        run: mise run --skip-tools github:workflows:cancel-closed-pr-runs:cancel
