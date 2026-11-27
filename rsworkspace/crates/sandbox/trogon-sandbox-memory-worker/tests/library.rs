@@ -1,10 +1,16 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+use clap::Parser;
 use tokio_util::sync::CancellationToken;
-use trogon_sandbox_contract::{CommandOutput, FileContentHashing, FileRecursion, ProviderKind, WorkerId};
+use trogon_sandbox_contract::CapabilitySupport::{Supported, Unsupported};
+use trogon_sandbox_contract::{
+    CommandOutput, EgressCapability, EgressEnforcementLevel, FileContentHashing, FileRecursion, ProviderKind,
+    SuspendLevel, WorkerId,
+};
 use trogon_sandbox_memory_worker::{
-    CommandCtx, CommandTable, LiveOutput, MemoryFs, PROFILE, build_heartbeat, build_heartbeat_in_regions, out, resolve,
+    CommandCtx, CommandTable, LiveOutput, MemoryFs, MemoryWorkerArgs, PROFILE, build_heartbeat,
+    build_heartbeat_in_regions, out, resolve,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -163,5 +169,114 @@ fn heartbeats_claim_the_declared_profile() -> TestResult {
     let placed = build_heartbeat_in_regions(ProviderKind::Mock, &worker, 8, 0, &["eu-1".to_string()]);
     assert_eq!(placed.profile.placement.regions, vec!["eu-1".to_string()]);
     assert_eq!(PROFILE.provider, ProviderKind::Mock);
+    Ok(())
+}
+
+#[test]
+fn manifests_follow_content_and_skip_missing_paths() -> TestResult {
+    let mut fs = MemoryFs::default();
+    fs.write("/w/a.txt", b"1".to_vec());
+    fs.write("/w/sub/b.txt", b"22".to_vec());
+    fs.write("/other/c.txt", b"3".to_vec());
+    let before = fs.manifest("/w", FileRecursion::Recursive, FileContentHashing::Content)?;
+    assert_eq!(
+        before.iter().map(|(path, _)| path.as_str()).collect::<Vec<_>>(),
+        vec!["/w/a.txt", "/w/sub/b.txt"]
+    );
+    assert_eq!(before.get("/w/sub/b.txt").map(|entry| entry.size()), Some(2));
+    assert!(
+        fs.manifest("/nowhere", FileRecursion::Recursive, FileContentHashing::Content)?
+            .is_empty()
+    );
+    fs.write("/w/a.txt", b"2".to_vec());
+    let after = fs.manifest("/w", FileRecursion::Recursive, FileContentHashing::Content)?;
+    let hash =
+        |manifest: &trogon_sandbox_file_ops::Manifest| manifest.get("/w/a.txt").and_then(|entry| entry.hash().cloned());
+    assert!(hash(&before).is_some());
+    assert_ne!(hash(&after), hash(&before));
+    Ok(())
+}
+
+#[test]
+fn a_sibling_with_a_shared_prefix_is_not_a_directory() {
+    let mut fs = MemoryFs::default();
+    fs.write("/w/sub/b.txt", b"x".to_vec());
+    fs.write("/wx", b"x".to_vec());
+    assert!(fs.is_dir("/w"));
+    assert!(fs.is_dir("/w/sub/"));
+    assert!(!fs.is_dir("/wx"));
+    assert!(!fs.is_dir("/w/sub/b.txt"));
+    assert_eq!(fs.read("/w/./sub/b.txt"), Some(&b"x"[..]));
+    assert!(fs.read("/w/sub/c.txt").is_none());
+}
+
+#[tokio::test]
+async fn commands_resolve_paths_against_their_working_directory() -> TestResult {
+    let table = CommandTable::default();
+    let fs = Arc::new(Mutex::new(MemoryFs::default()));
+    fs.lock().map_err(|e| e.to_string())?.write("/work/f", b"data".to_vec());
+    let mut context = ctx(&fs, &[]);
+    context.cwd = "/work".to_string();
+    let found = run(&table, &["cat", "f"], context).await;
+    assert_eq!((found.exit_code, found.stdout), (0, b"data".to_vec()));
+    let missing = run(&table, &["cat", "f"], ctx(&fs, &[])).await;
+    assert_eq!(missing.exit_code, 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_shell_line_splits_on_any_run_of_whitespace() {
+    let table = CommandTable::default();
+    let fs = Arc::new(Mutex::new(MemoryFs::default()));
+    let spaced = run(&table, &["sh", "-c", "echo  a   b"], ctx(&fs, &[])).await;
+    assert_eq!((spaced.exit_code, spaced.stdout), (0, b"a b\n".to_vec()));
+    assert_eq!(run(&table, &["sh", "-c", "nope"], ctx(&fs, &[])).await.exit_code, 127);
+}
+
+#[tokio::test]
+async fn a_registered_handler_sees_its_arguments() {
+    let mut table = CommandTable::default();
+    table.register_sync("hello", |context| out(0, &format!("hi {}", context.args.join(",")), ""));
+    let fs = Arc::new(Mutex::new(MemoryFs::default()));
+    let greeted = run(&table, &["hello", "bob", "amy"], ctx(&fs, &[])).await;
+    assert_eq!(greeted.stdout, b"hi bob,amy");
+    assert_eq!(run(&table, &["echo", "still"], ctx(&fs, &[])).await.stdout, b"still\n");
+}
+
+#[test]
+fn pause_is_a_freeze_and_suspend_is_memory_level() {
+    assert_eq!(PROFILE.lifecycle.dormancy.freeze, Supported);
+    assert_eq!(PROFILE.lifecycle.dormancy.suspend, Some(SuspendLevel::Memory));
+}
+
+#[test]
+fn egress_claims_nothing_because_there_is_no_network_to_restrict() {
+    assert_eq!(PROFILE.isolation.egress, EgressCapability::NONE);
+    assert_eq!(PROFILE.isolation.egress_enforcement, EgressEnforcementLevel::None);
+}
+
+#[test]
+fn the_profile_claims_only_what_the_worker_does() {
+    assert_eq!(PROFILE.snapshot.can_snapshot, Unsupported);
+    assert!(PROFILE.volume.supported_modes.is_empty());
+    assert_eq!(PROFILE.isolation.supports_sandbox_users, Unsupported);
+    assert_eq!(PROFILE.isolation.supports_interactive_stdin, Unsupported);
+    assert_eq!(PROFILE.isolation.supports_file_ops, Unsupported);
+    assert_eq!(PROFILE.isolation.supports_named_processes, Supported);
+    assert_eq!(PROFILE.isolation.supports_process_readiness, Supported);
+    assert_eq!(PROFILE.isolation.supports_output_redaction, Supported);
+    assert_eq!(PROFILE.isolation.supports_change_tracking, Supported);
+    assert_eq!(PROFILE.isolation.supports_file_watch, Supported);
+}
+
+#[test]
+fn the_command_line_has_working_defaults() -> TestResult {
+    let args = MemoryWorkerArgs::try_parse_from(["trogon-sandbox-memory-worker"])?;
+    assert_eq!(args.nats_url, "nats://127.0.0.1:4222");
+    assert_eq!(args.max_concurrent_leases, 64);
+    assert!(args.regions.is_empty());
+    assert!(args.dispatch_fence_file.is_none());
+    let regions = MemoryWorkerArgs::try_parse_from(["trogon-sandbox-memory-worker", "--regions", "eu-1,us-2"])?;
+    assert_eq!(regions.regions, vec!["eu-1".to_string(), "us-2".to_string()]);
     Ok(())
 }
