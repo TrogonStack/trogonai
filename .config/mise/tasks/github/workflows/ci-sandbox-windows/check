@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Compile the Windows sandbox crates and their tests for Windows"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/rsworkspace"
+
+cargo check --locked --all-targets \
+    -p trogon-sandbox-subprocess-worker \
+    -p trogon-sandbox-policy-exec \
+    -p trogon-sandbox-policy-cli \
+    -p trogon-sandbox-fence-helper \
+    -p trogon-sandbox-windows-fence \
+    -p trogon-sandbox-egress-proxy
