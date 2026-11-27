@@ -8,6 +8,8 @@ struct RecordingAgent {
     initializes: std::sync::Mutex<Vec<InitializeRequest>>,
     prompts: AtomicU32,
     refuses_initialize: bool,
+    /// When set, every `initialize` waits for a permit before it answers.
+    paused: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 impl RecordingAgent {
@@ -27,6 +29,9 @@ impl AgentHandler for RecordingAgent {
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
         if self.refuses_initialize {
             return Err(agent_client_protocol::Error::invalid_params());
+        }
+        if let Some(paused) = &self.paused {
+            paused.acquire().await.expect("open").forget();
         }
         let reply = reply_to(&args);
         self.initializes.lock().unwrap().push(args);
@@ -192,11 +197,78 @@ async fn a_second_client_is_refused_before_the_child_sees_it() {
     let h = harness(None);
     h.agent.initialize(discord("1")).await.expect("first");
 
-    let zed = InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("zed", "1"));
-    let refusal = h.agent.initialize(zed).await.expect_err("refused");
+    let refusal = h.agent.initialize(zed()).await.expect_err("refused");
 
     assert_eq!(refusal.code, agent_client_protocol::ErrorCode::INVALID_REQUEST);
     assert_eq!(h.agent.inner.initializes().len(), 1);
+}
+
+fn zed() -> InitializeRequest {
+    InitializeRequest::new(ProtocolVersion::V1).client_info(Implementation::new("zed", "1"))
+}
+
+#[tokio::test]
+async fn a_client_that_loses_the_race_for_the_claim_is_refused_instead_of_relaunching_the_winner() {
+    let paused = Arc::new(tokio::sync::Semaphore::new(0));
+    let handshake = Arc::new(ClientHandshake::default());
+    let child = RecordingAgent {
+        paused: Some(paused.clone()),
+        ..RecordingAgent::default()
+    };
+    let agent = Arc::new(InitializedAgent::new(child, None, Arc::default(), handshake.clone()));
+
+    let winner = tokio::spawn({
+        let agent = agent.clone();
+        async move { agent.initialize(discord("1")).await }
+    });
+    while agent.child.try_lock().is_ok() {
+        tokio::task::yield_now().await;
+    }
+    // The winner is inside the child's `initialize`, holding the child, while
+    // the host is still unclaimed; the loser arrives now and waits its turn.
+    let loser = tokio::spawn({
+        let agent = agent.clone();
+        async move { agent.initialize(zed()).await }
+    });
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    paused.add_permits(1);
+
+    assert_eq!(winner.await.unwrap().expect("winner"), reply_to(&discord("1")));
+    let refusal = loser.await.unwrap().expect_err("loser refused");
+    assert_eq!(refusal.code, agent_client_protocol::ErrorCode::INVALID_REQUEST);
+    assert_eq!(agent.inner.initializes(), vec![discord("1")]);
+    assert_eq!(
+        handshake.next(),
+        Some(discord("1").into()),
+        "the winner's child is not relaunched"
+    );
+}
+
+#[tokio::test]
+async fn a_client_that_asks_for_a_relaunch_claims_the_host_before_another_can() {
+    let h = harness(None);
+    h.agent
+        .prompt(PromptRequest::new("sess-1", vec![]))
+        .await
+        .expect("prompt");
+    let first = tokio::spawn({
+        let agent = h.agent.clone();
+        async move { agent.initialize(discord("1")).await }
+    });
+    h.handshake.relaunch_wanted().await;
+
+    let refusal = h.agent.initialize(zed()).await.expect_err("second client refused");
+
+    assert_eq!(refusal.code, agent_client_protocol::ErrorCode::INVALID_REQUEST);
+    assert_eq!(
+        h.handshake.next(),
+        Some(discord("1").into()),
+        "the relaunch keeps the first client's initialize"
+    );
+    h.handshake.settle(&discord("1").into(), &Ok(reply_to(&discord("1"))));
+    assert_eq!(first.await.unwrap().expect("answered"), reply_to(&discord("1")));
 }
 
 #[tokio::test]

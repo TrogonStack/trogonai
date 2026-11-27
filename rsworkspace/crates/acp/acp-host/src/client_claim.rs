@@ -19,7 +19,8 @@ use std::sync::Mutex;
 /// the `acp-nats` bridge stamps with that same name on everything its client
 /// sends after initializing.
 ///
-/// Only an `initialize` the agent answered claims the host ([`Self::claim`]).
+/// Only an `initialize` claims the host ([`Self::claim`]): one the agent
+/// answered, or one that relaunches the agent with its parameters.
 /// A header proves nothing (any request can carry one, including one that
 /// fails or names a method that does not exist), so a request that only
 /// carries a header is checked against a claim but never makes one: otherwise
@@ -57,8 +58,9 @@ impl ClientClaim {
         self.check(name_of(request))
     }
 
-    /// Claims the host for the client of an `initialize` the agent answered,
-    /// or refuses it because a different client claimed it first.
+    /// Claims the host for the client of an `initialize` the agent answered or
+    /// is relaunched with, or refuses it because a different client claimed it
+    /// first.
     pub fn claim(&self, request: &InitializeRequest) -> Result<(), Error> {
         let client = name_of(request);
         let mut claimed_by = self.lock();

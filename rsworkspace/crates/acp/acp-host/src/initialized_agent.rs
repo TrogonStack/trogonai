@@ -51,8 +51,9 @@ use tracing::{info, warn};
 /// A second, different client is refused by the [`ClientClaim`] before
 /// anything reaches the child: here for `initialize`, which names its client
 /// in `clientInfo`, and on the NATS side for everything else, which names it
-/// in a header (see [`Self::claim`]). Only an `initialize` the child answered
-/// claims the host.
+/// in a header (see [`Self::claim`]). An `initialize` the child answered
+/// claims the host, and so does one that relaunches the child, as it asks for
+/// the relaunch.
 pub struct InitializedAgent<A> {
     inner: A,
     claim: Arc<ClientClaim>,
@@ -86,37 +87,51 @@ impl<A> InitializedAgent<A> {
 }
 
 impl<A: AgentHandler + Send + Sync> InitializedAgent<A> {
+    /// Admission, the claim and the decision to relaunch all happen under the
+    /// child lock, so a client that waited on it while another client claimed
+    /// the host is refused here, like any other second client, instead of
+    /// relaunching the claiming client's child with its own `initialize`.
     async fn initialize_client(&self, args: ClientInitialize) -> Result<InitializeResponse> {
-        if let Err(refusal) = self.claim.admit(args.typed()) {
-            warn!(error = %refusal, "refused a second client's initialize");
-            return Err(refusal);
-        }
         let mut child = self.child.lock().await;
-        let response = match child.as_ref() {
-            Some(done) if done.request == args => done.response.clone(),
+        match child.as_ref() {
+            Some(done) if done.request == args => {
+                let response = done.response.clone();
+                self.claim_for(&args)?;
+                Ok(response)
+            }
             Some(_) => {
+                // Claimed before the relaunch is asked for: the relaunch
+                // replaces the running child for this client, and a client
+                // that loses the race must not replace it again.
+                self.claim_for(&args)?;
                 info!("the client initialized with different parameters; relaunching the agent with them");
-                let pending = self.handshake.relaunch_with(args.clone());
+                let pending = self.handshake.relaunch_with(args);
                 drop(child);
-                pending.answer().await?
+                pending.answer().await
             }
             None => {
+                if let Err(refusal) = self.claim.admit(args.typed()) {
+                    warn!(error = %refusal, "refused a second client's initialize");
+                    return Err(refusal);
+                }
                 let response = self.inner.initialize_raw(args.params().clone()).await?;
                 info!(agent = ?response.agent_info, "agent initialized by the client");
+                self.claim_for(&args)?;
                 let done = Handshake {
-                    request: args.clone(),
+                    request: args,
                     response: response.clone(),
                 };
                 self.handshake.initialized(&done);
                 *child = Some(done);
-                response
+                Ok(response)
             }
-        };
-        if let Err(refusal) = self.claim.claim(args.typed()) {
-            warn!(error = %refusal, "another client claimed the host while this initialize was answered");
-            return Err(refusal);
         }
-        Ok(response)
+    }
+
+    fn claim_for(&self, args: &ClientInitialize) -> Result<()> {
+        self.claim.claim(args.typed()).inspect_err(|refusal| {
+            warn!(error = %refusal, "refused a second client's initialize");
+        })
     }
 
     /// Makes sure the child is initialized before it gets any other request.
