@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use trogon_std::env::SystemEnv;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -11,7 +12,7 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use trogon_sandbox_contract::{DispatchAuth, FileSha256, LeaseEpoch, LeaseId, TenantId, WorkerId};
 use trogon_sandbox_protocol::{
-    AUTH_FIELD, DispatchAuthError, DispatchDecodeError, DispatchMalformedReason, DispatchPublicKeyError,
+    AUTH_FIELD, DispatchAuthError, DispatchDecodeError, DispatchMalformedError, DispatchPublicKeyError,
     DispatchSignError, DispatchSigner, DispatchSignerConfigError, DispatchVerifier, DispatchVerifierConfigError,
     ENV_FENCE_EPOCH, ENV_FENCE_FILE, ENV_PUBLIC_KEYS, ENV_PUBLIC_KEYS_FILE, ENV_SIGNING_KEY, ENV_SIGNING_KEY_FILE,
     ENV_SIGNING_KEY_ID, ENV_SIGNING_TTL_SECS, ENV_VERIFY_MODE, EnforcementMode, EnforcementModeError, EpochMode,
@@ -42,7 +43,7 @@ fn pair(mode: EnforcementMode) -> Result<(DispatchSigner, DispatchVerifier), Box
 }
 
 fn check(verifier: &DispatchVerifier, payload: &[u8], now: SystemTime) -> Result<(), DispatchAuthError> {
-    let mut value: Value = serde_json::from_slice(payload).map_err(DispatchMalformedReason::Json)?;
+    let mut value: Value = serde_json::from_slice(payload).map_err(DispatchMalformedError::Json)?;
     verifier.verify_value(&mut value, OP_LEASE_DISPATCH, None, now)
 }
 
@@ -413,7 +414,7 @@ fn decode_reports_json_and_shape_errors() -> TestResult {
         matches!(
             result,
             Err(DispatchDecodeError::Auth(DispatchAuthError::Malformed(
-                DispatchMalformedReason::NotAnObject
+                DispatchMalformedError::NotAnObject
             )))
         ),
         "{result:?}"
@@ -432,7 +433,7 @@ fn a_missing_or_unreadable_envelope_is_refused() -> TestResult {
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::NotAnObject))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::NotAnObject))
         ),
         "{result:?}"
     );
@@ -441,7 +442,7 @@ fn a_missing_or_unreadable_envelope_is_refused() -> TestResult {
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Json(_)))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::Json(_)))
         ),
         "{result:?}"
     );
@@ -457,7 +458,7 @@ fn an_unsupported_version_or_malformed_signature_is_refused() -> TestResult {
         matches!(
             result,
             Err(DispatchAuthError::Malformed(
-                DispatchMalformedReason::UnsupportedVersion { version: 2 }
+                DispatchMalformedError::UnsupportedVersion { version: 2 }
             ))
         ),
         "{result:?}"
@@ -469,7 +470,7 @@ fn an_unsupported_version_or_malformed_signature_is_refused() -> TestResult {
         assert!(
             matches!(
                 result,
-                Err(DispatchAuthError::Malformed(DispatchMalformedReason::Signature))
+                Err(DispatchAuthError::Malformed(DispatchMalformedError::Signature))
             ),
             "{signature}: {result:?}"
         );
@@ -580,6 +581,13 @@ fn an_epoch_in_the_target_is_signed() -> TestResult {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn signing_refuses_a_payload_it_cannot_bind() -> TestResult {
     let signer = DispatchSigner::new("k1", FORGE_SEED);
     let sign = |value: Value| signer.sign_payload(&value.to_string().into_bytes(), OP_LEASE_DISPATCH);
@@ -647,6 +655,13 @@ fn sign_errors_describe_what_is_wrong() -> TestResult {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn public_keys_must_be_base64_of_a_valid_point() -> TestResult {
     for bad in [
         "not base64!!",
@@ -731,6 +746,13 @@ fn the_signer_prefers_a_key_file_over_the_inline_seed() -> TestResult {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn the_signer_reports_an_unreadable_key_file() -> TestResult {
     let directory = tempfile::tempdir()?;
     let missing = directory.path().join("absent.key");
@@ -748,6 +770,13 @@ fn the_signer_reports_an_unreadable_key_file() -> TestResult {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn the_signer_refuses_a_malformed_seed_key_id_or_lifetime() -> TestResult {
     let (seed, _) = DispatchSigner::generate_keypair_b64();
     for bad in ["not base64 !!", &B64.encode([1u8; 31]), &B64.encode([1u8; 33]), "   x"] {
@@ -785,8 +814,8 @@ fn the_signer_refuses_a_malformed_seed_key_id_or_lifetime() -> TestResult {
 #[test]
 fn the_process_environment_readers_accept_an_unconfigured_environment() {
     // Neither reader may panic whatever the host sets; with the variables unset they succeed.
-    let _ = DispatchSigner::from_env();
-    let _ = DispatchVerifier::from_env();
+    let _ = DispatchSigner::from_env(&SystemEnv);
+    let _ = DispatchVerifier::from_env(&SystemEnv);
 }
 
 #[test]
@@ -847,6 +876,13 @@ fn the_verifier_reads_keys_from_a_file_in_preference_to_the_inline_list() -> Tes
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn the_verifier_refuses_bad_configuration() -> TestResult {
     let error = verifier_from(&vars(&[(ENV_VERIFY_MODE, "maybe")]), None)
         .err()
@@ -885,6 +921,13 @@ fn the_verifier_refuses_bad_configuration() -> TestResult {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn the_verifier_reports_an_unreadable_key_file() -> TestResult {
     let directory = tempfile::tempdir()?;
     let missing = directory.path().join("absent");
@@ -1059,7 +1102,7 @@ fn auth_errors_describe_the_refusal() {
             "dispatch signed for worker w2, this worker is w1",
         ),
         (
-            DispatchAuthError::Malformed(DispatchMalformedReason::Nonce),
+            DispatchAuthError::Malformed(DispatchMalformedError::Nonce),
             "dispatch signature is malformed: nonce",
         ),
     ];
@@ -1071,28 +1114,28 @@ fn auth_errors_describe_the_refusal() {
 #[test]
 fn malformed_reasons_describe_what_was_unreadable() {
     let cases = [
-        (DispatchMalformedReason::NotAnObject, "not an object"),
-        (DispatchMalformedReason::UnsupportedVersion { version: 3 }, "version 3"),
-        (DispatchMalformedReason::Signature, "signature"),
-        (DispatchMalformedReason::Nonce, "nonce"),
+        (DispatchMalformedError::NotAnObject, "not an object"),
+        (DispatchMalformedError::UnsupportedVersion { version: 3 }, "version 3"),
+        (DispatchMalformedError::Signature, "signature"),
+        (DispatchMalformedError::Nonce, "nonce"),
         (
-            DispatchMalformedReason::ReadinessTransfer,
+            DispatchMalformedError::ReadinessTransfer,
             "command readiness cannot carry a transfer descriptor",
         ),
         (
-            DispatchMalformedReason::NativeSnapshotDeleteTransfer,
+            DispatchMalformedError::NativeSnapshotDeleteTransfer,
             "native snapshot deletion cannot carry a transfer descriptor",
         ),
         (
-            DispatchMalformedReason::OwnedCancellationTransfer,
+            DispatchMalformedError::OwnedCancellationTransfer,
             "owned cancellation cannot carry a transfer descriptor",
         ),
         (
-            DispatchMalformedReason::NativeSnapshotProvider,
+            DispatchMalformedError::NativeSnapshotProvider,
             "native snapshot provider differs from its subject",
         ),
         (
-            DispatchMalformedReason::CapturedScopeNotReadiness,
+            DispatchMalformedError::CapturedScopeNotReadiness,
             "captured scope is not worker command readiness",
         ),
     ];

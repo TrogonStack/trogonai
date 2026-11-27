@@ -15,16 +15,9 @@ use trogon_nats::jetstream::traits::JetStreamPublisher;
 use trogon_sandbox_contract::{CommandExitMarker, ExecutionId, LeaseId, PollCommandResponse};
 
 use crate::command_exit_error::CommandExitError;
+pub use crate::constants::{DETACHED_EXIT_POLL_FAILURES, DETACHED_EXIT_POLL_INTERVAL};
 use crate::detached_exit::DetachedExit;
 use crate::subjects;
-
-/// How often a detached command's watcher asks the agent whether it exited.
-pub const DETACHED_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
-
-/// Consecutive failed polls after which the watcher stops and reports the
-/// exit as unknown. The agent going quiet this long means the sandbox is gone,
-/// and a follower is better told so than left waiting.
-pub const DETACHED_EXIT_POLL_FAILURES: u32 = 20;
 
 /// Polls `poll` every `interval` until the command leaves `Running`.
 ///

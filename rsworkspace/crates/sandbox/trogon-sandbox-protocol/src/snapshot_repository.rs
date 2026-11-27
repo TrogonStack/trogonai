@@ -11,10 +11,8 @@
 //! owns the prefix of the moved repositories in a registry that grants access
 //! by repository prefix.
 
+use crate::constants::{HEX_SEGMENT, ROOT};
 use trogon_sandbox_contract::TenantId;
-
-const ROOT: &str = "snapshots";
-const HEX_SEGMENT: &str = "tenant-hex";
 
 /// Repository new snapshots of `tenant` are written to.
 pub fn snapshot_repository_for_tenant(tenant: &TenantId) -> String {

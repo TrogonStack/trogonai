@@ -1,12 +1,12 @@
 use trogon_sandbox_contract::{EntityState, LeaseId, SandboxEntityRecord};
 
-use crate::{EntityEvent, IllegalTransition};
+use crate::{EntityEvent, IllegalTransitionError};
 
 /// The single entity transition table.
 ///
 /// Returns the next state, or an error when the move is not allowed, including a lease that does not match the
 /// bound one.
-pub fn next_entity_state(state: &EntityState, event: &EntityEvent) -> Result<EntityState, IllegalTransition> {
+pub fn next_entity_state(state: &EntityState, event: &EntityEvent) -> Result<EntityState, IllegalTransitionError> {
     let bound = state.lease();
     let matches = |lease: &LeaseId| bound == Some(lease);
     let next = match (state, event) {
@@ -55,7 +55,7 @@ pub fn next_entity_state(state: &EntityState, event: &EntityEvent) -> Result<Ent
         (EntityState::Failed { .. }, EntityEvent::Recovered) => Some(EntityState::Stopped),
         _ => None,
     };
-    next.ok_or_else(|| IllegalTransition {
+    next.ok_or_else(|| IllegalTransitionError {
         from: state.kind(),
         event: event.name(),
     })
@@ -66,7 +66,7 @@ pub fn next_entity_state(state: &EntityState, event: &EntityEvent) -> Result<Ent
 ///
 /// A start bumps the generation. A delete keeps the bound lease so whoever finishes it can end the run. On an
 /// illegal transition the record is left unchanged.
-pub fn apply_entity_event(record: &mut SandboxEntityRecord, event: &EntityEvent) -> Result<(), IllegalTransition> {
+pub fn apply_entity_event(record: &mut SandboxEntityRecord, event: &EntityEvent) -> Result<(), IllegalTransitionError> {
     let next = next_entity_state(&record.state, event)?;
     if matches!(event, EntityEvent::StartRequested { .. }) {
         record.generation = record.generation.saturating_add(1);

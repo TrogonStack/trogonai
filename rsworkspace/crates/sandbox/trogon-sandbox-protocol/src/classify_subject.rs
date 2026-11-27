@@ -1,42 +1,7 @@
 use trogon_sandbox_contract::{LeaseId, WorkerId};
 
 use crate::SignedSubject;
-
-/// Verbs the broker sends to the worker holding a lease, as the fourth token of
-/// `sandbox.provider.<provider>.<verb>.<lease>`.
-const LEASE_VERBS: &[&str] = &[
-    "cancel",
-    "cancel_owned",
-    "checkpoint_running",
-    "network_policy_update",
-    "run_command",
-    "get_domain",
-    "native_handle",
-    "ssh_access",
-    "pause",
-    "resume",
-    "rollback",
-    "suspend",
-    "wake",
-    "resource_usage",
-    "kill_command",
-    "cancel_command_launch",
-    "stop_command",
-    "restart_command",
-    "write_stdin",
-    "terminal",
-    "write_files",
-    "read_file",
-    "file_op",
-    "poll_command",
-    "list_processes",
-    "wait_ready",
-    "create_user",
-    "create_group",
-    "modify_group_membership",
-];
-
-const MAX_READINESS_LEASE_LEN: usize = 1024;
+use crate::constants::{LEASE_VERBS, MAX_READINESS_LEASE_LEN};
 
 /// Classifies a subject, or `None` when it is not a signed request.
 pub fn classify_subject(subject: &str) -> Option<SignedSubject> {

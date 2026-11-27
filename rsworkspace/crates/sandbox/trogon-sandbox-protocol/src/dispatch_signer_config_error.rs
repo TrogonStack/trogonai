@@ -1,4 +1,4 @@
-use crate::dispatch_auth_constants::{ENV_SIGNING_KEY_FILE, ENV_SIGNING_KEY_ID, ENV_SIGNING_TTL_SECS};
+use crate::constants::{ENV_SIGNING_KEY_FILE, ENV_SIGNING_KEY_ID, ENV_SIGNING_TTL_SECS};
 
 /// Why the dispatch signer could not be built from its configuration.
 #[derive(Debug, thiserror::Error)]

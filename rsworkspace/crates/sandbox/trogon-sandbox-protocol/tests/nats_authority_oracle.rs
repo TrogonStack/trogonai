@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::path::PathBuf;
 use std::time::Duration;
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 use futures::StreamExt;
 use trogon_sandbox_contract::{
@@ -23,13 +24,13 @@ impl Drop for Server {
 }
 
 fn server_binary() -> Option<PathBuf> {
-    let on_path = std::env::var_os("PATH").and_then(|paths| {
+    let on_path = SystemEnv.var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths)
             .map(|dir| dir.join("nats-server"))
             .find(|candidate| candidate.is_file())
     });
     on_path.or_else(|| {
-        let home = std::env::var_os("HOME")?;
+        let home = SystemEnv.var_os("HOME")?;
         let shim = PathBuf::from(home).join(".local/share/mise/shims/nats-server");
         shim.is_file().then_some(shim)
     })

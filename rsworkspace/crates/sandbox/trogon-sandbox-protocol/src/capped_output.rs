@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use trogon_sandbox_contract::OutputTruncation;
 
-use crate::output_cap::join;
+use crate::output_join::join;
 
 /// Accumulates one stream, retaining at most `cap` bytes of it.
 ///

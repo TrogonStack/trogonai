@@ -9,15 +9,16 @@ use base64::engine::general_purpose::STANDARD as B64;
 use ed25519_dalek::{Signature, Verifier as _, VerifyingKey};
 use serde_json::Value;
 use trogon_sandbox_contract::{DispatchAuth, DispatchTarget, LeaseId, TenantId, WorkerId};
+use trogon_std::env::ReadEnv;
 
-use crate::dispatch_auth_constants::{
+use crate::constants::{
     AUTH_FIELD, CLOCK_SKEW, ENV_FENCE_EPOCH, ENV_FENCE_FILE, ENV_PUBLIC_KEYS, ENV_PUBLIC_KEYS_FILE, ENV_VERIFY_MODE,
 };
 use crate::dispatch_envelope::{body_digest, signing_input, string_at, unix};
 use crate::dispatch_fence::DispatchFence;
-use crate::dispatch_global::default_fence_path;
+use crate::dispatch_fence_location::default_fence_path;
 use crate::{
-    DispatchAuthError, DispatchDecodeError, DispatchMalformedReason, DispatchPublicKeyError,
+    DispatchAuthError, DispatchDecodeError, DispatchMalformedError, DispatchPublicKeyError,
     DispatchVerifierConfigError, EnforcementMode, EpochMode, FreshLaunchFenceError,
 };
 
@@ -111,8 +112,8 @@ impl DispatchVerifier {
 
     /// Builds the verifier from the process environment. `warn` is the default mode; `require` with no keys is an
     /// error.
-    pub fn from_env() -> Result<Self, DispatchVerifierConfigError> {
-        Self::from_lookup(&|name| std::env::var(name).ok(), default_fence_path())
+    pub fn from_env(env: &impl ReadEnv) -> Result<Self, DispatchVerifierConfigError> {
+        Self::from_lookup(&|name| env.var(name).ok(), default_fence_path())
     }
 
     /// Builds the verifier from the variables `lookup` returns. `default_fence` is used when no fence file is
@@ -168,7 +169,7 @@ impl DispatchVerifier {
     /// Checks version, key, signature and expiry of an envelope.
     pub(crate) fn check_envelope(&self, auth: &DispatchAuth, now: SystemTime) -> Result<(), DispatchAuthError> {
         if auth.version != 1 {
-            return Err(DispatchMalformedReason::UnsupportedVersion { version: auth.version }.into());
+            return Err(DispatchMalformedError::UnsupportedVersion { version: auth.version }.into());
         }
         let key = self
             .keys
@@ -178,7 +179,7 @@ impl DispatchVerifier {
             .decode(&auth.signature)
             .ok()
             .and_then(|bytes| Signature::from_slice(&bytes).ok())
-            .ok_or(DispatchMalformedReason::Signature)?;
+            .ok_or(DispatchMalformedError::Signature)?;
         key.verify(&signing_input(auth), &signature)
             .map_err(|_| DispatchAuthError::BadSignature)?;
         if unix(now) > auth.expires_at.saturating_add(CLOCK_SKEW.as_secs()) {
@@ -195,9 +196,9 @@ impl DispatchVerifier {
         own_worker: Option<&WorkerId>,
         now: SystemTime,
     ) -> Result<(), DispatchAuthError> {
-        let object = value.as_object_mut().ok_or(DispatchMalformedReason::NotAnObject)?;
+        let object = value.as_object_mut().ok_or(DispatchMalformedError::NotAnObject)?;
         let auth = object.remove(AUTH_FIELD).ok_or(DispatchAuthError::Missing)?;
-        let auth: DispatchAuth = serde_json::from_value(auth).map_err(DispatchMalformedReason::Json)?;
+        let auth: DispatchAuth = serde_json::from_value(auth).map_err(DispatchMalformedError::Json)?;
         self.check_envelope(&auth, now)?;
         if auth.operation != operation {
             return Err(DispatchAuthError::WrongOperation {

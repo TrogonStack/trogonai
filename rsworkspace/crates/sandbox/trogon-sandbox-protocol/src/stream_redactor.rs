@@ -1,5 +1,12 @@
 use crate::RedactionSet;
 
+impl RedactionSet {
+    /// A filter for one stream that arrives in chunks.
+    pub fn stream(&self) -> StreamRedactor {
+        StreamRedactor::new(self.clone())
+    }
+}
+
 /// Redacts one stream pushed in chunks, so a value split across two chunks is still caught.
 ///
 /// It holds back at most `max_value_len - 1` bytes, the longest prefix of a value a chunk can end in, until the next

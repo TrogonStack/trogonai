@@ -104,6 +104,13 @@ async fn publishes_the_marker_on_the_evidence_subject() -> TestResult {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 async fn a_rejected_publish_is_a_publish_error() -> TestResult {
     let js = MockJetStreamPublisher::new();
     js.fail_next_js_publish();

@@ -1,7 +1,5 @@
+pub use crate::constants::DEFAULT_SUBSTRATE_SIZE_CLASSES;
 use trogon_sandbox_contract::{SubstrateSizeClass, SubstrateSizeClassError, SubstrateSizeClasses};
-
-/// The documented default ladder of Substrate pools.
-pub const DEFAULT_SUBSTRATE_SIZE_CLASSES: &str = "small=2048,medium=8192,large=32768";
 
 /// The default ladder of Substrate pools.
 pub fn default_substrate_size_classes() -> Result<SubstrateSizeClasses, SubstrateSizeClassError> {

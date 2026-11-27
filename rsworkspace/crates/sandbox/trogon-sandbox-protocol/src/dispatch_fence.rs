@@ -10,17 +10,13 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 #[cfg(unix)]
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use trogon_sandbox_contract::{DispatchAttemptId, DispatchTarget, LeaseEpoch, LeaseId, TenantId, WorkerId};
 
+use crate::constants::{CAPACITY, COMPACT_SLACK, RETENTION};
 use crate::{DispatchAuthError, EpochMode, FreshLaunchFenceError};
-
-const RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
-const CAPACITY: usize = 100_000;
-/// Journal lines beyond the live entries that trigger a rewrite on open.
-const COMPACT_SLACK: usize = 1024;
 
 struct Entry {
     tenant: String,

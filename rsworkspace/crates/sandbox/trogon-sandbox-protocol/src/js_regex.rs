@@ -3,7 +3,7 @@ use std::ops::Range;
 use regress::{Flags, Regex};
 use trogon_sandbox_contract::ExtractPattern;
 
-use crate::{GroupOneUndefined, JsRegexError};
+use crate::{GroupOneUndefinedError, JsRegexError};
 
 /// A regular expression compiled for scanning content for the credential value in capture group 1.
 ///
@@ -91,13 +91,18 @@ impl JsRegex {
     ///
     /// Empty groups are skipped, overlapping spans merge, and a span that splits a surrogate pair widens to the
     /// whole scalar. A match that leaves group 1 undefined aborts the scan.
-    pub fn group_one_spans(&self, content: &str) -> Result<Vec<Range<usize>>, GroupOneUndefined> {
+    pub fn group_one_spans(&self, content: &str) -> Result<Vec<Range<usize>>, GroupOneUndefinedError> {
         let text = Utf16Text::new(content);
         let mut spans: Vec<Range<usize>> = Vec::new();
         for found in self.compiled.find_from_ucs2(&text.units, 0) {
-            let group = found.captures.first().cloned().flatten().ok_or(GroupOneUndefined {
-                offset: text.start_byte(found.range.start),
-            })?;
+            let group = found
+                .captures
+                .first()
+                .cloned()
+                .flatten()
+                .ok_or(GroupOneUndefinedError {
+                    offset: text.start_byte(found.range.start),
+                })?;
             if group.is_empty() {
                 continue;
             }

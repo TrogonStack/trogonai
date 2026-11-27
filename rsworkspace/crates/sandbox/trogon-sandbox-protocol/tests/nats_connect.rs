@@ -6,6 +6,13 @@ use trogon_sandbox_protocol::nats_connect::connect;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[tokio::test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 async fn an_unparseable_url_is_an_invalid_url_error() -> TestResult {
     let error = connect("not a url").await.err().ok_or("expected an error")?;
     assert!(matches!(error, NatsConnectError::InvalidUrl(_)));
@@ -44,6 +51,13 @@ async fn userinfo_in_the_url_authenticates_as_user_and_password() -> TestResult 
 }
 
 #[tokio::test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 async fn a_user_without_a_password_is_refused() -> TestResult {
     let error = connect("nats://alice@127.0.0.1:4222")
         .await

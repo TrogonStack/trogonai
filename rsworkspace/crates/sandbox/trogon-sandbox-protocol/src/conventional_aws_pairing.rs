@@ -2,11 +2,10 @@ use trogon_sandbox_contract::{
     AwsCredentialPairBinding, AwsCredentialPairs, SecretBinding, SecretBindings, SecretTarget,
 };
 
+pub use crate::constants::{
+    CONVENTIONAL_AWS_ACCESS_KEY_ID, CONVENTIONAL_AWS_SECRET_ACCESS_KEY, CONVENTIONAL_AWS_SESSION_TOKEN,
+};
 use crate::{ConventionalAwsPair, UnpairedReason};
-
-pub const CONVENTIONAL_AWS_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
-pub const CONVENTIONAL_AWS_SECRET_ACCESS_KEY: &str = "AWS_SECRET_ACCESS_KEY";
-pub const CONVENTIONAL_AWS_SESSION_TOKEN: &str = "AWS_SESSION_TOKEN";
 
 /// Two bindings inject at the same places: same hosts and same request scope.
 fn same_destination(a: &SecretBinding, b: &SecretBinding) -> bool {

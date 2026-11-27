@@ -1,10 +1,3 @@
-pub(crate) const DASH: u16 = b'-' as u16;
-pub(crate) const SLASH: u16 = b'/' as u16;
-pub(crate) const STAR_UNIT: u16 = b'*' as u16;
-pub(crate) const OPEN: u16 = b'[' as u16;
-pub(crate) const CLOSE: u16 = b']' as u16;
-pub(crate) const QUESTION: u16 = b'?' as u16;
-
 /// The UTF-16 code units of `text`, which is how the glob dialect counts characters.
 pub(crate) fn units(text: &str) -> Vec<u16> {
     text.encode_utf16().collect()

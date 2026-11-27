@@ -254,6 +254,13 @@ fn errors_never_carry_the_real_payload() -> TestResult {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn violation_reasons_are_typed() -> TestResult {
     assert_eq!(
         JwtMaskError::NoClaimMatched.violation_reason(),

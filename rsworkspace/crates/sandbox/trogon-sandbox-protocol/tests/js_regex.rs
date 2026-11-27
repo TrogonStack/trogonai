@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use trogon_sandbox_contract::ExtractPattern;
-use trogon_sandbox_protocol::{GroupOneUndefined, JsRegex};
+use trogon_sandbox_protocol::{GroupOneUndefinedError, JsRegex};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
-type Spans = Result<Vec<Range<usize>>, GroupOneUndefined>;
+type Spans = Result<Vec<Range<usize>>, GroupOneUndefinedError>;
 
 fn spans(pattern: &str, content: &str) -> Result<Spans, Box<dyn std::error::Error>> {
     Ok(JsRegex::new(&ExtractPattern::new(pattern)?)?.group_one_spans(content))
@@ -48,11 +48,14 @@ fn constructs_only_javascript_accepts_match_as_the_engine_does() -> TestResult {
 
 #[test]
 fn an_alternative_that_leaves_group_one_unset_aborts_the_scan() -> TestResult {
-    assert_eq!(spans("(a)|b", "ab")?, Err(GroupOneUndefined { offset: 1 }));
-    assert_eq!(spans("(?<n>a)|(?<n>b)", "ab")?, Err(GroupOneUndefined { offset: 1 }));
-    assert_eq!(spans(r"(a)?\1(b)", "b")?, Err(GroupOneUndefined { offset: 0 }));
+    assert_eq!(spans("(a)|b", "ab")?, Err(GroupOneUndefinedError { offset: 1 }));
     assert_eq!(
-        GroupOneUndefined { offset: 3 }.to_string(),
+        spans("(?<n>a)|(?<n>b)", "ab")?,
+        Err(GroupOneUndefinedError { offset: 1 })
+    );
+    assert_eq!(spans(r"(a)?\1(b)", "b")?, Err(GroupOneUndefinedError { offset: 0 }));
+    assert_eq!(
+        GroupOneUndefinedError { offset: 3 }.to_string(),
         "capture group 1 is undefined in the match at byte 3"
     );
     Ok(())

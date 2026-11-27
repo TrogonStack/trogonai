@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use trogon_std::env::SystemEnv;
 
 use trogon_sandbox_contract::{TerminalInput, TerminalOutput};
 use trogon_sandbox_protocol::{
@@ -211,7 +212,7 @@ fn replay_size_comes_from_the_configuration_value() {
 #[test]
 fn replay_size_from_the_environment_stays_in_range() {
     assert_eq!(TERMINAL_REPLAY_BYTES_ENV, "SANDBOX_TERMINAL_REPLAY_BYTES");
-    assert!(terminal_replay_bytes_from_env() <= TerminalReplayRing::MAX_CAPACITY);
+    assert!(terminal_replay_bytes_from_env(&SystemEnv) <= TerminalReplayRing::MAX_CAPACITY);
 }
 
 #[test]

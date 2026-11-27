@@ -14,11 +14,8 @@ use trogon_sandbox_contract::{
 };
 
 use crate::attempt_ledger_storage::{create_private_file, initialize, read_state, write_state};
+use crate::constants::{HAS_LEASE, MAX_LEGACY_BYTES, SQLITE_MAGIC};
 use crate::{AttemptLedgerError, AttemptPhase, CleanupState};
-
-const MAX_LEGACY_BYTES: u64 = 64 * 1024 * 1024;
-const SQLITE_MAGIC: &[u8; 16] = b"SQLite format 3\0";
-const HAS_LEASE: &str = "SELECT EXISTS(SELECT 1 FROM attempts WHERE lease_id=?1)";
 
 /// How a refused try-lock surfaces: contention means another worker owns the ledger, anything else is an I/O failure.
 fn lock_error(error: TryLockError) -> AttemptLedgerError {

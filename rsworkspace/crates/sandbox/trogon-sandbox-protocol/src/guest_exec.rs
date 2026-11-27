@@ -9,22 +9,9 @@
 use base64::Engine as _;
 use trogon_sandbox_contract::{CommandOutput, CommandTimeoutStatus, OutputTruncation};
 
+use crate::constants::TIMED_OUT_REPLY;
+pub use crate::constants::{GUEST_STREAM_LIMIT, SIGNAL_BY_MARKER_SCRIPT};
 use crate::{CappedOutput, GuestCaptureError};
-
-/// Most bytes of one stream the guest returns; beyond it the middle is cut in
-/// the guest and reported as dropped.
-pub const GUEST_STREAM_LIMIT: usize = 16 * 1024 * 1024;
-
-/// What the guest script prints in place of the exit status when the deadline
-/// stopped the command. GNU `timeout` reports a stop as 124 or 137; busybox
-/// `timeout` execs the command in its own process and reports whatever the
-/// signal leaves (143 for TERM, 137 for KILL). A command can return any of
-/// those itself, so the script does not read them: the shell that runs the
-/// command traps TERM and writes a marker file, and the script reports the
-/// marker. That shell also writes an "armed" file once the trap is in place, so
-/// a TERM that lands before the trap (the command never started) still reads
-/// as a timeout rather than as 143.
-const TIMED_OUT_REPLY: &str = "timeout";
 
 /// The `sh -c` script that captures one command. `timeout_bin` and `env_bin`
 /// name the guest's `timeout` and `env` binaries. Invoke it as
@@ -223,28 +210,3 @@ fn decode(line: &str) -> Result<Vec<u8>, GuestCaptureError> {
         .decode(line.trim())
         .map_err(GuestCaptureError::Encoding)
 }
-
-/// Signals every process whose environment carries a marker. Invoke it as
-/// `sh -c <script> sh KEY=VALUE <SIGNAL>`; it exits 0 when at least one
-/// process was signaled. Children inherit the marker, so the whole process
-/// tree of a command started with it in its environment is covered. The scan
-/// repeats after a short pause, signaling only processes it has not signaled
-/// yet, so a child forked after one pass listed `/proc`, or by a signal
-/// handler, is caught by the next instead of being orphaned with the
-/// command's output still open.
-pub const SIGNAL_BY_MARKER_SCRIPT: &str = r#"marker="$1"; sig="$2"; self=$$; found=1; seen=" "; pass=0
-while [ "$pass" -lt 5 ]; do
-  new=1
-  for environ in /proc/[0-9]*/environ; do
-    pid=${environ#/proc/}; pid=${pid%/environ}
-    [ "$pid" = "$self" ] && continue
-    case "$seen" in *" $pid "*) continue ;; esac
-    if tr '\0' '\n' < "$environ" 2>/dev/null | grep -qxF "$marker"; then
-      kill "-$sig" "$pid" 2>/dev/null && { found=0; new=0; seen="$seen$pid "; }
-    fi
-  done
-  [ "$new" = 0 ] || break
-  pass=$((pass+1))
-  sleep 0.1 2>/dev/null || sleep 1
-done
-exit $found"#;

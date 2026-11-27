@@ -2,9 +2,7 @@ use sha2::{Digest as _, Sha256};
 use trogon_sandbox_contract::{EnvDigest, EnvironmentDefinition};
 
 use crate::EnvironmentDigestError;
-
-/// Domain separator hashed before the encoded definition.
-const DOMAIN: &[u8] = b"trogon.sandbox.environment.v1\n";
+use crate::constants::DOMAIN;
 
 /// The bytes an environment digest hashes: the domain separator, then the compact JSON of the definition.
 ///

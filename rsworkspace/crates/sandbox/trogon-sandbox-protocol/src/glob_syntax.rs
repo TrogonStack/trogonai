@@ -1,5 +1,6 @@
 use crate::GlobToken;
-use crate::glob_units::{CLOSE, DASH, OPEN, QUESTION, SLASH, STAR_UNIT, text_of, units};
+use crate::constants::{CLOSE, DASH, OPEN, QUESTION, SLASH, STAR_UNIT};
+use crate::glob_units::{text_of, units};
 
 /// The ranges that `members` spell, in UTF-16 code units as a regular expression without the `u` flag reads them.
 fn set_ranges(members: &[u16]) -> Option<Vec<(u16, u16)>> {

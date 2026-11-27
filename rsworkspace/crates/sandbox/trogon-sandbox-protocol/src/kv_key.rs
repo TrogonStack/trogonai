@@ -16,10 +16,8 @@
 //! records stay where they are; the legacy helpers below exist so stores can
 //! still find records written under a legacy key that differs.
 
+use crate::constants::{ESCAPE, SEPARATOR};
 use trogon_sandbox_contract::TenantId;
-
-const ESCAPE: u8 = b'=';
-const SEPARATOR: char = '_';
 
 fn escape_into(out: &mut String, value: &str, keep_underscore: bool) {
     for byte in value.bytes() {

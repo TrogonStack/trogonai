@@ -2,10 +2,8 @@ use trogon_sandbox_contract::{
     DomainPattern, DomainPatternError, Host, InjectMethod, InjectPathPrefix, InjectScope, InjectScopeVersion, Port,
 };
 
+pub use crate::constants::DEFAULT_INJECT_PORT;
 use crate::{pattern_matches, pattern_with_port};
-
-/// The port an omitted port means under [`InjectScopeVersion::V2`].
-pub const DEFAULT_INJECT_PORT: u16 = 443;
 
 /// The port an inject host without one stands for under `version`, or `None` when it spans every port.
 pub fn inject_omitted_port(version: InjectScopeVersion) -> Option<u16> {

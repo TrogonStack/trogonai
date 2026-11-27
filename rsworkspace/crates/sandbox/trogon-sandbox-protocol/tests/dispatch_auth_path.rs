@@ -6,7 +6,7 @@ use async_nats::HeaderMap;
 use serde_json::{Value, json};
 use trogon_sandbox_contract::{LeaseId, TenantId};
 use trogon_sandbox_protocol::{
-    AUTH_HEADER, DispatchAuthError, DispatchMalformedReason, DispatchSigner, DispatchVerifier, EnforcementMode,
+    AUTH_HEADER, DispatchAuthError, DispatchMalformedError, DispatchSigner, DispatchVerifier, EnforcementMode,
     OP_LEASE_DISPATCH, VerbScope,
 };
 
@@ -95,7 +95,7 @@ fn owned_lease_cancellation_needs_an_untransferred_well_formed_body() -> TestRes
         matches!(
             result,
             Err(DispatchAuthError::Malformed(
-                DispatchMalformedReason::OwnedCancellationTransfer
+                DispatchMalformedError::OwnedCancellationTransfer
             ))
         ),
         "{result:?}"
@@ -106,7 +106,7 @@ fn owned_lease_cancellation_needs_an_untransferred_well_formed_body() -> TestRes
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Json(_)))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::Json(_)))
         ),
         "{result:?}"
     );
@@ -131,7 +131,7 @@ fn native_snapshot_delete_is_signed_without_a_lease_and_binds_the_tenant_and_pro
         matches!(
             result,
             Err(DispatchAuthError::Malformed(
-                DispatchMalformedReason::NativeSnapshotProvider
+                DispatchMalformedError::NativeSnapshotProvider
             ))
         ),
         "{result:?}"
@@ -152,7 +152,7 @@ fn native_snapshot_delete_refuses_a_transferred_or_malformed_body_and_extra_bind
         matches!(
             result,
             Err(DispatchAuthError::Malformed(
-                DispatchMalformedReason::NativeSnapshotDeleteTransfer
+                DispatchMalformedError::NativeSnapshotDeleteTransfer
             ))
         ),
         "{result:?}"
@@ -163,7 +163,7 @@ fn native_snapshot_delete_refuses_a_transferred_or_malformed_body_and_extra_bind
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Json(_)))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::Json(_)))
         ),
         "{result:?}"
     );
@@ -217,7 +217,7 @@ fn a_signed_ssh_attach_and_detach_verify_and_bind_the_body_lease() -> TestResult
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Json(_)))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::Json(_)))
         ),
         "{result:?}"
     );
@@ -314,7 +314,7 @@ fn a_purge_binds_the_tenant_in_its_body() -> TestResult {
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Json(_)))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::Json(_)))
         ),
         "{result:?}"
     );
@@ -337,7 +337,7 @@ fn a_lease_never_seen_is_admitted_for_a_signed_tenant_only() -> TestResult {
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Json(_)))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::Json(_)))
         ),
         "{result:?}"
     );
@@ -371,7 +371,7 @@ fn a_reassembled_body_with_an_unreadable_envelope_follows_the_mode() -> TestResu
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Json(_)))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::Json(_)))
         ),
         "{result:?}"
     );

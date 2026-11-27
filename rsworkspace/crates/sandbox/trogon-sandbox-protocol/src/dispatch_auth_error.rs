@@ -1,4 +1,4 @@
-use crate::DispatchMalformedReason;
+use crate::DispatchMalformedError;
 
 /// Why a signed dispatch or per-lease request was refused.
 #[derive(Debug, thiserror::Error)]
@@ -6,7 +6,7 @@ pub enum DispatchAuthError {
     #[error("dispatch is not signed")]
     Missing,
     #[error("dispatch signature is malformed: {0}")]
-    Malformed(DispatchMalformedReason),
+    Malformed(DispatchMalformedError),
     #[error("dispatch signed with unknown key {0}")]
     UnknownKey(String),
     #[error("dispatch signature does not verify")]
@@ -37,8 +37,8 @@ pub enum DispatchAuthError {
     Replayed,
 }
 
-impl From<DispatchMalformedReason> for DispatchAuthError {
-    fn from(reason: DispatchMalformedReason) -> Self {
+impl From<DispatchMalformedError> for DispatchAuthError {
+    fn from(reason: DispatchMalformedError) -> Self {
         Self::Malformed(reason)
     }
 }

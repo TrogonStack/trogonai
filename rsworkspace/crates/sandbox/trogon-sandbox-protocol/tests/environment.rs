@@ -163,6 +163,13 @@ fn unlabeled_snapshots_follow_the_legacy_policy() -> TestResult {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn errors_describe_themselves() -> TestResult {
     let own = digest('a')?;
     assert!(

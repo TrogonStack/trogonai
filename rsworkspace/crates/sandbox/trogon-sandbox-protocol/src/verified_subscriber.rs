@@ -10,6 +10,13 @@ use futures::Stream;
 
 use crate::{DispatchVerifier, VerifiedVerbScope};
 
+/// The error body a refused request's sender receives.
+#[derive(serde::Serialize)]
+struct RefusalBody {
+    error: &'static str,
+    message: String,
+}
+
 /// A subscription that refuses unverified signed requests.
 pub struct VerifiedSubscriber {
     pub(crate) inner: Subscriber,
@@ -36,12 +43,13 @@ impl VerifiedSubscriber {
         };
         if let Some(reply) = message.reply.clone() {
             let client = self.client.clone();
-            let body = serde_json::json!({
-                "error": "dispatch_auth",
-                "message": error.to_string(),
-            });
+            let body = serde_json::to_string(&RefusalBody {
+                error: "dispatch_auth",
+                message: error.to_string(),
+            })
+            .unwrap_or_default();
             tokio::spawn(async move {
-                let _ = client.publish(reply, body.to_string().into()).await;
+                let _ = client.publish(reply, body.into()).await;
             });
         }
         None

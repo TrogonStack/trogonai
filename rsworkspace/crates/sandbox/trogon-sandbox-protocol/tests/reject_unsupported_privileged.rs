@@ -23,6 +23,13 @@ fn spec(privileged: bool) -> Result<SandboxSpec, Box<dyn std::error::Error>> {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn rejects_privileged_when_the_profile_cannot_grant_it() -> TestResult {
     let error = reject_unsupported_privileged(&spec(true)?, &mock_profile(CapabilitySupport::Unsupported))
         .err()

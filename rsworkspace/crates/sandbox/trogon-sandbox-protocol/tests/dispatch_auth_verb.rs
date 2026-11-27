@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use trogon_sandbox_contract::{DispatchAttemptId, DispatchAuth, FileSha256, LeaseId, TenantId, WorkerId};
 use trogon_sandbox_protocol::{
-    AUTH_HEADER, DispatchAuthError, DispatchMalformedReason, DispatchSigner, DispatchVerifier, EnforcementMode,
+    AUTH_HEADER, DispatchAuthError, DispatchMalformedError, DispatchSigner, DispatchVerifier, EnforcementMode,
     OP_LEASE_DISPATCH, SignedSubject, VerbScope, classify_subject,
 };
 
@@ -61,7 +61,7 @@ fn dispatch_for(signer: &DispatchSigner, tenant: &str, attempt: &str) -> Result<
 }
 
 fn check(verifier: &DispatchVerifier, payload: &[u8]) -> Result<(), DispatchAuthError> {
-    let mut value: Value = serde_json::from_slice(payload).map_err(DispatchMalformedReason::Json)?;
+    let mut value: Value = serde_json::from_slice(payload).map_err(DispatchMalformedError::Json)?;
     verifier.verify_value(&mut value, OP_LEASE_DISPATCH, None, SystemTime::now())
 }
 
@@ -344,10 +344,7 @@ fn a_verb_without_a_nonce_is_refused() -> TestResult {
     let header = forged_header(b"{}", |auth| auth.nonce = None)?;
     let result = verifier.verify_verb(RUN, &header, b"{}", false, at(1_000));
     assert!(
-        matches!(
-            result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Nonce))
-        ),
+        matches!(result, Err(DispatchAuthError::Malformed(DispatchMalformedError::Nonce))),
         "{result:?}"
     );
     Ok(())
@@ -375,7 +372,7 @@ fn an_unsupported_version_malformed_signature_or_header_is_refused() -> TestResu
         matches!(
             result,
             Err(DispatchAuthError::Malformed(
-                DispatchMalformedReason::UnsupportedVersion { version: 2 }
+                DispatchMalformedError::UnsupportedVersion { version: 2 }
             ))
         ),
         "{result:?}"
@@ -386,7 +383,7 @@ fn an_unsupported_version_malformed_signature_or_header_is_refused() -> TestResu
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Signature))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::Signature))
         ),
         "{result:?}"
     );
@@ -395,7 +392,7 @@ fn an_unsupported_version_malformed_signature_or_header_is_refused() -> TestResu
         assert!(
             matches!(
                 result,
-                Err(DispatchAuthError::Malformed(DispatchMalformedReason::Json(_)))
+                Err(DispatchAuthError::Malformed(DispatchMalformedError::Json(_)))
             ),
             "{garbage}: {result:?}"
         );
@@ -588,7 +585,7 @@ fn a_cleanup_must_match_its_signed_lease_and_attempt() -> TestResult {
     assert!(
         matches!(
             result,
-            Err(DispatchAuthError::Malformed(DispatchMalformedReason::Json(_)))
+            Err(DispatchAuthError::Malformed(DispatchMalformedError::Json(_)))
         ),
         "{result:?}"
     );

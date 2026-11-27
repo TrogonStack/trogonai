@@ -1,4 +1,4 @@
-use crate::dispatch_auth_constants::{ENV_PUBLIC_KEYS_FILE, ENV_VERIFY_MODE};
+use crate::constants::{ENV_PUBLIC_KEYS_FILE, ENV_VERIFY_MODE};
 use crate::{DispatchPublicKeyError, EnforcementModeError, EpochModeError};
 
 /// Why the dispatch verifier could not be built from its configuration.

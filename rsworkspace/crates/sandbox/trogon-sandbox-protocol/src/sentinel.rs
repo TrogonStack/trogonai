@@ -1,12 +1,9 @@
 use std::fmt;
 
 use crate::RealValue;
+use crate::constants::PADDING_ALPHABET;
+pub use crate::constants::SENTINEL_PREFIX;
 use crate::jwt_structure::is_fake_jwt;
-
-/// What every sentinel starts with.
-pub const SENTINEL_PREFIX: &str = "fake_value_";
-
-const PADDING_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789_-";
 
 /// The stand-in a sandboxed process sees: `fake_value_<uuid4>`.
 ///

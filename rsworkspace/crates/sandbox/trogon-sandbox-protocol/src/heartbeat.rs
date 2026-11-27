@@ -9,10 +9,8 @@ use tokio_util::sync::CancellationToken;
 use trogon_nats::PublishClient;
 use trogon_sandbox_contract::{CapabilitySupport, ProviderKind, WorkerHeartbeat, WorkerId};
 
+pub use crate::constants::DEFAULT_HEARTBEAT_INTERVAL;
 use crate::subjects;
-
-/// How often workers publish a heartbeat unless they have a reason to differ.
-pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Publishes a [`WorkerHeartbeat`] on [`subjects::worker_heartbeat`] every `interval`, starting
 /// with an immediate tick, until `cancel` fires.

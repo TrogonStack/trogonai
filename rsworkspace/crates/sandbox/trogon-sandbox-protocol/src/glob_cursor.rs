@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use crate::glob_units::SLASH;
-use crate::{GlobMatcher, GlobToken};
+use crate::GlobToken;
+use crate::constants::SLASH;
 
 /// The positions in a pattern that the text read so far can have reached.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -72,23 +72,13 @@ impl GlobCursor {
         now
     }
 
-    /// Where the walk stands after descending into the child `name`.
-    pub fn child(&self, matcher: &GlobMatcher, name: &str) -> GlobCursor {
-        self.fed(matcher.tokens(), &format!("/{name}"))
-    }
-
-    /// Reports whether anything beneath the directory the cursor stands at can match.
-    pub fn reaches_beneath(&self, matcher: &GlobMatcher) -> bool {
-        !self.fed(matcher.tokens(), "/").0.is_empty()
-    }
-
     /// Reports whether no path below this point can match.
     pub fn is_dead(&self) -> bool {
         self.0.is_empty()
     }
 
-    /// Reports whether the text read so far is a match.
-    pub fn accepts(&self, matcher: &GlobMatcher) -> bool {
-        self.0.contains(&(matcher.tokens().len(), 0))
+    /// Reports whether the cursor stands at the position `at`.
+    pub(crate) fn contains(&self, at: &(usize, usize)) -> bool {
+        self.0.contains(at)
     }
 }

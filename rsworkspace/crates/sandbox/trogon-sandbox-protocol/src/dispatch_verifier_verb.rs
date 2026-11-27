@@ -14,18 +14,17 @@ use trogon_sandbox_contract::{
     CancelOwnedLeaseRequest, DispatchAttemptId, DispatchAuth, LeaseId, NativeSnapshotDeleteRequest,
 };
 
-use crate::dispatch_auth_constants::{AUTH_HEADER, CLOCK_SKEW, TRANSFER_HEADER};
+use crate::constants::MAX_NONCES;
+use crate::constants::{AUTH_HEADER, CLOCK_SKEW, TRANSFER_HEADER};
 use crate::dispatch_envelope::{pointer_str, sha256_hex, unix};
 use crate::subjects::provider_token;
 use crate::{
-    DispatchAuthError, DispatchMalformedReason, DispatchVerifier, EnforcementMode, SignedSubject, VerbScope,
+    DispatchAuthError, DispatchMalformedError, DispatchVerifier, EnforcementMode, SignedSubject, VerbScope,
     VerifiedVerbScope, classify_subject,
 };
 
-const MAX_NONCES: usize = 100_000;
-
 fn json_error(error: serde_json::Error) -> DispatchAuthError {
-    DispatchMalformedReason::Json(error).into()
+    DispatchMalformedError::Json(error).into()
 }
 
 fn body_value(payload: &[u8]) -> Result<Value, DispatchAuthError> {
@@ -66,7 +65,7 @@ impl DispatchVerifier {
                 found: auth.operation,
             });
         }
-        let nonce = auth.nonce.clone().ok_or(DispatchMalformedReason::Nonce)?;
+        let nonce = auth.nonce.clone().ok_or(DispatchMalformedError::Nonce)?;
         if !transferred && auth.body_sha256.as_str() != sha256_hex(payload) {
             return Err(DispatchAuthError::BodyMismatch);
         }
@@ -107,7 +106,7 @@ impl DispatchVerifier {
         match kind {
             SignedSubject::WorkerCommandReadiness { worker, lease, .. } => {
                 if transferred {
-                    return Err(DispatchMalformedReason::ReadinessTransfer.into());
+                    return Err(DispatchMalformedError::ReadinessTransfer.into());
                 }
                 if &auth.lease_id != lease {
                     return Err(DispatchAuthError::LeaseMismatch);
@@ -126,14 +125,14 @@ impl DispatchVerifier {
             }
             SignedSubject::NativeSnapshotDelete { provider } => {
                 if transferred {
-                    return Err(DispatchMalformedReason::NativeSnapshotDeleteTransfer.into());
+                    return Err(DispatchMalformedError::NativeSnapshotDeleteTransfer.into());
                 }
                 let request: NativeSnapshotDeleteRequest = serde_json::from_slice(payload).map_err(json_error)?;
                 if request.tenant != auth.tenant {
                     return Err(DispatchAuthError::TenantMismatch);
                 }
                 if provider_token(request.reference.provider) != provider {
-                    return Err(DispatchMalformedReason::NativeSnapshotProvider.into());
+                    return Err(DispatchMalformedError::NativeSnapshotProvider.into());
                 }
                 if !auth.lease_id.as_str().is_empty()
                     || auth.attempt_id.is_some()
@@ -150,7 +149,7 @@ impl DispatchVerifier {
                 }
                 if subject.split('.').nth(3) == Some("cancel_owned") {
                     if transferred {
-                        return Err(DispatchMalformedReason::OwnedCancellationTransfer.into());
+                        return Err(DispatchMalformedError::OwnedCancellationTransfer.into());
                     }
                     let request: CancelOwnedLeaseRequest = serde_json::from_slice(payload).map_err(json_error)?;
                     if request.tenant != auth.tenant {
@@ -217,7 +216,7 @@ impl DispatchVerifier {
         }
         let Some(SignedSubject::WorkerCommandReadiness { worker, lease, .. }) = classify_subject(&verified.subject)
         else {
-            return Err(DispatchMalformedReason::CapturedScopeNotReadiness.into());
+            return Err(DispatchMalformedError::CapturedScopeNotReadiness.into());
         };
         let scope = verified.scope();
         if scope.lease_id != lease {

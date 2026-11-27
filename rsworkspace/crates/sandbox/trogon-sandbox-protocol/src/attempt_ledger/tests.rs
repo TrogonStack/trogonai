@@ -13,6 +13,6 @@ fn contention_means_another_worker_owns_the_ledger() {
 #[test]
 fn any_other_lock_failure_is_an_io_failure() -> TestResult {
     let error = lock_error(TryLockError::Error(std::io::Error::other("no locks")));
-    assert!(matches!(&error, AttemptLedgerError::Io(source) if source.to_string() == "no locks"));
+    assert!(matches!(&error, AttemptLedgerError::Io(source) if source.kind() == std::io::ErrorKind::Other));
     Ok(())
 }

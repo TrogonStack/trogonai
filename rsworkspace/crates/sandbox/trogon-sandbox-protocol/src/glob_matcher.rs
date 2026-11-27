@@ -2,7 +2,9 @@ use std::collections::{BTreeSet, HashSet};
 
 use trogon_sandbox_contract::{GlobPattern, LiteralPath, LiteralPathError};
 
-use crate::glob_units::{SLASH, fold_unit, units};
+use crate::constants::SLASH;
+
+use crate::glob_units::{fold_unit, units};
 use crate::{GlobCursor, GlobToken, LiteralPathExt, parse_glob};
 
 /// A [`GlobPattern`] read into tokens, so it can be matched against paths.

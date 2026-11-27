@@ -4,6 +4,6 @@
 /// every worker gives for a missing file.
 #[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
 #[error("file not found: {path}")]
-pub struct FileNotFound {
+pub struct FileNotFoundError {
     pub path: String,
 }

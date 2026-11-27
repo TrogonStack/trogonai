@@ -1,10 +1,10 @@
 use serde_json::{Map, Value};
 use trogon_sandbox_contract::JwtMasking;
 
-use crate::jwt_structure::{FAKE_SIGNATURE, ParsedJwt, encode, parse};
+use crate::constants::FAKE_EXPIRY;
+use crate::constants::FAKE_SIGNATURE;
+use crate::jwt_structure::{ParsedJwt, encode, parse};
 use crate::{JwtMaskError, MaskedClaim, MaskedJwt, RealValue, Sentinel};
-
-const FAKE_EXPIRY: u64 = 9_999_999_999;
 
 fn assemble(header: &str, payload: &Value) -> Sentinel {
     Sentinel::from_fake_jwt(format!("{header}.{}.{FAKE_SIGNATURE}", encode(payload)))

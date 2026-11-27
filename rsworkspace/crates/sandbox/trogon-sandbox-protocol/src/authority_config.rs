@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::AuthorityMode;
-use crate::worker_authority_constants::{
+use crate::constants::{
     CONFIRMATIONS, DEFAULT_CHECK_INTERVAL, DEFAULT_GRACE, DEFAULT_PARTITION_AFTER, DEFAULT_REQUEST_TIMEOUT,
     MIN_LEASE_AGE,
 };

@@ -9,11 +9,9 @@ use trogon_sandbox_contract::{
     CancelIntent, DispatchAttemptId, DispatchTarget, LeaseAttemptIdentity, LeaseEpoch, LeaseId, ProviderKind, WorkerId,
 };
 
+use crate::constants::{HAS_EPOCH_COLUMN, MAX_RECEIPT_BYTES};
 use crate::subjects::provider_token;
 use crate::{AttemptLedgerError, AttemptPhase, CleanupState};
-
-const MAX_RECEIPT_BYTES: usize = 64 * 1024;
-const HAS_EPOCH_COLUMN: &str = "SELECT EXISTS(SELECT 1 FROM pragma_table_info('attempts') WHERE name='epoch')";
 
 pub(crate) fn create_private_file(path: &Path) -> Result<(), AttemptLedgerError> {
     let mut options = OpenOptions::new();

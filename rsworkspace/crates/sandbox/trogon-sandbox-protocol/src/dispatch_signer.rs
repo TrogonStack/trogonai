@@ -5,8 +5,9 @@ use base64::engine::general_purpose::STANDARD as B64;
 use ed25519_dalek::{Signer as _, SigningKey};
 use serde_json::Value;
 use trogon_sandbox_contract::{DispatchAttemptId, DispatchAuth, LeaseEpoch, LeaseId, TenantId, WorkerId};
+use trogon_std::env::ReadEnv;
 
-use crate::dispatch_auth_constants::{
+use crate::constants::{
     AUTH_FIELD, DEFAULT_TTL, ENV_SIGNING_KEY, ENV_SIGNING_KEY_FILE, ENV_SIGNING_KEY_ID, ENV_SIGNING_TTL_SECS,
 };
 use crate::dispatch_envelope::{body_digest, pointer_str, signing_input, string_at, unix};
@@ -56,8 +57,8 @@ impl DispatchSigner {
     }
 
     /// Reads the signer from the process environment; `Ok(None)` when no key is set.
-    pub fn from_env() -> Result<Option<Self>, DispatchSignerConfigError> {
-        Self::from_lookup(&|name| std::env::var(name).ok())
+    pub fn from_env(env: &impl ReadEnv) -> Result<Option<Self>, DispatchSignerConfigError> {
+        Self::from_lookup(&|name| env.var(name).ok())
     }
 
     /// Reads the signer from the variables `lookup` returns; `Ok(None)` when no key is set.

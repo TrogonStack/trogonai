@@ -3,6 +3,7 @@
 
 use std::path::Path;
 use std::process::Command;
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 use async_nats::HeaderMap;
 use serde_json::{Value, json};
@@ -28,7 +29,7 @@ fn key_entry() -> String {
 /// In the parent, re-runs the named test in a child with `envs` and returns true; in the child, returns false so
 /// the caller runs the scenario.
 fn in_child(test: &str, envs: &[(&str, &str)]) -> Result<bool, Box<dyn std::error::Error>> {
-    if std::env::var_os(CHILD).is_some() {
+    if SystemEnv.var_os(CHILD).is_some() {
         return Ok(false);
     }
     let mut command = Command::new(std::env::current_exe()?);
@@ -57,7 +58,7 @@ fn in_child(test: &str, envs: &[(&str, &str)]) -> Result<bool, Box<dyn std::erro
 }
 
 fn env_path(name: &str) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    Ok(std::env::var_os(name).ok_or("the parent sets this path")?.into())
+    Ok(SystemEnv.var_os(name).ok_or("the parent sets this path")?.into())
 }
 
 fn dispatch(tenant: &str, lease: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {

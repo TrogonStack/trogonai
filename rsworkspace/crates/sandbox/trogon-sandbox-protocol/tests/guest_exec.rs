@@ -4,7 +4,7 @@ use base64::Engine;
 use common::TestResult;
 use trogon_sandbox_contract::{CommandTimeoutStatus, LeaseError, OutputTruncation, ReadFileResponse};
 use trogon_sandbox_protocol::{
-    FileNotFound, GUEST_STREAM_LIMIT, GuestCaptureError, ReadFileFailure, parse_guest_capture, read_file_response,
+    FileNotFoundError, GUEST_STREAM_LIMIT, GuestCaptureError, ReadFileError, parse_guest_capture, read_file_response,
 };
 
 fn b64(data: &[u8]) -> String {
@@ -103,9 +103,9 @@ fn malformed_replies_are_typed_errors() -> TestResult {
 
 #[test]
 fn a_missing_file_maps_to_not_found_and_other_failures_to_denied() {
-    let missing: ReadFileFailure<String> = ReadFileFailure::NotFound(FileNotFound { path: "/a".into() });
+    let missing: ReadFileError<String> = ReadFileError::NotFound(FileNotFoundError { path: "/a".into() });
     assert_eq!(read_file_response(Err(missing), denied), ReadFileResponse::NotFound);
-    let boom: ReadFileFailure<String> = ReadFileFailure::Other("boom".to_string());
+    let boom: ReadFileError<String> = ReadFileError::Other("boom".to_string());
     assert!(matches!(
         read_file_response(Err(boom), denied),
         ReadFileResponse::Denied(_)
@@ -114,7 +114,10 @@ fn a_missing_file_maps_to_not_found_and_other_failures_to_denied() {
         read_file_response::<String>(Ok(b"data".to_vec()), denied),
         ReadFileResponse::Content { data: b"data".to_vec() }
     );
-    assert_eq!(FileNotFound { path: "/a".into() }.to_string(), "file not found: /a");
+    assert_eq!(
+        FileNotFoundError { path: "/a".into() }.to_string(),
+        "file not found: /a"
+    );
 }
 
 #[test]

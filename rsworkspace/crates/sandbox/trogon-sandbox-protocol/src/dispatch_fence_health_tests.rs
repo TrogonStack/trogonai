@@ -1,5 +1,6 @@
 use super::*;
 use crate::{DispatchSigner, DispatchVerifier, EnforcementMode};
+use std::time::Duration;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -149,6 +150,13 @@ fn malformed_journal_does_not_earn_fresh_health_or_recovered_witness() -> TestRe
 
 #[cfg(unix)]
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn canonical_inode_replacement_refuses_fresh_health_and_original_restoration_recovers_it() -> TestResult {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("fence");

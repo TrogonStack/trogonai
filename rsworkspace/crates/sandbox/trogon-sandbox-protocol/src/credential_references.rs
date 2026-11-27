@@ -1,10 +1,7 @@
 use std::collections::HashSet;
 
+pub use crate::constants::COMMITTED_POLICY_BUCKET;
 use trogon_sandbox_contract::{DomainRuleAction, NetworkPolicy, PullSecretId, SandboxSpec};
-
-/// The NATS KV bucket the control plane commits each lease's credential policy to, and the credential broker and
-/// workers read it from.
-pub const COMMITTED_POLICY_BUCKET: &str = "sandbox-committed-credential-policies";
 
 /// Every credential reference `spec` can ask the broker to resolve.
 ///

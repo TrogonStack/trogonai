@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::error::Error;
 use std::time::Duration;
+use trogon_std::env::SystemEnv;
 
 use trogon_sandbox_contract::{
     DispatchAttemptId, DispatchTarget, LeaseAttemptIdentity, LeaseEpoch, LeaseId, ProviderKind, WorkerId,
@@ -80,7 +81,7 @@ fn mode_from_a_set_variable_is_parsed() -> TestResult {
 #[test]
 fn mode_reads_the_process_environment_without_panicking() {
     // The value depends on the surrounding environment; only the call itself is exercised.
-    let _ = AuthorityMode::from_env();
+    let _ = AuthorityMode::from_env(&SystemEnv);
 }
 
 #[test]
@@ -330,6 +331,13 @@ fn host_errors_describe_each_failure() -> TestResult {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn oracle_errors_describe_each_failure() -> TestResult {
     assert_eq!(
         OracleError::NoResponders.to_string(),

@@ -1343,6 +1343,13 @@ async fn a_legacy_journal_that_cannot_be_stored_is_refused_and_cleaned_up() -> T
 }
 
 #[tokio::test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 async fn a_file_that_is_neither_a_database_nor_a_legacy_journal_is_refused() -> TestResult {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("attempts.json");

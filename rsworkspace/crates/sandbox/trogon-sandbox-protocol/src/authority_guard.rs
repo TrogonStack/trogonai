@@ -5,7 +5,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use trogon_sandbox_contract::{LeaseEpoch, LeaseId, WorkerAuthorityRequest, WorkerAuthorityResponse, WorkerId};
 
-use crate::worker_authority_constants::MAX_LEASES_PER_REQUEST;
+use crate::constants::MAX_LEASES_PER_REQUEST;
 use crate::{
     AuthorityConfig, AuthorityHost, AuthorityMode, AuthorityOracle, AuthorityStats, FreezeOutcome, HeldLease,
     OracleError, PurgeOutcome, ThawOutcome,

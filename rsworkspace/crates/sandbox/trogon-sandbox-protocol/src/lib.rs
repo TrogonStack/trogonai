@@ -27,6 +27,7 @@ mod cleanup_state;
 mod command_exit;
 mod command_exit_error;
 mod compiled_fs_entry;
+mod constants;
 mod context_verified_subscriber;
 mod conventional_aws_pair;
 mod conventional_aws_pairing;
@@ -34,13 +35,13 @@ mod credential_references;
 mod deny_reason_lookup;
 mod destination_matching;
 mod detached_exit;
-mod dispatch_auth_constants;
 mod dispatch_auth_error;
 mod dispatch_decode_error;
 mod dispatch_envelope;
 mod dispatch_fence;
+mod dispatch_fence_location;
 mod dispatch_global;
-mod dispatch_malformed_reason;
+mod dispatch_malformed_error;
 mod dispatch_public_key_error;
 mod dispatch_sign_error;
 mod dispatch_signer;
@@ -67,7 +68,7 @@ mod exec_cwd;
 mod extract_error;
 mod extract_kind;
 mod extract_masking;
-mod file_not_found;
+mod file_not_found_error;
 mod file_op_class;
 mod file_op_reply;
 mod freeze_outcome;
@@ -75,18 +76,19 @@ mod fresh_launch_fence_error;
 mod fs_access;
 mod fs_policy_evaluator;
 mod glob_cursor;
+mod glob_cursor_walk;
 mod glob_matcher;
 mod glob_syntax;
 mod glob_token;
 mod glob_units;
-mod group_one_undefined;
+mod group_one_undefined_error;
 mod guest_capture_error;
 mod guest_exec;
 mod handoff_error;
 mod heartbeat;
 mod held_lease;
 mod host_match;
-mod illegal_transition;
+mod illegal_transition_error;
 mod inject_scope_matching;
 mod js_regex;
 mod js_regex_error;
@@ -119,6 +121,7 @@ mod noop_lifecycle_emitter;
 mod operation_request_kind;
 mod oracle_error;
 mod output_cap;
+mod output_join;
 mod phase_timer;
 mod platform_matching;
 mod privileged_unsupported_error;
@@ -127,7 +130,7 @@ mod provider_error;
 mod provider_phases;
 mod proxy_routing;
 mod purge_outcome;
-mod read_file_failure;
+mod read_file_error;
 mod read_file_response;
 mod real_value;
 mod redaction_set;
@@ -170,7 +173,6 @@ mod verb_scope;
 mod verified_request;
 mod verified_subscriber;
 mod verified_verb_scope;
-mod worker_authority_constants;
 
 pub use activity_signal::ActivitySignal;
 pub use attempt_ledger::AttemptLedger;
@@ -199,6 +201,14 @@ pub use command_exit::{
 };
 pub use command_exit_error::CommandExitError;
 pub use compiled_fs_entry::CompiledFsEntry;
+pub use constants::{
+    AUTH_FIELD, AUTH_HEADER, ENV_FENCE_EPOCH, ENV_FENCE_FILE, ENV_PUBLIC_KEYS, ENV_PUBLIC_KEYS_FILE, ENV_SIGNING_KEY,
+    ENV_SIGNING_KEY_FILE, ENV_SIGNING_KEY_ID, ENV_SIGNING_TTL_SECS, ENV_VERIFY_MODE, OP_LEASE_DISPATCH,
+};
+pub use constants::{
+    CONFIRMATIONS, DEFAULT_CHECK_INTERVAL, DEFAULT_GRACE, DEFAULT_PARTITION_AFTER, ENV_WORKER_AUTHORITY,
+    MAX_LEASES_PER_REQUEST, MIN_LEASE_AGE,
+};
 pub use context_verified_subscriber::ContextVerifiedSubscriber;
 pub use conventional_aws_pair::ConventionalAwsPair;
 pub use conventional_aws_pairing::{
@@ -211,16 +221,11 @@ pub use destination_matching::{
     denied_domain_matches, destination_is_covered_by, destination_matches, pattern_is_covered_by, pattern_matches,
 };
 pub use detached_exit::DetachedExit;
-pub use dispatch_auth_constants::{
-    AUTH_FIELD, AUTH_HEADER, ENV_FENCE_EPOCH, ENV_FENCE_FILE, ENV_PUBLIC_KEYS, ENV_PUBLIC_KEYS_FILE, ENV_SIGNING_KEY,
-    ENV_SIGNING_KEY_FILE, ENV_SIGNING_KEY_ID, ENV_SIGNING_TTL_SECS, ENV_VERIFY_MODE, OP_LEASE_DISPATCH,
-};
 pub use dispatch_auth_error::DispatchAuthError;
 pub use dispatch_decode_error::DispatchDecodeError;
-pub use dispatch_global::{
-    check_reassembled, decode_verified, global_verifier, register_fence_file, register_state_dir,
-};
-pub use dispatch_malformed_reason::DispatchMalformedReason;
+pub use dispatch_fence_location::{register_fence_file, register_state_dir};
+pub use dispatch_global::{check_reassembled, decode_verified, global_verifier};
+pub use dispatch_malformed_error::DispatchMalformedError;
 pub use dispatch_public_key_error::DispatchPublicKeyError;
 pub use dispatch_sign_error::DispatchSignError;
 pub use dispatch_signer::DispatchSigner;
@@ -247,7 +252,7 @@ pub use exec_cwd::{join_relative_cwd, resolve_exec_cwd};
 pub use extract_error::ExtractError;
 pub use extract_kind::ExtractKind;
 pub use extract_masking::{mask_extract, plan_extract};
-pub use file_not_found::FileNotFound;
+pub use file_not_found_error::FileNotFoundError;
 pub use file_op_class::FileOpClass;
 pub use file_op_reply::{encode_file_op_response_within, file_op_token, unsupported_file_op_response};
 pub use freeze_outcome::FreezeOutcome;
@@ -258,7 +263,7 @@ pub use glob_cursor::GlobCursor;
 pub use glob_matcher::GlobMatcher;
 pub use glob_syntax::{parse_glob, textual_brackets};
 pub use glob_token::GlobToken;
-pub use group_one_undefined::GroupOneUndefined;
+pub use group_one_undefined_error::GroupOneUndefinedError;
 pub use guest_capture_error::GuestCaptureError;
 pub use guest_exec::{
     GUEST_STREAM_LIMIT, SIGNAL_BY_MARKER_SCRIPT, guest_capture_script, parse_guest_capture,
@@ -268,7 +273,7 @@ pub use handoff_error::HandoffError;
 pub use heartbeat::{DEFAULT_HEARTBEAT_INTERVAL, spawn_heartbeat_loop};
 pub use held_lease::HeldLease;
 pub use host_match::HostMatch;
-pub use illegal_transition::IllegalTransition;
+pub use illegal_transition_error::IllegalTransitionError;
 pub use inject_scope_matching::{
     DEFAULT_INJECT_PORT, inject_effective_pattern, inject_host_matches, inject_omitted_port, inject_path_matches,
     inject_scope_admits, parse_inject_method,
@@ -320,7 +325,7 @@ pub use proxy_routing::{
     select_parent_proxy,
 };
 pub use purge_outcome::PurgeOutcome;
-pub use read_file_failure::ReadFileFailure;
+pub use read_file_error::ReadFileError;
 pub use read_file_response::read_file_response;
 pub use real_value::RealValue;
 pub use redaction_set::{MIN_REDACTABLE_LEN, REDACTION_MARKER, RedactionSet};
@@ -369,7 +374,3 @@ pub use verb_scope::VerbScope;
 pub use verified_request::VerifiedRequest;
 pub use verified_subscriber::VerifiedSubscriber;
 pub use verified_verb_scope::VerifiedVerbScope;
-pub use worker_authority_constants::{
-    CONFIRMATIONS, DEFAULT_CHECK_INTERVAL, DEFAULT_GRACE, DEFAULT_PARTITION_AFTER, ENV_WORKER_AUTHORITY,
-    MAX_LEASES_PER_REQUEST, MIN_LEASE_AGE,
-};

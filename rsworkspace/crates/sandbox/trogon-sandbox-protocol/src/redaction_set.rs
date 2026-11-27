@@ -3,13 +3,7 @@ use std::sync::Arc;
 
 use trogon_sandbox_contract::RedactValues;
 
-use crate::StreamRedactor;
-
-/// What replaces every redacted occurrence.
-pub const REDACTION_MARKER: &str = "[REDACTED]";
-
-/// Shortest registered value, in bytes, that is redacted. Shorter values are dropped when a [`RedactionSet`] is built.
-pub const MIN_REDACTABLE_LEN: usize = 6;
+pub use crate::constants::{MIN_REDACTABLE_LEN, REDACTION_MARKER};
 
 /// The values to redact, ready to filter output. Cheap to clone. An empty set is a no-op filter.
 ///
@@ -86,11 +80,6 @@ impl RedactionSet {
     /// Registered values are valid UTF-8 and the marker is ASCII, so the result is valid UTF-8.
     pub fn redact_str(&self, text: &str) -> String {
         String::from_utf8_lossy(&self.redact(text.as_bytes())).into_owned()
-    }
-
-    /// A filter for one stream that arrives in chunks.
-    pub fn stream(&self) -> StreamRedactor {
-        StreamRedactor::new(self.clone())
     }
 
     /// Scans `buf` from the start, appending to `out`, and decides every position below `decide_below`. Returns where

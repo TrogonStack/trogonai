@@ -1,6 +1,6 @@
 /// Why a signed dispatch envelope or request could not be understood.
 #[derive(Debug, thiserror::Error)]
-pub enum DispatchMalformedReason {
+pub enum DispatchMalformedError {
     #[error("not an object")]
     NotAnObject,
     #[error("version {version}")]

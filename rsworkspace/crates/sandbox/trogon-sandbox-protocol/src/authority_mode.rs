@@ -1,7 +1,9 @@
 use std::str::FromStr;
 
+use trogon_std::env::ReadEnv;
+
 use crate::AuthorityModeError;
-use crate::worker_authority_constants::ENV_WORKER_AUTHORITY;
+use crate::constants::ENV_WORKER_AUTHORITY;
 
 /// How far the authority guard goes when the broker does not list a held lease as the worker's.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -33,8 +35,8 @@ impl AuthorityMode {
     }
 
     /// The mode in `SANDBOX_WORKER_AUTHORITY`; unset means `warn`.
-    pub fn from_env() -> Result<Self, AuthorityModeError> {
-        Self::from_env_value(std::env::var(ENV_WORKER_AUTHORITY).ok().as_deref())
+    pub fn from_env(env: &impl ReadEnv) -> Result<Self, AuthorityModeError> {
+        Self::from_env_value(env.var(ENV_WORKER_AUTHORITY).ok().as_deref())
     }
 }
 

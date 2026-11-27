@@ -11,16 +11,10 @@ use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
+pub use crate::constants::MAX_TRANSFER_BYTES;
+use crate::constants::{MAX_CHUNK_BYTES, METADATA_RESERVE, TRANSFER_HEADER, TRANSFER_TIMEOUT, TRANSFER_VERSION};
 use crate::dispatch_global::check_reassembled;
 use crate::nats_transfer_error::NatsTransferError;
-
-const TRANSFER_HEADER: &str = "Sandbox-Transfer";
-const TRANSFER_VERSION: &str = "chunks-v1";
-/// The largest payload a transfer carries, in encoded bytes.
-pub const MAX_TRANSFER_BYTES: usize = 128 * 1024 * 1024;
-const TRANSFER_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_CHUNK_BYTES: usize = 64 * 1024;
-const METADATA_RESERVE: usize = 1024;
 
 #[derive(Serialize, Deserialize)]
 struct Transfer {

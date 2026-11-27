@@ -1,7 +1,7 @@
 use serde_json::json;
 use trogon_sandbox_contract::{EntityState, EntityStateKind, EntityStateKind as K, LeaseId, SandboxEntityRecord};
 use trogon_sandbox_protocol::{
-    EntityEvent, EntityEvent as E, IllegalTransition, apply_entity_event, next_entity_state,
+    EntityEvent, EntityEvent as E, IllegalTransitionError, apply_entity_event, next_entity_state,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -89,7 +89,7 @@ fn every_state_event_pair_matches_the_table() -> TestResult {
                     let error = got.err().ok_or("expected an illegal transition")?;
                     assert_eq!(
                         error,
-                        IllegalTransition {
+                        IllegalTransitionError {
                             from: state.kind(),
                             event: event.name()
                         }

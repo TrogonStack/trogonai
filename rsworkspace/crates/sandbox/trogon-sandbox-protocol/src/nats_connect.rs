@@ -1,15 +1,11 @@
 //! Opening a NATS connection from a single URL that may carry credentials.
 
-use std::time::Duration;
-
 use trogon_nats::{CredentialValue, NatsAuth, NatsConfig, NatsTls, connect_once};
 
 use trogon_std::secret_string::SecretString;
 
+use crate::constants::CONNECT_TIMEOUT;
 use crate::nats_connect_error::NatsConnectError;
-
-/// How long one connection attempt may take.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Connects to the server at `nats_url`.
 ///

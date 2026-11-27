@@ -5,7 +5,7 @@ use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use trogon_sandbox_contract::{DispatchAuth, FileSha256, FileSha256Error};
 
-use crate::dispatch_auth_constants::SIGNING_DOMAIN;
+use crate::constants::SIGNING_DOMAIN;
 
 /// The bytes the broker signs for an envelope.
 ///

@@ -3,9 +3,7 @@ use base64::engine::general_purpose::{URL_SAFE_NO_PAD, URL_SAFE_NO_PAD_INDIFFERE
 use serde_json::{Map, Value};
 
 use crate::JwtDefect;
-
-/// Signature segment of every fake token.
-pub(crate) const FAKE_SIGNATURE: &str = "ZmFrZS1zaWduYXR1cmU";
+use crate::constants::FAKE_SIGNATURE;
 
 pub(crate) struct ParsedJwt<'a> {
     pub(crate) header: &'a str,

@@ -457,6 +457,13 @@ fn a_captured_jwt_with_named_claims_registers_claim_entries() -> TestResult {
 }
 
 #[test]
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(
+        error_string_comparison,
+        reason = "the rendered message is the contract under test; typed variants are matched separately"
+    )
+)]
 fn a_captured_jwt_that_cannot_be_masked_registers_nothing() -> TestResult {
     let jwt_a = token(r#"{"sub":"alice"}"#);
     let jwt_b = token(r#"{"other":"bobby"}"#);

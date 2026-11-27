@@ -5,10 +5,8 @@ use trogon_sandbox_contract::{
     TlsInterceptionExemptions, UnlistedDestinations,
 };
 
+pub use crate::constants::DEFAULT_TUNNEL_CAP;
 use crate::pattern_matches;
-
-/// The tunnel cap used when `NetworkOptions` sets none.
-pub const DEFAULT_TUNNEL_CAP: u32 = 256;
 
 /// Reports whether a TLS exclusion covers the destination.
 pub fn tls_exclusions_exclude(exclusions: &TlsExclusions, host: &Host, port: u16) -> bool {
