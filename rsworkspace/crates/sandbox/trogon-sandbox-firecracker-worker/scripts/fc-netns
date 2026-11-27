@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Root helper for trogon-sandbox-firecracker-worker leases with a network device.
+#
+# Run only through sudo by the worker's user, which a sudoers rule limits to this file:
+#   up NS        create the namespace, its tap and its deny-by-default nftables table
+#   exec NS CMD  run CMD inside the namespace as the calling user, never as root
+#   down NS      delete the namespace and everything in it
+#   list         print the namespaces this helper owns
+#   spoofed NS   print `nft -j list counter` for the frames the TAP guard dropped in NS
+#   check        print the anti-spoof level this helper installs, so the worker can refuse an old one
+#
+# NS must start with NETNS_PREFIX, so the helper cannot touch namespaces it did not create.
+# Set NETNS_PREFIX when installing; sudo clears the caller's environment.
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+NETNS_PREFIX="sbxfc-"
+TAP="tap0"
+HOST_ADDR="172.16.0.1"
+# Must match GUEST_ADDR and GUEST_MAC in src/legacy_network.rs (a unit test checks).
+GUEST_ADDR="172.16.0.2"
+GUEST_MAC="06:00:ac:10:00:02"
+PROXY_PORT=3128
+# Bumped when `up` gains a guard the worker depends on; the worker compares it at startup.
+ANTI_SPOOF_LEVEL=1
+
+die() { echo "fc-netns: $*" >&2; exit 2; }
+
+[ "$(id -u)" -eq 0 ] || die "must run as root through sudo"
+caller_uid="${SUDO_UID:-}"
+caller_gid="${SUDO_GID:-}"
+[[ "$caller_uid" =~ ^[0-9]+$ && "$caller_gid" =~ ^[0-9]+$ ]] || die "must run through sudo"
+[ "$caller_uid" -ne 0 ] || die "refusing to run leases as root"
+
+valid_ns() {
+  [[ "$1" == "$NETNS_PREFIX"* && "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || die "invalid namespace name: $1"
+}
+
+ns_exists() { [ -e "/run/netns/$1" ]; }
+
+cmd_up() {
+  local ns="$1"
+  valid_ns "$ns"
+  ns_exists "$ns" && cmd_down "$ns"
+  ip netns add "$ns"
+  ip -n "$ns" link set lo up
+  ip -n "$ns" tuntap add dev "$TAP" mode tap user "$caller_uid"
+  ip -n "$ns" addr add "$HOST_ADDR/30" dev "$TAP"
+  ip -n "$ns" link set "$TAP" up
+  ip netns exec "$ns" sysctl -qw "net.ipv4.conf.$TAP.rp_filter=1"
+  ip netns exec "$ns" nft -f - <<NFT
+table netdev sandbox_l2 {
+  counter spoofed { }
+  chain ingress {
+    type filter hook ingress device "$TAP" priority -500; policy accept;
+    ether type { 8021q, 8021ad } counter name "spoofed" drop
+    ether saddr != $GUEST_MAC counter name "spoofed" drop
+  }
+}
+table inet sandbox {
+  chain input {
+    type filter hook input priority 0; policy drop;
+    iif lo accept
+    ct state established,related accept
+    iifname "$TAP" ip saddr $GUEST_ADDR ip daddr $HOST_ADDR tcp dport $PROXY_PORT accept
+  }
+  chain forward {
+    type filter hook forward priority 0; policy drop;
+  }
+  chain output {
+    type filter hook output priority 0; policy drop;
+    oif lo accept
+    ct state established,related accept
+  }
+}
+NFT
+}
+
+cmd_exec() {
+  local ns="$1"
+  shift
+  valid_ns "$ns"
+  ns_exists "$ns" || die "no such namespace: $ns"
+  [ "${1:-}" = "--" ] && shift
+  [ $# -gt 0 ] || die "exec needs a command"
+  exec ip netns exec "$ns" setpriv --reuid "$caller_uid" --regid "$caller_gid" \
+    --init-groups --inh-caps=-all --bounding-set=-all --no-new-privs --pdeathsig KILL -- "$@"
+}
+
+cmd_down() {
+  local ns="$1"
+  valid_ns "$ns"
+  ns_exists "$ns" || return 0
+  local pids
+  pids="$(ip netns pids "$ns" 2>/dev/null || true)"
+  [ -z "$pids" ] || kill -KILL $pids 2>/dev/null || true
+  ip netns del "$ns"
+}
+
+cmd_spoofed() {
+  local ns="$1"
+  valid_ns "$ns"
+  ns_exists "$ns" || die "no such namespace: $ns"
+  ip netns exec "$ns" nft -j list counter netdev sandbox_l2 spoofed
+}
+
+cmd_check() { echo "anti-spoof $ANTI_SPOOF_LEVEL"; }
+
+cmd_list() {
+  ip netns list | awk '{print $1}' | while read -r ns; do
+    [[ "$ns" == "$NETNS_PREFIX"* ]] && echo "$ns"
+  done
+  return 0
+}
+
+case "${1:-}" in
+  up) [ $# -eq 2 ] || die "usage: up NS"; cmd_up "$2" ;;
+  exec) [ $# -ge 3 ] || die "usage: exec NS -- CMD..."; shift; cmd_exec "$@" ;;
+  down) [ $# -eq 2 ] || die "usage: down NS"; cmd_down "$2" ;;
+  list) cmd_list ;;
+  spoofed) [ $# -eq 2 ] || die "usage: spoofed NS"; cmd_spoofed "$2" ;;
+  check) cmd_check ;;
+  *) die "usage: fc-netns up|exec|down|list|spoofed|check ..." ;;
+esac
