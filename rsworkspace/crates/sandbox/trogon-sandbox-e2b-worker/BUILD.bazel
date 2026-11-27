@@ -1,0 +1,37 @@
+load("//.config/bazel:rust.bzl", "workspace_crate")
+
+workspace_crate(
+    unit_test_tags = ["requires-network"],
+    integration_tests = {
+        "*": {"compile_data": ["tests/*/*.rs"]},
+        # These start a NATS server in a container through Docker.
+        "assignment_storage_policy": {"tags": ["requires-network"]},
+        "authority_intake_nats": {"tags": ["requires-network"]},
+        "file_ops_nats": {"tags": ["requires-network"]},
+        "native_fence_durability": {"tags": ["requires-network"]},
+        "native_launch_cancellation": {"tags": ["requires-network"]},
+        "native_launch_downgrade": {"tags": ["requires-network"]},
+        "native_launch_family_escape": {"tags": ["requires-network"]},
+        "native_launch_held_bootstrap": {"tags": ["requires-network"]},
+        "native_launch_storage": {"tags": ["requires-network"]},
+        "native_preparing_restart": {"tags": ["requires-network"]},
+        "native_process_launch": {"tags": ["requires-network"]},
+        "native_process_scope_refusal": {"tags": ["requires-network"]},
+        "native_recovery_refusal": {"tags": ["requires-network"]},
+        "native_recovery_structure": {"tags": ["requires-network"]},
+        "native_restart_process": {"tags": ["requires-network"]},
+        "native_running_release_restart": {"tags": ["requires-network"]},
+        "native_snapshot_nats": {"tags": ["requires-network"]},
+        "partial_assignment_restart": {"tags": ["requires-network"]},
+        "preview_privacy_recovery": {"tags": ["requires-network"]},
+        "protected_preview_recovery": {"tags": ["requires-network"]},
+        "startup_assignment_refusal": {"tags": ["requires-network"]},
+        "startup_assignment_storage": {"tags": ["requires-network"]},
+        "targeted_intake_process": {"tags": ["requires-network"]},
+        "terminal_envd": {"tags": ["requires-network"]},
+        "track_envd": {"tags": ["requires-network"]},
+        "watch_envd": {"tags": ["requires-network"]},
+        "watch_snapshot_envd": {"tags": ["requires-network"]},
+        "worker_nats": {"tags": ["requires-network"]},
+    },
+)
