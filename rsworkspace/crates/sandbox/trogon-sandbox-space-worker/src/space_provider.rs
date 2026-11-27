@@ -67,7 +67,7 @@ impl SpaceProvider {
 
     /// What this worker offers, with its configured capacity.
     pub fn profile(&self) -> ProviderCapabilityProfile {
-        capability_profile(self.config.max_leases.get())
+        capability_profile(self.config.max_leases)
     }
 
     /// The durable record of dispatch attempts.

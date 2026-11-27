@@ -49,6 +49,7 @@ pub use anti_spoof::AntiSpoof;
 pub use constants::{MAX_LEASES_LIMIT, MAX_VCPU_MILLIS};
 pub use lease_proxy_error::LeaseProxyError;
 pub use network_setup_error::NetworkSetupError;
+pub use profile::capability_profile;
 pub use proxmox_api::ProxmoxApi;
 pub use proxmox_api_error::ProxmoxApiError;
 pub use proxmox_config::ProxmoxConfig;
