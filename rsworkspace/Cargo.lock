@@ -11485,6 +11485,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "trogon-sandbox-policy-exec"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "ipnet",
+ "libc",
+ "nix",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "trogon-sandbox-contract",
+ "trogon-sandbox-egress-proxy",
+ "trogon-sandbox-protocol",
+ "trogon-sandbox-subprocess-worker",
+ "trogon-sandbox-windows-fence",
+ "trogon-std",
+ "url",
+ "uuid",
+ "which 8.0.6",
+]
+
+[[package]]
 name = "trogon-sandbox-protocol"
 version = "0.1.0"
 dependencies = [

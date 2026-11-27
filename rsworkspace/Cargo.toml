@@ -92,6 +92,7 @@ trogon-sandbox-memory-worker = { path = "crates/sandbox/trogon-sandbox-memory-wo
 trogon-sandbox-modal-worker = { path = "crates/sandbox/trogon-sandbox-modal-worker" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
 trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
+trogon-sandbox-policy-exec = { path = "crates/sandbox/trogon-sandbox-policy-exec" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-providers = { path = "crates/sandbox/trogon-sandbox-providers" }
 trogon-sandbox-proxmox-worker = { path = "crates/sandbox/trogon-sandbox-proxmox-worker" }
@@ -193,6 +194,7 @@ confique = { version = "=0.4.0", features = ["toml"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 semver = "=1.0.28"
 serde_json = "=1.0.154"
+serde_path_to_error = "=0.1.20"
 jsonschema = { version = "=0.49.4", default-features = false }
 
 # CLI
