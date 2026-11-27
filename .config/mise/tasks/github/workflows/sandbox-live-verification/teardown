@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#MISE description="Stop the worker and the stack and remove everything they created"
+set -euo pipefail
+
+: "${RUNNER_TEMP:?}"
+compose_file=devops/docker/compose/sandbox/compose.yml
+
+if [[ -f "$RUNNER_TEMP/worker.pid" ]]; then
+  pid="$(cat "$RUNNER_TEMP/worker.pid")"
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  rm -f "$RUNNER_TEMP/worker.pid"
+fi
+
+if [[ -n "${SANDBOX_DOCKER_WORKER_OWNER:-}" ]]; then
+  docker ps -aq --filter "label=sandbox.trogon.live/owner=${SANDBOX_DOCKER_WORKER_OWNER}" |
+    xargs -r docker rm -f >/dev/null
+fi
+
+# Compose resolves the required signing key even to stop the stack, and the
+# key from the start step is gone, so any value lets it parse.
+export SANDBOX_DISPATCH_SIGNING_KEY="${SANDBOX_DISPATCH_SIGNING_KEY:-unused}"
+docker compose -f "$compose_file" logs --no-color || true
+docker compose -f "$compose_file" down --remove-orphans --volumes || true
+
+rm -rf "$RUNNER_TEMP/docker-worker-state"

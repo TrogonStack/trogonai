@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Open the live verification failure issue, or comment on the open one"
+set -euo pipefail
+
+: "${RUN_URL:?}" "${GITHUB_WORKFLOW:?}"
+title="Sandbox live verification is failing on main"
+body="The ${GITHUB_WORKFLOW} run failed: ${RUN_URL}"
+
+existing="$(gh issue list --state open --search "in:title \"${title}\"" --json number --jq '.[0].number // empty')"
+if [[ -n "$existing" ]]; then
+  gh issue comment "$existing" --body "$body"
+else
+  gh issue create --title "$title" --body "$body"
+fi

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Fail early when the runner cannot run the compose stack"
+set -euo pipefail
+
+docker info >/dev/null
+docker compose version
