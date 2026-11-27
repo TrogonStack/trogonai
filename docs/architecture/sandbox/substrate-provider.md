@@ -1,7 +1,7 @@
 # The Agent Substrate provider
 
 `trogon-sandbox-substrate-worker` translates sandbox leases into Agent Substrate actors. The adapter targets the
-pinned `substrate.ateapi.v1` contract in `rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/proto/ateapi.proto`.
+pinned `substrate.ateapi.v1` contract, whose client bindings are generated from the upstream `v1.0.1` schema by `.config/buf/substrate-worker.buf.gen.yaml`.
 The broker remains above the substrate: it chooses a provider and owns tenant admission, quotas and lease deadlines.
 Other providers can serve other leases in the same application.
 

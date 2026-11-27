@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Fail when the committed substrate worker bindings differ from what buf generates from the pinned upstream schema"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+out=rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/proto
+
+mise run --skip-tools proto:generate-substrate-worker
+git add --intent-to-add -- "$out"
+if ! git diff --exit-code -- "$out"; then
+  echo "the committed bindings are stale; run: mise run proto:generate-substrate-worker" >&2
+  exit 1
+fi

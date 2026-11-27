@@ -44,6 +44,7 @@
     "rsworkspace/crates/sandbox/trogon-sandbox-subprocess-worker/src/isolation/mount_plan.rs": 2013,
     "rsworkspace/crates/sandbox/trogon-sandbox-subprocess-worker/tests/seatbelt_read_bypass.rs": 1250,
     "rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/adapter.rs": 1256,
-    "rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/proto/substrate.ateapi.v1.rs": 4402
+    "rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/proto/substrate.ateapi.v1.rs": 1228,
+    "rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/proto/substrate.ateapi.v1.tonic.rs": 1094
   }
 }

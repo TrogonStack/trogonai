@@ -1,11 +1,8 @@
 # syntax=docker/dockerfile:1
 #
-# Agent Substrate worker: fulfills sandbox leases as Substrate actors. The
-# client code is generated from proto/ateapi.proto at build time, which
-# needs a newer protoc than Debian ships, so the builder fetches a pinned
-# protoc release and checks its sha256. devops/kubernetes/sandbox/
-# substrate-worker/validation has an example deployment. The build context
-# is the repository root:
+# Agent Substrate worker: fulfills sandbox leases as Substrate actors.
+# devops/kubernetes/sandbox/substrate-worker/validation has an example
+# deployment. The build context is the repository root:
 #
 #   docker build -f devops/docker/images/trogon-sandbox-substrate-worker/Dockerfile -t trogon-sandbox-substrate-worker:dev .
 #
@@ -22,21 +19,6 @@ ARG CARGO_BUILD_JOBS
 ENV CARGO_INCREMENTAL=0 \
     CARGO_TARGET_DIR=/cargo-target
 WORKDIR /src
-
-# ateapi.proto needs protoc 27 or newer for `debug_redact`; trixie ships 3.21.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl unzip \
-    && rm -rf /var/lib/apt/lists/* \
-    && case "${TARGETARCH}" in \
-        amd64) protoc_arch=x86_64; protoc_sha256=121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278 ;; \
-        arm64) protoc_arch=aarch_64; protoc_sha256=8b8f18bd2b30346efbc698dd5a73dd7c805f3ef8380f6dfc95c768f3f1852f6a ;; \
-        *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac \
-    && curl -fsSL -o /tmp/protoc.zip "https://github.com/protocolbuffers/protobuf/releases/download/v36.2/protoc-36.2-linux-${protoc_arch}.zip" \
-    && echo "${protoc_sha256}  /tmp/protoc.zip" | sha256sum -c - \
-    && unzip -q /tmp/protoc.zip -d /opt/protoc \
-    && rm /tmp/protoc.zip
-ENV PROTOC=/opt/protoc/bin/protoc
 
 RUN --mount=type=bind,source=rsworkspace,target=/src,rw \
     --mount=type=cache,id=trogonai-rust-registry,target=/usr/local/cargo/registry,sharing=locked \

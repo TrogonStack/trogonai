@@ -230,7 +230,6 @@ thiserror = "=2.0.21"
 authzed = { package = "spicedb-grpc-tonic", version = "=1.0.0" }
 tonic = { version = "=0.14.9", default-features = false, features = ["transport", "codegen", "router"] }
 tonic-prost = "=0.14.5"
-tonic-prost-build = "=0.14.6"
 moka = { version = "=0.12.16", features = ["future"] }
 
 # Object storage
@@ -316,7 +315,6 @@ uuid = { version = "=1.24.0", features = ["v4", "v7"] }
 prost = "=0.14.3"
 prost-reflect = "=0.14.7"
 prost-types = "=0.14.3"
-protox = "=0.10.0"
 serde_urlencoded = "=0.7.1"
 serde_yaml = "=0.9.34"
 wasmtime-wasi = "=47.0.3"

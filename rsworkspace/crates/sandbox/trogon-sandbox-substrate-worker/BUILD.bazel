@@ -5,14 +5,6 @@ workspace_crate(
         # These start a NATS server in a container through Docker.
         "actor_index_nats": {"tags": ["requires-network"]},
         "binary": {"tags": ["requires-network"]},
-        # Regenerates the bindings from the schema and compares them with the committed file at run time.
-        "generated_proto": {
-            "data": [
-                "proto/ateapi.proto",
-                "src/proto/substrate.ateapi.v1.rs",
-            ],
-            "rustc_env": {"CARGO_MANIFEST_DIR": "{package}"},
-        },
         "template_tenant_scope": {"tags": ["requires-network"]},
     },
     unit_test_tags = ["requires-network"],

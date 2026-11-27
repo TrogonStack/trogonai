@@ -2,19 +2,24 @@ name: CI Sandbox Ratchets
 
 # Engineering ratchets on the sandbox crates: a Rust source file may not grow
 # past its line ceiling, and an #[ignore] test must be listed in the quarantine
-# inventory with a reason, so neither kind of debt grows without review.
+# inventory with a reason, so neither kind of debt grows without review. The
+# substrate worker's generated bindings must also match the pinned upstream schema.
 on:
   push:
     branches: [main]
     paths:
       - 'rsworkspace/crates/sandbox/**'
       - '.config/mise/tasks/github/workflows/ci-sandbox-ratchets/**'
+      - '.config/buf/substrate-worker.buf.gen.yaml'
+      - '.config/mise/tasks/proto/generate-substrate-worker'
       - '.github/workflows/ci-sandbox-ratchets.yml'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
       - 'rsworkspace/crates/sandbox/**'
       - '.config/mise/tasks/github/workflows/ci-sandbox-ratchets/**'
+      - '.config/buf/substrate-worker.buf.gen.yaml'
+      - '.config/mise/tasks/proto/generate-substrate-worker'
       - '.github/workflows/ci-sandbox-ratchets.yml'
 
 concurrency:
@@ -48,3 +53,21 @@ jobs:
 
       - name: Ignored-test inventory is current
         run: mise run --skip-tools github:workflows:ci-sandbox-ratchets:ignored-tests
+
+  substrate-bindings:
+    name: Substrate worker bindings are current
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install buf and the prost plugins
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install_args: buf rust cargo:protoc-gen-prost cargo:protoc-gen-tonic
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Regenerate the bindings and fail on drift
+        run: mise run --skip-tools github:workflows:ci-sandbox-ratchets:substrate-bindings
