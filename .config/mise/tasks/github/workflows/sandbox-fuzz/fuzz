@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#MISE description="Fuzz one egress proxy parser target for FUZZ_SECONDS on a nightly toolchain"
+set -euo pipefail
+
+: "${FUZZ_TARGET:?FUZZ_TARGET is required}"
+: "${FUZZ_SECONDS:?FUZZ_SECONDS is required}"
+
+# The budget comes from a manual run input. Anything past 3000 seconds would hit
+# the job timeout first, and a timed out job is cancelled before it can upload
+# the crashing inputs.
+case "$FUZZ_SECONDS" in
+    '' | *[!0-9]*) echo "FUZZ_SECONDS must be a whole number of seconds, got: ${FUZZ_SECONDS}" >&2; exit 1 ;;
+esac
+seconds=$((10#$FUZZ_SECONDS))
+if [ "$seconds" -lt 1 ] || [ "$seconds" -gt 3000 ]; then
+    echo "FUZZ_SECONDS must be between 1 and 3000, got: ${seconds}" >&2
+    exit 1
+fi
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy"
+
+# cargo-fuzz needs nightly for the sanitizer flags, while mise pins the stable
+# toolchain everything else builds with. mise shims and wrappers reset
+# RUSTUP_TOOLCHAIN to that pin, so the nightly binaries go first on PATH and
+# cargo-fuzz runs from its install path instead of through a shim.
+rustup toolchain install nightly --profile minimal --no-self-update
+nightly_bin="$(dirname "$(rustup which --toolchain nightly cargo)")"
+cargo_fuzz="$(mise which cargo-fuzz)"
+
+PATH="${nightly_bin}:${PATH}" RUSTUP_TOOLCHAIN=nightly \
+    "$cargo_fuzz" fuzz run "$FUZZ_TARGET" -- -max_total_time="$seconds" -rss_limit_mb=2048

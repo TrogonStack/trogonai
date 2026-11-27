@@ -26,3 +26,5 @@ parsers. It is for fuzz targets and is not meant for production builds.
 
 The cargo-fuzz targets live in `fuzz/`, outside the Cargo workspace, and need a nightly toolchain:
 `cargo +nightly fuzz run proxied_head` or `cargo +nightly fuzz run chunked_body` from this directory.
+`.github/workflows/sandbox-fuzz.yml` runs both targets every week and on demand, and uploads any crashing input as an
+artifact.
