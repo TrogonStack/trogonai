@@ -72,6 +72,7 @@ trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
 trogon-sandbox-dev = { path = "crates/sandbox/trogon-sandbox-dev" }
 trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-helper" }
 trogon-sandbox-file-ops = { path = "crates/sandbox/trogon-sandbox-file-ops" }
+trogon-sandbox-fly-worker = { path = "crates/sandbox/trogon-sandbox-fly-worker" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
 trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
