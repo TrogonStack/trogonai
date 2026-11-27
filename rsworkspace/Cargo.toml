@@ -76,6 +76,7 @@ trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-help
 trogon-sandbox-file-ops = { path = "crates/sandbox/trogon-sandbox-file-ops" }
 trogon-sandbox-fly-worker = { path = "crates/sandbox/trogon-sandbox-fly-worker" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
+trogon-sandbox-hyperlight-worker = { path = "crates/sandbox/trogon-sandbox-hyperlight-worker" }
 trogon-sandbox-memory-worker = { path = "crates/sandbox/trogon-sandbox-memory-worker" }
 trogon-sandbox-modal-worker = { path = "crates/sandbox/trogon-sandbox-modal-worker" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
