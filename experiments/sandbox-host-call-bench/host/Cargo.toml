@@ -1,0 +1,21 @@
+[package]
+name = "bench-host"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1"
+# The version the repository's in-process wasm worker pins.
+wasmtime = "=47.0.3"
+# The revision trogon-sandbox-hyperlight-worker pins. Linux (KVM/MSHV) and Windows only.
+hyperlight-wasm = { git = "https://github.com/yordis/hyperlight-wasm.git", rev = "28b6c052eaf2c0eade8c73de48c530e29eccc422", optional = true }
+
+[features]
+hyperlight = ["dep:hyperlight-wasm"]
+
+[profile.release]
+opt-level = 3
+debug = false
+
+[workspace]

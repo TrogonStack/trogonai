@@ -1,0 +1,16 @@
+# Builds for wasm32-unknown-unknown only and stays out of every workspace.
+[package]
+name = "bench-guest"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+lto = true
+opt-level = 3
+strip = true
+
+[workspace]
