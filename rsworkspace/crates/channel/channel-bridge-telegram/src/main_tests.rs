@@ -131,12 +131,12 @@ impl RuntimeFixture {
 }
 
 #[tokio::test]
-async fn runtime_initializes_before_stopping_when_inbound_stream_ends() {
+async fn runtime_fails_after_initializing_when_inbound_stream_ends() {
     let fixture = RuntimeFixture::new().await;
     let initialized = fixture.accept_initialization().await;
     tokio::task::LocalSet::new()
         .run_until(async move {
-            tokio::time::timeout(
+            let error = tokio::time::timeout(
                 Duration::from_secs(5),
                 super::run(
                     fixture.nats,
@@ -150,7 +150,8 @@ async fn runtime_initializes_before_stopping_when_inbound_stream_ends() {
             )
             .await
             .unwrap()
-            .unwrap();
+            .expect_err("a bridge that can no longer receive updates must fail");
+            assert_eq!(error.to_string(), "inbound consumer stream ended");
             initialized.await.unwrap();
         })
         .await;
@@ -253,7 +254,7 @@ async fn runtime_continues_after_receive_and_message_processing_errors() {
             )
             .await
             .unwrap()
-            .unwrap();
+            .expect_err("the updates run out, which ends the bridge");
             initialized.await.unwrap();
         })
         .await;
@@ -320,7 +321,7 @@ async fn runtime_reports_unavailable_agent_before_consuming_updates() {
 }
 
 #[tokio::test]
-async fn runtime_stops_when_the_client_subscription_is_drained() {
+async fn runtime_fails_when_the_client_subscription_is_drained() {
     let fixture = RuntimeFixture::new().await;
     let initialized = fixture.accept_initialization().await;
     let client = fixture.nats.clone();
@@ -351,7 +352,8 @@ async fn runtime_stops_when_the_client_subscription_is_drained() {
             let (result, ()) = tokio::time::timeout(Duration::from_secs(5), async { tokio::join!(runtime, drain) })
                 .await
                 .unwrap();
-            result.unwrap();
+            let error = result.expect_err("a bridge that can no longer render replies must fail");
+            assert!(error.to_string().starts_with("ACP client task ended"), "{error}");
         })
         .await;
 }
