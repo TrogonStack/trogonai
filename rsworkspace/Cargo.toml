@@ -70,6 +70,7 @@ trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-help
 trogon-sandbox-file-ops = { path = "crates/sandbox/trogon-sandbox-file-ops" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
+trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
 trogon-sandbox-volumes = { path = "crates/sandbox/trogon-sandbox-volumes" }
 trogon-sandbox-windows-fence = { path = "crates/sandbox/trogon-sandbox-windows-fence" }
@@ -198,6 +199,9 @@ toml = "=1.1.8"
 wasmtime = "=47.0.3"
 http = "=1.5.0"
 regex = "=1.12.3"
+http-auth = { version = "=0.1.10", default-features = false }
+oci-client = { version = "=0.17.0", default-features = false, features = ["rustls-tls"] }
+olpc-cjson = "=0.1.4"
 regress = { version = "=0.12.0", features = ["utf16"] }
 reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rrule = "=0.14.0"
@@ -241,6 +245,7 @@ filetime = "=0.2.29"
 time = "=0.3.55"
 unicode-ident = "=1.0.24"
 url = "=2.5.8"
+walkdir = "=2.5.0"
 uuid = { version = "=1.24.0", features = ["v4", "v7"] }
 prost-reflect = "=0.14.7"
 serde_yaml = "=0.9.34"
