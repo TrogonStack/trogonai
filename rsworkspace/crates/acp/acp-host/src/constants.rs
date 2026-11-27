@@ -24,6 +24,12 @@ pub const HOST_STREAMS: [AcpStream; 2] = [AcpStream::Commands, AcpStream::Respon
 pub const FALLBACK_PROTOCOL_VERSION: agent_client_protocol::schema::ProtocolVersion =
     agent_client_protocol::schema::ProtocolVersion::V1;
 
+/// How long a relaunched child has to answer the client's `initialize` it is
+/// launched with. A child that keeps its pipe open and never answers would
+/// otherwise hold the run forever: no NATS serving, no relaunch. Shorter than
+/// [`REINITIALIZE_TIMEOUT`], so a client waiting on the relaunch hears why.
+pub const INITIALIZE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// How long a client's `initialize` waits for the relaunched child it asked
 /// for to answer. Longer than the bridge's default operation timeout, so the
 /// client gives up first and this only bounds a task nobody is waiting on.

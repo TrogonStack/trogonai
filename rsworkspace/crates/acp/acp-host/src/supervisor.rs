@@ -1,10 +1,12 @@
 use crate::agent_launch::AgentLaunch;
 use crate::client_claim::ClientClaim;
-use crate::client_handshake::ClientHandshake;
+use crate::client_handshake::{ClientHandshake, ClientInitialize};
+use crate::constants::INITIALIZE_TIMEOUT;
 use crate::initialized_agent::{Handshake, InitializedAgent};
 use crate::restart_policy::RestartPolicy;
 use acp_nats::boundary::{BoundaryExit, ConnectionAgent, connect_client_boundary_with};
 use acp_nats::{AgentHandler, ClientHandler};
+use agent_client_protocol::v1::schema::InitializeResponse;
 use agent_client_protocol::{AcpAgent, Client, ConnectTo};
 use std::fmt::Display;
 use std::future::Future;
@@ -40,8 +42,8 @@ pub enum RunExit<E> {
     /// The NATS side failed; the agent is restarted with it.
     ServeFailed(E),
     /// The agent connection failed: the child could not be launched, refused
-    /// the client's initialize it was relaunched with, or died abnormally
-    /// (e.g. killed by a signal).
+    /// the client's initialize it was relaunched with or did not answer it in
+    /// time, or died abnormally (e.g. killed by a signal).
     AgentFailed(agent_client_protocol::Error),
     /// The client initialized again with different parameters, which the
     /// running child cannot take: the next child is initialized with them.
@@ -69,7 +71,8 @@ enum Served<E> {
 /// Launches the agent and hands it to `serve` until either side ends.
 ///
 /// When `handshake` holds a client's `initialize` (this is a relaunch), the
-/// child is initialized with it before serving starts. Otherwise the child is
+/// child is initialized with it before serving starts, and has
+/// [`INITIALIZE_TIMEOUT`] to answer before the run fails. Otherwise the child is
 /// left for the first client `initialize` to reach it; see
 /// [`InitializedAgent`].
 pub async fn run_once<L, C, S, F, E>(
@@ -89,9 +92,7 @@ where
         let agent = ConnectionAgent::new(cx);
         let initialized = match handshake.last() {
             Some(request) => {
-                let result = agent.initialize_raw(request.params().clone()).await;
-                handshake.settle(&request, &result);
-                let response = result?;
+                let response = initialize_relaunched(&agent, &handshake, &request).await?;
                 info!(agent = ?response.agent_info, "agent relaunched with the client's initialize");
                 Some(Handshake { request, response })
             }
@@ -113,6 +114,21 @@ where
         Ok(BoundaryExit::Main(Served::Reinitialize)) => RunExit::Reinitialize,
         Err(error) => RunExit::AgentFailed(error),
     }
+}
+
+/// Initializes a relaunched child with the client's `request`, giving it
+/// [`INITIALIZE_TIMEOUT`] to answer, and tells `handshake` how that went.
+async fn initialize_relaunched(
+    agent: &ConnectionAgent,
+    handshake: &ClientHandshake,
+    request: &ClientInitialize,
+) -> agent_client_protocol::Result<InitializeResponse> {
+    let Ok(result) = tokio::time::timeout(INITIALIZE_TIMEOUT, agent.initialize_raw(request.params().clone())).await
+    else {
+        return Err(handshake.time_out(request));
+    };
+    handshake.settle(request, &result);
+    result
 }
 
 /// Keeps one agent running behind `serve`, relaunching it per `policy`

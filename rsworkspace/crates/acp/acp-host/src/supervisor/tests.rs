@@ -494,6 +494,49 @@ async fn capabilities_the_schema_does_not_name_reach_every_child() {
     assert_eq!(launcher.initialize_params(), vec![sent.clone(), sent]);
 }
 
+/// A child that keeps its pipe open and never answers anything.
+struct SilentLauncher;
+
+impl LaunchAgent for SilentLauncher {
+    type Transport = ByteStreams<Compat<WriteHalf<DuplexStream>>, Compat<ReadHalf<DuplexStream>>>;
+
+    fn launch(&self) -> Self::Transport {
+        let (host_io, agent_io) = tokio::io::duplex(64 * 1024);
+        let (host_read, host_write) = tokio::io::split(host_io);
+        tokio::spawn(async move {
+            let (mut agent_read, _agent_write) = tokio::io::split(agent_io);
+            let _ = tokio::io::copy(&mut agent_read, &mut tokio::io::sink()).await;
+        });
+        ByteStreams::new(Compat::new(host_write), Compat::new(host_read))
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relaunched_child_that_never_answers_initialize_fails_the_run_and_keeps_the_handshake() {
+    let handshake = Arc::new(ClientHandshake::default());
+    handshake.remember(discord("1").into());
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
+
+    let exit = run_once(
+        &SilentLauncher,
+        Arc::new(NoopClient),
+        Arc::default(),
+        handshake.clone(),
+        &serve,
+    )
+    .await;
+
+    assert!(
+        matches!(&exit, RunExit::AgentFailed(_)) && exit.to_string().contains("did not answer initialize"),
+        "got {exit}"
+    );
+    assert_eq!(
+        handshake.last(),
+        Some(discord("1").into()),
+        "the next child gets it too"
+    );
+}
+
 #[tokio::test]
 async fn a_relaunched_child_that_exits_before_answering_keeps_the_handshake() {
     let handshake = Arc::new(ClientHandshake::default());

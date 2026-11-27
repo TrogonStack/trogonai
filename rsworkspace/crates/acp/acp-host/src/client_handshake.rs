@@ -1,4 +1,4 @@
-use crate::constants::REINITIALIZE_TIMEOUT;
+use crate::constants::{INITIALIZE_TIMEOUT, REINITIALIZE_TIMEOUT};
 use agent_client_protocol::v1::schema::{InitializeRequest, InitializeResponse};
 use agent_client_protocol::{Error, ErrorCode, Result, is_connection_terminated, is_incoming_transport_closed};
 use serde::Deserialize;
@@ -105,9 +105,25 @@ impl ClientHandshake {
                 *last = None;
             }
         }
+        self.publish(request, result.clone());
+    }
+
+    /// Records that a freshly launched child did not answer `request` within
+    /// [`INITIALIZE_TIMEOUT`], and returns the error to fail its run with. A
+    /// silent child refused nothing, so the request is kept for the next one.
+    pub fn time_out(&self, request: &ClientInitialize) -> Error {
+        let error = Error::new(
+            ErrorCode::INTERNAL_ERROR,
+            format!("the agent did not answer initialize within {INITIALIZE_TIMEOUT:?}"),
+        );
+        self.publish(request, Err(error.clone()));
+        error
+    }
+
+    fn publish(&self, request: &ClientInitialize, result: Result<InitializeResponse>) {
         self.outcomes.send_replace(Some(Arc::new(Outcome {
             request: request.clone(),
-            result: result.clone(),
+            result,
         })));
     }
 

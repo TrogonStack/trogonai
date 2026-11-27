@@ -29,6 +29,16 @@ fn a_refused_initialize_is_dropped_so_the_next_child_waits_for_the_client() {
 }
 
 #[test]
+fn a_child_that_did_not_answer_in_time_refused_nothing_so_the_initialize_is_kept() {
+    let handshake = ClientHandshake::default();
+    handshake.remember(from("discord"));
+
+    handshake.time_out(&from("discord"));
+
+    assert_eq!(handshake.last(), Some(from("discord")));
+}
+
+#[test]
 fn a_refusal_of_an_older_initialize_keeps_the_newer_one() {
     let handshake = ClientHandshake::default();
     handshake.remember(from("discord-2"));
