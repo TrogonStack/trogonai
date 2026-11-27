@@ -61,6 +61,7 @@ trogon-identity-types = { path = "crates/platform/trogon-identity-types" }
 trogon-jwks-publisher = { path = "crates/platform/trogon-jwks-publisher" }
 trogon-semconv = { path = "crates/platform/trogon-semconv" }
 trogon-service-config = { path = "crates/platform/trogon-service-config" }
+trogon-sandbox-aca-worker = { path = "crates/sandbox/trogon-sandbox-aca-worker" }
 trogon-sandbox-actor-agent = { path = "crates/sandbox/trogon-sandbox-actor-agent" }
 trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-client = { path = "crates/sandbox/trogon-sandbox-client" }
