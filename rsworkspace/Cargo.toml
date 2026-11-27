@@ -71,6 +71,7 @@ trogon-sandbox-cosign = { path = "crates/sandbox/trogon-sandbox-cosign" }
 trogon-sandbox-credential-broker = { path = "crates/sandbox/trogon-sandbox-credential-broker" }
 trogon-sandbox-credential-client = { path = "crates/sandbox/trogon-sandbox-credential-client" }
 trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
+trogon-sandbox-daytona-worker = { path = "crates/sandbox/trogon-sandbox-daytona-worker" }
 trogon-sandbox-dev = { path = "crates/sandbox/trogon-sandbox-dev" }
 trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-helper" }
 trogon-sandbox-file-ops = { path = "crates/sandbox/trogon-sandbox-file-ops" }
