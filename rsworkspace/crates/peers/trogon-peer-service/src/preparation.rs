@@ -19,7 +19,9 @@ use crate::{
 use buffa::MessageField;
 use trogon_decider_runtime::{CommandAuthorizer, CommandError, StreamAppend, StreamRead};
 use trogon_peer::PeerState;
-use trogon_peer::{BatchId, MessageError, MessageId, PeerId, PrepareBatch, TrustedBatchPlan, TrustedPeerOwner};
+use trogon_peer::{
+    BatchId, MessageError, MessageId, PeerId, PrepareBatch, RenderedUtf8Bytes, TrustedBatchPlan, TrustedPeerOwner,
+};
 use trogon_peer_context::{MAX_MESSAGES, PeerContext, PeerContextError};
 use trogonai_proto::{convert::timestamp_from_datetime, peers::v1alpha1 as proto};
 impl<S, P, C, Content, Cache, Ids, Catalog> PeerApplication<S, P, C, Content, Cache, Ids, Catalog>
@@ -116,7 +118,7 @@ where
                 }
             }
             let frame = frame.ok_or(PeerApplicationError::Scope)?;
-            let plan = TrustedBatchPlan::from_renderer(selected, frame.as_str().len())?;
+            let plan = TrustedBatchPlan::from_renderer(selected, RenderedUtf8Bytes::new(frame.as_str().len())?)?;
             let key = PresentationKey::new(owner.tenant().clone(), reference.peer_id().clone(), batch_id.clone());
             let record = PreparedPresentation::from_port(batch.clone(), messages, frame.as_str().to_owned());
             self.cache.insert(&key, &record).await?;

@@ -7,6 +7,7 @@ use trogon_peer::InstallationId;
 use trogon_peer::NativeSessionId;
 use trogon_peer::PeerDisplayName;
 use trogon_peer::PeerObservation;
+use trogon_peer::RenderedUtf8Bytes;
 use trogon_peer_service::PeerService;
 use trogon_peer_service::test_support::IsolatedEnrollmentFixture;
 
@@ -140,7 +141,7 @@ impl CommandAuthorizer<PrepareBatch> for PreparationGrant {
         self.base.authorize(principal, command)?;
         if command.batch_id() != &self.batch
             || command.plan().message_ids() != self.messages.as_slice()
-            || command.plan().rendered_utf8_bytes() > self.maximum_rendered_bytes
+            || command.plan().rendered_utf8_bytes().get() > self.maximum_rendered_bytes
         {
             return Err(AuthorizationDeniedError::new("preparation exceeds rendered-plan grant"));
         }
@@ -301,7 +302,7 @@ async fn batch_grants_bind_selection_budget_and_exact_acknowledgement_before_sto
         f.bob.clone(),
         reference(&f.b)?,
         batch.clone(),
-        TrustedBatchPlan::from_renderer(vec![accepted.message.clone()], 20)?,
+        TrustedBatchPlan::from_renderer(vec![accepted.message.clone()], RenderedUtf8Bytes::new(20)?)?,
         f.clock.now(),
     );
     let allowed = PreparationGrant {
@@ -838,7 +839,10 @@ async fn public_fixture_batch_id_grants_reject_preparation_and_ack_before_storag
             text: Some("payload".into()),
         }],
     )?;
-    let plan = TrustedBatchPlan::from_renderer(vec![accepted.message.clone()], rendered.as_str().len())?;
+    let plan = TrustedBatchPlan::from_renderer(
+        vec![accepted.message.clone()],
+        RenderedUtf8Bytes::new(rendered.as_str().len())?,
+    )?;
     let denied = PrepareBatch::new(
         f.bob.clone(),
         reference(&f.b)?,

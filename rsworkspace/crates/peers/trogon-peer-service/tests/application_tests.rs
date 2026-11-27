@@ -25,6 +25,7 @@ use trogon_peer::MessageError;
 use trogon_peer::PeerState;
 use trogon_peer::PeerValueError;
 use trogon_peer::PrepareBatch;
+use trogon_peer::RenderedUtf8Bytes;
 use trogon_peer::SealedContentRef;
 use trogon_peer::TrustedBatchPlan;
 use trogon_peer::{MessageId, PeerId};
@@ -1586,7 +1587,7 @@ async fn public_preparation_receipts_drive_status_and_preserve_the_exact_present
         text: Some(body.into()),
     }];
     let frame = trogon_peer_context::PeerContext::render(&draft_batch, &messages)?;
-    let plan = TrustedBatchPlan::from_renderer(vec![id], frame.as_str().len())?;
+    let plan = TrustedBatchPlan::from_renderer(vec![id], RenderedUtf8Bytes::new(frame.as_str().len())?)?;
     let prepared = CommandExecution::new(
         &f.store,
         &PrepareBatch::new(f.bob.clone(), reference.clone(), batch_id.clone(), plan, f.clock.now()),
@@ -1776,7 +1777,7 @@ impl trogon_peer_service::PresentationInsert for ConcurrentPreparationCache {
                 .map(MessageId::new)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|_| PeerPortError::Integrity)?,
-            frame.as_str().len(),
+            trogon_peer::RenderedUtf8Bytes::new(frame.as_str().len()).map_err(|_| PeerPortError::Integrity)?,
         )
         .map_err(|_| PeerPortError::Integrity)?;
         let now = trogonai_proto::convert::datetime_from_timestamp(
@@ -4165,7 +4166,7 @@ async fn public_preparation_rejects_a_leap_clock_before_allocating_or_opening_co
             text: Some("pending".into()),
         }],
     )?;
-    let plan = TrustedBatchPlan::from_renderer(vec![id.clone()], rendered.as_str().len())?;
+    let plan = TrustedBatchPlan::from_renderer(vec![id.clone()], RenderedUtf8Bytes::new(rendered.as_str().len())?)?;
     let leap = chrono::Utc
         .timestamp_opt((ordinary + Duration::seconds(1)).timestamp(), 1_500_000_000)
         .single()

@@ -1,6 +1,7 @@
 mod caller_id;
 mod collaboration_ref;
 mod connector_id;
+mod constants;
 mod enrollment_identity;
 mod installation_id;
 mod native_session_id;
@@ -44,6 +45,9 @@ pub use trusted_content::TrustedContent;
 
 mod terminal_disposition;
 pub use terminal_disposition::TerminalDisposition;
+
+mod rendered_utf8_bytes;
+pub use rendered_utf8_bytes::RenderedUtf8Bytes;
 
 mod trusted_batch_plan;
 pub use trusted_batch_plan::TrustedBatchPlan;

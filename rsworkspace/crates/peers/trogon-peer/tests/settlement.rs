@@ -28,7 +28,11 @@ fn acknowledgment_stops_replay_and_releases_recipient_quota_exactly_once() {
         identity("recipient").owner().clone(),
         reference("recipient", 1),
         BatchId::new("next_batch").unwrap(),
-        TrustedBatchPlan::from_renderer(vec![MessageId::new("message_4").unwrap()], 2048).unwrap(),
+        TrustedBatchPlan::from_renderer(
+            vec![MessageId::new("message_4").unwrap()],
+            RenderedUtf8Bytes::new(2048).unwrap(),
+        )
+        .unwrap(),
         time(5),
     );
     assert_eq!(run(state, &cmd).batches.len(), 2);
@@ -803,4 +807,25 @@ fn authoritative_receipt_rejects_sender_binding_that_disagrees_with_intake() {
             AuthoritativeReceipt::from_recipient_history(&recipient, &MessageId::new("message_0").unwrap()).is_err()
         );
     }
+}
+
+#[test]
+fn receipt_for_another_senders_message_with_the_same_id_cannot_release_this_senders_outbox() {
+    let recipient = run(inbox(&[0], 1), &prepare(&[0], 20, 3));
+    let other = identity("other_sender");
+    let colliding = SendMessage::new(
+        other.owner().clone(),
+        reference("other_sender", 1),
+        IdempotencyKey::new("key_0").unwrap(),
+        MessageId::new("message_0").unwrap(),
+        identity("recipient").peer_id().clone(),
+        CollaborationRef::new("collaboration").unwrap(),
+        content(1, 1),
+        None,
+        time(1),
+    );
+    let other_sender = run(enrolled("other_sender", 0), &colliding);
+    let command = SettleMessage::new(other.peer_id().clone(), receipt(&recipient, 0));
+    assert_eq!(error(other_sender.clone(), &command), MessageError::Conflict);
+    assert!(!other_sender.outbox[0].settlement.is_set());
 }

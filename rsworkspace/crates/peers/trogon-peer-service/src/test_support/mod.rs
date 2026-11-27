@@ -648,7 +648,7 @@ impl CommandAuthorizer<PrepareBatch> for PolicyFixture {
         self.peer(p, c.owner(), c.attachment().peer_id())?;
         if c.batch_id().as_str() == "denied"
             || c.plan().message_ids().is_empty()
-            || c.plan().rendered_utf8_bytes() > 8192
+            || c.plan().rendered_utf8_bytes().get() > 8192
         {
             return Err(AuthorizationDeniedError::new("plan outside fixture grant"));
         }

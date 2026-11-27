@@ -2,6 +2,8 @@
 pub enum PeerValueError {
     #[error("batch plan must select 1 to 4 distinct messages within 8192 rendered UTF-8 bytes")]
     InvalidBatchPlan,
+    #[error("rendered batch size must be 1 to 8192 UTF-8 bytes")]
+    InvalidRenderedSize,
     #[error("content must contain 1 to 2048 UTF-8 bytes")]
     InvalidContent,
     #[error("stored content reference must contain a locator and a SHA-256 integrity digest")]
