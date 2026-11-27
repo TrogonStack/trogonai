@@ -49,9 +49,10 @@ The bearer token file is read on every call, so a rotated projected token is pic
 
 ## The wire contract
 
-`proto/ateapi.proto` is the pinned `substrate.ateapi.v1` contract. `build.rs` generates the client only, and
-`ate_client` is the single place where `tonic::Status` is classified. To move to a newer contract, replace the file
-unmodified, rerun the tests, and re-read `ate_client` if a `Control` call changed shape.
+`proto/ateapi.proto` is the pinned `substrate.ateapi.v1` contract. Its client-only bindings are checked in at
+`src/proto/substrate.ateapi.v1.rs`, and `ate_client` is the single place where `tonic::Status` is classified. To move
+to a newer contract, follow `proto/README.md`: replace the file, regenerate the bindings, rerun the tests, and re-read
+`ate_client` if a `Control` call changed shape.
 
 ## What a lease may not ask for
 

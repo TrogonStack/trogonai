@@ -25,7 +25,7 @@ fn policy_command() -> Command {
 }
 
 fn proxy_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_trogon-sandbox-policy-proxy"))
+    Command::new(support::binary(env!("CARGO_BIN_EXE_trogon-sandbox-policy-proxy")))
 }
 
 fn spawn_piped(command: &mut Command) -> std::io::Result<Child> {
@@ -313,7 +313,7 @@ fn version_line() -> String {
 
 #[test]
 fn version_needs_nothing_from_the_environment_or_the_working_directory() -> TestResult {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_trogon-sandbox-policy"));
+    let mut command = Command::new(support::binary(env!("CARGO_BIN_EXE_trogon-sandbox-policy")));
     command.args(["proxy", "--version"]).env_clear().current_dir("/");
     let done = finish(command)?;
     assert_eq!(done.code(), Some(0));

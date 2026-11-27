@@ -19,6 +19,9 @@ filegroup(name = "unit_tests", srcs = glob(["app/**/*.test.ts", "server/**/*.tes
 ts_project(
     name = "typecheck",
     srcs = [":sources", ":unit_tests"],
+    # `next build` writes allowJs and incremental into tsconfig.json, so the rule mirrors them.
+    allow_js = True,
+    incremental = True,
     no_emit = True,
     tsconfig = "tsconfig.json",
     deps = [":node_modules", ":package_metadata"],

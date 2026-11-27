@@ -1,6 +1,8 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
+    # `src/lib.rs` takes its crate docs from the README.
+    compile_data = ["README.md"],
     integration_tests = {
         # These start a NATS server in a container through Docker.
         "binary": {"tags": ["requires-network"]},

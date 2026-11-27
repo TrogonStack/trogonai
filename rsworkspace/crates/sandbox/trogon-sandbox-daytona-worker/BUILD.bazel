@@ -3,9 +3,11 @@ load("//.config/bazel:rust.bzl", "workspace_crate")
 workspace_crate(
     compile_data = ["src/ordinary_command_runtime/bridge.cjs"],
     integration_tests = {
+        # Test binaries share the `*_support` module directories through `#[path]` and `mod` items.
         "*": {"compile_data": [
             "tests/*/*.rs",
             "tests/*/*/*.rs",
+            "tests/*_support/**/*.rs",
         ]},
         # These start a NATS server in a container through Docker.
         "binary": {"tags": ["requires-network"]},
