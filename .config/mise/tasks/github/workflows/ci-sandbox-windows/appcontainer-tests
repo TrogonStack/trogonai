@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#MISE description="Run the Windows sandbox tests, AppContainer enforcement included"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}/rsworkspace"
+
+# Hosted Windows runners run only Windows containers and the NATS test fixture
+# is a Linux image, so the tests that start it are left to Linux CI.
+protocol_targets=(--lib)
+for test_file in crates/sandbox/trogon-sandbox-protocol/tests/*.rs; do
+    if ! grep -q '^mod nats_common;' "${test_file}"; then
+        protocol_targets+=(--test "$(basename "${test_file}" .rs)")
+    fi
+done
+worker_nats_tests=(
+    worker::tests::a_successful_launch_returns_the_provider_lease_and_releases_the_lease_slot
+    worker::tests::a_failed_launch_propagates_the_provider_error
+    worker::tests::sandbox_user_verbs_are_ignored_when_the_lease_is_not_held_here
+    worker::tests::sandbox_user_verbs_are_answered_with_a_denial_when_the_lease_is_held_here
+    worker::tests::redispatching_a_lease_id_returns_the_first_grant_without_launching_again
+)
+worker_skips=()
+for test_name in "${worker_nats_tests[@]}"; do
+    worker_skips+=(--skip "${test_name}")
+done
+
+cargo test --locked -p trogon-sandbox-contract
+cargo test --locked -p trogon-sandbox-protocol "${protocol_targets[@]}"
+cargo test --locked -p trogon-sandbox-subprocess-worker -- --test-threads=1 "${worker_skips[@]}"
+cargo test --locked -p trogon-sandbox-windows-fence -p trogon-sandbox-policy-cli
+cargo test --locked -p trogon-sandbox-policy-exec --lib windows_wait
+cargo test --locked -p trogon-sandbox-fence-helper --lib

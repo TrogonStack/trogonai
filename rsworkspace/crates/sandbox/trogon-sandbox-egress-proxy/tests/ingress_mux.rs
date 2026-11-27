@@ -10,6 +10,7 @@ use base64::engine::general_purpose::STANDARD;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Semaphore, mpsc};
+#[cfg(unix)]
 use trogon_sandbox_contract::DomainPattern;
 #[cfg(unix)]
 use trogon_sandbox_contract::MitmUnixSocket;
@@ -38,6 +39,7 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 trait OptionsExt: Sized {
     fn with_reasoned_refusals(self) -> Self;
     fn with_parent_proxy(self, parent_proxy: ParentProxy) -> Self;
+    #[cfg(unix)]
     fn with_mitm(self, mitm: MitmUnixSocket) -> Self;
     fn with_tunnel_cap(self, cap: TunnelCap) -> Self;
     fn with_strip_response_headers(self, strip: ResponseHeaderStrip) -> Self;
@@ -54,6 +56,7 @@ impl OptionsExt for NetworkOptions {
         self
     }
 
+    #[cfg(unix)]
     fn with_mitm(mut self, mitm: MitmUnixSocket) -> Self {
         self.mitm = Some(mitm);
         self

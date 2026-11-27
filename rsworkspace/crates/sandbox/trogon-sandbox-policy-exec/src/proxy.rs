@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use trogon_sandbox_contract::NetworkOptions;
-use trogon_sandbox_contract::{DomainRuleAction, ExternalProxy, LeaseId, NetworkPolicy, Port};
+use trogon_sandbox_contract::{ExternalProxy, LeaseId, NetworkPolicy, Port};
 #[cfg(target_os = "linux")]
 use trogon_sandbox_egress_proxy::ingress::ListenAddress;
 use trogon_sandbox_egress_proxy::ingress::Listener;
@@ -22,6 +22,7 @@ use trogon_sandbox_subprocess_worker::EgressPolicy;
 
 use crate::constants::{CA_FILE_NAME, PROXY_SHUTDOWN_GRACE, SOCKS5_VERSION};
 use crate::credentials::PreparedCredentials;
+use crate::tls_intercept::requires_tls_intercept;
 #[cfg(target_os = "linux")]
 use trogon_sandbox_subprocess_worker::isolation::relay::RelayEgress;
 use trogon_sandbox_subprocess_worker::lease_proxy::LeaseProxyToken;
@@ -422,22 +423,6 @@ fn both_ports(external: ExternalProxy) -> Option<(Port, Port)> {
 /// command's own is started.
 pub(crate) fn replaces_runtime_proxy(external: ExternalProxy) -> bool {
     both_ports(external).is_some()
-}
-
-/// Whether the policy has a rule that terminates TLS for the connections it
-/// matches, so the workload must trust the per-command CA. A pass-through
-/// rule never terminates TLS, and a CA file that stays empty would break
-/// every TLS connection the workload makes.
-fn requires_tls_intercept(policy: &NetworkPolicy) -> bool {
-    match policy {
-        NetworkPolicy::AllowAll | NetworkPolicy::DenyAll => false,
-        NetworkPolicy::UserDefined { rules, .. } => rules.iter().any(|rule| {
-            matches!(
-                rule.action,
-                DomainRuleAction::Transform(_) | DomainRuleAction::Forward(_)
-            )
-        }),
-    }
 }
 
 fn restrict_to_owner(path: &std::path::Path) -> anyhow::Result<()> {
