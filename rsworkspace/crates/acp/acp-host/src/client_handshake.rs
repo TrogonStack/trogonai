@@ -1,6 +1,6 @@
 use crate::constants::REINITIALIZE_TIMEOUT;
 use agent_client_protocol::v1::schema::{InitializeRequest, InitializeResponse};
-use agent_client_protocol::{Error, ErrorCode, Result};
+use agent_client_protocol::{Error, ErrorCode, Result, is_connection_terminated, is_incoming_transport_closed};
 use serde::Deserialize;
 use std::sync::{Arc, Mutex, PoisonError};
 use tokio::sync::watch;
@@ -94,10 +94,12 @@ impl ClientHandshake {
     }
 
     /// Records how a freshly launched child answered `request`, for the
-    /// client waiting on it. A refused request is dropped, so the next child
-    /// is not launched into the same refusal: it waits for the client instead.
+    /// client waiting on it. A request the child refused is dropped, so the
+    /// next child is not launched into the same refusal: it waits for the
+    /// client instead. A child that died before answering refused nothing, so
+    /// the request is kept for the next one.
     pub fn settle(&self, request: &ClientInitialize, result: &Result<InitializeResponse>) {
-        if result.is_err() {
+        if result.as_ref().is_err_and(refused) {
             let mut last = self.lock();
             if last.as_ref() == Some(request) {
                 *last = None;
@@ -119,6 +121,12 @@ impl ClientHandshake {
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<ClientInitialize>> {
         self.last.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+/// Whether the child answered with this error, as opposed to going away
+/// before it answered.
+fn refused(error: &Error) -> bool {
+    !is_incoming_transport_closed(error) && !is_connection_terminated(error)
 }
 
 /// A client `initialize` waiting for a relaunched child to answer it.

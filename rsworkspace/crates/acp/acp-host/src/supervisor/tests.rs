@@ -493,3 +493,25 @@ async fn capabilities_the_schema_does_not_name_reach_every_child() {
 
     assert_eq!(launcher.initialize_params(), vec![sent.clone(), sent]);
 }
+
+#[tokio::test]
+async fn a_relaunched_child_that_exits_before_answering_keeps_the_handshake() {
+    let handshake = Arc::new(ClientHandshake::default());
+    handshake.remember(discord("1").into());
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>| Ok::<(), Error>(());
+
+    let exit = run_once(
+        &ExitingLauncher::default(),
+        Arc::new(NoopClient),
+        Arc::default(),
+        handshake.clone(),
+        &serve,
+    )
+    .await;
+
+    assert!(
+        matches!(exit, RunExit::AgentExited | RunExit::AgentFailed(_)),
+        "got {exit}"
+    );
+    assert_eq!(handshake.last(), Some(discord("1").into()));
+}

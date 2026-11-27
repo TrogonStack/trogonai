@@ -68,7 +68,8 @@ than in the spec. `Debug` output of the spec prints env names, never values.
     [Relaunch on exit](#behavior) for which agents can load them);
   - a child relaunched after a crash is initialized with the claiming
     client's last `initialize` before it serves anything, so it comes back with
-    the same capabilities and `_meta`;
+    the same capabilities and `_meta`. The host forgets that `initialize` only
+    when a child refuses it, not when a child dies before answering;
   - the host keeps that `initialize` in memory only. **After the host itself
     restarts it has none**, so if its client carries on without initializing
     again, the first request initializes the child with protocol v1 and no
