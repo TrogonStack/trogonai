@@ -26,9 +26,9 @@ try {
 
   try {
     const rootDir = (await sandbox.runCommand('pwd')).stdout().trim();
-    const projectDir = `${rootDir}/learn-typescript`;
+    const projectDir = `${rootDir}/trogonerror`;
 
-    await git(['clone', '--branch', 'master', 'https://github.com/panaverse/learn-typescript', projectDir]);
+    await git(['clone', '--branch', 'main', 'https://github.com/TrogonStack/trogonerror', projectDir]);
     await git(['pull'], projectDir);
   } catch (error) {
     console.error('Error:', error);

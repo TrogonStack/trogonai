@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::LeaseId;
 
 /// Client-facing request to resolve a port the sandbox spec exposes on an already-running lease into a reachable
-/// endpoint, mirroring Vercel Sandbox's `sandbox.domain(port)` parity.
+/// endpoint, which backs the client's `sandbox.domain(port)`.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GetSandboxDomainRequest {
     pub lease_id: LeaseId,

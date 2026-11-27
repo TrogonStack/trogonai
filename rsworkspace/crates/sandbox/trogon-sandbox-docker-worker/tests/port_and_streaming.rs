@@ -26,8 +26,7 @@ use trogon_sandbox_protocol::subjects;
 /// `bare_lease_request` asks for `exposed_ports: vec![8080]`, so a fresh
 /// lease publishes that port at container-create time and
 /// `get_sandbox_domain_for_lease` must resolve it to a reachable
-/// `127.0.0.1:{host_port}` endpoint, mirroring Vercel Sandbox's
-/// `sandbox.domain(port)`.
+/// `127.0.0.1:{host_port}` endpoint for `sandbox.domain(port)`.
 fn bare_lease_request() -> TestResult<LeaseRequest> {
     lease_request_exposing("port-and-streaming-test", BootMode::Bare, &[8080])
 }

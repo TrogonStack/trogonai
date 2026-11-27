@@ -113,7 +113,7 @@ import {
 import type { IdleAction, SshAccess, TerminalOutputEvent } from './wire.ts';
 
 /**
- * Vercel-shaped convenience input for network policy. `'allow-all'` and
+ * Convenience input for network policy. `'allow-all'` and
  * `'deny-all'` map onto the wire's `allow_all`/`deny_all` string variants;
  * `{ allow: ['registry.npmjs.org'] }` builds a deny-by-default policy that
  * permits only those hosts (see `allowListPolicy`); anything else (the wire's
@@ -149,9 +149,8 @@ function decodeBytes(bytes: number[]): Uint8Array {
 /**
  * Environment merged under the caller's `env` on every non-interactive run so
  * a tool that would stop to ask a question fails or proceeds instead of
- * hanging. This is the hang-preventing subset of the upstream SDK defaults;
- * its cosmetic ones (`TERM=dumb`, `NO_COLOR=1`) and its `SANDBOX_SDK_RUN`
- * marker are left out because they change output rather than prevent stalls.
+ * hanging. Cosmetic variables such as `TERM=dumb` and `NO_COLOR=1` are left
+ * out because they change output rather than prevent stalls.
  */
 export const NON_INTERACTIVE_ENV: Readonly<Record<string, string>> = Object.freeze({
   CI: '1',
@@ -244,8 +243,8 @@ export interface RunCommandParams {
 }
 
 /**
- * `CommandFinished` is the result of an already-completed command. Unlike
- * the real Vercel SDK, this client has no push-based log stream: `logs()`
+ * `CommandFinished` is the result of an already-completed command. This
+ * client has no push-based log stream: `logs()`
  * is only ever able to replay the two buffered chunks captured at
  * completion, not a live feed.
  */
@@ -1301,9 +1300,8 @@ function defaultSpec(image: SandboxSpec['image'] | undefined, env: Record<string
 export type SandboxWith<F extends SandboxFeature> = Sandbox & { readonly capabilities: SandboxCapabilities<F> };
 
 /**
- * The Vercel-shaped ergonomic wrapper around a sandbox lease. Wraps
- * a `SandboxClientApi` (`SandboxWsClient`, or `MemorySandboxClient` in tests) to mirror
- * `@vercel/sandbox`'s `Sandbox` class as closely as this backend allows.
+ * The ergonomic wrapper around a sandbox lease. Wraps a `SandboxClientApi`
+ * (`SandboxWsClient`, or `MemorySandboxClient` in tests).
  */
 export class Sandbox {
   readonly sandboxId: LeaseId;
@@ -1828,7 +1826,7 @@ export class Sandbox {
 
   /**
    * Resolves a port from the sandbox's `exposed_ports` into a reachable
-   * `host:port` endpoint, mirroring `@vercel/sandbox`'s `sandbox.domain(port)`.
+   * `host:port` endpoint.
    * Where the provider supports the `expose_after_create` feature, a port
    * not declared at create resolves too, e.g. a dev server started later.
    * Throws a descriptive error for `port_not_exposed`/`unsupported`/`denied`

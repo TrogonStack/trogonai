@@ -287,7 +287,7 @@ impl DockerWorkerProvider {
     }
 
     /// Resolves a reachable endpoint for `port` on `lease_id`'s container,
-    /// mirroring Vercel Sandbox's `sandbox.domain(port)`.
+    /// which backs the client's `sandbox.domain(port)`.
     pub async fn get_sandbox_domain_for_lease(
         &self,
         lease_id: &LeaseId,
