@@ -2,6 +2,85 @@
 
 lockfile_version = 3
 
+[[tools."aqua:helm/helm"]]
+version = "3.18.6"
+backend = "aqua:helm/helm"
+specifiers = ["3.18.6"]
+
+[tools."aqua:helm/helm"."platforms.linux-arm64"]
+checksum = "sha256:5b8e00b6709caab466cbbb0bc29ee09059b8dc9417991dd04b497530e49b1737"
+url = "https://get.helm.sh/helm-v3.18.6-linux-arm64.tar.gz"
+
+[tools."aqua:helm/helm"."platforms.linux-x64"]
+checksum = "sha256:3f43c0aa57243852dd542493a0f54f1396c0bc8ec7296bbb2c01e802010819ce"
+url = "https://get.helm.sh/helm-v3.18.6-linux-amd64.tar.gz"
+
+[tools."aqua:helm/helm"."platforms.macos-arm64"]
+checksum = "sha256:48e30d236a1f334c6acb78501be5a851eaa2a267fefeb1131b6484eb2f9f30d7"
+url = "https://get.helm.sh/helm-v3.18.6-darwin-arm64.tar.gz"
+
+[tools."aqua:helm/helm"."platforms.macos-x64"]
+checksum = "sha256:80cad0470e38cf25731cdead7c32dfbeb887bc177bd6fa01e31b065722f8f06b"
+url = "https://get.helm.sh/helm-v3.18.6-darwin-amd64.tar.gz"
+
+[[tools."aqua:mikefarah/yq"]]
+version = "4.54.3"
+backend = "aqua:mikefarah/yq"
+specifiers = ["4.54.3"]
+
+[tools."aqua:mikefarah/yq"."platforms.linux-arm64"]
+checksum = "sha256:89f69310b61b68d1245065a1241d1fc843f7a36cd6103ffd77ad987613bd1b67"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.3/yq_linux_arm64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/726219924"
+provenance = "cosign"
+
+[tools."aqua:mikefarah/yq"."platforms.linux-x64"]
+checksum = "sha256:129534601871538efe0ba4c5e62a34fb1d5f469bcb975c4fddeb467d82974973"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.3/yq_linux_amd64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/726219936"
+provenance = "cosign"
+
+[tools."aqua:mikefarah/yq"."platforms.macos-arm64"]
+checksum = "sha256:a2aebb93b5bdcb61bb76f630e42a0ef6a3ee10842a6516cd7b9e4080786ec593"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.3/yq_darwin_arm64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/726219940"
+provenance = "cosign"
+
+[tools."aqua:mikefarah/yq"."platforms.macos-x64"]
+checksum = "sha256:96d5105ffd693d6845c54fbd825b2d1bbdb8619e0a2ce6af95e5654e841e0984"
+url = "https://github.com/mikefarah/yq/releases/download/v4.54.3/yq_darwin_amd64"
+url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/726219934"
+provenance = "cosign"
+
+[[tools."aqua:prometheus/prometheus"]]
+version = "3.15.1"
+backend = "aqua:prometheus/prometheus"
+specifiers = ["3.15.1"]
+
+[tools."aqua:prometheus/prometheus"."platforms.linux-arm64"]
+checksum = "sha256:ceb6d21493c37ca0b4513b147642797c68cf39a0f50a444d50e1e80c74f21b26"
+checksum_source = "mise-versions"
+url = "https://github.com/prometheus/prometheus/releases/download/v3.15.1/prometheus-3.15.1.linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/prometheus/prometheus/releases/assets/662697891"
+
+[tools."aqua:prometheus/prometheus"."platforms.linux-x64"]
+checksum = "sha256:6a726885328ad9efebbf36e876ce2fb6225468a71fd1e7ce3ba666d5f4d97a84"
+checksum_source = "mise-versions"
+url = "https://github.com/prometheus/prometheus/releases/download/v3.15.1/prometheus-3.15.1.linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/prometheus/prometheus/releases/assets/662697731"
+
+[tools."aqua:prometheus/prometheus"."platforms.macos-arm64"]
+checksum = "sha256:0d4d3d9837d27e4fcd0bd16d115b1b8d6732a4bf3e69107f1190d9ef653ae471"
+checksum_source = "mise-versions"
+url = "https://github.com/prometheus/prometheus/releases/download/v3.15.1/prometheus-3.15.1.darwin-arm64.tar.gz"
+url_api = "https://api.github.com/repos/prometheus/prometheus/releases/assets/662695921"
+
+[tools."aqua:prometheus/prometheus"."platforms.macos-x64"]
+checksum = "sha256:c89fcb30045d8c394c9d93e96cbbee3aaf2448a48326b417e811eb4e528edf88"
+checksum_source = "mise-versions"
+url = "https://github.com/prometheus/prometheus/releases/download/v3.15.1/prometheus-3.15.1.darwin-amd64.tar.gz"
+url_api = "https://api.github.com/repos/prometheus/prometheus/releases/assets/662695728"
+
 [[tools.bazel]]
 version = "9.3.2"
 backend = "aqua:bazelbuild/bazel"
@@ -75,6 +154,11 @@ version = "6.0.1"
 backend = "cargo:cargo-dylint"
 specifiers = ["6.0.1"]
 
+[[tools."cargo:cargo-fuzz"]]
+version = "0.13.2"
+backend = "cargo:cargo-fuzz"
+specifiers = ["0.13.2"]
+
 [[tools."cargo:dylint-link"]]
 version = "6.0.1"
 backend = "cargo:dylint-link"
@@ -94,6 +178,35 @@ specifiers = ["0.9.2"]
 version = "1.250.0"
 backend = "cargo:wasm-tools"
 specifiers = ["1.250.0"]
+
+[[tools."github:nats-io/nats-server"]]
+version = "2.14.10"
+backend = "github:nats-io/nats-server"
+specifiers = ["2.14.10"]
+
+[tools."github:nats-io/nats-server"."platforms.linux-arm64"]
+checksum = "sha256:d86b596f7fb232e3ba297b5fb9d342d72af1e51feb37d9f777e54f3e02906451"
+checksum_source = "mise-versions"
+url = "https://github.com/nats-io/nats-server/releases/download/v2.14.10/nats-server-v2.14.10-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/nats-io/nats-server/releases/assets/735434687"
+
+[tools."github:nats-io/nats-server"."platforms.linux-x64"]
+checksum = "sha256:464f118a8aecf293e405514c1ab2c197a5d9209e58e36a5d05ad9577e5ee9b99"
+checksum_source = "mise-versions"
+url = "https://github.com/nats-io/nats-server/releases/download/v2.14.10/nats-server-v2.14.10-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/nats-io/nats-server/releases/assets/735434583"
+
+[tools."github:nats-io/nats-server"."platforms.macos-arm64"]
+checksum = "sha256:b0d66c4461596cc4f09fb2a289eed19ecab6374130a108b586f46ea1a61615e8"
+checksum_source = "mise-versions"
+url = "https://github.com/nats-io/nats-server/releases/download/v2.14.10/nats-server-v2.14.10-darwin-arm64.tar.gz"
+url_api = "https://api.github.com/repos/nats-io/nats-server/releases/assets/735434617"
+
+[tools."github:nats-io/nats-server"."platforms.macos-x64"]
+checksum = "sha256:6f8112b3f739b351798eda9e21d242b59598bca1292685d1c8bcc5f75f2389c9"
+checksum_source = "mise-versions"
+url = "https://github.com/nats-io/nats-server/releases/download/v2.14.10/nats-server-v2.14.10-darwin-amd64.tar.gz"
+url_api = "https://api.github.com/repos/nats-io/nats-server/releases/assets/735434679"
 
 [[tools."github:open-telemetry/weaver"]]
 version = "0.24.2"
