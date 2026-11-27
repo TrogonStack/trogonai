@@ -476,11 +476,26 @@ them change the topology above.
   with no session filter, so two clients sharing a host's prefix would see each
   other's turns and could approve each other's tool calls. The rule is one
   client per `acp-host`: run a host per client, each on its own `ACP_PREFIX`,
-  and give the client the same prefix. The host refuses a second client's
-  `initialize` when its `clientInfo.name` differs from the first one's, which
-  catches a misconfigured prefix but is not access control; NATS permissions
-  per prefix are what actually keep clients apart. Filtering callbacks by
-  session in `acp-nats` would lift the rule, and nothing does that yet.
+  and give the client the same prefix. The first client to identify itself
+  claims the host, by the `clientInfo.name` in its `initialize`. The `acp-nats`
+  bridge then stamps that name as an `X-Acp-Client` header on every request
+  and notification it sends, and the host refuses, before the child sees it,
+  any request that names a different client: `initialize`, `session/new`,
+  `session/prompt` and the rest. This catches a misconfigured prefix but is
+  not access control. The header is whatever a client sets, and requests
+  without it are served so that a lone client with no `clientInfo`, or an older
+  bridge, keeps working. NATS permissions per prefix are what actually keep
+  clients apart. Filtering callbacks by session in `acp-nats` would lift the
+  rule, and nothing does that yet.
+- **The host's child is initialized with the client's `initialize`.** The
+  child receives the claiming client's own request, with its protocol version,
+  capabilities, `clientInfo` and `_meta`. That is how fx learns which host
+  tools a client offers. The host keeps the request and re-sends it to every
+  relaunched child. A client that initializes again with different parameters
+  gets a fresh child initialized with them, because ACP has a client
+  initialize once per connection. Until a client initializes (the host
+  restarted and the client carried on), the child runs on a protocol v1
+  default.
 
 ## End-to-end walkthrough
 

@@ -32,20 +32,49 @@ than in the spec. `Debug` output of the spec prints env names, never values.
   `session/request_permission` to every client listening on the host's prefix,
   without filtering by session, so two clients on one prefix would each see
   the other's turns and could answer the other's permission requests. The
-  first `initialize` claims the host for its `clientInfo.name`; a later
-  `initialize` from a different name is refused with a JSON-RPC
-  `-32600 Invalid Request` naming both clients. The same client initializing
-  again (after it restarts, or after the child restarts) is accepted. The
-  claim lasts until the host exits. It is a guard against misconfiguration,
-  not access control: the host cannot see who sends a NATS request, so two
-  instances of one client look alike, and a client that never initializes is
-  not checked. Keep clients apart for real with NATS permissions per prefix.
-  See [Running one host per client](#running-one-host-per-client).
-- **One child, initialized once.** The host initializes the child when it
-  starts and answers the client's `initialize` with that reply, so a client
-  that reconnects does not make the child initialize twice on one connection.
-  The child is initialized with default client capabilities, so it uses its
-  own filesystem and terminal tools.
+  first client to identify itself claims the host, and the claim lasts until
+  the host exits. A client identifies itself by the `clientInfo.name` in its
+  `initialize`, and the `acp-nats` bridge then stamps that name as the
+  `X-Acp-Client` header on everything the client sends (`initialize`
+  included). Any request that names a different client is refused with
+  JSON-RPC `-32600 Invalid Request` naming both clients, before it reaches the
+  child: `initialize`, `session/new`, `session/prompt`, `session/load`,
+  `session/cancel` and every other global or session method. So a refused
+  client cannot open a session over the real client's. The same client
+  initializing again (after it restarts, or after the child restarts) is
+  accepted. See [Running one host per client](#running-one-host-per-client).
+- **What the claim does and doesn't protect against.** It catches a second
+  client misconfigured onto a prefix it should not share. It is not access
+  control. The name is whatever a client says it is, and two instances of one
+  client give the same name. A request with no `X-Acp-Client` header is
+  served, so that a lone client with no `clientInfo`, or one behind a bridge
+  from before the header, keeps working. That also means a second client
+  without the header gets through on everything except `initialize`. Keep
+  clients apart for real with NATS permissions per prefix.
+- **The child sees the client's own `initialize`.** The host does not
+  initialize the child with defaults of its own. The client's `initialize`
+  goes to the child as sent: its protocol version, `clientCapabilities` (with
+  their `_meta`, where fx reads the host tools a client offers), `clientInfo`
+  and `_meta`. The client gets the child's real answer, and the host keeps the
+  request:
+  - the same `initialize` again is answered from the child's first reply,
+    without bothering the child;
+  - an `initialize` with different parameters is not sent a second time on
+    the same connection, which ACP does not allow for. The host relaunches the
+    child at once, initializes the new one with the new request, and answers
+    with that child's reply;
+  - a child relaunched after a crash is initialized with the claiming
+    client's last `initialize` before it serves anything, so it comes back with
+    the same capabilities and `_meta`;
+  - if no client has initialized since the host started (the host restarted
+    and its client carried on without initializing again), the first request
+    initializes the child with protocol v1 and no capabilities, as before. The
+    client's next `initialize` then relaunches the child with its own
+    parameters.
+
+  Protocol v1 is all that is negotiated today, because `acp-nats` speaks only
+  v1. The host passes the client's offered version through rather than fixing
+  one, so it needs no change when v2 arrives.
 - **Callbacks are routed per session.** `session/update`,
   `session/request_permission`, `fs/*` and `terminal/*` from the child go to
   `{prefix}.v1.session.{id}.client.*` for the session they name.
@@ -55,7 +84,8 @@ than in the spec. `Debug` output of the spec prints env names, never values.
   bridge's own signal to its clients, so the host never forwards it to the
   child as a `_ready` notification.
 - **Relaunch on exit.** If the child exits, it is relaunched after 1s, doubling
-  per short-lived run up to 30s, and reset after a run that lasted 60s.
+  per short-lived run up to 30s, and reset after a run that lasted 60s. The
+  new child is initialized with the client's last `initialize` (see above).
   Whether a session survives a relaunch depends on the agent. fx keeps
   sessions on disk and reloads one when the client sends `session/load`, so
   its sessions carry on; an agent that keeps sessions only in memory has never
