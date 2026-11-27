@@ -1,0 +1,43 @@
+[package]
+name = "trogon-sandbox-dev"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "One-command local sandbox stack: nats-server, broker, a worker and the ws gateway under one supervisor"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_dev"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-dev"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream", "kv"] }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+rand_core = { workspace = true }
+secrecy = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "process", "time", "net", "sync"] }
+trogon-sandbox-auth = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-std = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time", "net"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true, features = ["test-support"] }

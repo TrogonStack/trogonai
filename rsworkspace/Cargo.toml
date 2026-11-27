@@ -65,6 +65,7 @@ trogon-sandbox-auth = { path = "crates/sandbox/trogon-sandbox-auth" }
 trogon-sandbox-contract = { path = "crates/sandbox/trogon-sandbox-contract" }
 trogon-sandbox-credential-client = { path = "crates/sandbox/trogon-sandbox-credential-client" }
 trogon-sandbox-dashboard = { path = "crates/sandbox/trogon-sandbox-dashboard" }
+trogon-sandbox-dev = { path = "crates/sandbox/trogon-sandbox-dev" }
 trogon-sandbox-fence-helper = { path = "crates/sandbox/trogon-sandbox-fence-helper" }
 trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" }
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
