@@ -121,12 +121,9 @@ where
     // nobody stops and a subscriber that cannot be installed, so only the first call runs, and
     // concurrent callers wait for it to finish. The first call wins even if OpenTelemetry setup
     // fails in it: later calls do not retry.
-    if LOGGER_INIT.is_completed() {
-        eprintln!("WARN: logger already initialized");
-        return;
-    }
-
+    let mut ran = false;
     LOGGER_INIT.call_once(|| {
+        ran = true;
         let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
         let stderr_layer = tracing_subscriber::fmt::layer()
@@ -144,8 +141,8 @@ where
                 .json()
         });
 
-        match try_init_otel(service_name, resource_attributes, env) {
-            Ok((tracer_provider, meter_provider, logger_provider)) => {
+        let otel = try_init_otel(service_name, resource_attributes, env).map(
+            |(tracer_provider, meter_provider, logger_provider)| {
                 opentelemetry::global::set_text_map_propagator(TraceContextPropagator::new());
 
                 let tracer = tracer_provider.tracer(service_name.as_str().to_owned());
@@ -164,38 +161,39 @@ where
                 let stored = log::LOGGER_PROVIDER.set(logger_provider).is_ok();
                 debug_assert!(stored, "init_logger must be the only writer of LOGGER_PROVIDER");
 
-                if let Err(e) = tracing_subscriber::registry()
-                    .with(env_filter)
-                    .with(stderr_layer)
-                    .with(file_layer)
-                    .with(otel_trace_layer)
-                    .with(otel_logs_layer)
-                    .try_init()
-                {
-                    eprintln!("WARN: tracing subscriber already initialized: {e}");
-                }
+                (otel_trace_layer, otel_logs_layer)
+            },
+        );
+        let (otel_layers, otel_error) = match otel {
+            Ok(layers) => (Some(layers), None),
+            Err(e) => (None, Some(e)),
+        };
+        let (otel_trace_layer, otel_logs_layer) = otel_layers.unzip();
 
-                tracing::info!("Logger initialized with OpenTelemetry");
-                file_logging.record();
-            }
-            Err(e) => {
-                if let Err(init_error) = tracing_subscriber::registry()
-                    .with(env_filter)
-                    .with(stderr_layer)
-                    .with(file_layer)
-                    .try_init()
-                {
-                    eprintln!("WARN: tracing subscriber already initialized: {init_error}");
-                }
-
-                tracing::warn!(
-                    error = %e,
-                    "Logger initialized without OpenTelemetry (init failed)"
-                );
-                file_logging.record();
-            }
+        if let Err(e) = tracing_subscriber::registry()
+            .with(env_filter)
+            .with(stderr_layer)
+            .with(file_layer)
+            .with(otel_trace_layer)
+            .with(otel_logs_layer)
+            .try_init()
+        {
+            eprintln!("WARN: tracing subscriber already initialized: {e}");
         }
+
+        match otel_error {
+            None => tracing::info!("Logger initialized with OpenTelemetry"),
+            Some(e) => tracing::warn!(
+                error = %e,
+                "Logger initialized without OpenTelemetry (init failed)"
+            ),
+        }
+        file_logging.record();
     });
+
+    if !ran {
+        eprintln!("WARN: logger already initialized");
+    }
 }
 
 fn try_init_otel<A>(
