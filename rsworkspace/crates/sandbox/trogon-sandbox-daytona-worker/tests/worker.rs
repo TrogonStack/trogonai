@@ -139,6 +139,33 @@ async fn a_cancelled_lease_id_launches_again_when_reused() -> TestResult {
     running.stop().await
 }
 
+/// Pins today's behaviour, pending a decision on which one every worker should have: the cancel handler forgets the
+/// grant before it cancels, so a redispatch after a failed cancel is not answered with the grant. The provider still
+/// holds the sandbox it could not delete, so it refuses to launch another and the redispatch gets a provider error.
+/// The k8s, v8-wasm and kubevirt workers keep the grant until a cancel succeeds and answer with it instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_redispatch_after_a_failed_cancel_is_refused_while_the_sandbox_is_held() -> TestResult {
+    let mut running = Running::start().await?;
+    running.dispatch(LEASE).await?;
+    running
+        .fake
+        .json("DELETE", &format!("/sandbox/{SANDBOX}"), 500, json!({}));
+
+    running.cancel_lease(LEASE).await?;
+    let fake = &running.fake;
+    until(|| deletes(fake) == 1).await?;
+    let reply = running.dispatch(LEASE).await?;
+
+    assert!(
+        reply["provider_error"]
+            .as_str()
+            .is_some_and(|error| error.contains("settle cleanup before reallocating")),
+        "{reply}"
+    );
+    assert_eq!(creates(&running.fake), 1, "no second sandbox was created");
+    running.stop().await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cancel_that_arrives_during_a_launch_waits_for_it_and_releases_the_sandbox() -> TestResult {
     let mut running = Running::start().await?;
