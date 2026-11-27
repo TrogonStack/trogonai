@@ -2,7 +2,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use trogon_sandbox_contract::Base64Data;
 
-use crate::FileOpFailure;
+use crate::FileOpError;
 
 /// The number of raw bytes `data` decodes to, without decoding it.
 pub(crate) fn decoded_len(data: &Base64Data) -> u64 {
@@ -17,6 +17,6 @@ pub(crate) fn decode(data: &Base64Data) -> Vec<u8> {
     STANDARD.decode(data.as_str()).unwrap_or_default()
 }
 
-pub(crate) fn encode(bytes: &[u8]) -> Result<Base64Data, FileOpFailure> {
+pub(crate) fn encode(bytes: &[u8]) -> Result<Base64Data, FileOpError> {
     Ok(Base64Data::new(STANDARD.encode(bytes))?)
 }

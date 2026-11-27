@@ -6,7 +6,7 @@ directory on the host, and holds the value types that file tracking is built on.
 ## Serving file operations
 
 `FsRoot` is rooted at one host directory. `execute` runs a `FileOp` and always
-returns a `FileOpResponse`; `try_execute` returns a typed `FileOpFailure` instead
+returns a `FileOpResponse`; `try_execute` returns a typed `FileOpError` instead
 of folding the failure into the response. `manifest` fingerprints a path or tree.
 The root may carry a `SandboxPrefix`, the absolute path the sandbox sees that
 directory under, so requests written in sandbox paths resolve to host paths and
@@ -29,7 +29,7 @@ need a manifest source that outlives one request.
 
 | Type | Purpose |
 | --- | --- |
-| `FileOpFailure` | Why an operation produced no result; converts to a `FileOpResponse`. |
+| `FileOpError` | Why an operation produced no result; converts to a `FileOpResponse`. |
 | `SandboxPrefix` | The validated absolute prefix the sandbox sees the root under. |
 | `GlobPattern` | A compiled path glob where `*` stays within a segment. |
 | `EditSpec` | A validated find, replace, and expected-occurrence count. |

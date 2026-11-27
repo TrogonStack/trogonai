@@ -8,7 +8,7 @@ use trogon_sandbox_contract::{
     FileWatchEvent, FileWatchEventKind, FileWatchOverflow, FileWatchOverflowEvidence, FileWatchTarget, LeaseId,
 };
 use trogon_sandbox_file_ops::{
-    ChangeHint, FileOpFailure, Manifest, ManifestDiff, ManifestEntry, ManifestSource, Tracking,
+    ChangeHint, FileOpError, Manifest, ManifestDiff, ManifestEntry, ManifestSource, Tracking,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -29,7 +29,7 @@ fn tree(entries: &[(&str, u64)]) -> Manifest {
 struct Fake {
     current: Mutex<Manifest>,
     hints: Mutex<Vec<ChangeHint>>,
-    since_start: Mutex<Option<Result<ManifestDiff, FileOpFailure>>>,
+    since_start: Mutex<Option<Result<ManifestDiff, FileOpError>>>,
     after_wait: Mutex<Option<Manifest>>,
     fail: AtomicBool,
     yield_once: AtomicBool,
@@ -58,7 +58,7 @@ impl Fake {
         }
     }
 
-    fn provider(&self, answer: Result<ManifestDiff, FileOpFailure>) {
+    fn provider(&self, answer: Result<ManifestDiff, FileOpError>) {
         if let Ok(mut since_start) = self.since_start.lock() {
             *since_start = Some(answer);
         }
@@ -75,17 +75,17 @@ impl ManifestSource for Fake {
         path: &str,
         _recursion: FileRecursion,
         _hashing: FileContentHashing,
-    ) -> Result<Manifest, FileOpFailure> {
+    ) -> Result<Manifest, FileOpError> {
         if self.yield_once.swap(false, Ordering::SeqCst) {
             tokio::task::yield_now().await;
         }
         if self.fail.load(Ordering::SeqCst) {
-            return Err(FileOpFailure::NotFound { path: path.to_string() });
+            return Err(FileOpError::NotFound { path: path.to_string() });
         }
         Ok(self.snapshot())
     }
 
-    async fn changes_since_start(&self) -> Option<Result<ManifestDiff, FileOpFailure>> {
+    async fn changes_since_start(&self) -> Option<Result<ManifestDiff, FileOpError>> {
         self.since_start.lock().ok().and_then(|answer| answer.clone())
     }
 
@@ -112,7 +112,7 @@ impl ManifestSource for Fake {
 struct Bare(Manifest);
 
 impl ManifestSource for Bare {
-    async fn manifest(&self, _: &str, _: FileRecursion, _: FileContentHashing) -> Result<Manifest, FileOpFailure> {
+    async fn manifest(&self, _: &str, _: FileRecursion, _: FileContentHashing) -> Result<Manifest, FileOpError> {
         Ok(self.0.clone())
     }
 }
@@ -294,7 +294,7 @@ async fn the_provider_fills_in_paths_outside_the_baseline() -> TestResult {
     ));
     let inside = tracking.serve("lease", &changes(None, Some("/w/a")), &source).await;
     assert!(matches!(inside, Some(FileOpResponse::Changes { ref added, .. }) if added.is_empty()));
-    source.provider(Err(FileOpFailure::invalid_request("provider broke")));
+    source.provider(Err(FileOpError::invalid_request("provider broke")));
     let swallowed = tracking.serve("lease", &changes(None, None), &source).await;
     assert!(matches!(swallowed, Some(FileOpResponse::Changes { .. })));
     Ok(())
@@ -312,7 +312,7 @@ async fn without_a_baseline_the_provider_or_an_error_answers() -> TestResult {
     }));
     let served = tracking.serve("lease", &changes(None, None), &source).await;
     assert!(matches!(served, Some(FileOpResponse::Changes { ref added, .. }) if added.len() == 1));
-    source.provider(Err(FileOpFailure::invalid_request("no")));
+    source.provider(Err(FileOpError::invalid_request("no")));
     let failed = tracking.serve("lease", &changes(None, None), &source).await;
     assert!(is_failure(&failed, FileOpErrorKind::InvalidRequest));
     let bare = tracking

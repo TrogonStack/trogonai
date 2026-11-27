@@ -7,9 +7,9 @@ use trogon_sandbox_contract::{
 };
 
 use crate::fs_io::{lock, open_read, replace_file, write_at, write_whole};
-use crate::fs_root::Reply;
+use crate::fs_root_core::Reply;
 use crate::fs_root_read::directory_failure;
-use crate::{EditOutcome, EditSpec, FileOpFailure, FsRoot, dirfd, payload};
+use crate::{EditOutcome, EditSpec, FileOpError, FsRoot, dirfd, payload};
 
 impl FsRoot {
     pub(crate) fn write(
@@ -21,10 +21,10 @@ impl FsRoot {
         mode: Option<u32>,
         parents: FileParentCreation,
     ) -> Reply<FileOpResponse> {
-        let io = |e| FileOpFailure::from_io(e, path);
+        let io = |e| FileOpError::from_io(e, path);
         let size_of_request = payload::decoded_len(data);
         if size_of_request > FileOp::MAX_WRITE_BYTES {
-            return Err(FileOpFailure::too_large(format!(
+            return Err(FileOpError::too_large(format!(
                 "write of {size_of_request} bytes exceeds the {} byte per-request limit; send the file in chunks",
                 FileOp::MAX_WRITE_BYTES
             )));
@@ -33,7 +33,7 @@ impl FsRoot {
         let host = self.resolve(path, true)?;
         let _guard = lock();
         if host == self.root {
-            return Err(FileOpFailure::failed(
+            return Err(FileOpError::failed(
                 FileOpErrorKind::IsADirectory,
                 "cannot write the root",
             ));
@@ -56,7 +56,7 @@ impl FsRoot {
     }
 
     pub(crate) fn edit(&self, path: &str, find: &str, replace: &str, expected: u32) -> Reply<FileOpResponse> {
-        let io = |e| FileOpFailure::from_io(e, path);
+        let io = |e| FileOpError::from_io(e, path);
         let spec = EditSpec::new(find, replace, expected)?;
         let host = self.resolve(path, true)?;
         let _guard = lock();
@@ -67,7 +67,7 @@ impl FsRoot {
             return Err(directory_failure(path));
         }
         if metadata.len() > FileOp::MAX_READ_BYTES {
-            return Err(FileOpFailure::too_large(format!(
+            return Err(FileOpError::too_large(format!(
                 "{path} is {} bytes, over the {} byte edit limit",
                 metadata.len(),
                 FileOp::MAX_READ_BYTES
@@ -88,11 +88,11 @@ impl FsRoot {
     pub(crate) fn remove(&self, path: &str, recursion: FileRecursion) -> Reply<FileOpResponse> {
         let host = self.resolve(path, false)?;
         if host == self.root {
-            return Err(FileOpFailure::invalid_path("cannot remove the sandbox root"));
+            return Err(FileOpError::invalid_path("cannot remove the sandbox root"));
         }
         let _guard = lock();
         let existed =
-            dirfd::remove(&host, &self.root, recursion.is_recursive()).map_err(|e| FileOpFailure::from_io(e, path))?;
+            dirfd::remove(&host, &self.root, recursion.is_recursive()).map_err(|e| FileOpError::from_io(e, path))?;
         Ok(FileOpResponse::Removed {
             existed: FilePresence::from(existed),
         })
@@ -102,11 +102,11 @@ impl FsRoot {
         let host = self.resolve(path, true)?;
         let _guard = lock();
         let already_existed = dirfd::mkdir(&self.root, &host, parents.creates()).map_err(|e| match e.kind() {
-            io::ErrorKind::AlreadyExists => FileOpFailure::failed(
+            io::ErrorKind::AlreadyExists => FileOpError::failed(
                 FileOpErrorKind::AlreadyExists,
                 format!("{path} exists and is not a directory"),
             ),
-            _ => FileOpFailure::from_io(e, path),
+            _ => FileOpError::from_io(e, path),
         })?;
         Ok(FileOpResponse::Created {
             already_existed: FilePresence::from(already_existed),
@@ -117,15 +117,15 @@ impl FsRoot {
         let source = self.resolve(from, false)?;
         let target = self.resolve(to, false)?;
         if source == self.root || target == self.root {
-            return Err(FileOpFailure::invalid_path("cannot rename the sandbox root"));
+            return Err(FileOpError::invalid_path("cannot rename the sandbox root"));
         }
         let _guard = lock();
         let overwrites = overwrite.overwrites();
         dirfd::rename(&source, &target, overwrites, &self.root).map_err(|(is_source, e)| {
             if !is_source && !overwrites && e.kind() == io::ErrorKind::AlreadyExists {
-                FileOpFailure::failed(FileOpErrorKind::AlreadyExists, format!("{to} already exists"))
+                FileOpError::failed(FileOpErrorKind::AlreadyExists, format!("{to} already exists"))
             } else {
-                FileOpFailure::from_io(e, if is_source { from } else { to })
+                FileOpError::from_io(e, if is_source { from } else { to })
             }
         })?;
         Ok(FileOpResponse::Renamed)

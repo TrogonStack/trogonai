@@ -10,7 +10,7 @@ use trogon_sandbox_contract::{
 use trogon_sandbox_protocol::subjects::file_watch_overflow_evidence;
 
 use crate::manifest_diff::is_within;
-use crate::{ChangeHint, FileOpFailure, Manifest, ManifestDiff, ManifestSource, WatchOverflow};
+use crate::{ChangeHint, FileOpError, Manifest, ManifestDiff, ManifestSource, WatchOverflow};
 
 struct Checkpoint {
     path: String,
@@ -236,7 +236,7 @@ impl Tracking {
         since: Option<&str>,
         path: Option<&str>,
         source: &S,
-    ) -> Result<(String, ManifestDiff), FileOpFailure> {
+    ) -> Result<(String, ManifestDiff), FileOpError> {
         if let Some(id) = since {
             let baseline = {
                 let leases = self.leases();
@@ -251,7 +251,7 @@ impl Tracking {
                 })
             };
             let Some((checkpoint_path, hashing, before)) = baseline else {
-                return Err(FileOpFailure::failed(
+                return Err(FileOpError::failed(
                     FileOpErrorKind::UnknownCheckpoint,
                     format!("checkpoint {id} is not held on this lease"),
                 ));
@@ -287,7 +287,7 @@ impl Tracking {
             None => match source.changes_since_start().await {
                 Some(result) => result?,
                 None => {
-                    return Err(FileOpFailure::invalid_request(
+                    return Err(FileOpError::invalid_request(
                         "this lease holds no start baseline; create a checkpoint and name it in since",
                     ));
                 }
@@ -329,7 +329,7 @@ impl Tracking {
         let mut leases = self.leases();
         let state = leases.entry(lease.to_string()).or_default();
         if state.watches.len() >= Self::MAX_WATCHES_PER_LEASE {
-            return FileOpFailure::too_large(format!(
+            return FileOpError::too_large(format!(
                 "a lease may hold at most {} watches; stop one first",
                 Self::MAX_WATCHES_PER_LEASE
             ))
@@ -353,10 +353,10 @@ impl Tracking {
 
     /// Events past `after_seq` already buffered, or what a scan needs when there are none. Also
     /// stamps the watch as used, and refuses an unknown watch.
-    fn buffered(&self, lease: &str, watch_id: &str, after_seq: u64) -> Result<Buffered, FileOpFailure> {
+    fn buffered(&self, lease: &str, watch_id: &str, after_seq: u64) -> Result<Buffered, FileOpError> {
         let mut leases = self.leases();
         let Some(watch) = leases.get_mut(lease).and_then(|state| state.watches.get_mut(watch_id)) else {
-            return Err(FileOpFailure::failed(
+            return Err(FileOpError::failed(
                 FileOpErrorKind::UnknownWatch,
                 format!("watch {watch_id} is not live on this lease"),
             ));

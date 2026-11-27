@@ -12,6 +12,8 @@
 
 mod archive_summary;
 mod change_hint;
+mod constants;
+mod containment;
 mod content_hash;
 #[cfg(unix)]
 #[path = "dirfd_unix.rs"]
@@ -22,10 +24,11 @@ mod dirfd;
 mod edit_outcome;
 mod edit_spec;
 mod edit_spec_error;
-mod file_op_failure;
+mod file_op_error;
 mod fs_io;
 mod fs_root;
 mod fs_root_archive;
+mod fs_root_core;
 mod fs_root_read;
 mod fs_root_search;
 mod fs_root_write;
@@ -50,8 +53,8 @@ pub use content_hash::content_hash;
 pub use edit_outcome::EditOutcome;
 pub use edit_spec::EditSpec;
 pub use edit_spec_error::EditSpecError;
-pub use file_op_failure::FileOpFailure;
-pub use fs_root::FsRoot;
+pub use file_op_error::FileOpError;
+pub use fs_root_core::FsRoot;
 pub use glob_pattern::GlobPattern;
 pub use glob_pattern_error::GlobPatternError;
 pub use manifest::Manifest;

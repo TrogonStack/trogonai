@@ -4,10 +4,11 @@ use std::path::Path;
 
 use trogon_sandbox_contract::{Base64Data, FileOp, FileOpResponse, FileWriteTruncation};
 
-use crate::archive_summary::{MAX_ARCHIVE_ENTRIES, archive_relative};
+use crate::archive_summary::archive_relative;
+use crate::constants::MAX_ARCHIVE_ENTRIES;
 use crate::fs_io::{lock, sorted_entries, write_at};
-use crate::fs_root::Reply;
-use crate::{ArchiveSummary, FileOpFailure, FsRoot, payload};
+use crate::fs_root_core::Reply;
+use crate::{ArchiveSummary, FileOpError, FsRoot, payload};
 
 #[derive(Default)]
 pub(crate) struct Tally {
@@ -21,13 +22,13 @@ impl Tally {
         self.bytes = self.bytes.saturating_add(len);
         self.entries += 1;
         if self.bytes > self.cap {
-            return Err(FileOpFailure::too_large(format!(
+            return Err(FileOpError::too_large(format!(
                 "{path} holds more than {} bytes of file content; move it file by file with ranged reads and writes",
                 self.cap
             )));
         }
         if self.entries > MAX_ARCHIVE_ENTRIES {
-            return Err(FileOpFailure::too_large(format!(
+            return Err(FileOpError::too_large(format!(
                 "{path} holds more than {MAX_ARCHIVE_ENTRIES} entries"
             )));
         }
@@ -37,7 +38,7 @@ impl Tally {
 
 impl FsRoot {
     pub(crate) fn archive_get(&self, path: &str, max_bytes: Option<u64>) -> Reply<FileOpResponse> {
-        let io = |e: io::Error| FileOpFailure::from_io(e, path);
+        let io = |e: io::Error| FileOpError::from_io(e, path);
         let host = self.resolve(path, true)?;
         let metadata = fs::metadata(&host).map_err(io)?;
         let cap = max_bytes
@@ -61,7 +62,7 @@ impl FsRoot {
         }
         let data = builder.into_inner().map_err(io)?;
         if data.len() as u64 > FileOp::MAX_ARCHIVE_BYTES {
-            return Err(FileOpFailure::too_large(format!(
+            return Err(FileOpError::too_large(format!(
                 "archive of {path} is {} bytes, over the {} byte limit",
                 data.len(),
                 FileOp::MAX_ARCHIVE_BYTES
@@ -75,7 +76,7 @@ impl FsRoot {
     }
 
     pub(crate) fn archive_put(&self, path: &str, data: &Base64Data) -> Reply<FileOpResponse> {
-        let io = |e: io::Error| FileOpFailure::from_io(e, path);
+        let io = |e: io::Error| FileOpError::from_io(e, path);
         let data = payload::decode(data);
         ArchiveSummary::validate(&data)?;
         let dest = if path.is_empty() { "." } else { path };
@@ -94,7 +95,7 @@ impl FsRoot {
             }
             let virtual_path = format!("{}/{relative}", dest.trim_end_matches('/'));
             let host = self.resolve(&virtual_path, true)?;
-            let entry_io = |e: io::Error| FileOpFailure::from_io(e, &virtual_path);
+            let entry_io = |e: io::Error| FileOpError::from_io(e, &virtual_path);
             if entry.header().entry_type().is_dir() {
                 fs::create_dir_all(&host).map_err(entry_io)?;
             } else {
@@ -112,7 +113,7 @@ impl FsRoot {
 }
 
 fn add_dir(builder: &mut tar::Builder<Vec<u8>>, dir: &Path, relative: &str, tally: &mut Tally) -> Reply<()> {
-    let io = |e: io::Error| FileOpFailure::from_io(e, relative);
+    let io = |e: io::Error| FileOpError::from_io(e, relative);
     for entry in sorted_entries(dir).map_err(io)? {
         let metadata = entry.metadata().map_err(io)?;
         let name = entry.file_name().to_string_lossy().into_owned();

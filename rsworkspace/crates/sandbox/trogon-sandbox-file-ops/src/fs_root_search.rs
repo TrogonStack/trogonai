@@ -6,17 +6,10 @@ use trogon_sandbox_contract::{
     FileCaseSensitivity, FileOp, FileOpResponse, FileResultTruncation, FileSearchSyntax, SearchMatch,
 };
 
+use crate::constants::{MAX_MATCH_LINE_CHARS, MAX_SEARCH_SCAN_BYTES, REGEX_SIZE_LIMIT};
 use crate::fs_io::sorted_entries;
-use crate::fs_root::Reply;
-use crate::glob_pattern::REGEX_SIZE_LIMIT;
-use crate::{FileOpFailure, FsRoot, GlobPattern};
-
-/// Longest line kept in a content match; longer lines are cut so one minified file cannot flood a
-/// reply.
-const MAX_MATCH_LINE_CHARS: usize = 500;
-
-/// Total bytes one content search reads across files.
-const MAX_SEARCH_SCAN_BYTES: u64 = 256 * 1024 * 1024;
+use crate::fs_root_core::Reply;
+use crate::{FileOpError, FsRoot, GlobPattern};
 
 /// The parameters of one search, borrowed from the request.
 pub(crate) struct SearchRequest<'a> {
@@ -32,7 +25,7 @@ pub(crate) struct SearchRequest<'a> {
 impl FsRoot {
     pub(crate) fn search(&self, request: &SearchRequest<'_>) -> Reply<FileOpResponse> {
         let path = request.path;
-        let io = |e| FileOpFailure::from_io(e, path);
+        let io = |e| FileOpError::from_io(e, path);
         let base = self.resolve(path, true)?;
         let limit = request
             .max_results
@@ -42,7 +35,7 @@ impl FsRoot {
         let bare_glob = request.glob.is_some_and(|glob| !glob.contains('/'));
         let glob = request
             .glob
-            .map(|glob| GlobPattern::new(glob).map_err(|e| FileOpFailure::invalid_request(e.to_string())))
+            .map(|glob| GlobPattern::new(glob).map_err(|e| FileOpError::invalid_request(e.to_string())))
             .transpose()?;
         let matcher = request
             .pattern
@@ -56,7 +49,7 @@ impl FsRoot {
                     .case_insensitive(request.case.ignores_case())
                     .size_limit(REGEX_SIZE_LIMIT)
                     .build()
-                    .map_err(|e| FileOpFailure::invalid_request(format!("bad pattern: {e}")))
+                    .map_err(|e| FileOpError::invalid_request(format!("bad pattern: {e}")))
             })
             .transpose()?;
         let file_cap = request.max_file_bytes.unwrap_or(FileOp::DEFAULT_SEARCH_FILE_BYTES);

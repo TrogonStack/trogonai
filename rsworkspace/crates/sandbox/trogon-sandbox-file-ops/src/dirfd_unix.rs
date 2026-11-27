@@ -15,7 +15,8 @@ use std::os::fd::OwnedFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use crate::fs_io::require_inside;
+use crate::constants::WRITE_FLAGS;
+use crate::containment::require_inside;
 
 fn err(errno: Errno) -> io::Error {
     io::Error::from(errno)
@@ -189,8 +190,6 @@ pub(crate) fn open_for_write(path: &Path, root: &Path) -> io::Result<Opened> {
         None => create_new(&parent, name),
     }
 }
-
-const WRITE_FLAGS: OFlags = OFlags::WRONLY.union(OFlags::NOFOLLOW).union(OFlags::CLOEXEC);
 
 /// Opens an existing file for writing, or `None` when it is absent.
 fn open_existing(parent: &OwnedFd, name: &OsStr) -> io::Result<Option<Opened>> {

@@ -6,7 +6,7 @@ use trogon_sandbox_contract::{Base64DataError, FileOpErrorKind, FileOpResponse, 
 ///
 /// Converting a failure into a [`FileOpResponse`] yields the typed reply a worker publishes.
 #[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
-pub enum FileOpFailure {
+pub enum FileOpError {
     /// The path does not exist.
     #[error("{path}: not found")]
     NotFound { path: String },
@@ -18,7 +18,7 @@ pub enum FileOpFailure {
     Unsupported { message: String },
 }
 
-impl FileOpFailure {
+impl FileOpError {
     pub fn failed(kind: FileOpErrorKind, message: impl Into<String>) -> Self {
         Self::Failed {
             kind,
@@ -56,23 +56,23 @@ impl FileOpFailure {
     }
 }
 
-impl From<FileOpFailure> for FileOpResponse {
-    fn from(failure: FileOpFailure) -> Self {
+impl From<FileOpError> for FileOpResponse {
+    fn from(failure: FileOpError) -> Self {
         match failure {
-            FileOpFailure::NotFound { path } => Self::NotFound { path },
-            FileOpFailure::Failed { kind, message } => Self::Failed { kind, message },
-            FileOpFailure::Unsupported { message } => Self::Unsupported { message },
+            FileOpError::NotFound { path } => Self::NotFound { path },
+            FileOpError::Failed { kind, message } => Self::Failed { kind, message },
+            FileOpError::Unsupported { message } => Self::Unsupported { message },
         }
     }
 }
 
-impl From<FileSha256Error> for FileOpFailure {
+impl From<FileSha256Error> for FileOpError {
     fn from(error: FileSha256Error) -> Self {
         Self::failed(FileOpErrorKind::Io, format!("digest could not be encoded: {error}"))
     }
 }
 
-impl From<Base64DataError> for FileOpFailure {
+impl From<Base64DataError> for FileOpError {
     fn from(error: Base64DataError) -> Self {
         Self::failed(FileOpErrorKind::Io, format!("payload could not be encoded: {error}"))
     }

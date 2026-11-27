@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use trogon_sandbox_contract::{FileContentHashing, FileRecursion};
 
-use crate::{ChangeHint, FileOpFailure, Manifest, ManifestDiff};
+use crate::{ChangeHint, FileOpError, Manifest, ManifestDiff};
 
 /// Where a worker's manifests come from.
 #[allow(async_fn_in_trait)]
@@ -16,13 +16,13 @@ pub trait ManifestSource {
         path: &str,
         recursion: FileRecursion,
         hashing: FileContentHashing,
-    ) -> Result<Manifest, FileOpFailure>;
+    ) -> Result<Manifest, FileOpError>;
 
     /// Changes since the lease start when the provider can report them without a stored baseline.
     /// Used when no lease-start baseline was recorded with
     /// [`Tracking::set_start_baseline`](crate::Tracking::set_start_baseline), and for the paths
     /// outside the baseline's tree when one was. `None` means the provider cannot say.
-    async fn changes_since_start(&self) -> Option<Result<ManifestDiff, FileOpFailure>> {
+    async fn changes_since_start(&self) -> Option<Result<ManifestDiff, FileOpError>> {
         None
     }
 

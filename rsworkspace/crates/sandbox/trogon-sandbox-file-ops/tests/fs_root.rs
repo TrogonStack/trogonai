@@ -12,7 +12,7 @@ use trogon_sandbox_contract::{
     FileOverwrite, FileParentCreation, FilePresence, FileRecursion, FileResultTruncation, FileSearchSyntax,
     FileWriteTruncation,
 };
-use trogon_sandbox_file_ops::{FileOpFailure, FsRoot, SandboxPrefix};
+use trogon_sandbox_file_ops::{FileOpError, FsRoot, SandboxPrefix};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -1029,7 +1029,7 @@ fn tracking_verbs_are_not_served_by_the_directory_root() -> TestResult {
     });
     assert!(matches!(reply, FileOpResponse::Unsupported { ref message } if message.contains("checkpoint")));
     let typed = fs_root.try_execute(&FileOp::WatchStop { watch_id: "w".into() });
-    assert!(matches!(typed, Err(FileOpFailure::Unsupported { .. })));
+    assert!(matches!(typed, Err(FileOpError::Unsupported { .. })));
     for op in [
         FileOp::Changes {
             since: None,
@@ -1071,7 +1071,7 @@ fn manifest_fingerprints_files_and_trees() -> TestResult {
     assert!(whole.contains_path("/workspace/d"));
     assert!(matches!(
         fs_root.manifest("none", FileRecursion::Flat, FileContentHashing::Metadata),
-        Err(FileOpFailure::NotFound { .. })
+        Err(FileOpError::NotFound { .. })
     ));
     Ok(())
 }
@@ -1099,7 +1099,7 @@ fn manifest_is_capped_at_the_tracking_limit() -> TestResult {
     let result = fs_root.manifest("", FileRecursion::Flat, FileContentHashing::Metadata);
     assert!(matches!(
         result,
-        Err(FileOpFailure::Failed {
+        Err(FileOpError::Failed {
             kind: FileOpErrorKind::TooLarge,
             ..
         })

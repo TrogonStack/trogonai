@@ -9,19 +9,19 @@ use trogon_sandbox_contract::{
 
 use crate::content_hash::encode_digest;
 use crate::fs_io::{open_read, sorted_entries, stat_of};
-use crate::fs_root::Reply;
-use crate::{FileOpFailure, FsRoot, payload};
+use crate::fs_root_core::Reply;
+use crate::{FileOpError, FsRoot, payload};
 
 impl FsRoot {
     pub(crate) fn list(&self, path: &str, recursion: FileRecursion, max_entries: Option<u32>) -> Reply<FileOpResponse> {
-        let io = |e| FileOpFailure::from_io(e, path);
+        let io = |e| FileOpError::from_io(e, path);
         let dir = self.resolve(path, true)?;
         let limit = max_entries
             .unwrap_or(FileOp::DEFAULT_MAX_ENTRIES)
             .clamp(1, FileOp::MAX_ENTRIES) as usize;
         let metadata = fs::metadata(&dir).map_err(io)?;
         if !metadata.is_dir() {
-            return Err(FileOpFailure::failed(
+            return Err(FileOpError::failed(
                 FileOpErrorKind::NotADirectory,
                 format!("{path} is not a directory"),
             ));
@@ -37,7 +37,7 @@ impl FsRoot {
 
     pub(crate) fn stat(&self, path: &str) -> Reply<FileOpResponse> {
         let host = self.resolve(path, false)?;
-        let metadata = fs::symlink_metadata(&host).map_err(|e| FileOpFailure::from_io(e, path))?;
+        let metadata = fs::symlink_metadata(&host).map_err(|e| FileOpError::from_io(e, path))?;
         let name = host
             .file_name()
             .map_or_else(|| "/".to_string(), |name| name.to_string_lossy().into_owned());
@@ -53,7 +53,7 @@ impl FsRoot {
         length: Option<u64>,
         max_bytes: Option<u64>,
     ) -> Reply<FileOpResponse> {
-        let io = |e| FileOpFailure::from_io(e, path);
+        let io = |e| FileOpError::from_io(e, path);
         let host = self.resolve(path, true)?;
         let mut file = open_read(&host).map_err(io)?;
         self.ensure_opened_inside(&file, path)?;
@@ -82,7 +82,7 @@ impl FsRoot {
     }
 
     pub(crate) fn checksum(&self, path: &str, offset: u64, length: Option<u64>) -> Reply<FileOpResponse> {
-        let io = |e| FileOpFailure::from_io(e, path);
+        let io = |e| FileOpError::from_io(e, path);
         let host = self.resolve(path, true)?;
         let mut file = open_read(&host).map_err(io)?;
         self.ensure_opened_inside(&file, path)?;
@@ -116,8 +116,8 @@ impl FsRoot {
     }
 }
 
-pub(crate) fn directory_failure(path: &str) -> FileOpFailure {
-    FileOpFailure::failed(FileOpErrorKind::IsADirectory, format!("{path} is a directory"))
+pub(crate) fn directory_failure(path: &str) -> FileOpError {
+    FileOpError::failed(FileOpErrorKind::IsADirectory, format!("{path} is a directory"))
 }
 
 fn walk(

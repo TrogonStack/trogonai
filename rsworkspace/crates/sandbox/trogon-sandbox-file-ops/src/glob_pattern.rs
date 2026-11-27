@@ -1,9 +1,7 @@
 use regex::{Regex, RegexBuilder};
 
 use crate::GlobPatternError;
-
-/// Compiled-regex size ceiling, so a hostile pattern cannot exhaust the worker.
-pub(crate) const REGEX_SIZE_LIMIT: usize = 1024 * 1024;
+use crate::constants::REGEX_SIZE_LIMIT;
 
 /// A glob over `/`-separated relative paths.
 ///

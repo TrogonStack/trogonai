@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use crate::{EditOutcome, EditSpecError, FileOpFailure};
+use crate::{EditOutcome, EditSpecError, FileOpError};
 
 /// An exact-string edit: replace every occurrence of `find` with `replace` when `find` occurs
 /// exactly the expected number of times.
@@ -44,9 +44,9 @@ impl EditSpec {
 
     /// Applies the edit to `content`, which must be UTF-8 text. A count other than the expected
     /// one is reported without a replacement.
-    pub fn apply(&self, content: &[u8]) -> Result<EditOutcome, FileOpFailure> {
+    pub fn apply(&self, content: &[u8]) -> Result<EditOutcome, FileOpError> {
         let Ok(text) = std::str::from_utf8(content) else {
-            return Err(FileOpFailure::invalid_request("file is not valid UTF-8 text"));
+            return Err(FileOpError::invalid_request("file is not valid UTF-8 text"));
         };
         let occurrences = u32::try_from(text.matches(self.find.as_str()).count()).unwrap_or(u32::MAX);
         if occurrences != self.expected_occurrences.get() {
@@ -59,7 +59,7 @@ impl EditSpec {
     }
 }
 
-impl From<EditSpecError> for FileOpFailure {
+impl From<EditSpecError> for FileOpError {
     fn from(error: EditSpecError) -> Self {
         Self::invalid_request(error.to_string())
     }

@@ -3,10 +3,8 @@ use std::path::{Component, Path};
 
 use trogon_sandbox_contract::FileOp;
 
-use crate::FileOpFailure;
-
-/// Entry count ceiling for one archive.
-pub(crate) const MAX_ARCHIVE_ENTRIES: u64 = 100_000;
+use crate::FileOpError;
+use crate::constants::MAX_ARCHIVE_ENTRIES;
 
 /// What a vetted tar stream holds.
 ///
@@ -20,22 +18,22 @@ pub struct ArchiveSummary {
 }
 
 impl ArchiveSummary {
-    pub fn validate(data: &[u8]) -> Result<Self, FileOpFailure> {
+    pub fn validate(data: &[u8]) -> Result<Self, FileOpError> {
         if data.len() as u64 > FileOp::MAX_ARCHIVE_BYTES {
-            return Err(FileOpFailure::too_large(format!(
+            return Err(FileOpError::too_large(format!(
                 "archive is {} bytes, over the {} byte limit",
                 data.len(),
                 FileOp::MAX_ARCHIVE_BYTES
             )));
         }
-        let bad = |error: std::io::Error| FileOpFailure::invalid_request(format!("bad archive: {error}"));
+        let bad = |error: std::io::Error| FileOpError::invalid_request(format!("bad archive: {error}"));
         let mut archive = tar::Archive::new(Cursor::new(data));
         let (mut entries, mut bytes) = (0u64, 0u64);
         for entry in archive.entries().map_err(bad)? {
             let entry = entry.map_err(bad)?;
             let kind = entry.header().entry_type();
             if !(kind.is_file() || kind.is_dir()) {
-                return Err(FileOpFailure::invalid_request(
+                return Err(FileOpError::invalid_request(
                     "archive holds an entry that is neither a file nor a directory (links are not extracted)",
                 ));
             }
@@ -43,7 +41,7 @@ impl ArchiveSummary {
             entries += 1;
             bytes = bytes.saturating_add(entry.size());
             if entries > MAX_ARCHIVE_ENTRIES || bytes > FileOp::MAX_ARCHIVE_BYTES {
-                return Err(FileOpFailure::too_large("archive exceeds the entry or size limit"));
+                return Err(FileOpError::too_large("archive exceeds the entry or size limit"));
             }
         }
         Ok(Self { entries, bytes })
@@ -62,14 +60,14 @@ impl ArchiveSummary {
 
 /// The `/`-joined relative path of a tar entry, refusing anything that is not a plain descent
 /// (absolute, `..`, drive prefixes).
-pub(crate) fn archive_relative(path: &Path) -> Result<String, FileOpFailure> {
+pub(crate) fn archive_relative(path: &Path) -> Result<String, FileOpError> {
     let mut parts = Vec::new();
     for component in path.components() {
         match component {
             Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
             Component::CurDir => {}
             _ => {
-                return Err(FileOpFailure::invalid_request(format!(
+                return Err(FileOpError::invalid_request(format!(
                     "archive entry {} is not a relative path",
                     path.display()
                 )));

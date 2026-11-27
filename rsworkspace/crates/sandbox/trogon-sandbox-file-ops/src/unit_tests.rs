@@ -5,7 +5,8 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
-use crate::fs_io::{opened_inside, replace_file, require_inside, sync_parent, write_whole};
+use crate::containment::{opened_inside, require_inside};
+use crate::fs_io::{replace_file, sync_parent, write_whole};
 use crate::fs_root_archive::Tally;
 use crate::{FsRoot, dirfd};
 
