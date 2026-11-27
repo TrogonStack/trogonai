@@ -32,6 +32,11 @@ if [ "$kvm" = yes ]; then
     --git https://github.com/yordis/hyperlight-wasm.git --rev "$hl_rev" hyperlight-wasm-aot >&2
   "$tools/bin/hyperlight-wasm-aot" compile "$wasm" "$here/host/target/guest.aot" >&2
   aot=("$here/host/target/guest.aot")
+  # hyperlight-wasm's build script writes its guest runtime under target/ outside cargo's
+  # tracking; a restored cache can keep the script's fingerprint but drop that file, and cargo
+  # then never reruns the script. Clean the package so the script runs again.
+  [ -d host/target/hyperlight-wasm-runtime ] \
+    || cargo clean --release --manifest-path host/Cargo.toml -p hyperlight-wasm >&2
   # hyperlight-wasm's build script compiles its guest runtime for a custom target, which stable
   # Rust only accepts with RUSTC_BOOTSTRAP (see trogon-sandbox-hyperlight-worker/README.md).
   host_build=(env RUSTC_BOOTSTRAP=1 "${host_build[@]}" --features hyperlight)

@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# `bash` (not the default shell) adds pipefail, so a failing bench is not hidden by `| tee`.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   bench:
     runs-on: ubuntu-latest
