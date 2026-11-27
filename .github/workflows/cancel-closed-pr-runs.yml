@@ -1,0 +1,34 @@
+name: Cancel closed PR runs
+
+# A concurrency group only cancels a run when a newer one joins it, so a PR
+# that merges or closes leaves its queued and running CI behind, holding the
+# runners for a branch nobody will look at again.
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      # The base branch, not the PR's merge ref, which no longer exists once
+      # the PR is merged and is the PR author's code when it is not.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+      - uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+      - name: Cancel the PR's unfinished runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: mise run --skip-tools github:workflows:cancel-closed-pr-runs:cancel

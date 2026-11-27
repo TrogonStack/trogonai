@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#MISE description="Cancel the unfinished runs of a pull request that just closed"
+#MISE tools={"aqua:cli/cli"="2.104.0"}
+set -euo pipefail
+
+: "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+: "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
+: "${HEAD_REF:?HEAD_REF is required}"
+: "${HEAD_REPO:?HEAD_REPO is required}"
+
+for status in queued pending waiting requested in_progress; do
+  gh api --paginate -X GET "repos/$GITHUB_REPOSITORY/actions/runs" \
+    -f branch="$HEAD_REF" -f status="$status" -f per_page=100 \
+    --jq '.workflow_runs[] | "\(.id) \(.head_repository.full_name)"'
+done | sort -u | while read -r id repo; do
+  # A fork can push a branch with the same name as one in this repo.
+  [ "$repo" = "$HEAD_REPO" ] && [ "$id" != "$GITHUB_RUN_ID" ] || continue
+  gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" --silent \
+    || echo "::notice::run $id already finished"
+done
