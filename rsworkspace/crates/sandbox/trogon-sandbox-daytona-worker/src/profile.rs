@@ -11,8 +11,8 @@ use trogon_sandbox_contract::{
 ///
 /// Declared true only where the worker implements the feature against the Daytona API. A sandbox starts from a named
 /// snapshot that fixes its own size, so no resource range is offered. Pause and resume are declared with stop and
-/// start semantics: a stopped sandbox keeps its files but not its processes. Daytona owns its snapshots, so neither
-/// native snapshots nor OCI export are offered.
+/// start semantics: a stopped sandbox keeps its files but not its processes. Native snapshots are offered; OCI export
+/// is not. Daytona egress is not verified, so no egress policy is advertised and the worker refuses restricted ones.
 pub static PROFILE: LazyLock<ProviderCapabilityProfile> = LazyLock::new(|| {
     let off = CapabilitySupport::Unsupported;
     let on = CapabilitySupport::Supported;
@@ -20,12 +20,12 @@ pub static PROFILE: LazyLock<ProviderCapabilityProfile> = LazyLock::new(|| {
         provider: ProviderKind::Daytona,
         snapshot: SnapshotCapability {
             can_snapshot: off,
-            can_checkpoint_running: off,
-            can_restore: off,
+            can_checkpoint_running: on,
+            can_restore: on,
             supported_artifact_types: Vec::new(),
             layered_deltas: off,
             max_snapshot_size_bytes: None,
-            supports_native_snapshots: off,
+            supports_native_snapshots: on,
             supports_in_place_rollback: off,
         },
         volume: VolumeCapability {
@@ -36,10 +36,10 @@ pub static PROFILE: LazyLock<ProviderCapabilityProfile> = LazyLock::new(|| {
         isolation: IsolationCapability {
             default_tier: IsolationTier::Container,
             supported_tiers: vec![IsolationTier::Container],
-            egress_enforcement: EgressEnforcementLevel::BestEffort,
+            egress_enforcement: EgressEnforcementLevel::None,
             supports_privileged: off,
             supports_sandbox_users: off,
-            supports_interactive_stdin: off,
+            supports_interactive_stdin: on,
             supports_named_processes: off,
             supports_process_readiness: off,
             supports_graceful_stop: off,
@@ -60,12 +60,12 @@ pub static PROFILE: LazyLock<ProviderCapabilityProfile> = LazyLock::new(|| {
             supports_file_search: off,
             supports_file_archive: off,
             supports_output_redaction: off,
-            supports_terminal: off,
+            supports_terminal: on,
             resource_limits: ResourceLimitMechanism::None,
             egress: EgressCapability {
-                deny_all: on,
+                deny_all: off,
                 host_allowlist: off,
-                cidr_allowlist: on,
+                cidr_allowlist: off,
                 proxy_mediated: off,
             },
             supports_hardening_overrides: off,
@@ -90,7 +90,7 @@ pub static PROFILE: LazyLock<ProviderCapabilityProfile> = LazyLock::new(|| {
         performance: PerformanceProfile {
             cold_start_p50_ms: 2000,
             cold_restore_p50_ms: 5000,
-            max_concurrent_sandboxes: None,
+            max_concurrent_sandboxes: Some(8),
         },
         resources: ResourceCapability {
             vcpu_millis: None,

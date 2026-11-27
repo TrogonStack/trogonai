@@ -86,3 +86,26 @@ fn more_than_ten_blocks_are_refused() -> TestResult {
     assert!(translate_network_policy(Some(&fits)).is_ok());
     Ok(())
 }
+
+#[test]
+fn admission_refuses_every_restricting_policy_with_the_unverified_reason() -> TestResult {
+    for restricted in [NetworkPolicy::DenyAll, policy(|_| {})?] {
+        let refused = require_unrestricted_egress(Some(&restricted)).err().ok_or("admitted")?;
+        assert!(matches!(
+            refused,
+            LeaseError::InvalidNetworkPolicy { ref reason } if reason == RESTRICTED_EGRESS_UNVERIFIED
+        ));
+    }
+    assert_eq!(
+        RESTRICTED_EGRESS_UNVERIFIED,
+        "restricted Daytona egress requires verified provider enforcement, which is unavailable"
+    );
+    Ok(())
+}
+
+#[test]
+fn admission_lets_unrestricted_egress_through() -> TestResult {
+    require_unrestricted_egress(None)?;
+    require_unrestricted_egress(Some(&NetworkPolicy::AllowAll))?;
+    Ok(())
+}

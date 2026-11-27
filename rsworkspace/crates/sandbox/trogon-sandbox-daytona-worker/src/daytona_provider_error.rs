@@ -1,7 +1,7 @@
 use trogon_sandbox_contract::{LeaseError, SandboxIdError};
 use trogon_sandbox_protocol::{NativeOptionsError, PrivilegedUnsupportedError, ProviderError};
 
-use crate::{DaytonaApiError, SandboxState};
+use crate::{DaytonaApiError, SandboxState, SnapshotCustodyError};
 
 /// Why the Daytona provider could not serve a lease or cleanup call.
 #[derive(Debug, thiserror::Error)]
@@ -27,6 +27,8 @@ pub enum DaytonaProviderError {
     },
     #[error("the sandbox did not reach {target:?} in time; Daytona last reported {state:?}")]
     SettleTimedOut { state: SandboxState, target: SandboxState },
+    #[error(transparent)]
+    Custody(#[from] SnapshotCustodyError),
     #[error("provider is already bound to another worker")]
     BoundToAnotherWorker,
 }

@@ -15,19 +15,26 @@ fn every_option_is_read() -> Result<(), NativeOptionsError> {
         "auto_archive_interval": 6,
         "auto_delete_interval": 7,
         "public": true,
+        "class": "medium",
+        "gpu": 3,
     }});
     let params = native_params(Some(&native))?;
     assert_eq!(params.auto_stop_interval, Some(5));
     assert_eq!(params.auto_archive_interval, Some(6));
     assert_eq!(params.auto_delete_interval, Some(7));
     assert_eq!(params.public, Some(true));
+    assert_eq!(params.class.as_deref(), Some("medium"));
+    assert_eq!(params.gpu, Some(3));
     Ok(())
 }
 
 #[test]
 fn unknown_keys_and_bad_values_are_refused() {
     for native in [
-        json!({"daytona": {"gpu": 1}}),
+        json!({"daytona": {"gpu": 0}}),
+        json!({"daytona": {"gpu": 9}}),
+        json!({"daytona": {"class": "huge"}}),
+        json!({"daytona": {"colour": 1}}),
         json!({"daytona": {"auto_stop_interval": "soon"}}),
         json!({"daytona": {"auto_stop_interval": MAX_INTERVAL_MINUTES + 1}}),
         json!({"daytona": {"public": 1}}),

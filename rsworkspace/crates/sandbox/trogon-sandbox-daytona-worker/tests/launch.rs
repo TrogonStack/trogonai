@@ -93,3 +93,21 @@ async fn settings_the_worker_cannot_use_are_refused_at_parse_time() -> TestResul
     assert!(args(UNUSED_NATS, &["--api-key", ""]).is_err());
     Ok(())
 }
+
+#[tokio::test]
+async fn a_supervisor_that_does_not_match_its_pin_stops_the_launch() -> TestResult {
+    let nats = JetStreamTestServer::start().await;
+    let dir = tempfile::tempdir()?;
+    let artifact = dir.path().join("supervisor");
+    std::fs::write(&artifact, b"not the pinned artifact")?;
+    let path = artifact.to_string_lossy().into_owned();
+    let pin = "0".repeat(64);
+    let url = format!("nats://{}", nats.address());
+    let args = args(
+        &url,
+        &["--command-supervisor", &path, "--command-supervisor-sha256", &pin],
+    )?;
+    let result = tokio::time::timeout(Duration::from_secs(30), launch(&args, std::future::pending())).await?;
+    assert!(matches!(result, Err(DaytonaWorkerError::Runtime(_))));
+    Ok(())
+}

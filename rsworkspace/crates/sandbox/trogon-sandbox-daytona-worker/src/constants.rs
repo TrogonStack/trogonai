@@ -11,10 +11,24 @@ pub const NATIVE_OPTION_KEYS: &[&str] = &[
     "auto_archive_interval",
     "auto_delete_interval",
     "public",
+    "class",
+    "gpu",
 ];
 
 /// The largest interval, in minutes, a native option may carry: one year.
 pub const MAX_INTERVAL_MINUTES: u64 = 525_600;
+
+/// The sandbox classes Daytona offers.
+pub const SANDBOX_CLASSES: &[&str] = &["small", "medium", "large"];
+
+/// The most GPUs a sandbox may ask for.
+pub const MAX_GPUS: u64 = 8;
+
+/// The label prefix a lease tag travels under on the sandbox.
+pub const TAG_LABEL_PREFIX: &str = "trogon.tag.";
+
+/// The label that names the lease a sandbox belongs to.
+pub const LEASE_LABEL: &str = "trogon.lease_id";
 
 pub const UNSUPPORTED: &str = "Daytona owns its snapshots; exporting one as an OCI artifact is not supported";
 
@@ -39,9 +53,6 @@ pub const TOOLBOX_DEADLINE_SLACK: Duration = Duration::from_secs(10);
 
 /// The header that carries a port preview token.
 pub const PREVIEW_TOKEN_HEADER: &str = "x-daytona-preview-token";
-
-/// The exit status of a poll script when the command it asks about has not finished.
-pub const RUNNING_EXIT: i32 = 3;
 
 /// How long a sandbox may take to reach the state a lease asked for.
 pub const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(300);
@@ -83,6 +94,7 @@ pub const RESUME: &str = "sandbox.provider.daytona.resume.>";
 pub const SUSPEND: &str = "sandbox.provider.daytona.suspend.>";
 pub const WAKE: &str = "sandbox.provider.daytona.wake.>";
 pub const NATIVE_HANDLE: &str = "sandbox.provider.daytona.native_handle.>";
+pub const SSH_ACCESS: &str = "sandbox.provider.daytona.ssh_access.>";
 
 /// The user name a token travels under when a git host takes the token as a password.
 pub const CLONE_TOKEN_USER: &str = "oauth2";
@@ -93,3 +105,68 @@ pub const WORKSPACE_MODE: u32 = 0o755;
 /// Encoding room reserved for both streams' truncation markers: a marker is under 64 bytes, and the number-array
 /// encoding costs up to four bytes per byte.
 pub const MARKER_ROOM: usize = 2 * 64 * 4;
+
+/// How long SSH access lasts when the caller does not say, matching Daytona's own default.
+pub const DEFAULT_SSH_ACCESS_MINUTES: u32 = 60;
+
+/// Most leases this worker keeps a gateway session for. Sessions exist only for leases the worker holds, so this is a
+/// backstop, not a working limit.
+pub const MAX_GUEST_SESSIONS: usize = 256;
+
+/// How long a connection to Daytona's SSH gateway may take, login included.
+pub const GATEWAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a released session waits for the gateway to acknowledge the disconnect.
+pub const GATEWAY_DISCONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// A gateway token is replaced this long before it expires.
+pub const TOKEN_REFRESH_MARGIN: Duration = Duration::from_secs(60);
+
+/// How long a token with no reported expiry is trusted. Daytona's default access lifetime is an hour.
+pub const UNDATED_TOKEN_LIFETIME: Duration = Duration::from_secs(50 * 60);
+
+/// How often a native snapshot is looked at while it builds, unless the operator says otherwise.
+pub const DEFAULT_SNAPSHOT_POLL_INTERVAL: Duration = Duration::from_secs(DEFAULT_SNAPSHOT_POLL_INTERVAL_SECS);
+
+/// How long a native snapshot may take to turn active, unless the operator says otherwise.
+pub const DEFAULT_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(DEFAULT_SNAPSHOT_TIMEOUT_SECS);
+
+/// The default for `--snapshot-poll-interval-secs`.
+pub const DEFAULT_SNAPSHOT_POLL_INTERVAL_SECS: u64 = 2;
+
+/// The default for `--snapshot-timeout-secs`.
+pub const DEFAULT_SNAPSHOT_TIMEOUT_SECS: u64 = 300;
+
+/// How long a guest script may run, in seconds.
+pub(crate) const SCRIPT_TIMEOUT_SECONDS: u64 = 20;
+
+/// The most output a guest script may print.
+pub(crate) const MAX_SCRIPT_OUTPUT_BYTES: usize = 4096;
+
+/// Most finished results kept at once; the oldest go first, so a lease that runs many short commands cannot grow the
+/// worker's memory until it ends.
+pub(crate) const MAX_COMPLETED_RESULTS: usize = 256;
+
+/// Why a restricted egress policy is refused at admission.
+pub(crate) const RESTRICTED_EGRESS_UNVERIFIED: &str =
+    "restricted Daytona egress requires verified provider enforcement, which is unavailable";
+
+pub(crate) const MAX_ARTIFACT_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_BRIDGE_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const BRIDGE: &str = include_str!("ordinary_command_runtime/bridge.cjs");
+
+/// The largest stdin payload sent in one frame, before encoding.
+pub(crate) const STDIN_PIECE_BYTES: usize = 192 * 1024;
+
+/// How often the acknowledgement file is read while a frame is outstanding.
+pub(crate) const ACK_POLL: Duration = Duration::from_millis(50);
+
+/// The line that tells the stdin reader of an interactive command to close the command's stdin.
+pub(crate) const STDIN_EOF_LINE: &str = ".";
+
+/// The port `ssh` uses when the command line names none.
+pub(crate) const DEFAULT_PORT: u16 = 22;
+
+/// Broadcast subject the broker sends terminal requests on for this provider
+/// (see [`trogon_sandbox_protocol::subjects::provider_terminal`]).
+pub const TERMINAL_SUBJECT: &str = "sandbox.provider.daytona.terminal.>";

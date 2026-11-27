@@ -1,10 +1,22 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
 workspace_crate(
+    compile_data = ["src/ordinary_command_runtime/bridge.cjs"],
     integration_tests = {
+        "*": {"compile_data": [
+            "tests/*/*.rs",
+            "tests/*/*/*.rs",
+        ]},
         # These start a NATS server in a container through Docker.
         "binary": {"tags": ["requires-network"]},
         "launch": {"tags": ["requires-network"]},
+        "native_snapshot": {"tags": ["requires-network"]},
+        "terminal_ssh": {"tags": ["requires-network"]},
         "worker": {"tags": ["requires-network"]},
+        "worker_ssh": {"tags": ["requires-network"]},
+        # These reach a real Daytona account and skip unless opted in.
+        "hosted_conformance": {"tags": ["requires-network"]},
+        "hosted_contract": {"tags": ["requires-network"]},
+        "hosted_network_policy": {"tags": ["requires-network"]},
     },
 )

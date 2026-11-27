@@ -50,8 +50,13 @@ impl DaytonaApi {
         &self.config
     }
 
+    /// The timeout every request carries unless a call extends it.
+    pub(crate) fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
     /// A request to `url` carrying the credentials and the organization scope.
-    fn builder(&self, method: Method, url: String) -> RequestBuilder {
+    pub(crate) fn builder(&self, method: Method, url: String) -> RequestBuilder {
         let request = self
             .http
             .request(method, url)
@@ -63,13 +68,13 @@ impl DaytonaApi {
         }
     }
 
-    fn control(&self, method: Method, path: &str) -> RequestBuilder {
+    pub(crate) fn control(&self, method: Method, path: &str) -> RequestBuilder {
         let base = self.config.endpoint().as_str().trim_end_matches('/');
         self.builder(method, format!("{base}{path}"))
     }
 
     /// Turns a non-2xx response into the matching [`DaytonaApiError`].
-    async fn check(response: Response) -> Result<Response, DaytonaApiError> {
+    pub(crate) async fn check(response: Response) -> Result<Response, DaytonaApiError> {
         let status = response.status();
         if status.is_success() {
             return Ok(response);
@@ -83,13 +88,13 @@ impl DaytonaApi {
         Err(DaytonaApiError::from_status(status, retry_after, &bytes))
     }
 
-    async fn send(request: RequestBuilder) -> Result<Bytes, DaytonaApiError> {
+    pub(crate) async fn send(request: RequestBuilder) -> Result<Bytes, DaytonaApiError> {
         let response = request.send().await.map_err(DaytonaApiError::transport)?;
         let response = Self::check(response).await?;
         response.bytes().await.map_err(DaytonaApiError::transport)
     }
 
-    fn parse<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, DaytonaApiError> {
+    pub(crate) fn parse<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, DaytonaApiError> {
         serde_json::from_slice(bytes).map_err(DaytonaApiError::unexpected)
     }
 
@@ -145,7 +150,7 @@ impl DaytonaApi {
     }
 
     /// The toolbox proxy of a sandbox, remembered per sandbox.
-    async fn proxy_for(&self, id: &str) -> Result<String, DaytonaApiError> {
+    pub(crate) async fn proxy_for(&self, id: &str) -> Result<String, DaytonaApiError> {
         safe_id(id, "sandbox id")?;
         let known = self
             .proxies
@@ -166,7 +171,12 @@ impl DaytonaApi {
         Ok(proxy)
     }
 
-    async fn toolbox(&self, method: Method, id: &str, rest: &str) -> Result<RequestBuilder, DaytonaApiError> {
+    pub(crate) async fn toolbox(
+        &self,
+        method: Method,
+        id: &str,
+        rest: &str,
+    ) -> Result<RequestBuilder, DaytonaApiError> {
         let proxy = self.proxy_for(id).await?;
         Ok(self.builder(method, format!("{proxy}/{id}/{rest}")))
     }
@@ -175,7 +185,10 @@ impl DaytonaApi {
     pub async fn execute(&self, id: &str, request: &ExecuteRequest) -> Result<ExecuteReply, DaytonaApiError> {
         let mut call = self.toolbox(Method::POST, id, "process/execute").await?.json(request);
         if let Some(seconds) = request.timeout {
-            call = call.timeout(self.timeout.max(Duration::from_secs(seconds) + TOOLBOX_DEADLINE_SLACK));
+            call = call.timeout(
+                self.timeout()
+                    .max(Duration::from_secs(seconds) + TOOLBOX_DEADLINE_SLACK),
+            );
         }
         let bytes = Self::send(call).await?;
         Self::parse(&bytes)

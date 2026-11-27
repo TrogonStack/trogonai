@@ -17,6 +17,13 @@ impl DaytonaConfig {
         }
     }
 
+    /// The same configuration, scoped to `organization`.
+    #[must_use]
+    pub fn with_organization(mut self, organization: DaytonaOrganizationId) -> Self {
+        self.organization = Some(organization);
+        self
+    }
+
     pub fn endpoint(&self) -> &DaytonaEndpoint {
         &self.endpoint
     }

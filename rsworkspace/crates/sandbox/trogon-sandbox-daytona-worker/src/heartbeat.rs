@@ -8,9 +8,15 @@ use trogon_sandbox_contract::{
 
 use crate::PROFILE;
 
-/// What the worker tells the broker about itself: its capacity and what Daytona lets it offer.
-pub fn build_heartbeat(worker_id: &WorkerId, max_concurrent_leases: u32, current_leases: u32) -> WorkerHeartbeat {
-    let profile = PROFILE.clone();
+/// What the worker tells the broker about itself: its capacity, the regions it offers and what Daytona lets it offer.
+pub fn build_heartbeat(
+    worker_id: &WorkerId,
+    max_concurrent_leases: u32,
+    current_leases: u32,
+    regions: &[String],
+) -> WorkerHeartbeat {
+    let mut profile = PROFILE.clone();
+    profile.placement.regions = regions.to_vec();
     WorkerHeartbeat {
         worker_id: worker_id.clone(),
         dispatch_protocol: WorkerDispatchProtocol::Legacy,

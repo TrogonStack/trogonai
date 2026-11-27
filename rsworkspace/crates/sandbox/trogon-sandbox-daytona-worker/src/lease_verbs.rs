@@ -9,7 +9,7 @@ use trogon_sandbox_contract::{
     ModifyGroupMembershipRequest, ModifyGroupMembershipResponse, NativeHandleRequest, NetworkPolicyUpdateRequest,
     NetworkPolicyUpdateResponse, PollCommandRequest, ReadFileRequest, RunCommandRequest, SandboxFreezeRequest,
     SandboxFreezeResponse, SandboxSuspendRequest, SandboxSuspendResponse, SandboxWakeRequest, SandboxWakeResponse,
-    SnapshotExportError, SnapshotExportOutcome, SuspendLevel, WriteFilesRequest, WriteStdinRequest,
+    SnapshotExportError, SnapshotExportOutcome, SshAccessRequest, SuspendLevel, WriteFilesRequest, WriteStdinRequest,
 };
 use trogon_sandbox_protocol::{nats_transfer, unsupported_file_op_response};
 
@@ -55,8 +55,8 @@ async fn kill_command(daytona: Provider, sandbox: LeaseSandbox, request: KillCom
     )
 }
 
-async fn write_stdin(daytona: Provider, _sandbox: LeaseSandbox, _request: WriteStdinRequest, _max: usize) -> Reply {
-    encode(&daytona.exec().handle_write_stdin())
+async fn write_stdin(daytona: Provider, sandbox: LeaseSandbox, request: WriteStdinRequest, _max: usize) -> Reply {
+    encode(&daytona.exec().handle_write_stdin(&sandbox, &request).await)
 }
 
 async fn write_files(daytona: Provider, sandbox: LeaseSandbox, request: WriteFilesRequest, _max: usize) -> Reply {
@@ -122,15 +122,22 @@ async fn native_handle(daytona: Provider, _sandbox: LeaseSandbox, request: Nativ
     encode(&daytona.native_handle_for_lease(&request.lease_id).await)
 }
 
+async fn ssh_access(daytona: Provider, sandbox: LeaseSandbox, request: SshAccessRequest, _max: usize) -> Reply {
+    encode(&daytona.ssh_access_for_sandbox(&sandbox.id, request.ttl_seconds).await)
+}
+
 async fn checkpoint_running(
-    _daytona: Provider,
-    _sandbox: LeaseSandbox,
-    _request: CheckpointRunningRequest,
+    daytona: Provider,
+    sandbox: LeaseSandbox,
+    request: CheckpointRunningRequest,
     _max: usize,
 ) -> Reply {
-    encode(&SnapshotExportOutcome::Err(SnapshotExportError::Unsupported {
-        message: UNSUPPORTED.to_owned(),
-    }))
+    match request.native_name.as_deref() {
+        Some(name) => encode(&daytona.native_snapshot(&sandbox.id, name).await),
+        None => encode(&SnapshotExportOutcome::Err(SnapshotExportError::Unsupported {
+            message: UNSUPPORTED.to_owned(),
+        })),
+    }
 }
 
 async fn network_policy_update(
@@ -193,6 +200,7 @@ pub(crate) async fn serve_lease_verbs(
     serve(client, daytona, cancel, subjects::SUSPEND, false, suspend).await?;
     serve(client, daytona, cancel, subjects::WAKE, false, wake).await?;
     serve(client, daytona, cancel, subjects::NATIVE_HANDLE, false, native_handle).await?;
+    serve(client, daytona, cancel, subjects::SSH_ACCESS, false, ssh_access).await?;
     serve(
         client,
         daytona,
