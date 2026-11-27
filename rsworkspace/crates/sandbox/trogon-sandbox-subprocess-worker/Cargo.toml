@@ -1,0 +1,84 @@
+[package]
+name = "trogon-sandbox-subprocess-worker"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+description = "NATS-subscribed worker that fulfills sandbox lease requests through isolated local subprocesses"
+
+[lints]
+workspace = true
+
+[lib]
+name = "trogon_sandbox_subprocess_worker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "trogon-sandbox-subprocess-worker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-nats = { workspace = true, features = ["jetstream"] }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["env"] }
+futures = { workspace = true }
+rand_core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "process", "io-util", "time", "net", "sync"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+trogon-sandbox-contract = { workspace = true }
+trogon-sandbox-credential-broker = { workspace = true }
+trogon-sandbox-egress-proxy = { workspace = true }
+trogon-sandbox-file-ops = { workspace = true }
+trogon-sandbox-protocol = { workspace = true }
+trogon-sandbox-windows-fence = { workspace = true }
+trogon-std = { workspace = true }
+uuid = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+nix = { workspace = true, features = ["process", "fs", "ioctl", "user", "signal", "term"] }
+thiserror = { workspace = true }
+trogon-sandbox-volumes = { workspace = true }
+which = { workspace = true }
+
+# The worker only serves on Linux, macOS and Windows; elsewhere the binary is a
+# stub that never bootstraps telemetry.
+[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
+trogon-sandbox-observability = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+trogon-sandbox-fence-helper = { workspace = true }
+windows = { workspace = true, features = [
+  "Win32_Security_Isolation",
+] }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+trogon-sandbox-ssh-gateway = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { workspace = true }
+seccompiler = { workspace = true }
+
+[dev-dependencies]
+regex = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-auth = { workspace = true }
+trogon-sandbox-conformance = { workspace = true }
+which = { workspace = true }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies]
+russh = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+rcgen = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
