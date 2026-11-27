@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Lint and render the sandbox Helm charts, then check and unit-test their alert rules"
+set -euo pipefail
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+helm version --short
+yq --version
+promtool --version
+devops/helm/sandbox/ci/check-charts.sh

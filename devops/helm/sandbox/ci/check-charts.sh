@@ -69,7 +69,8 @@ helm template ci "${chart}" "${sets[@]}" > "${work}/rules-on.yaml"
 # One plain Prometheus rule file per PrometheusRule, named after the resource.
 rules="${work}/rules"
 mkdir -p "${rules}"
-yq eval-all -s "\"${rules}/\" + .metadata.name" 'select(.kind == "PrometheusRule")' "${work}/rules-on.yaml"
+# yq only writes split files below its working directory.
+(cd "${rules}" && yq eval-all -s '.metadata.name' 'select(.kind == "PrometheusRule")' "${work}/rules-on.yaml")
 count=0
 for f in "${rules}"/*.yml; do
   [ -e "${f}" ] || break
