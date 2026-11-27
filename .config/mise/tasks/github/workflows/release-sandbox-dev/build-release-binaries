@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Build the release binaries named in SANDBOX_DEV_BINARIES"
+set -euo pipefail
+
+: "${SANDBOX_DEV_BINARIES:?SANDBOX_DEV_BINARIES is required}"
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+cd "$ROOT/rsworkspace"
+
+args=()
+for binary in $SANDBOX_DEV_BINARIES; do
+    args+=(--package "$binary" --bin "$binary")
+done
+cargo build --locked --release "${args[@]}"

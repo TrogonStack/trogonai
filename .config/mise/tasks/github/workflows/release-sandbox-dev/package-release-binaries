@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+#MISE description="Archive the SANDBOX_DEV_BINARIES release builds, plus nats-server when WITH_NATS_SERVER is true, for PLATFORM under OUTPUT_DIR with a sha256 file"
+set -euo pipefail
+
+: "${SANDBOX_DEV_BINARIES:?SANDBOX_DEV_BINARIES is required}"
+: "${RELEASE_VERSION:?RELEASE_VERSION is required}"
+: "${PLATFORM:?PLATFORM is required}"
+: "${WITH_NATS_SERVER:?WITH_NATS_SERVER is required}"
+: "${OUTPUT_DIR:?OUTPUT_DIR is required}"
+
+ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
+target="$(cd "$ROOT/rsworkspace" && cargo metadata --format-version 1 --no-deps | jq -r .target_directory)"
+
+name="trogon-sandbox-dev-${RELEASE_VERSION}-${PLATFORM}"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+stage="$work/$name"
+mkdir -p "$stage"
+
+# trogon-sandbox-dev finds these next to itself, so one extracted directory runs.
+for binary in $SANDBOX_DEV_BINARIES; do
+    install -m 0755 "$target/release/$binary" "$stage/$binary"
+    strip "$stage/$binary"
+done
+# The pinned nats-server makes the Linux archive run without any other install.
+if [[ "$WITH_NATS_SERVER" == "true" ]]; then
+    install -m 0755 "$(mise which nats-server)" "$stage/nats-server"
+fi
+
+mkdir -p "$OUTPUT_DIR"
+tar -C "$work" -czf "$OUTPUT_DIR/$name.tar.gz" "$name"
+cd "$OUTPUT_DIR"
+if command -v sha256sum >/dev/null; then
+    sha256sum "$name.tar.gz" >"$name.tar.gz.sha256"
+else
+    shasum -a 256 "$name.tar.gz" >"$name.tar.gz.sha256"
+fi

@@ -1,0 +1,158 @@
+name: cd / sandbox dev release binaries
+
+# Builds trogon-sandbox-dev and the binaries it starts, then attaches one
+# archive per platform to a release that already exists. It never creates a
+# release or a tag: Release Please does not cut this component, so publish the
+# release first, or run this by hand with the tag of an existing release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing trogon-sandbox-dev@v* release tag to attach the archives to
+        required: true
+        type: string
+
+concurrency:
+  group: release-sandbox-dev-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+  CARGO_NET_RETRY: '10'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  # Everything trogon-sandbox-dev looks up next to its own executable, except
+  # nats-server, which comes from mise. Each package builds one binary of the
+  # same name.
+  SANDBOX_DEV_BINARIES: >-
+    trogon-sandbox-dev
+    trogon-sandbox-broker
+    trogon-sandbox-ws-gateway
+    trogon-sandbox-docker-worker
+    trogon-sandbox-subprocess-worker
+    trogon-sandbox-memory-worker
+
+jobs:
+  resolve:
+    name: Resolve the release tag
+    # Every published release starts this workflow; only trogon-sandbox-dev
+    # releases carry these archives.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'trogon-sandbox-dev@v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
+      - name: Check the tag names a published release
+        id: tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: mise run --skip-tools github:workflows:release-sandbox-dev:resolve-release-tag
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Pinned to 24.04 so the glibc the binaries need does not move with
+          # the runner image.
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+            install-args: rust github:nats-io/nats-server
+            with-nats-server: true
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            install-args: rust github:nats-io/nats-server
+            with-nats-server: true
+          # macOS users install nats-server themselves.
+          - platform: macos-arm64
+            runner: macos-latest
+            install-args: rust
+            with-nats-server: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+
+      # No caches: a published binary should come only from the tagged tree
+      # and the pinned tools, never from state another run saved.
+      - name: Install mise tools
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install_args: ${{ matrix.install-args }}
+          cache: false
+
+      - name: Build
+        run: mise run --skip-tools github:workflows:release-sandbox-dev:build-release-binaries
+
+      - name: Package
+        env:
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          WITH_NATS_SERVER: ${{ matrix.with-nats-server }}
+          OUTPUT_DIR: ${{ runner.temp }}/sandbox-dev-dist
+        run: mise run --skip-tools github:workflows:release-sandbox-dev:package-release-binaries
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sandbox-dev-${{ matrix.platform }}
+          path: ${{ runner.temp }}/sandbox-dev-dist/
+          if-no-files-found: error
+
+  attach:
+    name: Attach to the release
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install: false
+          cache: false
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: sandbox-dev-*
+          path: ${{ runner.temp }}/sandbox-dev-dist
+          merge-multiple: true
+
+      - name: Upload to the existing release
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          DIST_DIR: ${{ runner.temp }}/sandbox-dev-dist
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: mise run --skip-tools github:workflows:release-sandbox-dev:release-upload
