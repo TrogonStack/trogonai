@@ -76,6 +76,7 @@ trogon-sandbox-guest-init = { path = "crates/sandbox/trogon-sandbox-guest-init" 
 trogon-sandbox-observability = { path = "crates/sandbox/trogon-sandbox-observability" }
 trogon-sandbox-oci = { path = "crates/sandbox/trogon-sandbox-oci" }
 trogon-sandbox-protocol = { path = "crates/sandbox/trogon-sandbox-protocol" }
+trogon-sandbox-space-worker = { path = "crates/sandbox/trogon-sandbox-space-worker" }
 trogon-sandbox-volumes = { path = "crates/sandbox/trogon-sandbox-volumes" }
 trogon-sandbox-windows-fence = { path = "crates/sandbox/trogon-sandbox-windows-fence" }
 trogon-std = { path = "crates/platform/trogon-std" }
