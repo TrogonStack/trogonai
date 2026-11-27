@@ -218,6 +218,26 @@ impl ClientMethod {
         }
     }
 
+    /// Whether a message for this method is a notification: it expects no answer,
+    /// so the client proxy delivers it in arrival order instead of concurrently.
+    ///
+    /// Ext methods are notifications exactly when sent without a reply subject.
+    pub fn is_notification(&self, has_reply: bool) -> bool {
+        match self {
+            Self::SessionUpdate | Self::ElicitationComplete => true,
+            Self::Ext(_) => !has_reply,
+            Self::FsReadTextFile
+            | Self::FsWriteTextFile
+            | Self::SessionRequestPermission
+            | Self::TerminalCreate
+            | Self::TerminalKill
+            | Self::TerminalOutput
+            | Self::TerminalRelease
+            | Self::TerminalWaitForExit
+            | Self::ElicitationCreate => false,
+        }
+    }
+
     pub fn from_subject_suffix(suffix: &str) -> Option<Self> {
         match suffix {
             "fs.read_text_file" => Some(Self::FsReadTextFile),

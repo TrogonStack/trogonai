@@ -265,7 +265,7 @@ async fn prompt_js_agent_error_response() {
     assert!(err.message.contains("agent blew up"));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn prompt_js_response_stream_closed() {
     let (mock, js, bridge) = mock_bridge();
     let _cancel_tx = mock.inject_messages();
@@ -276,7 +276,8 @@ async fn prompt_js_response_stream_closed() {
     drop(resp_tx);
 
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
-    assert!(result.is_err());
+    let message = result.unwrap_err().message;
+    assert!(message.contains("prompt timed out waiting for runner"), "{message}");
 }
 
 #[tokio::test]
@@ -323,7 +324,7 @@ async fn prompt_js_resp_messages_failure() {
     assert!(result.unwrap_err().message.contains("response messages"));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn prompt_js_response_consumer_error() {
     let (mock, js, bridge) = mock_bridge();
     let _cancel_tx = mock.inject_messages();
@@ -336,8 +337,37 @@ async fn prompt_js_response_consumer_error() {
         .unwrap();
 
     let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
-    assert!(result.is_err());
-    assert!(result.unwrap_err().message.contains("response consumer"));
+    let message = result.unwrap_err().message;
+    assert!(message.contains("prompt timed out waiting for runner"), "{message}");
+    assert!(message.contains("last response consumer error"), "{message}");
+}
+
+/// Regression: under a network stall the client got `-32603 "response consumer:
+/// missed idle heartbeat"` while the runner finished the turn; its stop reason
+/// never reached the client.
+#[tokio::test(start_paused = true)]
+async fn prompt_returns_the_real_stop_reason_after_a_missed_heartbeat() {
+    let (mock, js, bridge) = mock_bridge();
+    let _cancel_tx = mock.inject_messages();
+
+    let (stalled, stalled_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+    let (recreated, recreated_tx) = trogon_nats::jetstream::MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(stalled);
+    js.consumer_factory.add_consumer(recreated);
+
+    stalled_tx
+        .unbounded_send(Err(trogon_nats::mocks::MockError("missed idle heartbeat".to_string())))
+        .unwrap();
+    reply_success_when_published(&js, recreated_tx, &PromptResponse::new(StopReason::EndTurn));
+
+    let result = handle(&bridge, PromptRequest::new("s1", vec![])).await;
+
+    assert_eq!(
+        result
+            .expect("the stop reason survives the consumer failure")
+            .stop_reason,
+        StopReason::EndTurn
+    );
 }
 
 #[tokio::test]
