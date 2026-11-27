@@ -28,12 +28,14 @@ use trogon_std::time::SystemClock;
 const EXT_METHOD: &str = "_vendor/method";
 const WAIT: Duration = Duration::from_secs(10);
 
+/// Notification names the agent saw. Requests echo their name in the reply instead.
 #[derive(Default)]
-struct RecordingAgent {
-    requests: Mutex<Vec<String>>,
-    notifications: Mutex<Vec<String>>,
-    notified: Notify,
+struct Notifications {
+    names: Mutex<Vec<String>>,
+    arrived: Notify,
 }
+
+struct RecordingAgent(Arc<Notifications>);
 
 #[async_trait::async_trait]
 impl AgentHandler for RecordingAgent {
@@ -58,7 +60,6 @@ impl AgentHandler for RecordingAgent {
     }
 
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
-        self.requests.lock().unwrap().push(args.method.to_string());
         let params: Value = serde_json::from_str(args.params.get()).unwrap();
         let reply = json!({ "method": args.method.as_ref(), "params": params });
         Ok(ExtResponse::new(
@@ -67,8 +68,8 @@ impl AgentHandler for RecordingAgent {
     }
 
     async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
-        self.notifications.lock().unwrap().push(args.method.to_string());
-        self.notified.notify_one();
+        self.0.names.lock().unwrap().push(args.method.to_string());
+        self.0.arrived.notify_one();
         Ok(())
     }
 }
@@ -107,16 +108,20 @@ async fn wait_for_agent(nats: &async_nats::Client, prefix: &AcpPrefix) {
 async fn extension_names_reach_the_agent_unchanged_through_nats() {
     let server = JetStreamTestServer::start().await;
     let prefix = AcpPrefix::new("ext_names").unwrap();
-    let agent = Arc::new(RecordingAgent::default());
+    let notifications = Arc::new(Notifications::default());
 
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
             let agent_nats = server.client().await;
-            let (_conn, serve) =
-                AgentSideNatsConnection::new(SharedAgent(agent.clone()), agent_nats, prefix.clone(), |fut| {
+            let (_conn, serve) = AgentSideNatsConnection::new(
+                RecordingAgent(notifications.clone()),
+                agent_nats,
+                prefix.clone(),
+                |fut| {
                     tokio::task::spawn_local(fut);
-                });
+                },
+            );
             tokio::task::spawn_local(serve);
 
             let bridge_nats = server.client().await;
@@ -139,7 +144,7 @@ async fn extension_names_reach_the_agent_unchanged_through_nats() {
                 async move |_cx| std::future::pending::<Result<()>>().await,
             );
 
-            let observed = agent.clone();
+            let observed = notifications.clone();
             let client = async move {
                 let mut lines = BufReader::new(client_read).lines();
                 send_frame(
@@ -155,8 +160,8 @@ async fn extension_names_reach_the_agent_unchanged_through_nats() {
                 )
                 .await;
                 timeout(WAIT, async {
-                    while observed.notifications.lock().unwrap().is_empty() {
-                        observed.notified.notified().await;
+                    while observed.names.lock().unwrap().is_empty() {
+                        observed.arrived.notified().await;
                     }
                 })
                 .await
@@ -182,40 +187,5 @@ async fn extension_names_reach_the_agent_unchanged_through_nats() {
         })
         .await;
 
-    assert_eq!(*agent.requests.lock().unwrap(), vec![EXT_METHOD.to_string()]);
-    assert_eq!(*agent.notifications.lock().unwrap(), vec![EXT_METHOD.to_string()]);
-}
-
-/// Lets the test keep a handle on the agent the connection owns.
-struct SharedAgent(Arc<RecordingAgent>);
-
-#[async_trait::async_trait]
-impl AgentHandler for SharedAgent {
-    async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse> {
-        self.0.initialize(args).await
-    }
-
-    async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse> {
-        self.0.authenticate(args).await
-    }
-
-    async fn new_session(&self, args: NewSessionRequest) -> Result<NewSessionResponse> {
-        self.0.new_session(args).await
-    }
-
-    async fn prompt(&self, args: PromptRequest) -> Result<PromptResponse> {
-        self.0.prompt(args).await
-    }
-
-    async fn cancel(&self, args: CancelNotification) -> Result<()> {
-        self.0.cancel(args).await
-    }
-
-    async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
-        self.0.ext_method(args).await
-    }
-
-    async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
-        self.0.ext_notification(args).await
-    }
+    assert_eq!(*notifications.names.lock().unwrap(), vec![EXT_METHOD.to_string()]);
 }

@@ -84,7 +84,7 @@ fn empty_headers() -> HeaderMap {
 fn make_ext_wire_request(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>) {
     let raw = RawValue::from_string(params_json.to_string()).unwrap();
     crate::client::test_support::encode_wire_request(
-        &format!("_{method}"),
+        &ext_protocol_method(method),
         RequestId::Number(1),
         &Arc::<RawValue>::from(raw),
     )
@@ -92,7 +92,7 @@ fn make_ext_wire_request(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>
 
 fn make_ext_wire_notification(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>) {
     let value: serde_json::Value = serde_json::from_str(params_json).unwrap();
-    crate::client::test_support::encode_wire_notification(&format!("_{method}"), &value)
+    crate::client::test_support::encode_wire_notification(&ext_protocol_method(method), &value)
 }
 
 // --- request/response tests ---

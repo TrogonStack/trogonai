@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use futures::future::LocalBoxFuture;
 use serde::de::Error;
+use serde_json::value::RawValue;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -329,19 +330,16 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
             .await
         }
         GlobalAgentMethod::Ext(ref name) => {
-            // `method` is `#[serde(skip)]` in the ACP schema, so the decoded body
-            // has an empty name. The subject token carries the exact name.
-            let name: Arc<str> = name.as_str().into();
+            // `method` is `#[serde(skip)]` in the ACP schema, so the body carries only
+            // the params; the subject token carries the exact name.
             if msg.reply.is_some() {
-                handle_jsonrpc_request(msg, method.protocol_method().as_str(), nats, |mut req: ExtRequest| {
-                    req.method = name;
-                    agent.ext_method(req)
+                handle_jsonrpc_request(msg, &name.protocol_method(), nats, |params: Arc<RawValue>| {
+                    agent.ext_method(ExtRequest::new(name.as_str(), params))
                 })
                 .await
             } else {
-                handle_notification(msg, |mut req: ExtNotification| {
-                    req.method = name;
-                    agent.ext_notification(req)
+                handle_notification(msg, |params: Arc<RawValue>| {
+                    agent.ext_notification(ExtNotification::new(name.as_str(), params))
                 })
                 .await
             }

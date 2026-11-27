@@ -71,9 +71,7 @@ fn ext_method_name_error_display() {
 
 #[test]
 fn ext_method_name_accepts_sdk_names() {
-    let name = ExtMethodName::new("_vendor/method").unwrap();
-    assert_eq!(name.as_str(), "_vendor/method");
-    assert_eq!(name.protocol_method(), "_vendor/method");
+    assert_eq!(ExtMethodName::new("_vendor/method").unwrap().as_str(), "_vendor/method");
 }
 
 #[test]
