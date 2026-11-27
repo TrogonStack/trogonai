@@ -18,11 +18,9 @@ use trogon_sandbox_contract::OciArtifactRef;
 use trogon_sandbox_oci::{Annotations, Layer, OciClient};
 use zeroize::Zeroizing;
 
+use crate::constants::{COSIGN_SIMPLE_SIGNING_MEDIA_TYPE, SIGSTORE_SIGNATURE_ANNOTATION};
 use crate::failure::{registry_failed, sign_failed};
 use crate::{CosignError, CosignSigner};
-
-pub const COSIGN_SIMPLE_SIGNING_MEDIA_TYPE: &str = "application/vnd.dev.cosign.simplesigning.v1+json";
-const SIGSTORE_SIGNATURE_ANNOTATION: &str = "dev.sigstore.cosign.signature";
 
 /// Sign `subject` and attach the Cosign signature manifest as an OCI referrer.
 pub async fn attach_cosign_signature(

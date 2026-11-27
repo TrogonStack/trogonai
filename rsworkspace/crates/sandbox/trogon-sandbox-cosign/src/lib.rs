@@ -4,6 +4,7 @@
 //! checks the signature layers published next to a snapshot against a configured PEM public key.
 
 mod attach;
+mod constants;
 mod cosign_error;
 mod cosign_signer;
 mod cosign_verifier;
@@ -15,7 +16,8 @@ mod verify;
 mod verify_mode;
 mod verify_mode_error;
 
-pub use attach::{COSIGN_SIMPLE_SIGNING_MEDIA_TYPE, attach_cosign_signature, attach_cosign_signature_with_annotations};
+pub use attach::{attach_cosign_signature, attach_cosign_signature_with_annotations};
+pub use constants::COSIGN_SIMPLE_SIGNING_MEDIA_TYPE;
 pub use cosign_error::CosignError;
 pub use cosign_signer::CosignSigner;
 pub use cosign_verifier::CosignVerifier;
