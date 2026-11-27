@@ -666,3 +666,30 @@ async fn a_request_naming_a_client_before_any_initialize_does_not_lock_out_the_r
     );
     acp_nats_agent::ClientGate::admit(claim.as_ref(), Some("squatter")).expect_err("the stray client is refused");
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_serving_failure_ends_the_run_and_serving_starts_again() {
+    let launcher = InProcessLauncher::default();
+    let serves = AtomicU32::new(0);
+    // The first run's serving fails, as it does when NATS lost the COMMANDS
+    // stream; the next run's serving (which provisions again) holds.
+    let serve = async |_agent: InitializedAgent<ConnectionAgent>| -> std::result::Result<(), &str> {
+        if serves.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err("commands stream missing");
+        }
+        std::future::pending().await
+    };
+    let shutdown = CancellationToken::new();
+    let supervised = supervise(
+        &launcher,
+        Arc::new(NoopClient),
+        Arc::default(),
+        serve,
+        RestartPolicy::DEFAULT,
+        &shutdown,
+    );
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), supervised).await;
+
+    assert_eq!(serves.load(Ordering::SeqCst), 2);
+}

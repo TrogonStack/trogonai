@@ -470,3 +470,67 @@ async fn a_request_naming_a_client_before_any_initialize_does_not_lock_out_the_r
         })
         .await;
 }
+
+fn unserved_agent() -> InitializedAgent<Child> {
+    InitializedAgent::new(Child::default(), None, Arc::default(), Arc::default())
+}
+
+#[tokio::test]
+async fn a_run_whose_serving_fails_re_creates_the_streams_for_the_next_run() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // NATS restarted without its JetStream storage: no stream exists,
+            // so serving fails on the missing COMMANDS stream.
+            let js = trogon_nats::jetstream::MockJetStreamContext::new();
+            let nats = MockNatsClient::new();
+            let _global = nats.inject_messages();
+            let _ext = nats.inject_messages();
+            let prefix = AcpPrefix::new("acp").unwrap();
+
+            let error = serve_and_reprovision(
+                unserved_agent(),
+                nats,
+                js.clone(),
+                prefix.clone(),
+                std::future::pending(),
+            )
+            .await
+            .expect_err("the stream is gone");
+
+            assert!(matches!(error, ServeError::Connection(_)), "{error}");
+            let names: Vec<String> = js.created_streams().into_iter().map(|config| config.name).collect();
+            assert_eq!(
+                names,
+                [
+                    acp_nats::nats::AcpStream::Commands.stream_name(&prefix),
+                    acp_nats::nats::AcpStream::Responses.stream_name(&prefix),
+                ]
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_run_that_cannot_provision_again_reports_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let js = trogon_nats::jetstream::MockJetStreamContext::new();
+            js.fail_next();
+            let nats = MockNatsClient::new();
+            let _global = nats.inject_messages();
+            let _ext = nats.inject_messages();
+
+            let error = serve_and_reprovision(
+                unserved_agent(),
+                nats,
+                js,
+                AcpPrefix::new("acp").unwrap(),
+                std::future::pending(),
+            )
+            .await
+            .expect_err("the stream is gone and cannot be re-created");
+
+            assert!(matches!(error, ServeError::Provision(_)), "{error}");
+        })
+        .await;
+}

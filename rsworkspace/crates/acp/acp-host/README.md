@@ -144,6 +144,15 @@ than in the spec. `Debug` output of the spec prints env names, never values.
   subjects that are also used for core request/reply; if any of them exists,
   JetStream answers those requests with its publish ack first and the
   requester takes it as the reply. See `src/streams.rs`.
+- **Losing JetStream storage.** The host creates its streams at startup, and
+  again whenever the NATS side ends serving with an error of any kind. That
+  run ends, and the next one (after the restart delay, with a fresh child)
+  consumes from the re-created streams, so a NATS server that restarted
+  without its data is recovered from without restarting the host. Bridges look the `RESPONSES` stream up on
+  every prompt, so they pick it up once the host has re-created it. Until
+  `acp-nats-agent` ends serving when its `COMMANDS` consumer or stream is lost
+  (#1375), a host whose streams vanish while it runs only logs `JetStream
+  consumer error` warnings and does not notice.
 
 ## Configuration
 

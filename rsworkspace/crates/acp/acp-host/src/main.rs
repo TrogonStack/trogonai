@@ -55,6 +55,8 @@ async fn main() -> anyhow::Result<()> {
 
     let nats_client = nats::connect(acp.nats(), acp_nats::nats_connect_timeout(&SystemEnv)).await?;
     let js_client = NatsJetStreamClient::new(async_nats::jetstream::new(nats_client.clone()));
+    // A run whose serving fails provisions again (see
+    // `serving::serve_and_reprovision`).
     streams::provision(&js_client, acp.acp_prefix_ref()).await?;
 
     let client = Arc::new(SessionRoutedClient::new(
@@ -68,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
         let prefix = acp.acp_prefix_ref().clone();
         let shutdown = shutdown.clone();
         move |agent: InitializedAgent<ConnectionAgent>| {
-            serving::serve(
+            serving::serve_and_reprovision(
                 agent,
                 nats_client.clone(),
                 js_client.clone(),

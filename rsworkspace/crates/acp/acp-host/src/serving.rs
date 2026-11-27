@@ -1,9 +1,51 @@
 use crate::initialized_agent::InitializedAgent;
+use crate::streams;
+use acp_nats::jetstream::provision::ProvisionError;
 use acp_nats::{AcpPrefix, AgentHandler};
 use acp_nats_agent::{AgentSideNatsConnection, ConnectionError};
+use async_nats::jetstream::context::GetStreamError;
 use std::future::Future;
-use trogon_nats::jetstream::{JetStreamGetStream, JsDispatchMessage, JsMessageOf};
+use tracing::warn;
+use trogon_nats::jetstream::{
+    JetStreamContext, JetStreamGetStream, JetStreamGetStreamInfo, JsDispatchMessage, JsMessageOf,
+};
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
+
+/// Why a run's NATS side ended with an error.
+#[derive(Debug, thiserror::Error)]
+pub enum ServeError<P> {
+    #[error("could not provision the host's JetStream streams: {0}")]
+    Provision(#[source] P),
+    #[error(transparent)]
+    Connection(#[from] ConnectionError),
+}
+
+/// [`serve`]s the run and, if serving ends with an error of any kind,
+/// provisions the host's streams again before reporting it, so the next run
+/// consumes from streams a NATS server lost with its storage (see "Losing
+/// JetStream storage" in the README). A run that serves normally provisions
+/// nothing, to subscribe as soon as it can.
+pub async fn serve_and_reprovision<A, N, J>(
+    agent: InitializedAgent<A>,
+    nats: N,
+    js: J,
+    prefix: AcpPrefix,
+    stop: impl Future<Output = ()> + 'static,
+) -> Result<(), ServeError<ProvisionError<<J as JetStreamContext>::Error>>>
+where
+    A: AgentHandler + Send + Sync + 'static,
+    N: SubscribeClient + RequestClient + PublishClient + FlushClient + Clone + 'static,
+    J: JetStreamContext + JetStreamGetStream<Error = GetStreamError> + 'static,
+    <J as JetStreamGetStream>::Stream: JetStreamGetStreamInfo,
+    JsMessageOf<J>: JsDispatchMessage,
+{
+    let Err(error) = serve(agent, nats, js.clone(), prefix.clone(), stop).await else {
+        return Ok(());
+    };
+    warn!(error = %error, "NATS serving failed; provisioning the streams again for the next run");
+    streams::provision(&js, &prefix).await.map_err(ServeError::Provision)?;
+    Err(error.into())
+}
 
 /// Serves one child run on the host's ACP prefix until NATS serving ends.
 ///
