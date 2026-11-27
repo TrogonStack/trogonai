@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "privacy": {
+    "mode": "local_only",
+    "allowed_destinations": ["private-inference"]
+  },
+  "destinations": [
+    {
+      "id": "private-inference",
+      "location": "local",
+      "host": "192.0.2.10",
+      "port": 8080
+    }
+  ],
+  "model_routes": [
+    {"purpose": "worker", "destination": "private-inference", "model": "private-worker"},
+    {"purpose": "reviewer", "destination": "private-inference", "model": "normal-local-reviewer"},
+    {"purpose": "title", "destination": "private-inference", "model": "local-text"},
+    {"purpose": "summary", "destination": "private-inference", "model": "local-text"},
+    {"purpose": "compaction", "destination": "private-inference", "model": "local-text"},
+    {"purpose": "embedding", "destination": "private-inference", "model": "local-embedding"},
+    {"purpose": "search", "destination": "private-inference", "model": "local-search"}
+  ],
+  "execution": {
+    "network_allowlist": [],
+    "limits": {
+      "command_seconds": 30,
+      "memory_mib": 512,
+      "processes": 64,
+      "payload_bytes": 524288,
+      "model_calls": 96,
+      "tool_calls": 24
+    },
+    "wasm_tools": [
+      {
+        "id": "read-input",
+        "component": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "capabilities": {
+          "preopens": [
+            {
+              "host_dir": "/srv/private/task/input",
+              "guest_path": "/input",
+              "readonly": true
+            }
+          ]
+        },
+        "review": "deterministic_only"
+      }
+    ],
+    "shell": {
+      "isolation": "micro_vm",
+      "review": "required_veto"
+    }
+  }
+}
