@@ -1,34 +1,8 @@
 use prometheus::{HistogramVec, IntCounterVec, Registry};
 
 use crate::VolumeMetricsError;
-use crate::metrics_text::{MetricSpec, counter, duration_histogram, gather_text};
-
-const BUCKET_MODE: &[&str] = &["bucket", "mode"];
-const BYTES_IN: MetricSpec = MetricSpec {
-    name: "trogon_sandbox_volumes_bytes_in_total",
-    help: "Bytes downloaded from object storage per bucket and mode",
-    labels: BUCKET_MODE,
-};
-const BYTES_OUT: MetricSpec = MetricSpec {
-    name: "trogon_sandbox_volumes_bytes_out_total",
-    help: "Bytes uploaded to object storage per bucket and mode",
-    labels: BUCKET_MODE,
-};
-const PULL_DURATION: MetricSpec = MetricSpec {
-    name: "trogon_sandbox_volumes_pull_duration_seconds",
-    help: "Duration of prefix pull operations",
-    labels: BUCKET_MODE,
-};
-const PUSH_DURATION: MetricSpec = MetricSpec {
-    name: "trogon_sandbox_volumes_push_duration_seconds",
-    help: "Duration of prefix push operations",
-    labels: BUCKET_MODE,
-};
-const CACHE_HIT: MetricSpec = MetricSpec {
-    name: "trogon_sandbox_volumes_cache_hit_total",
-    help: "Clone cache hits served from object storage",
-    labels: &["bucket"],
-};
+use crate::constants::{BYTES_IN, BYTES_OUT, CACHE_HIT, PULL_DURATION, PUSH_DURATION};
+use crate::metrics_text::{counter, duration_histogram, gather_text};
 
 /// Prometheus collectors for pull, push, and clone-cache activity.
 #[derive(Clone)]

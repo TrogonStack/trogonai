@@ -1,18 +1,8 @@
 use prometheus::{HistogramVec, IntCounterVec, Registry};
 
 use crate::VolumeMetricsError;
-use crate::metrics_text::{MetricSpec, counter, duration_histogram, gather_text};
-
-const MOUNT_TOTAL: MetricSpec = MetricSpec {
-    name: "trogon_sandbox_volumes_fuse_mount_total",
-    help: "Total FUSE mounts attempted per bucket",
-    labels: &["bucket"],
-};
-const MOUNT_DURATION: MetricSpec = MetricSpec {
-    name: "trogon_sandbox_volumes_fuse_mount_duration_seconds",
-    help: "Duration of FUSE mount operations per bucket",
-    labels: &["bucket"],
-};
+use crate::constants::{MOUNT_DURATION, MOUNT_TOTAL};
+use crate::metrics_text::{counter, duration_histogram, gather_text};
 
 /// Prometheus collectors for FUSE mount activity.
 #[derive(Clone)]

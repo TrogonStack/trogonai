@@ -11,6 +11,7 @@ mod clone_cache_config;
 #[cfg(feature = "volume-cache")]
 mod clone_cache_outcome;
 mod compute_tree_digest;
+mod constants;
 mod cow_handle;
 mod digest_hash;
 mod fuse_metrics;

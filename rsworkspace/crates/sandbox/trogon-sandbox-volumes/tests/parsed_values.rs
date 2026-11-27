@@ -6,7 +6,7 @@ use std::path::Path;
 
 use trogon_sandbox_volumes::{
     KmsKeyId, KmsKeyIdError, ManifestKey, ManifestKeyError, StoreResourceName, StoreResourceNameError, VolumeEndpoint,
-    VolumeEndpointError, VolumePrefix, VolumeRegion, VolumeRegionError,
+    VolumeEndpointError, VolumePrefix, VolumePrefixError, VolumeRegion, VolumeRegionError,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -85,7 +85,7 @@ fn prefix_rejects_traversal_and_empty_segments() {
     assert!(VolumePrefix::new("a/../b").is_err());
     assert!(VolumePrefix::new("a//b").is_err());
     let err = VolumePrefix::new("..").err();
-    assert!(err.is_some_and(|e| e.to_string().starts_with("invalid volume prefix")));
+    assert!(matches!(err, Some(VolumePrefixError(_))));
 }
 
 #[test]

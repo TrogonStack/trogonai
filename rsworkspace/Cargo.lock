@@ -8135,6 +8135,7 @@ dependencies = [
  "tokio",
  "tracing",
  "trogon-sandbox-contract",
+ "trogon-std",
  "url",
 ]
 

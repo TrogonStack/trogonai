@@ -2,6 +2,7 @@ use std::process::Command;
 
 use trogon_sandbox_contract::S3BucketName;
 use trogon_sandbox_volumes::{VolumeBackend, VolumeClient, VolumeClientConfig, VolumeError, VolumeRegion};
+use trogon_std::env::{ReadEnv as _, SystemEnv};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -12,7 +13,7 @@ const CHILD_MARKER: &str = "VOLUME_STORE_BUILD_CHILD";
 /// process that is given an access key id and no secret.
 #[test]
 fn an_access_key_without_a_secret_fails_the_s3_build() -> TestResult {
-    if std::env::var_os(CHILD_MARKER).is_some() {
+    if SystemEnv.var_os(CHILD_MARKER).is_some() {
         let result = VolumeClient::new(VolumeClientConfig {
             backend: VolumeBackend::S3 {
                 bucket: S3BucketName::new("tenant-bucket")?,

@@ -332,6 +332,7 @@ fn errors_render_their_context() -> TestResult {
         operation: "x".to_owned(),
         implementer: "y".to_owned(),
     };
-    assert!(VolumeError::Backend(source).to_string().starts_with("object store:"));
+    let expected = format!("object store: {source}");
+    assert_eq!(VolumeError::Backend(source).to_string(), expected);
     Ok(())
 }

@@ -28,4 +28,5 @@ url = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+trogon-std = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "time"] }
