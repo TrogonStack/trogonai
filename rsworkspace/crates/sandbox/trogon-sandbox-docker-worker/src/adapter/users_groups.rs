@@ -1,8 +1,8 @@
 use super::*;
 
 impl DockerWorkerProvider {
-    /// Creates a per-sandbox Linux user in `lease_id`'s running container,
-    /// mirroring Vercel Sandbox's multi-agent per-user isolation model. Probes
+    /// Creates a per-sandbox Linux user in `lease_id`'s running container, so
+    /// several agents can share a sandbox under separate users. Probes
     /// via `id -u` first so a repeated call for the same lease/username is
     /// idempotent rather than failing on `useradd`'s "already exists" error.
     ///

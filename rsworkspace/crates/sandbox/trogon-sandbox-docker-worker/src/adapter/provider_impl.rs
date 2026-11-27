@@ -64,9 +64,8 @@ impl DockerWorkerProvider {
             .export_container_snapshot(&active.container_id, &push_target)
             .await?;
 
-        // A manual snapshot shuts the sandbox down automatically, matching
-        // Vercel's `snapshot()` semantics: the caller does not need to call
-        // `cancel()` separately afterward.
+        // A manual snapshot shuts the sandbox down automatically, so the
+        // caller does not need to call `cancel()` separately afterward.
         self.teardown_container(lease_id, &active.container_id, active.sidecar_id.as_deref())
             .await?;
         self.forget_executions(lease_id).await;

@@ -58,9 +58,6 @@ older CI kernel that still needs the compatibility wrapper. Boot with the
 matching custom `vmlinux`; configuration validation alone does not prove a
 container pipeline works in a guest.
 
-The build follows Firecracker's [kernel recipe](https://github.com/firecracker-microvm/firecracker/blob/v1.17.0/docs/rootfs-and-kernel-setup.md)
-and [kernel support policy](https://github.com/firecracker-microvm/firecracker/blob/v1.17.0/docs/kernel-policy.md).
-
 Inside Docker, use a Linux filesystem or named volume for `--cache-dir`. The
 rootfs population step needs nofollow symlink xattrs; a macOS shared mount can
 return `ENOENT` for a dangling symlink and make `mkfs.ext4 -d` fail. The finished

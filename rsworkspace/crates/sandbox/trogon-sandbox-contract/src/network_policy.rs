@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AllowRange, DeniedDomain, DomainRule, IpRange, OpaqueTunnelPolicy, RequestRule};
 
-/// Egress firewall mode for a sandbox, mirroring Vercel Sandbox's firewall wire shape.
+/// Egress firewall mode for a sandbox.
 ///
 /// `AllowAll` is unrestricted egress (the provider default). `DenyAll` denies all outbound traffic, including DNS.
 /// `UserDefined` is deny-by-default with explicit allow and deny IP ranges plus per-domain rules; `deny_ranges` and
