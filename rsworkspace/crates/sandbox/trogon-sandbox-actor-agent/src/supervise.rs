@@ -9,6 +9,7 @@ use trogon_sandbox_contract::{
     RunCommandStartedResponse, UnixSignal,
 };
 
+use crate::constants::OUTPUT_READ_CHUNK;
 use crate::execution::{Execution, ExecutionState};
 use crate::output_collector::OutputCollector;
 use crate::spawn_failure::spawn_failure;
@@ -16,8 +17,6 @@ use crate::stdin_op::StdinOp;
 use crate::stdin_writer::run_stdin_writer;
 use crate::unix_signals::{deliver_signal, group_of};
 use crate::{ExecBegin, ExecFrame};
-
-const OUTPUT_READ_CHUNK: usize = 8 * 1024;
 
 /// Everything the task that owns one child needs.
 pub(crate) struct Supervised {

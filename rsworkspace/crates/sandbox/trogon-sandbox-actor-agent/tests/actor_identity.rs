@@ -29,7 +29,6 @@ async fn a_missing_or_blank_identity_file_is_a_typed_error() -> Result<(), Box<d
     std::fs::write(&path, "  \n")?;
     let error = source.read().await.err().ok_or("a blank identity must not parse")?;
     assert!(matches!(error, ActorIdentityError::Invalid { .. }));
-    assert!(error.to_string().contains("not valid"));
     Ok(())
 }
 

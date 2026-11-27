@@ -3,6 +3,7 @@ use std::os::fd::AsRawFd;
 use std::time::Duration;
 
 use nix::fcntl::{FcntlArg, OFlag, fcntl};
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 use super::*;
 
@@ -47,7 +48,7 @@ const HELPER: &str = "TROGON_SANDBOX_SESSION_LEADER_HELPER";
 
 #[test]
 fn session_leader_helper() -> Result<(), Box<dyn Error>> {
-    if std::env::var_os(HELPER).is_none() {
+    if SystemEnv.var_os(HELPER).is_none() {
         return Ok(());
     }
     let pty = openpty(None, None)?;

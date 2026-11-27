@@ -14,12 +14,10 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_protocol::{home_dir_for_user, shared_dir_for_group};
 
+use crate::constants::PROVISIONING_SHELL;
 use crate::script_outcome::ScriptOutcome;
 use crate::script_runner::{ProcessScriptRunner, ScriptRunner};
 use crate::shell_quote::shell_quote;
-
-/// The shell every provisioning command runs through, probed like any other tool rather than assumed.
-const SHELL: &str = "/bin/bash";
 
 pub async fn create_user(request: &CreateSandboxUserRequest) -> CreateSandboxUserResponse {
     create_user_with(&ProcessScriptRunner, request).await
@@ -36,7 +34,7 @@ pub async fn modify_group_membership(request: &ModifyGroupMembershipRequest) -> 
 async fn create_user_with(runner: &impl ScriptRunner, request: &CreateSandboxUserRequest) -> CreateSandboxUserResponse {
     let home_dir = home_dir_for_user(&request.username);
 
-    if let Some(tool) = missing_dependency(runner, &["useradd", SHELL]).await {
+    if let Some(tool) = missing_dependency(runner, &["useradd", PROVISIONING_SHELL]).await {
         return CreateSandboxUserResponse::MissingDependency { tool };
     }
     match exists(runner, &format!("id -u {}", shell_quote(request.username.as_str()))).await {
@@ -48,11 +46,11 @@ async fn create_user_with(runner: &impl ScriptRunner, request: &CreateSandboxUse
     // `chmod 770` so a group member can enter the home directory once added, which is what makes a shared group useful
     // at all; the default 755 would let every user read it.
     let script = format!(
-        "useradd -m -s {SHELL} {name} && chmod 770 {home}",
+        "useradd -m -s {PROVISIONING_SHELL} {name} && chmod 770 {home}",
         name = shell_quote(request.username.as_str()),
         home = shell_quote(&home_dir),
     );
-    match runner.run(SHELL, &script).await {
+    match runner.run(PROVISIONING_SHELL, &script).await {
         Err(error) => CreateSandboxUserResponse::Denied(error),
         Ok(ScriptOutcome::Succeeded) => CreateSandboxUserResponse::Created { home_dir },
         Ok(ScriptOutcome::Failed { code, stderr }) => {
@@ -67,7 +65,7 @@ async fn create_group_with(
 ) -> CreateSandboxGroupResponse {
     let shared_dir = shared_dir_for_group(&request.groupname);
 
-    if let Some(tool) = missing_dependency(runner, &["groupadd", SHELL]).await {
+    if let Some(tool) = missing_dependency(runner, &["groupadd", PROVISIONING_SHELL]).await {
         return CreateSandboxGroupResponse::MissingDependency { tool };
     }
     match exists(
@@ -88,7 +86,7 @@ async fn create_group_with(
         name = shell_quote(request.groupname.as_str()),
         dir = shell_quote(&shared_dir),
     );
-    match runner.run(SHELL, &script).await {
+    match runner.run(PROVISIONING_SHELL, &script).await {
         Err(error) => CreateSandboxGroupResponse::Denied(error),
         Ok(ScriptOutcome::Succeeded) => CreateSandboxGroupResponse::Created { shared_dir },
         Ok(ScriptOutcome::Failed { code, stderr }) => {
@@ -121,11 +119,11 @@ async fn modify_group_membership_with(
             ),
         ),
     };
-    if let Some(tool) = missing_dependency(runner, &[tool, SHELL]).await {
+    if let Some(tool) = missing_dependency(runner, &[tool, PROVISIONING_SHELL]).await {
         return ModifyGroupMembershipResponse::MissingDependency { tool };
     }
 
-    match runner.run(SHELL, &script).await {
+    match runner.run(PROVISIONING_SHELL, &script).await {
         Err(error) => ModifyGroupMembershipResponse::Denied(error),
         Ok(ScriptOutcome::Succeeded) => ModifyGroupMembershipResponse::Applied,
         Ok(ScriptOutcome::Failed { code, stderr }) => {
@@ -140,11 +138,11 @@ async fn modify_group_membership_with(
 async fn missing_dependency(runner: &impl ScriptRunner, tools: &[&str]) -> Option<String> {
     for tool in tools {
         let script = format!("command -v {} >/dev/null 2>&1", shell_quote(tool));
-        match runner.run(SHELL, &script).await {
+        match runner.run(PROVISIONING_SHELL, &script).await {
             Ok(ScriptOutcome::Succeeded) => {}
             // A shell that cannot be started is itself the missing dependency, and probing the rest of the list
             // through it would report the wrong tool.
-            Err(_) => return Some(SHELL.to_string()),
+            Err(_) => return Some(PROVISIONING_SHELL.to_string()),
             Ok(ScriptOutcome::Failed { .. }) => return Some((*tool).to_string()),
         }
     }
@@ -156,7 +154,7 @@ async fn missing_dependency(runner: &impl ScriptRunner, tools: &[&str]) -> Optio
 /// `id` and `getent` both use exit status as their answer, so only a failure to start the shell at all is an error
 /// worth reporting.
 async fn exists(runner: &impl ScriptRunner, script: &str) -> Result<bool, LeaseError> {
-    Ok(runner.run(SHELL, script).await? == ScriptOutcome::Succeeded)
+    Ok(runner.run(PROVISIONING_SHELL, script).await? == ScriptOutcome::Succeeded)
 }
 
 fn provisioning_failed(tool: &str, code: i32, stderr: &str) -> LeaseError {

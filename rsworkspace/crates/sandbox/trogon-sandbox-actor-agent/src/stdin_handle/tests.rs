@@ -5,7 +5,7 @@ use std::time::Duration;
 use trogon_sandbox_contract::{StdinChunk, StdinEof};
 
 use super::*;
-use crate::stdin_op::PHASE_STARTED;
+use crate::constants::PHASE_STARTED;
 
 fn write() -> Result<StdinWrite, Box<dyn Error>> {
     Ok(StdinWrite {

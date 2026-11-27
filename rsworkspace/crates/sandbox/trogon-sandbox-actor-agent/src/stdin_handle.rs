@@ -5,12 +5,10 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time::{Instant, timeout, timeout_at};
 use trogon_sandbox_protocol::{StdinSequencer, StdinWrite};
 
+use crate::constants::{PHASE_CANCELLED, PHASE_QUEUED, STDIN_QUEUE_DEPTH};
 use crate::stdin_apply_error::StdinApplyError;
 use crate::stdin_deadlines::StdinDeadlines;
-use crate::stdin_op::{PHASE_CANCELLED, PHASE_QUEUED, StdinOp};
-
-/// Writes queued toward the process before callers see backpressure.
-const QUEUE_DEPTH: usize = 16;
+use crate::stdin_op::StdinOp;
 
 /// The caller's side of an execution's stdin.
 ///
@@ -25,7 +23,7 @@ pub(crate) struct StdinHandle {
 
 impl StdinHandle {
     pub(crate) fn channel() -> (Self, mpsc::Receiver<StdinOp>) {
-        Self::channel_with(QUEUE_DEPTH, StdinDeadlines::default())
+        Self::channel_with(STDIN_QUEUE_DEPTH, StdinDeadlines::default())
     }
 
     pub(crate) fn channel_with(depth: usize, deadlines: StdinDeadlines) -> (Self, mpsc::Receiver<StdinOp>) {

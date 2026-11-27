@@ -9003,6 +9003,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-sandbox-contract",
  "trogon-sandbox-protocol",
+ "trogon-std",
  "uuid",
 ]
 

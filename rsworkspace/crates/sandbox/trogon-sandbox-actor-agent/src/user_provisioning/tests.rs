@@ -117,7 +117,7 @@ async fn an_unstartable_shell_is_named_as_the_missing_tool() -> Result<(), Box<d
     assert_eq!(
         response,
         CreateSandboxUserResponse::MissingDependency {
-            tool: SHELL.to_string()
+            tool: PROVISIONING_SHELL.to_string()
         }
     );
     Ok(())
@@ -130,7 +130,7 @@ async fn a_missing_shell_after_the_first_tool_is_still_named_as_the_shell() -> R
     assert_eq!(
         response,
         CreateSandboxUserResponse::MissingDependency {
-            tool: SHELL.to_string()
+            tool: PROVISIONING_SHELL.to_string()
         }
     );
     Ok(())

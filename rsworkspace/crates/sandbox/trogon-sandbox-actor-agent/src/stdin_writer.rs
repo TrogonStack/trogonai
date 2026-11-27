@@ -4,7 +4,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::ChildStdin;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::stdin_op::{PHASE_CANCELLED, PHASE_QUEUED, PHASE_STARTED, StdinOp};
+use crate::constants::{PHASE_CANCELLED, PHASE_QUEUED, PHASE_STARTED};
+use crate::stdin_op::StdinOp;
 
 /// Applies queued writes to the process's stdin until stdin closes, a write fails, or the process finishes.
 pub(crate) async fn run_stdin_writer(

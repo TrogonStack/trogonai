@@ -15,13 +15,13 @@ mod actor_id_error;
 mod actor_identity;
 mod bind_lease_request;
 mod bind_lease_response;
+mod constants;
 mod exec_begin;
 mod exec_frame;
 mod guest_call_failure;
 mod guest_entropy_reseed_method;
 mod guest_entropy_reseed_receipt;
 mod guest_entropy_seed;
-mod guest_paths;
 mod guest_protocol_error;
 mod guest_protocol_version;
 mod terminal_frame;
@@ -112,22 +112,22 @@ pub use actor_id_error::ActorIdError;
 pub use actor_identity::ActorIdentity;
 pub use bind_lease_request::BindLeaseRequest;
 pub use bind_lease_response::BindLeaseResponse;
+pub use constants::{
+    ACTOR_ID_PATH, AGENT_MIN_PROTOCOL_VERSION_HEADER, AGENT_PROTOCOL_VERSION_HEADER, BIND_PATH, EXEC_KILL_PATH,
+    EXEC_PATH, EXEC_POLL_PATH, EXEC_WRITE_STDIN_PATH, FILES_READ_PATH, FILES_WRITE_PATH, GROUP_MEMBERSHIP_PATH,
+    GROUPS_CREATE_PATH, GUEST_PROTOCOL_VERSION, IDENTITY_PATH, MIN_AGENT_PROTOCOL_VERSION_ENV,
+    MIN_SUPPORTED_AGENT_PROTOCOL_VERSION, MIN_SUPPORTED_WORKER_PROTOCOL_VERSION, MIN_WORKER_PROTOCOL_VERSION_ENV,
+    PROTOCOL_REFUSED_STATUS, READYZ_PATH, RESERVED_PATH_PREFIX, TERMINAL_OP_PATH, TERMINAL_OPEN_PATH,
+    UNIMPLEMENTED_STATUS, USERS_CREATE_PATH, WORKER_PROTOCOL_VERSION_HEADER,
+};
 pub use exec_begin::ExecBegin;
 pub use exec_frame::ExecFrame;
 pub use guest_call_failure::GuestCallFailure;
 pub use guest_entropy_reseed_method::GuestEntropyReseedMethod;
 pub use guest_entropy_reseed_receipt::GuestEntropyReseedReceipt;
 pub use guest_entropy_seed::GuestEntropySeed;
-pub use guest_paths::{
-    ACTOR_ID_PATH, BIND_PATH, EXEC_KILL_PATH, EXEC_PATH, EXEC_POLL_PATH, EXEC_WRITE_STDIN_PATH, FILES_READ_PATH,
-    FILES_WRITE_PATH, GROUP_MEMBERSHIP_PATH, GROUPS_CREATE_PATH, IDENTITY_PATH, READYZ_PATH, RESERVED_PATH_PREFIX,
-    TERMINAL_OP_PATH, TERMINAL_OPEN_PATH, USERS_CREATE_PATH,
-};
 pub use guest_protocol_error::GuestProtocolError;
 pub use guest_protocol_version::{
-    AGENT_MIN_PROTOCOL_VERSION_HEADER, AGENT_PROTOCOL_VERSION_HEADER, GUEST_PROTOCOL_VERSION,
-    MIN_AGENT_PROTOCOL_VERSION_ENV, MIN_SUPPORTED_AGENT_PROTOCOL_VERSION, MIN_SUPPORTED_WORKER_PROTOCOL_VERSION,
-    MIN_WORKER_PROTOCOL_VERSION_ENV, PROTOCOL_REFUSED_STATUS, UNIMPLEMENTED_STATUS, WORKER_PROTOCOL_VERSION_HEADER,
     admit_agent_version, admit_protocol_version, min_protocol_version_from_env, parse_min_protocol_version,
     parse_protocol_version,
 };

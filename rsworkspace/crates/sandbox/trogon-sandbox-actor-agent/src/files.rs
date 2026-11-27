@@ -9,12 +9,10 @@ use trogon_sandbox_contract::{
 };
 
 use crate::LeaseBinding;
+use crate::constants::FILES_SHELL;
 use crate::lease_fault::backend;
 use crate::shell_quote::shell_quote;
 use crate::target_user::TargetUser;
-
-/// The shell a file operation borrows when it has to run as a sandbox user.
-const SHELL: &str = "/bin/sh";
 
 /// Writes files into the actor's own filesystem.
 ///
@@ -48,7 +46,7 @@ pub async fn read_file(request: &ReadFileRequest, binding: &LeaseBinding) -> Rea
     let path = resolve(&request.path, base_dir(user.as_ref(), binding).as_deref());
 
     match user.as_ref() {
-        Some(user) => read_as_user(SHELL, &path, user).await,
+        Some(user) => read_as_user(FILES_SHELL, &path, user).await,
         None => read_directly(&path).await,
     }
 }
@@ -56,7 +54,7 @@ pub async fn read_file(request: &ReadFileRequest, binding: &LeaseBinding) -> Rea
 async fn write_one(file: &SandboxFileWrite, base: Option<&str>, user: Option<&TargetUser>) -> Result<(), LeaseError> {
     let path = resolve(&file.path, base);
     match user {
-        Some(user) => write_as_user(SHELL, &path, &file.content, file.mode, user).await,
+        Some(user) => write_as_user(FILES_SHELL, &path, &file.content, file.mode, user).await,
         None => write_directly(&path, &file.content, file.mode).await,
     }
 }

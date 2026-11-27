@@ -5,6 +5,7 @@ use trogon_sandbox_actor_agent::{
     PROTOCOL_REFUSED_STATUS, UNIMPLEMENTED_STATUS, admit_agent_version, admit_protocol_version,
     min_protocol_version_from_env, parse_min_protocol_version, parse_protocol_version,
 };
+use trogon_std::env::InMemoryEnv;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -82,7 +83,10 @@ fn a_minimum_override_falls_back_to_the_default_unless_it_parses() {
     assert_eq!(parse_min_protocol_version(Some(""), 1), 1);
     assert_eq!(parse_min_protocol_version(Some("x"), 1), 1);
     assert_eq!(parse_min_protocol_version(Some(" 0 "), 1), 0);
-    assert_eq!(min_protocol_version_from_env("TROGON_SANDBOX_TEST_UNSET_MINIMUM", 3), 3);
+    let env = InMemoryEnv::new();
+    assert_eq!(min_protocol_version_from_env(&env, "TEST_MINIMUM", 3), 3);
+    env.set("TEST_MINIMUM", " 0 ");
+    assert_eq!(min_protocol_version_from_env(&env, "TEST_MINIMUM", 3), 0);
 }
 
 #[test]

@@ -17,7 +17,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::process::ExitStatus;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
 
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
@@ -35,22 +34,12 @@ use trogon_sandbox_protocol::{
 };
 
 use crate::LeaseBinding;
+use crate::constants::{
+    DEFAULT_SHELL, DEFAULT_TERM, DRAIN_IDLE, HANGUP_GRACE, INPUT_WRITE_TIMEOUT, NO_IDLE_LIMIT, TERMINAL_FRAME_BUFFER,
+};
 use crate::terminal_pty::{discard_forever, read_some, set_size, spawn_on_pty, write_all};
 use crate::terminal_session::TerminalSession;
 use crate::unix_signals::group_of;
-
-const DEFAULT_SHELL: &str = "/bin/sh";
-const DEFAULT_TERM: &str = "xterm-256color";
-/// Frames buffered between the pump and the HTTP body. Small on purpose: the terminal buffers.
-const FRAME_BUFFER: usize = 8;
-const INPUT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
-/// How long a hung-up process group gets to exit before it is killed.
-const HANGUP_GRACE: Duration = Duration::from_secs(2);
-/// How long the pump keeps draining after the command itself has exited, for output held by a background process that
-/// still has the slave open.
-const DRAIN_IDLE: Duration = Duration::from_millis(100);
-/// Stands in for "no limit" while the command is still running.
-const NO_IDLE_LIMIT: Duration = Duration::from_secs(60 * 60 * 24 * 365);
 
 fn invalid_request(reason: impl Into<String>) -> TerminalError {
     TerminalError::InvalidRequest { reason: reason.into() }
@@ -121,7 +110,7 @@ impl TerminalSessions {
         sessions.insert(request.terminal_id.clone(), Arc::clone(&session));
         drop(sessions);
 
-        let (frames, receiver) = mpsc::channel(FRAME_BUFFER);
+        let (frames, receiver) = mpsc::channel(TERMINAL_FRAME_BUFFER);
         tokio::spawn(Arc::clone(self).pump(request.terminal_id.clone(), session, child, frames));
         Ok(receiver)
     }

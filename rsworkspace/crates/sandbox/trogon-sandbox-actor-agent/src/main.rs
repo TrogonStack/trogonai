@@ -1,18 +1,19 @@
+#[path = "main/constants.rs"]
+mod constants;
+
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
+use constants::DEFAULT_AGENT_PORT;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use trogon_sandbox_actor_agent::{
     ACTOR_ID_PATH, ActorIdentitySource, AgentState, MIN_SUPPORTED_WORKER_PROTOCOL_VERSION,
     MIN_WORKER_PROTOCOL_VERSION_ENV, min_protocol_version_from_env, router, serve, serve_vsock,
 };
-
-/// Default ingress port. The runtime publishes it as the container's readiness port, so changing it means rebuilding
-/// every image that names it.
-const DEFAULT_AGENT_PORT: u16 = 8110;
+use trogon_std::env::SystemEnv;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -45,7 +46,11 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let minimum = min_protocol_version_from_env(MIN_WORKER_PROTOCOL_VERSION_ENV, MIN_SUPPORTED_WORKER_PROTOCOL_VERSION);
+    let minimum = min_protocol_version_from_env(
+        &SystemEnv,
+        MIN_WORKER_PROTOCOL_VERSION_ENV,
+        MIN_SUPPORTED_WORKER_PROTOCOL_VERSION,
+    );
     let state = Arc::new(
         AgentState::new(ActorIdentitySource::new(args.actor_id_path)).with_min_worker_protocol_version(minimum),
     );

@@ -10,6 +10,7 @@ use trogon_sandbox_protocol::StdinAdmit;
 use uuid::Uuid;
 
 use crate::command_builder::{build_command, stdin_mode};
+use crate::constants::{EXEC_FRAME_BUFFER, KILL_QUEUE_DEPTH};
 use crate::execution::{Execution, ExecutionState};
 use crate::launch::Launch;
 use crate::stdin_apply_error::StdinApplyError;
@@ -17,12 +18,6 @@ use crate::stdin_handle::StdinHandle;
 use crate::supervise::{Supervised, supervise};
 use crate::target_user::TargetUser;
 use crate::{ExecFrame, LeaseBinding};
-
-/// Frames buffered between the task that owns a child and the HTTP response reading them.
-const FRAME_BUFFER: usize = 64;
-
-/// How many signals may wait for the task that owns a child.
-const KILL_QUEUE_DEPTH: usize = 8;
 
 /// Commands started inside this actor, keyed by execution id.
 ///
@@ -44,7 +39,7 @@ impl ExecRegistry {
     /// streamed chunks followed by exactly one `Completed` frame. Either way the stream is finite and ends the HTTP
     /// response.
     pub async fn run(&self, request: RunCommandRequest, binding: LeaseBinding) -> mpsc::Receiver<ExecFrame> {
-        let (frames, receiver) = mpsc::channel(FRAME_BUFFER);
+        let (frames, receiver) = mpsc::channel(EXEC_FRAME_BUFFER);
 
         // Resolved before the spawn so a user that does not exist, or an agent that cannot become it, is a verdict
         // rather than an opaque "failed to start command".
