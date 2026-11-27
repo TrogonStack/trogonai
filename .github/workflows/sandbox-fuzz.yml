@@ -1,0 +1,61 @@
+name: Sandbox Fuzz
+
+# Fuzzes the egress proxy HTTP request parsers on a schedule and on demand. It
+# is not a pull request check: a fuzz run is open ended, so each target gets a
+# fixed time budget and any crashing input is uploaded as an artifact.
+on:
+  schedule:
+    - cron: '43 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Time budget per target, in seconds (at most 3000)
+        type: string
+        default: '600'
+
+concurrency:
+  group: sandbox-fuzz
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+  CARGO_NET_RETRY: '10'
+
+permissions: {}
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # One entry per binary in rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/fuzz/Cargo.toml.
+        target: [proxied_head, chunked_body]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          install-args: rust cargo:cargo-fuzz
+
+      - name: Fuzz
+        env:
+          FUZZ_TARGET: ${{ matrix.target }}
+          FUZZ_SECONDS: ${{ inputs.seconds || '600' }}
+        run: mise run --skip-tools github:workflows:sandbox-fuzz:fuzz
+
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
