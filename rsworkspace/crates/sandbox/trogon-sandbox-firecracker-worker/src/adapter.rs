@@ -1148,7 +1148,7 @@ impl FirecrackerProvider {
                     .map_err(ProviderError::from)?;
             }
             let agent = GuestAgent::new(VsockEndpoint::new(dir.vsock_socket(), self.config.agent_port))
-                .with_env(&trogon_std::env::SystemEnv);
+                .with_env(&trogon_std::env::SystemEnv)?;
             agent
                 .wait_ready(self.config.boot_timeout)
                 .await
