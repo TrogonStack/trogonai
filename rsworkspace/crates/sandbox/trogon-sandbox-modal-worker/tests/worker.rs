@@ -161,6 +161,40 @@ async fn a_cancel_ends_the_lease_and_a_failed_cancel_keeps_it() -> TestResult {
     running.stop().await
 }
 
+/// Pins today's behaviour, pending a decision on which one every worker should have: the cancel handler forgets the
+/// grant before it cancels, so a redispatch after a failed cancel is not answered with the grant. The provider still
+/// holds the sandbox it could not terminate, so it refuses to launch another and the redispatch gets a provider error.
+/// The k8s, v8-wasm and kubevirt workers keep the grant until a cancel succeeds and answer with it instead.
+#[tokio::test]
+async fn a_redispatch_after_a_failed_cancel_is_refused_while_the_sandbox_is_held() -> TestResult {
+    let mut running = Running::start().await?;
+    running.dispatch("lease-stuck", request_json()).await?;
+    running
+        .env
+        .api
+        .with(|state| state.terminate_failure = Some(Failure::Other));
+
+    running.client.publish(cancel_subject("lease-stuck"), "".into()).await?;
+    running.client.flush().await?;
+    // Redispatch only once the terminate has actually failed, so the cancel handler has forgotten the grant.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while running.env.api.with(|state| state.terminated.len()) == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    let reply = running.dispatch("lease-stuck", request_json()).await?;
+
+    assert!(
+        reply["provider_error"]
+            .as_str()
+            .is_some_and(|error| error.contains("settle cleanup before reallocating")),
+        "{reply}"
+    );
+    assert_eq!(running.env.provider.current_leases().await, 1);
+    running.stop().await
+}
+
 #[tokio::test]
 async fn a_held_port_is_resolved_and_a_stranger_gets_no_answer() -> TestResult {
     let mut running = Running::start().await?;

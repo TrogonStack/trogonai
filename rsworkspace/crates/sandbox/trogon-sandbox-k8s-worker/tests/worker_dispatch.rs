@@ -40,6 +40,32 @@ async fn a_dispatch_is_granted_once_and_a_cancel_releases_it() -> TestResult {
     running.stop().await
 }
 
+/// Pins today's behaviour, pending a decision on which one every worker should have: the cancel handler forgets the
+/// grant only once a cancel succeeds, so a redispatch after a failed cancel is answered with the original grant.
+/// The aca, modal, daytona and vercel workers forget the grant first and refuse the redispatch instead.
+#[tokio::test]
+async fn a_redispatch_after_a_failed_cancel_is_answered_with_the_original_grant() -> TestResult {
+    let mut running = Running::start().await?;
+    let first = running
+        .dispatch("lease-stuck", serde_json::to_value(lease_request()?)?)
+        .await?;
+    running.world.cluster.state().fail_deletes = 100;
+
+    let cancel = subjects::provider_cancel(ProviderKind::K8sMicroVm, &LeaseId::new("lease-stuck"));
+    running.publish(cancel, &serde_json::json!({})).await?;
+    let cluster = &running.world.cluster;
+    until(|| cluster.state().fail_deletes < 100).await?;
+    let second = running
+        .dispatch("lease-stuck", serde_json::to_value(lease_request()?)?)
+        .await?;
+
+    assert_eq!(first, second);
+    assert_eq!(running.world.cluster.state().jobs_created, 1);
+    assert!(running.world.provider.holds_lease(&lease_id("lease-stuck")).await);
+    running.world.cluster.state().fail_deletes = 0;
+    running.stop().await
+}
+
 #[tokio::test]
 async fn a_cancel_of_a_lease_nobody_holds_is_harmless() -> TestResult {
     let mut running = Running::start().await?;

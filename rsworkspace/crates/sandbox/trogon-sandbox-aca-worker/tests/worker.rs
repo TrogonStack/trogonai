@@ -229,6 +229,36 @@ async fn a_failed_cancel_keeps_the_lease_held() -> TestResult {
     harness.stop().await
 }
 
+/// Pins today's behaviour, pending a decision on which one every worker should have: the cancel handler forgets the
+/// grant before it cancels, so a redispatch after a failed cancel is not answered with the grant. The provider still
+/// holds the session it could not delete, so it refuses to launch another and the redispatch gets a provider error.
+/// The k8s, v8-wasm and kubevirt workers keep the grant until a cancel succeeds and answer with it instead.
+#[tokio::test]
+async fn a_redispatch_after_a_failed_cancel_is_refused_while_the_session_is_held() -> TestResult {
+    let harness = Harness::start().await?;
+    harness.dispatch("lease-stuck", empty_lease()?).await?;
+    let before = harness.fixture.aca.sessions().len();
+    harness.fixture.aca.script_delete(Err(500));
+
+    harness.cancel_lease("lease-stuck").await?;
+    let aca = Arc::clone(&harness.fixture.aca);
+    eventually(|| {
+        let aca = aca.clone();
+        async move { aca.sessions().len() > before }
+    })
+    .await?;
+    let reply = harness.dispatch("lease-stuck", empty_lease()?).await?;
+
+    assert!(
+        reply["provider_error"]
+            .as_str()
+            .is_some_and(|error| error.contains("settle cleanup before reallocating")),
+        "{reply}"
+    );
+    assert_eq!(harness.fixture.provider.active_lease_count().await, 1);
+    harness.stop().await
+}
+
 #[tokio::test]
 async fn a_provider_bound_to_another_worker_cannot_serve() -> TestResult {
     let server = JetStreamTestServer::start().await;
