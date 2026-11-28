@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
-use hosted_egress_support::{Observation, Stdout, classify};
+use hosted_egress_support::{Errno, Observation, Stdout, classify, errno_class};
 use hosted_support::{Boxed, GATE, TestResult, api, confirm_absent, exact_id, require, verify_running};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -331,7 +331,6 @@ async fn actual_public_provider_egress_reports_strict_original_probe_diagnostics
 
 #[test]
 fn socket_errno_classification_serializes_only_closed_labels() -> TestResult {
-    use hosted_egress_support::{Errno, errno_class};
     let reset = errno_class(b"ConnectionResetError: [Errno 104] opaque fixture message");
     let canceled = errno_class(b"OSError: [Errno 125] another opaque fixture message");
     assert_eq!((reset, canceled), (Errno::Econnreset, Errno::Ecanceled));
@@ -342,7 +341,6 @@ fn socket_errno_classification_serializes_only_closed_labels() -> TestResult {
 
 #[test]
 fn malformed_or_ambiguous_errno_cannot_invent_a_known_socket_error() {
-    use hosted_egress_support::{Errno, errno_class};
     assert_eq!(errno_class(b"generic reset text"), Errno::NotReported);
     assert_eq!(errno_class(b"[Errno 999] unknown"), Errno::Other);
     assert_eq!(errno_class(b"[Errno 104] one [Errno 125] two"), Errno::Ambiguous);

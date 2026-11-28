@@ -11852,6 +11852,7 @@ dependencies = [
  "trogon-sandbox-oci",
  "trogon-sandbox-protocol",
  "trogon-sandbox-substrate-worker",
+ "trogon-std",
 ]
 
 [[package]]
@@ -12001,6 +12002,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "trogon-std",
  "unicode-ident",
  "url",
 ]

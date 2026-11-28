@@ -43,3 +43,4 @@ trogon-sandbox-substrate-worker = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "process", "time"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-std = { workspace = true }

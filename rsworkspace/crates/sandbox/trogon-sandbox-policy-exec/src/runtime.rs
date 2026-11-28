@@ -18,12 +18,12 @@ use trogon_sandbox_egress_proxy::{
 use trogon_sandbox_protocol::CappedOutput;
 use trogon_sandbox_subprocess_worker::attribution::CommandAttribution;
 #[cfg(target_os = "linux")]
+use trogon_sandbox_subprocess_worker::fs_violation::FsDenialSink;
+#[cfg(target_os = "linux")]
 use trogon_sandbox_subprocess_worker::isolation::BubblewrapBackend;
 #[cfg(target_os = "macos")]
 use trogon_sandbox_subprocess_worker::isolation::SeatbeltBackend;
 use trogon_sandbox_subprocess_worker::isolation::limits::LimitGuard;
-#[cfg(target_os = "macos")]
-use trogon_sandbox_subprocess_worker::isolation::seatbelt::ViolationKind;
 use trogon_sandbox_subprocess_worker::isolation::{
     ChildStdio, HostView, LaunchedProcess, MonitorGuard, PassthroughBackend,
 };
@@ -37,7 +37,7 @@ use trogon_sandbox_subprocess_worker::{EgressPolicy, ExtraBind, IsolationBackend
 use crate::command::{CommandOutput, CommandSpec, Truncation};
 use crate::config::{FilesystemView, PolicyExecConfig, RuntimePolicy, validate_policy};
 use crate::constants::MIN_COMMAND_ID_LEN;
-use crate::constants::{GUEST_WORKSPACE, PIPE_DRAIN_GRACE, RESET_POLL, RESET_WAIT, VIOLATION_STREAM_WAIT};
+use crate::constants::{GUEST_WORKSPACE, PIPE_DRAIN_GRACE, RESET_POLL, RESET_WAIT};
 use crate::credentials::{CommandCredentials, PreparedCredentials};
 use crate::error::RuntimeError;
 use crate::host_env;
@@ -45,6 +45,10 @@ use crate::proxy::{Callbacks, CommandProxy, RequestDeciderSetup, replaces_runtim
 use crate::restrictions::literal_entry;
 use crate::settings::{CredentialContext, SandboxSettings, SettingsError};
 use crate::spawn::{CommandExit, RunningCommand};
+
+mod kernel_denials;
+
+use kernel_denials::KernelDenials;
 
 /// Domains one command may reach beyond its `CommandSpec`: the library
 /// counterpart of a per-command allow list.
@@ -1205,10 +1209,10 @@ impl PolicyExec {
                         .map(|launched| (launched, None))
                         .map_err(RuntimeError::launch);
                 }
-                let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+                let (sink, receiver) = FsDenialSink::channel();
                 let denials = KernelDenials::record(receiver, self.shared.violations.clone(), command.clone(), filter);
                 let observed = LaunchSpec {
-                    fs_denials: Some(sender),
+                    fs_denials: Some(sink),
                     ..spec.clone()
                 };
                 match backend.launch(&observed).await {
@@ -1350,89 +1354,6 @@ impl Capture {
             }
             None => (Vec::new(), false),
         }
-    }
-}
-
-#[cfg(target_os = "linux")]
-struct KernelDenials {
-    task: tokio::task::JoinHandle<()>,
-}
-
-#[cfg(target_os = "linux")]
-impl KernelDenials {
-    fn record(
-        mut receiver: tokio::sync::mpsc::UnboundedReceiver<trogon_sandbox_subprocess_worker::fs_violation::FsDenial>,
-        store: ViolationStore,
-        command: CommandId,
-        filter: ViolationFilter,
-    ) -> Self {
-        let task = tokio::spawn(async move {
-            while let Some(denial) = receiver.recv().await {
-                let operation = format!("{:?}", denial.operation).to_lowercase();
-                let line = format!("deny {operation} {}", denial.path);
-                if !filter.ignores(&line) {
-                    store.add(&line, Some(command.clone()));
-                }
-            }
-        });
-        Self { task }
-    }
-
-    async fn finish(self) {
-        let mut task = self.task;
-        if tokio::time::timeout(VIOLATION_STREAM_WAIT, &mut task).await.is_err() {
-            task.abort();
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-struct KernelDenials {
-    task: tokio::task::JoinHandle<()>,
-}
-
-#[cfg(target_os = "macos")]
-impl KernelDenials {
-    fn record(
-        mut receiver: tokio::sync::mpsc::UnboundedReceiver<
-            trogon_sandbox_subprocess_worker::isolation::seatbelt::SeatbeltViolation,
-        >,
-        store: ViolationStore,
-        command: CommandId,
-        filter: ViolationFilter,
-    ) -> Self {
-        let task = tokio::spawn(async move {
-            while let Some(violation) = receiver.recv().await {
-                let line = describe_denial(&violation);
-                if !filter.ignores(&line) {
-                    store.add(&line, Some(command.clone()));
-                }
-            }
-        });
-        Self { task }
-    }
-
-    async fn finish(self) {
-        let mut task = self.task;
-        if tokio::time::timeout(VIOLATION_STREAM_WAIT, &mut task).await.is_err() {
-            task.abort();
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn describe_denial(violation: &trogon_sandbox_subprocess_worker::isolation::seatbelt::SeatbeltViolation) -> String {
-    match &violation.kind {
-        ViolationKind::FileRead { path } | ViolationKind::FileWrite { path } => {
-            format!("deny {} {path}", violation.operation)
-        }
-        ViolationKind::NetworkConnect { ip: Some(ip), port } => {
-            format!("deny {} {ip}:{port}", violation.operation)
-        }
-        ViolationKind::NetworkConnect { ip: None, port } => {
-            format!("deny {} port {port}", violation.operation)
-        }
-        ViolationKind::Other { detail } => format!("deny {} {detail}", violation.operation),
     }
 }
 

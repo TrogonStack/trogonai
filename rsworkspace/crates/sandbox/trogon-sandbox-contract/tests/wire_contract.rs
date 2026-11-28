@@ -24,6 +24,7 @@ use trogon_sandbox_contract::{
     StdinChunk, StdinEof, StdinSeq, TerminalArgument, TerminalDimension, TerminalError, TerminalId, TerminalInput,
     TerminalOp, TerminalOutput, TerminalRequest, TerminalResponse, UnixSignal, WriteStdinRequest,
 };
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -60,7 +61,7 @@ impl Fixture {
             .join("tests/wire_fixtures")
             .join(self.file);
         let actual = serde_json::to_string_pretty(&self.cases)? + "\n";
-        if std::env::var_os("UPDATE_WIRE_FIXTURES").is_some() {
+        if SystemEnv.var_os("UPDATE_WIRE_FIXTURES").is_some() {
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
