@@ -184,6 +184,28 @@ async fn export_spoofed(namespace: &str) {
     }
 }
 
+/// Whether `subnet` collides with a route already on the host. A route whose destination
+/// is missing or unreadable is refused: skipping it would let a colliding subnet be chosen.
+fn overlaps_existing_route(routes: &[serde_json::Value], subnet: Ipv4Net) -> anyhow::Result<bool> {
+    for route in routes {
+        let destination = route["dst"].as_str().context("a host route has no destination")?;
+        if destination == "default" {
+            continue;
+        }
+        let network = destination.parse::<Ipv4Net>().or_else(|_| {
+            destination
+                .parse::<Ipv4Addr>()
+                .map_err(anyhow::Error::from)
+                .and_then(|ip| Ok(Ipv4Net::new(ip, 32)?))
+        });
+        let network = network.with_context(|| format!("unreadable host route destination {destination:?}"))?;
+        if network.contains(&subnet.network()) || subnet.contains(&network.network()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 async fn cleanup_identity(identity: &Identity) -> anyhow::Result<()> {
     identity.validate()?;
     let namespace = identity.namespace();
@@ -319,17 +341,7 @@ impl LeaseNetwork {
             if fs2::FileExt::try_lock_exclusive(&file).is_err() {
                 continue;
             }
-            let overlaps = routes
-                .iter()
-                .filter_map(|route| route["dst"].as_str())
-                .filter(|route| *route != "default")
-                .filter_map(|route| {
-                    route
-                        .parse::<Ipv4Net>()
-                        .ok()
-                        .or_else(|| route.parse::<Ipv4Addr>().ok().and_then(|ip| Ipv4Net::new(ip, 32).ok()))
-                })
-                .any(|route| route.contains(&subnet.network()) || subnet.contains(&route.network()));
+            let overlaps = overlaps_existing_route(&routes, subnet)?;
             if overlaps {
                 continue;
             }
