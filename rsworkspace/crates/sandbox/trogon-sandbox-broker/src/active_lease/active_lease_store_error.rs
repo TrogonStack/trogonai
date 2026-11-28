@@ -9,6 +9,9 @@ pub enum ActiveLeaseStoreError {
     /// A lease record could not be encoded or decoded.
     #[error(transparent)]
     Codec(#[from] serde_json::Error),
+    /// A stored lease record could not be decoded, so the listing is not trustworthy.
+    #[error("active lease record {key} is not a decodable lease: {source}")]
+    Undecodable { key: String, source: serde_json::Error },
     /// Concurrent writers kept winning the revision check.
     #[error("active lease {operation} exhausted CAS retries")]
     CasRetriesExhausted { operation: &'static str },

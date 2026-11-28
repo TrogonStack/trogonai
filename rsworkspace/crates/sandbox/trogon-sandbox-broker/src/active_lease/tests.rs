@@ -221,6 +221,32 @@ async fn all_returns_all_stored_records() -> TestResult {
 }
 
 #[tokio::test]
+async fn nats_kv_all_fails_on_a_record_that_does_not_decode() -> TestResult {
+    let server = crate::test_support::LocalNats::start().await;
+    let js = jetstream::new(server.client.clone());
+    let bucket = format!("sandbox-active-leases-test-{}", generated_ulid());
+    let store = NatsKvActiveLeaseStore::new(js.clone(), &bucket).await?;
+    let record = sample_record(
+        "nats-lease-ok",
+        "tenant-x",
+        SystemTime::now() + Duration::from_secs(300),
+    )?;
+    store.put(&record).await?;
+    js.get_key_value(&bucket)
+        .await?
+        .put("damaged", "not json".into())
+        .await?;
+
+    let outcome = store.all().await;
+
+    assert!(
+        matches!(&outcome, Err(ActiveLeaseStoreError::Undecodable { key, .. }) if key == "damaged"),
+        "{outcome:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn nats_kv_put_get_delete_roundtrip() -> TestResult {
     let server = crate::test_support::LocalNats::start().await;
     let js = jetstream::new(server.client.clone());
