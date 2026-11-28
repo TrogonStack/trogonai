@@ -6,7 +6,22 @@ workspace_crate(
         # These start a NATS server in a container through Docker.
         "large_files": {"tags": ["requires-network"]},
         "nats_bus": {"tags": ["requires-network"]},
-        # The live-stack lanes are all #[ignore]; run them with `cargo test --ignored`.
-        # They stay untagged: `manual` is for targets Bazel cannot build or run.
+        # These reach a live sandbox stack (a broker and a worker on a real provider)
+        # that a smoke script or the operator starts first. Every test is ignored, so
+        # they run only through Cargo with --ignored.
+        "docker_stack_smoke": {"tags": ["manual", "live-stack", "requires-network"]},
+        "firecracker_credential_smoke": {"tags": ["manual", "live-stack", "requires-network"]},
+        "firecracker_dagger_demo": {"tags": ["manual", "live-stack", "requires-network"]},
+        "firecracker_network_smoke": {"tags": ["manual", "live-stack", "requires-network"]},
+        "firecracker_stack_failures": {"tags": ["manual", "live-stack", "requires-network"]},
+        "firecracker_stack_smoke": {"tags": ["manual", "live-stack", "requires-network"]},
+        "firecracker_stack_snapshots": {"tags": ["manual", "live-stack", "requires-network"]},
+        "firecracker_stack_timings": {"tags": ["manual", "live-stack", "requires-network"]},
+        "hyperlight_stack_smoke": {"tags": ["manual", "live-stack", "requires-network"]},
+        "k8s_stack_live": {"tags": ["manual", "live-stack", "requires-network"]},
+        "provider_stack_smoke": {"tags": ["manual", "live-stack", "requires-network"]},
+        "proxmox_stack_smoke": {"tags": ["manual", "live-stack", "requires-network"]},
+        "stack_leak_sweep": {"tags": ["manual", "live-stack", "requires-network"]},
+        "substrate_stack_smoke": {"tags": ["manual", "live-stack", "requires-network"]},
     },
 )
