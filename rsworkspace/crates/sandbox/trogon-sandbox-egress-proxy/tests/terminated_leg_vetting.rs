@@ -146,7 +146,7 @@ impl Serve {
                 });
             }
         });
-        let ca = SandboxCa::generate(PermittedDomains::from_rules(&rules)?)?;
+        let ca = SandboxCa::generate(PermittedDomains::from_rules(&rules)?)?.permitting_every_name();
         let policy = NetworkPolicy::UserDefined {
             rules,
             allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
@@ -320,6 +320,23 @@ async fn a_named_leg_is_vetted_by_one_probe_and_redials_without_another() -> Tes
             served(&["/c"]),
         ]
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_literal_leg_is_dialed_as_given_without_a_probe() -> TestResult {
+    let serve = Serve::start(HOST).await?;
+    let mut session = serve.session("127.0.0.1").await?;
+    for path in ["/a", "/b"] {
+        session
+            .write_all(format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", serve.port).as_bytes())
+            .await?;
+        timeout(WAIT, read_head(&mut session))
+            .await
+            .map_err(|_| "no answer came")?
+            .ok_or("the tunnel ended")?;
+    }
+    assert_eq!(serve.accepted(2).await?, [Accepted::Unverified, Accepted::Unverified]);
     Ok(())
 }
 

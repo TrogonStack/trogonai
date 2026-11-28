@@ -6,4 +6,7 @@ workspace_crate(
     },
     # Some unit tests start a JetStream server on a local port.
     unit_test_tags = ["requires-network"],
+    # The AWS signature suite test finds its vectors through the manifest directory, relative to its runfiles.
+    rustc_env = {"CARGO_MANIFEST_DIR": "{package}"},
+    unit_test_data = ["tests/fixtures/**"],
 )

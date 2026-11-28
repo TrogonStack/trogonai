@@ -1,0 +1,8 @@
+# The default rules apply everywhere. The allowlist covers SigV4 conformance vectors, which carry
+# only the published example access key and the signatures and tokens derived from it.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "SigV4 conformance vectors signed with the published example access key"
+paths = ['''^rsworkspace/crates/sandbox/trogon-sandbox-egress-proxy/tests/fixtures/aws-sigv4-suite/''']

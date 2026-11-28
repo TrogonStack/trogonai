@@ -846,3 +846,32 @@ async fn a_pending_body_that_declares_no_framing_holds_nothing() -> TestResult<(
     assert!(request.pending.is_none());
     Ok(())
 }
+
+#[tokio::test]
+async fn a_rule_method_matches_the_request_method_whatever_its_spelling() -> TestResult<()> {
+    let request = parsed(&get("/")).await?;
+    assert_eq!(request.method, "GET");
+    for spelling in ["GET", "get", "Get"] {
+        assert!(
+            matching(rule(vec![HttpMethod::new(spelling)?], Vec::new(), Vec::new()), &request)?,
+            "{spelling}"
+        );
+    }
+    assert!(!matching(
+        rule(vec![HttpMethod::new("post")?], Vec::new(), Vec::new()),
+        &request
+    )?);
+
+    let lowercase = b"get / HTTP/1.1\r\nHost: api.example.com\r\n\r\n";
+    let (mut client, mut server) = duplex(1024);
+    client.write_all(lowercase).await?;
+    client.shutdown().await?;
+    let outcome = read_request(&mut server, &mut Vec::new(), &guard()).await;
+    assert!(matches!(
+        outcome,
+        Err(HttpInterceptError::Refused(RefusalError::Unparsed(
+            HeadParseError::InvalidMethod
+        )))
+    ));
+    Ok(())
+}
