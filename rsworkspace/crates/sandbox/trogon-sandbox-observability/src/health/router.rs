@@ -3,11 +3,7 @@ use axum::http::StatusCode;
 use axum::routing::get;
 
 use super::Health;
-
-/// Path answering liveness on every listener.
-pub const LIVENESS_PATH: &str = "/-/liveness";
-/// Path answering readiness on every listener.
-pub const READINESS_PATH: &str = "/-/readiness";
+use crate::constants::{LIVENESS_PATH, READINESS_PATH};
 
 impl Health {
     /// The operational routes. Merge them into a listener's router after its other layers so

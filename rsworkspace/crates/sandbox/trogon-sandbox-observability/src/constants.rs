@@ -14,6 +14,17 @@ pub(crate) const SERVICE_VERSION_KEY: &str = "service.version";
 /// Environment variable consulted when no endpoint is passed explicitly.
 pub const OTLP_ENDPOINT_ENV: &str = "SANDBOX_OTLP_ENDPOINT";
 
+/// Path answering liveness on every listener.
+pub const LIVENESS_PATH: &str = "/-/liveness";
+
+/// Path answering readiness on every listener.
+pub const READINESS_PATH: &str = "/-/readiness";
+
+/// How long a required dependency may report down before readiness fails.
+///
+/// A shared dependency that blips would otherwise take every pod out of rotation together.
+pub const DEPENDENCY_GRACE: Duration = Duration::from_secs(15);
+
 /// Content type of the Prometheus scrape response.
 pub(crate) const METRICS_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 
