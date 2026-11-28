@@ -13,6 +13,8 @@ pub enum GatewayError {
     Serve(#[source] std::io::Error),
     #[error("failed to install the shutdown signal handler: {0}")]
     Signal(#[source] std::io::Error),
+    #[error("failed to load the TLS certificate or key: {0}")]
+    Tls(#[source] std::io::Error),
     #[error("failed to set up observability: {0}")]
     Observability(#[from] ObservabilityError),
     #[error("failed to connect to NATS: {0}")]
