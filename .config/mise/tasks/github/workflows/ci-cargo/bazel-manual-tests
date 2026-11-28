@@ -24,6 +24,7 @@ MANUAL_TEST = re.compile(r'"([\w-]+)":\s*\{[^{}]*"tags":\s*\[[^\]]*"manual"[^\]]
 UNIT_TEST_ARGS = re.compile(r"unit_test_args\s*=\s*\[(.*?)\]", re.S)
 STRING = re.compile(r'"([^"]*)"')
 PASSED = re.compile(r"test result: ok\. (\d+) passed")
+IGNORED = re.compile(r"test result: ok\. \d+ passed; \d+ failed; (\d+) ignored")
 
 
 def build_files():
@@ -48,7 +49,7 @@ def skipped_unit_tests(text):
     return names
 
 
-def cargo_test(*arguments, expect=None):
+def cargo_test(*arguments, expect=None, allow_ignored_only=False):
     command = ["cargo", "test", *arguments]
     print("+ " + " ".join(command), flush=True)
     completed = subprocess.run(command, cwd=WORKSPACE, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -56,6 +57,11 @@ def cargo_test(*arguments, expect=None):
     if completed.returncode != 0:
         sys.exit(f"{' '.join(command)} exited {completed.returncode}")
     passed = sum(int(count) for count in PASSED.findall(completed.stdout))
+    # A live-stack target ignores every test because it needs a broker and a worker
+    # CI does not start. It still has to build and report its ignored tests, so a
+    # target that matched nothing keeps failing.
+    if allow_ignored_only and passed == 0 and sum(int(count) for count in IGNORED.findall(completed.stdout)) > 0:
+        return
     if passed == 0 or (expect is not None and passed != expect):
         sys.exit(f"{' '.join(command)} passed {passed} tests, expected {expect or 'at least one'}")
 
@@ -78,7 +84,7 @@ def main():
         sys.exit("no Bazel manual or skipped tests found; the parser no longer matches the BUILD files")
     for kind, crate, target, expect in runs:
         if kind == "--test":
-            cargo_test("-p", crate, "--all-features", "--test", target)
+            cargo_test("-p", crate, "--all-features", "--test", target, allow_ignored_only=True)
         else:
             cargo_test("-p", crate, "--all-features", "--lib", "--", "--exact", *target, expect=expect)
 
