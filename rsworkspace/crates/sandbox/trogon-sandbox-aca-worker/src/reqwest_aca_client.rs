@@ -110,7 +110,7 @@ impl AcaSessionApi for ReqwestAcaClient {
         let body = response.text().await?;
         Ok(SessionInfo {
             identifier: identifier.clone(),
-            status: SessionStatus::from_body(&body),
+            status: SessionStatus::from_body(&body)?,
         })
     }
 

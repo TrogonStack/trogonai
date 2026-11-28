@@ -79,7 +79,7 @@ pub use service_principal::ServicePrincipal;
 pub use session_delete_outcome::SessionDeleteOutcome;
 pub use session_identifier::SessionIdentifier;
 pub use session_info::SessionInfo;
-pub use session_status::SessionStatus;
+pub use session_status::{SessionStatus, SessionStatusError};
 pub use token_endpoint::fetch_dynamic_sessions_token;
 pub use upload_directory::upload_directory;
 pub use volume_backends::VolumeBackends;

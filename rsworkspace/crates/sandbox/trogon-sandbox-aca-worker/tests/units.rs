@@ -5,8 +5,8 @@ use clap::Parser;
 use trogon_nats::AdvancedMockNatsClient;
 use trogon_sandbox_aca_worker::{
     AcaError, AzureVolumeBackends, BrokerCredentialIssuer, CredentialIssuer, ServicePrincipal, SessionIdentifier,
-    SessionStatus, VolumeBackends, VolumeCredential, WorkerArgs, build_heartbeat, credential_ttl_seconds,
-    extract_cancel_lease_id,
+    SessionStatus, SessionStatusError, VolumeBackends, VolumeCredential, WorkerArgs, build_heartbeat,
+    credential_ttl_seconds, extract_cancel_lease_id,
 };
 use trogon_sandbox_contract::{
     CapabilitySupport, CredentialIssueOutcome, CredentialIssueResponse, CredentialProvider, CredentialScope,
@@ -46,17 +46,26 @@ fn session_statuses_ignore_case() {
 }
 
 #[test]
-fn a_session_body_names_its_status_in_properties_first() {
-    assert!(!SessionStatus::from_body(r#"{"properties":{"status":"Creating"},"status":"Ready"}"#).is_ready());
-    assert!(SessionStatus::from_body(r#"{"properties":{},"status":"Ready"}"#).is_ready());
-    assert!(!SessionStatus::from_body(r#"{"status":"Creating"}"#).is_ready());
+fn a_session_body_names_its_status_in_properties_first() -> TestResult {
+    assert!(!SessionStatus::from_body(r#"{"properties":{"status":"Creating"},"status":"Ready"}"#)?.is_ready());
+    assert!(SessionStatus::from_body(r#"{"properties":{},"status":"Ready"}"#)?.is_ready());
+    assert!(!SessionStatus::from_body(r#"{"status":"Creating"}"#)?.is_ready());
+    Ok(())
 }
 
 #[test]
-fn a_body_that_names_no_status_describes_a_ready_session() {
-    assert!(SessionStatus::from_body("{}").is_ready());
-    assert!(SessionStatus::from_body("").is_ready());
-    assert!(SessionStatus::from_body("not json").is_ready());
+fn a_body_that_does_not_state_a_status_is_an_error_not_a_ready_session() {
+    assert_eq!(SessionStatus::from_body(""), Err(SessionStatusError::EmptyBody));
+    assert_eq!(SessionStatus::from_body("  \n"), Err(SessionStatusError::EmptyBody));
+    assert_eq!(SessionStatus::from_body("{}"), Err(SessionStatusError::NoStatus));
+    assert_eq!(
+        SessionStatus::from_body(r#"{"properties":{}}"#),
+        Err(SessionStatusError::NoStatus)
+    );
+    assert!(matches!(
+        SessionStatus::from_body("not json"),
+        Err(SessionStatusError::NotJson(_))
+    ));
 }
 
 #[test]
