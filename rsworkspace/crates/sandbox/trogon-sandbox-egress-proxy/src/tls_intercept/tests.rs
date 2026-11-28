@@ -1442,4 +1442,4 @@ impl rustls::client::danger::ServerCertVerifier for AcceptAnyCertificate {
     }
 }
 
-mod naming;
+mod naming_tests;

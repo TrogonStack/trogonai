@@ -431,7 +431,7 @@ async fn without_reasons_the_403_phrase_stays_forbidden() -> TestResult {
 }
 
 #[path = "network_options/tunnel_cap.rs"]
-mod tunnel_cap;
+mod tunnel_cap_tests;
 
 #[tokio::test]
 async fn plain_http_responses_lose_the_network_wide_stripped_headers() -> TestResult {

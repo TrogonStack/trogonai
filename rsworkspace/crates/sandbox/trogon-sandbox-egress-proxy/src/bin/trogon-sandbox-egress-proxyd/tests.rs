@@ -1190,7 +1190,7 @@ async fn an_inherited_listening_descriptor_serves_the_explicit_proxy() -> TestRe
 }
 
 #[cfg(unix)]
-mod secret_handoff_and_broker;
+mod secret_handoff_and_broker_tests;
 
 #[tokio::test]
 async fn nats_endpoints_that_cannot_be_reached_stop_the_proxy() -> TestResult {

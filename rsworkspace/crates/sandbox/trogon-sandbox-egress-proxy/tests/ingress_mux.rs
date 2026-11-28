@@ -2859,7 +2859,7 @@ async fn a_parent_connection_close_is_read_before_the_response_strip_drops_it() 
 }
 
 #[path = "ingress_mux/reference_server_refusals.rs"]
-mod reference_server_refusals;
+mod reference_server_refusals_tests;
 
 #[path = "ingress_mux/host_headers.rs"]
-mod host_headers;
+mod host_headers_tests;
