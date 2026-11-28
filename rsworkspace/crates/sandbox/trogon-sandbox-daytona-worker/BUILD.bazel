@@ -12,6 +12,7 @@ workspace_crate(
         # These start a NATS server in a container through Docker.
         "binary": {"tags": ["requires-network"]},
         "launch": {"tags": ["requires-network"]},
+        "native_options_rejection": {"tags": ["requires-network"]},
         "native_snapshot": {"tags": ["requires-network"]},
         "terminal_ssh": {"tags": ["requires-network"]},
         "worker": {"tags": ["requires-network"]},
