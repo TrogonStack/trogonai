@@ -41,11 +41,11 @@ Run it from `rsworkspace/`. Without `--write` it only checks and exits non-zero 
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `default_tier` | `container` | `user_space_kernel` | `full_vm` | `wasm_micro_vm` | `container` | `micro_vm` | platform-dependent | `user_space_kernel` | `wasm_micro_vm` | `user_space_kernel` | `micro_vm` | `micro_vm` | `micro_vm` | `full_vm` | `micro_vm` | `micro_vm` | `micro_vm` | `container` |
 | `egress` | - | - | - | - | - | - | platform-dependent | - | - | - | - | - | - | - | - | - | - | - |
-| `egress.cidr_allowlist` | `true` | `true` | `false` | `false` | `true` | `false` | platform-dependent | `false` | `false` | `false` | `true` | `true` | `false` | `false` | `false` | `false` | `true` | `false` |
-| `egress.deny_all` | `true` | `true` | `false` | `true` | `true` | `false` | platform-dependent | `false` | `true` | `true` | `true` | `true` | `false` | `true` | `false` | `true` | `true` | `false` |
+| `egress.cidr_allowlist` | `true` | `true` | `false` | `false` | `false` | `false` | platform-dependent | `false` | `false` | `false` | `true` | `true` | `false` | `false` | `false` | `false` | `true` | `false` |
+| `egress.deny_all` | `true` | `true` | `false` | `true` | `false` | `false` | platform-dependent | `false` | `true` | `true` | `true` | `true` | `false` | `true` | `false` | `true` | `true` | `false` |
 | `egress.host_allowlist` | `true` | `false` | `false` | `false` | `false` | `false` | platform-dependent | `false` | `false` | `false` | `true` | `true` | `false` | `false` | `false` | `false` | `true` | `false` |
 | `egress.proxy_mediated` | `true` | `false` | `false` | `false` | `false` | `false` | platform-dependent | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `true` | `false` |
-| `egress_enforcement` | `best_effort` | `best_effort` | `none` | `best_effort` | `best_effort` | `none` | `mandatory` | `none` | `best_effort` | `best_effort` | `best_effort` | `best_effort` | `none` | `best_effort` | `none` | `mandatory` | `mandatory` | `none` |
+| `egress_enforcement` | `best_effort` | `best_effort` | `none` | `best_effort` | `none` | `none` | `mandatory` | `none` | `best_effort` | `best_effort` | `best_effort` | `best_effort` | `none` | `best_effort` | `none` | `mandatory` | `mandatory` | `none` |
 | `resource_limits` | `none` | `none` | `none` | `none` | `none` | `none` | platform-dependent | `none` | `runtime` | `none` | `none` | `none` | `none` | `none` | `none` | `none` | `none` | `none` |
 | `supported_tiers` | `container` | `user_space_kernel, micro_vm` | `full_vm` | `wasm_micro_vm` | `container` | `micro_vm` | platform-dependent | `user_space_kernel, micro_vm` | `wasm_micro_vm` | `user_space_kernel` | `micro_vm` | `micro_vm` | `micro_vm` | `micro_vm, full_vm` | `micro_vm` | `micro_vm` | `micro_vm` | `container` |
 | `supports_browser` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` |
@@ -64,7 +64,7 @@ Run it from `rsworkspace/`. Without `--write` it only checks and exits non-zero 
 | `supports_fs_policy` | `false` | `false` | `false` | `false` | `false` | `false` | platform-dependent | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` |
 | `supports_graceful_stop` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `true` |
 | `supports_hardening_overrides` | `true` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` |
-| `supports_interactive_stdin` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `true` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `true` | `true` | `false` |
+| `supports_interactive_stdin` | `true` | `true` | `false` | `false` | `true` | `false` | `false` | `true` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `true` | `true` | `false` |
 | `supports_masked_files` | `false` | `false` | `false` | `false` | `false` | `false` | platform-dependent | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` |
 | `supports_named_processes` | `true` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `true` |
 | `supports_network_policy_update` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `true` | `true` | `false` |
@@ -78,7 +78,7 @@ Run it from `rsworkspace/`. Without `--write` it only checks and exits non-zero 
 | `supports_sandbox_users` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `true` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `true` | `true` | `false` |
 | `supports_secret_bindings` | `false` | `false` | `false` | `false` | `false` | `false` | platform-dependent | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` |
 | `supports_secret_substitution` | `true` | `false` | `false` | `false` | `false` | `false` | platform-dependent | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` |
-| `supports_terminal` | `true` | `true` | `true` | `false` | `false` | `false` | platform-dependent | `false` | `false` | `false` | `true` | `false` | `false` | `false` | `false` | `true` | `true` | `true` |
+| `supports_terminal` | `true` | `true` | `true` | `false` | `true` | `false` | platform-dependent | `false` | `false` | `false` | `true` | `false` | `false` | `false` | `false` | `true` | `true` | `true` |
 | `supports_tls_intercept` | `true` | `false` | `false` | `false` | `false` | `false` | platform-dependent | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` |
 
 ### `lifecycle`
@@ -101,7 +101,7 @@ Run it from `rsworkspace/`. Without `--write` it only checks and exits non-zero 
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `cold_restore_p50_ms` | `5000` | `10000` | `30000` | `100` | `5000` | `8000` | `100` | `500` | `0` | `0` | `2000` | `2000` | `0` | `0` | `0` | `0` | `0` | `0` |
 | `cold_start_p50_ms` | `500` | `5000` | `5000` | `50` | `2000` | `3000` | `100` | `1500` | `8` | `5000` | `1000` | `1000` | `0` | `0` | `0` | `2000` | `2000` | `0` |
-| `max_concurrent_sandboxes` | `4` | `4` | `2` | `8` | - | `4` | `4` | - | - | - | - | - | `4` | `4` | `4` | - | - | - |
+| `max_concurrent_sandboxes` | `4` | `4` | `2` | `8` | `8` | `4` | `4` | - | - | - | - | - | `4` | `4` | `4` | - | - | - |
 
 ### `placement`
 
@@ -130,13 +130,13 @@ Run it from `rsworkspace/`. Without `--write` it only checks and exits non-zero 
 
 | Field | docker | k8s | kubevirt | hyperlight | daytona | aca | subprocess | substrate | v8-wasm | modal | e2b | vercel | fly | proxmox | space | firecracker | firecracker (networked) | memory |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `can_checkpoint_running` | `true` | `true` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `true` | `true` | `false` | `false` | `false` | `false` | `true` | `true` | `false` |
-| `can_restore` | `true` | `true` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `true` | `true` | `false` | `false` | `false` | `false` | `true` | `true` | `false` |
+| `can_checkpoint_running` | `true` | `true` | `true` | `true` | `true` | `false` | `false` | `false` | `false` | `true` | `true` | `false` | `false` | `false` | `false` | `true` | `true` | `false` |
+| `can_restore` | `true` | `true` | `true` | `true` | `true` | `false` | `false` | `false` | `false` | `true` | `true` | `false` | `false` | `false` | `false` | `true` | `true` | `false` |
 | `can_snapshot` | `true` | `true` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `true` | `true` | `false` |
 | `layered_deltas` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` |
 | `supported_artifact_types` | `sandbox_rootfs_v1` | `sandbox_rootfs_v1` | `kubevirt_disk_v1` | `hyperlight_snapshot_v1` | none | none | none | none | none | none | none | none | none | none | none | `firecracker_snapshot_v1` | `firecracker_snapshot_v1` | none |
 | `supports_in_place_rollback` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` |
-| `supports_native_snapshots` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `false` | `true` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `false` |
+| `supports_native_snapshots` | `false` | `false` | `false` | `false` | `true` | `false` | `false` | `false` | `false` | `true` | `true` | `true` | `false` | `false` | `false` | `false` | `false` | `false` |
 
 ### `volume`
 
