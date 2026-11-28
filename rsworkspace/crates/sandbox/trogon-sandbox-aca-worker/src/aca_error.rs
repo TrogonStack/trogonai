@@ -15,6 +15,12 @@ pub enum AcaError {
     /// The Dynamic Sessions data plane answered with an error status.
     #[error("ACA API error ({status}): {message}")]
     AcaApi { status: u16, message: String },
+    /// The data plane answered a session lookup with a body that does not state a status.
+    #[error("unreadable ACA session description: {0}")]
+    SessionStatus(#[from] crate::SessionStatusError),
+    /// A cancel subject names no lease.
+    #[error("cancel subject names no lease: {0:?}")]
+    CancelSubject(String),
     /// The session never became ready.
     #[error("ACA session not ready after {attempts} attempts")]
     SessionNotReady { attempts: u32 },

@@ -8,6 +8,17 @@ pub enum SessionStatus {
     Pending(String),
 }
 
+/// Why a session description does not say whether the session is ready.
+#[derive(Debug, Clone, Eq, PartialEq, thiserror::Error)]
+pub enum SessionStatusError {
+    #[error("the session description is empty")]
+    EmptyBody,
+    #[error("the session description is not JSON: {0}")]
+    NotJson(String),
+    #[error("the session description names no status")]
+    NoStatus,
+}
+
 #[derive(Deserialize)]
 struct SessionBody {
     properties: Option<SessionProperties>,
@@ -28,18 +39,21 @@ impl SessionStatus {
         }
     }
 
-    /// The status a session description carries: `properties.status`, then `status`. A body that
-    /// names none, or is not JSON, describes a ready session.
-    pub fn from_body(body: &str) -> Self {
-        serde_json::from_str::<SessionBody>(body)
-            .ok()
-            .and_then(|parsed| {
-                parsed
-                    .properties
-                    .and_then(|properties| properties.status)
-                    .or(parsed.status)
-            })
-            .map_or(Self::Ready, |status| Self::parse(&status))
+    /// The status a session description carries: `properties.status`, then `status`. An empty body,
+    /// a body that is not JSON, and a body that names no status are errors: none of them says the session
+    /// is ready, so none may be taken as ready.
+    pub fn from_body(body: &str) -> Result<Self, SessionStatusError> {
+        if body.trim().is_empty() {
+            return Err(SessionStatusError::EmptyBody);
+        }
+        let parsed: SessionBody =
+            serde_json::from_str(body).map_err(|error| SessionStatusError::NotJson(error.to_string()))?;
+        parsed
+            .properties
+            .and_then(|properties| properties.status)
+            .or(parsed.status)
+            .map(|status| Self::parse(&status))
+            .ok_or(SessionStatusError::NoStatus)
     }
 
     pub fn is_ready(&self) -> bool {

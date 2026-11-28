@@ -245,7 +245,7 @@ async fn the_api_version_can_be_overridden() -> TestResult {
     Mock::given(method("GET"))
         .and(path("/management/session"))
         .and(query_param("api-version", "2099-01-01"))
-        .respond_with(ResponseTemplate::new(200))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "status": "Ready" })))
         .mount(&server)
         .await;
 
@@ -328,5 +328,20 @@ async fn an_exchange_without_a_token_is_an_auth_error() -> TestResult {
         .err();
 
     assert!(matches!(error, Some(AcaError::Auth(reason)) if reason.contains("access_token")));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_200_that_states_no_status_is_an_error() -> TestResult {
+    for body in [
+        ResponseTemplate::new(200),
+        ResponseTemplate::new(200).set_body_string("not json"),
+        ResponseTemplate::new(200).set_body_json(json!({})),
+    ] {
+        let server = MockServer::start().await;
+        answer(&server, "GET", "/management/session", body).await;
+        let error = client(&server)?.get_session(&bearer(), &session()).await.err();
+        assert!(matches!(error, Some(AcaError::SessionStatus(_))), "{error:?}");
+    }
     Ok(())
 }
