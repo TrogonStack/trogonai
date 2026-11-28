@@ -28,13 +28,18 @@ mod stack_support;
 use std::future::Future;
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use common::TestResult;
+use futures::StreamExt;
+use futures::stream::BoxStream;
 use trogon_sandbox_client::{ClientError, CommandOptions, SandboxClient};
 use trogon_sandbox_contract::{
     AllowRange, ArtifactType, CommandDeadline, Digest, DomainPattern, DomainRule, DomainRuleAction, ExecutionId,
     IpRange, KillCommandResponse, LeaseError, LeaseId, LeaseRequest, NetworkPolicy, OciArtifactRef, OpaqueTunnelPolicy,
     PollCommandResponse, ProviderKind, RestartCommandResponse, SandboxImage, SandboxSpec, SnapshotLeaseResponse,
-    StdinMode, StopCommandResponse, StopSignal, TenantId, UnixSignal,
+    StdinMode, StopCommandResponse, StopSignal, TenantId, TerminalArgument, TerminalDimension, TerminalId,
+    TerminalInput, TerminalOp, TerminalOutput, TerminalResponse, UnixSignal,
 };
 
 const DEFAULT_IMAGE: &str = "nginxinc/nginx-unprivileged:alpine";
@@ -579,4 +584,223 @@ async fn a_cold_lease_survives_a_worker_restart() -> TestResult {
     let lease = granted.lease_id;
 
     with_release(&client, &lease, survives_restart(&client, &lease, &restart)).await
+}
+
+/// What a terminal printed so far, read from its output frames in order.
+struct Transcript {
+    frames: BoxStream<'static, TerminalOutput>,
+    next: u64,
+    text: String,
+    exited: bool,
+}
+
+impl Transcript {
+    /// Reads frames until the output holds `expected`, and returns the output so far.
+    async fn until(&mut self, expected: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let found = tokio::time::timeout(Duration::from_secs(15), async {
+            while !self.text.contains(expected) {
+                ensure(
+                    !self.exited,
+                    format!("the terminal exited before {expected:?}: {:?}", self.text),
+                )?;
+                self.frame().await?;
+            }
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })
+        .await;
+        ensure(
+            found.is_ok(),
+            format!("timed out waiting for {expected:?}: {:?}", self.text),
+        )?;
+        found??;
+        Ok(self.text.clone())
+    }
+
+    async fn frame(&mut self) -> TestResult {
+        let Some(frame) = self.frames.next().await else {
+            return Err("the terminal output subscription ended".into());
+        };
+        let seq = match &frame {
+            TerminalOutput::Data { seq, .. } | TerminalOutput::Exit { seq, .. } => *seq,
+            TerminalOutput::Resync { .. } => return Err("a fresh terminal cannot need a resync".into()),
+        };
+        ensure(
+            seq == self.next,
+            format!("output frames must be gapless, got {seq} at {}", self.next),
+        )?;
+        self.next += 1;
+        match frame {
+            TerminalOutput::Data { data, .. } => {
+                self.text
+                    .push_str(&String::from_utf8_lossy(&STANDARD.decode(data.as_str())?).replace('\r', ""));
+            }
+            _ => self.exited = true,
+        }
+        Ok(())
+    }
+}
+
+fn dimension(value: u16) -> Result<TerminalDimension, Box<dyn std::error::Error>> {
+    Ok(TerminalDimension::new(value)?)
+}
+
+async fn terminal_op(client: &SandboxClient, lease: &LeaseId, terminal: &TerminalId, op: TerminalOp) -> TestResult {
+    let response = client.terminal(lease, terminal.clone(), op).await?;
+    ensure(
+        matches!(response, TerminalResponse::Done | TerminalResponse::Opened { .. }),
+        format!("the terminal operation was refused: {response:?}"),
+    )
+}
+
+async fn type_line(client: &SandboxClient, lease: &LeaseId, terminal: &TerminalId, line: &str) -> TestResult {
+    let data = TerminalInput::new(STANDARD.encode(format!("{line}\n")))?;
+    terminal_op(client, lease, terminal, TerminalOp::Input { data }).await
+}
+
+/// Prints the shell's pid and start time, then answers `ping_*` and `size_*` lines.
+const TTY_SCRIPT: &str = r#"set -eu
+stty -echo
+printf 'INITIAL %s\n' "$(stty size)"
+stat=$(cat /proc/$$/stat); fields=${stat##*) }; set -- $fields; shift 19
+printf 'READY %s %s %s\n' "$$" "$1" "$(cat "/tmp/.sbx-term-$TERM_ID")"
+printf 'READY_END\n'
+while IFS= read -r line; do
+  case "$line" in
+    ping_*) printf 'ECHO_%s\n' "$line" ;;
+    size_*) printf 'SIZE_%s %s\n' "$line" "$(stty size)" ;;
+  esac
+done"#;
+
+/// Whether the process with `pid` and start time `started` is still in the sandbox.
+async fn process_alive(
+    client: &SandboxClient,
+    lease: &LeaseId,
+    pid: &str,
+    started: &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let script = format!(
+        "[ -e /proc/{pid}/stat ] || {{ printf absent; exit 0; }}; stat=$(cat /proc/{pid}/stat); fields=${{stat##*) }}; \
+         set -- $fields; shift 19; if [ \"$1\" = {started} ]; then printf alive; else printf absent; fi"
+    );
+    Ok(stdout_of(client, lease, &script).await? == "alive")
+}
+
+async fn terminal_checks(client: &SandboxClient, lease: &LeaseId, sentinel: &LeaseId) -> TestResult {
+    let id = stack_support::unique("tty");
+    let terminal = TerminalId::new(id.clone())?;
+    let frames = client.terminal_output(&terminal).await?;
+    let mut transcript = Transcript {
+        frames,
+        next: 0,
+        text: String::new(),
+        exited: false,
+    };
+    let open = TerminalOp::Open {
+        cols: dimension(80)?,
+        rows: dimension(24)?,
+        cmd: ["sh", "-c", TTY_SCRIPT]
+            .into_iter()
+            .map(TerminalArgument::new)
+            .collect::<Result<_, _>>()?,
+        env: std::collections::BTreeMap::from([("TERM_ID".to_owned(), id)]),
+        cwd: Some("/tmp".to_owned()),
+        resume_from: None,
+    };
+    terminal_op(client, lease, &terminal, open).await?;
+
+    let text = transcript.until("READY_END\n").await?;
+    ensure(
+        text.contains("INITIAL 24 80\n"),
+        format!("the terminal has its requested size: {text:?}"),
+    )?;
+    let ready = text
+        .lines()
+        .find(|line| line.starts_with("READY "))
+        .map(|line| line.split_whitespace().map(str::to_owned).collect::<Vec<_>>())
+        .unwrap_or_default();
+    ensure(
+        ready.len() == 4,
+        format!("the terminal reported its identity: {text:?}"),
+    )?;
+    let (pid, started, recorded) = (&ready[1], &ready[2], &ready[3]);
+    ensure(
+        pid == recorded,
+        format!("the wrapper recorded the pid it exec'd: {pid} vs {recorded}"),
+    )?;
+    ensure(
+        process_alive(client, lease, pid, started).await?,
+        "the terminal process runs before close",
+    )?;
+
+    type_line(client, lease, &terminal, "ping_1").await?;
+    transcript.until("ECHO_ping_1\n").await?;
+    terminal_op(
+        client,
+        lease,
+        &terminal,
+        TerminalOp::Resize {
+            cols: dimension(113)?,
+            rows: dimension(37)?,
+        },
+    )
+    .await?;
+    let mut resized = false;
+    for _ in 0..50 {
+        type_line(client, lease, &terminal, "size_1").await?;
+        if tokio::time::timeout(Duration::from_millis(500), transcript.until("SIZE_size_1 37 113\n"))
+            .await
+            .is_ok()
+        {
+            resized = true;
+            break;
+        }
+    }
+    ensure(resized, "the terminal reported the resized dimensions")?;
+
+    terminal_op(client, lease, &terminal, TerminalOp::Close).await?;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while process_alive(client, lease, pid, started).await? {
+        ensure(Instant::now() < deadline, "the terminal process survived close")?;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !transcript.exited {
+            transcript.frame().await?;
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })
+    .await
+    .map_err(|_| "close published no exit frame")??;
+
+    // Releasing the target must leave the unrelated lease running.
+    client.delete_lease(tenant()?, lease).await?;
+    ensure(
+        stdout_of(client, sentinel, "printf alive").await? == "alive",
+        "releasing one lease must not touch the other",
+    )
+}
+
+#[tokio::test]
+#[ignore = "requires a live stack with the k8s worker"]
+async fn cold_lease_native_tty_and_uid_cleanup() -> TestResult {
+    let client = stack_support::connect().await?;
+    let target = client
+        .lease(&lease_request(None)?, Duration::from_secs(240))
+        .await?
+        .lease_id;
+    let sentinel = match client.lease(&lease_request(None)?, Duration::from_secs(240)).await {
+        Ok(granted) => granted.lease_id,
+        Err(error) => {
+            client.delete_lease(tenant()?, &target).await?;
+            return Err(error.into());
+        }
+    };
+
+    let checks = terminal_checks(&client, &target, &sentinel).await;
+    // The target is released inside the checks; a repeat release is a no-op for a lease already gone.
+    let _ = client.delete_lease(tenant()?, &target).await;
+    let released = client.delete_lease(tenant()?, &sentinel).await;
+    checks?;
+    released?;
+    Ok(())
 }

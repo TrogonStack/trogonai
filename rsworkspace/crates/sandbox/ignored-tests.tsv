@@ -49,6 +49,7 @@ rsworkspace/crates/sandbox/trogon-sandbox-client/tests/k8s_stack_live.rs	a_cold_
 rsworkspace/crates/sandbox/trogon-sandbox-client/tests/k8s_stack_live.rs	a_domain_only_policy_is_refused_at_lease_time	requires a live stack with the k8s worker on a NetworkPolicy-enforcing cluster
 rsworkspace/crates/sandbox/trogon-sandbox-client/tests/k8s_stack_live.rs	a_plain_alpine_lease_runs_non_root_and_releases_promptly	requires a live stack with the k8s worker
 rsworkspace/crates/sandbox/trogon-sandbox-client/tests/k8s_stack_live.rs	a_running_lease_checkpoints_and_a_warm_pod_restores_it	requires a live stack with the k8s worker, its warm pool and a snapshot registry shared by broker and worker
+rsworkspace/crates/sandbox/trogon-sandbox-client/tests/k8s_stack_live.rs	cold_lease_native_tty_and_uid_cleanup	requires a live stack with the k8s worker
 rsworkspace/crates/sandbox/trogon-sandbox-client/tests/k8s_stack_live.rs	deny_all_blocks_egress_and_policy_updates_apply_in_place	requires a live stack with the k8s worker on a NetworkPolicy-enforcing cluster
 rsworkspace/crates/sandbox/trogon-sandbox-client/tests/k8s_stack_live.rs	exec_lifecycle_stop_restart_kill_cap_and_timeout	requires a live stack with the k8s worker
 rsworkspace/crates/sandbox/trogon-sandbox-client/tests/provider_stack_smoke.rs	lease_run_and_release_on_the_named_provider	requires a live stack and SANDBOX_SMOKE_PROVIDER naming the provider under test

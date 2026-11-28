@@ -32,3 +32,6 @@ pub fn build_heartbeat(
         native_volume_bindings: Default::default(),
     }
 }
+
+#[cfg(test)]
+mod tests;
