@@ -1,6 +1,10 @@
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, DeliverPolicy, ReplayPolicy};
 
+mod constants;
+
+pub use constants::{COMMANDS_ACK_WAIT, COMMANDS_CONSUMER_DURABLE};
+
 use crate::acp_prefix::AcpPrefix;
 use crate::session_id::AcpSessionId;
 
@@ -23,16 +27,38 @@ pub fn response_consumer(prefix: &AcpPrefix, session_id: &AcpSessionId) -> Confi
     }
 }
 
-/// Observer consumer for the COMMANDS stream.
+/// Agent-side consumer for the COMMANDS stream.
 ///
-/// Acks messages for audit persistence. No filter needed — the stream-level
-/// subject list already scopes to session-scoped commands only.
-pub fn commands_observer() -> Config {
+/// COMMANDS is a `Limits` stream kept for `max_age`, so a consumer that starts
+/// from the beginning would replay every past prompt and cancel each time the
+/// agent side starts. The consumer is durable instead: acked commands are
+/// never delivered again, and commands published while no agent host is
+/// running wait in the stream until one starts.
+///
+/// `DeliverPolicy::New` only applies when the durable is first created, so a
+/// host meeting an existing stream for the first time does not replay its
+/// history either. No filter needed — the stream-level subject list already
+/// scopes to session-scoped commands only.
+pub fn agent_commands_consumer() -> Config {
     Config {
-        deliver_policy: DeliverPolicy::All,
+        durable_name: Some(COMMANDS_CONSUMER_DURABLE.to_owned()),
+        deliver_policy: DeliverPolicy::New,
         ack_policy: AckPolicy::Explicit,
+        ack_wait: COMMANDS_ACK_WAIT,
         replay_policy: ReplayPolicy::Instant,
         ..Default::default()
+    }
+}
+
+/// [`agent_commands_consumer`] for recreating the durable after it was lost,
+/// starting at `deliver_policy` instead of at new commands.
+///
+/// `DeliverPolicy::New` would skip every command published between the loss
+/// and the recreate.
+pub fn resumed_agent_commands_consumer(deliver_policy: DeliverPolicy) -> Config {
+    Config {
+        deliver_policy,
+        ..agent_commands_consumer()
     }
 }
 

@@ -19,10 +19,12 @@ use crate::constants as subjects;
 use crate::lease_dispatch::handle_lease_msg;
 use crate::lease_verbs::serve_lease_verbs;
 use crate::snapshot_export::serve_snapshot_export;
+use crate::targeted::serve_targeted;
 use crate::{VercelWorkerError, VercelWorkerProvider};
 
 /// Serves `vercel` over NATS as `worker_id` until `cancel` fires: lease dispatch, cancel, the per-lease verbs and the
-/// authority check that keeps the worker honest about what it holds.
+/// authority check that keeps the worker honest about what it holds. A provider with a dispatch ledger also serves
+/// the dispatches and cleanups addressed to this worker alone.
 pub async fn run(
     client: Client,
     js: jetstream::Context,
@@ -35,6 +37,7 @@ pub async fn run(
     let provider: Arc<dyn Provider> = vercel.clone();
     serve_lease_verbs(&client, &vercel, &cancel).await?;
     serve_snapshot_export(&client, worker_id, &cancel).await?;
+    serve_targeted(&client, &js, &vercel, &cancel).await?;
     let mut leases = queue_subscribe_verified(&client, subjects::LEASE, subjects::LEASE_QUEUE_GROUP).await?;
     let mut cancels = subscribe_verified(&client, subjects::CANCEL).await?;
     let active = Arc::new(Mutex::new(HashMap::new()));
@@ -43,9 +46,10 @@ pub async fn run(
         authority_config,
         worker_id.clone(),
         Arc::new(NatsAuthorityOracle::new(client.clone(), worker_id.clone())),
-        vercel,
+        vercel.clone(),
     );
     tokio::spawn(authority.run(cancel.clone()));
+    vercel.mark_ready();
     info!("worker ready");
     loop {
         tokio::select! {

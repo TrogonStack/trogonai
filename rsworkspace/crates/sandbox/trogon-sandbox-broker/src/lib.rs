@@ -59,7 +59,6 @@ mod profile_satisfaction;
 pub mod quota;
 pub mod resolved_digest;
 pub mod retention_sweep;
-mod run_command_reply_fit;
 mod sandbox_entity_mode;
 mod sandbox_entity_mode_error;
 pub mod serve;

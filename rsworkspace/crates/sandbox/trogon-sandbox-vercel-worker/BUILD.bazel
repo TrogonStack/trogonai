@@ -8,6 +8,8 @@ workspace_crate(
         "binary": {"tags": ["requires-network"]},
         "launch": {"tags": ["requires-network"]},
         "worker": {"tags": ["requires-network"]},
+        "targeted_process": {"tags": ["requires-network"]},
+        "worker_targeted": {"tags": ["requires-network"]},
         # These reach a real Vercel team and skip unless opted in.
         "hosted_conformance": {"tags": ["requires-network"]},
         "hosted_egress_diagnostic": {"tags": ["requires-network"]},

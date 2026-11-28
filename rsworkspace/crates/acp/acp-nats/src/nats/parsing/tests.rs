@@ -89,6 +89,20 @@ fn parse_agent_ext_dotted() {
     );
 }
 
+#[test]
+fn agent_ext_keeps_the_sdk_name_with_slash_and_underscore() {
+    let subject = "acp.v1.global.agent.ext._vendor/method";
+    let Some(ParsedAgentSubject::Global(method)) = parse_agent_subject(subject) else {
+        panic!("{subject} must parse as a global agent ext method");
+    };
+    assert_eq!(
+        method,
+        GlobalAgentMethod::Ext(ExtMethodName::new("_vendor/method").unwrap())
+    );
+    assert_eq!(method.wire_method(), "ext._vendor/method");
+    assert_eq!(method.protocol_method(), "_vendor/method");
+}
+
 // Session-scoped agent methods
 
 #[test]
@@ -295,7 +309,10 @@ fn parse_client_ext_prompt_response_is_a_generic_extension() {
     // than a decode-and-drop.
     let parsed = parse_client_subject("acp.v1.session.s1.client.ext.session.prompt_response").unwrap();
     assert_eq!(parsed.session_id.as_str(), "s1");
-    assert_eq!(parsed.method, ClientMethod::Ext("session.prompt_response".to_string()));
+    assert_eq!(
+        parsed.method,
+        ClientMethod::Ext(ExtMethodName::new("session.prompt_response").unwrap())
+    );
 }
 
 #[test]
@@ -365,7 +382,17 @@ fn parse_agent_prefix_containing_session_falls_through_to_global() {
 fn parse_client_ext_method() {
     let parsed = parse_client_subject("acp.v1.session.s1.client.ext.my_tool").unwrap();
     assert_eq!(parsed.session_id.as_str(), "s1");
-    assert_eq!(parsed.method, ClientMethod::Ext("my_tool".to_string()));
+    assert_eq!(parsed.method, ClientMethod::Ext(ExtMethodName::new("my_tool").unwrap()));
+}
+
+#[test]
+fn client_ext_keeps_the_sdk_name_with_slash_and_underscore() {
+    let parsed = parse_client_subject("acp.v1.session.s1.client.ext._vendor/method").unwrap();
+    assert_eq!(
+        parsed.method,
+        ClientMethod::Ext(ExtMethodName::new("_vendor/method").unwrap())
+    );
+    assert_eq!(parsed.method.protocol_method(), "_vendor/method");
 }
 
 #[test]
@@ -456,7 +483,7 @@ fn client_methods_round_trip_through_subject_suffix() {
 
 #[test]
 fn client_ext_method_maps_protocol_to_subject_terminal() {
-    let method = ClientMethod::Ext("custom".to_string());
+    let method = ClientMethod::Ext(ExtMethodName::new("custom").unwrap());
     assert_eq!(method.protocol_method(), "_custom");
     assert_eq!(ClientMethod::from_subject_suffix("ext.custom"), Some(method));
 }
@@ -464,4 +491,14 @@ fn client_ext_method_maps_protocol_to_subject_terminal() {
 #[test]
 fn parse_client_subject_rejects_agent_subjects() {
     assert!(parse_client_subject("acp.v1.session.s1.agent.prompt").is_none());
+}
+
+#[test]
+fn client_notifications_are_the_methods_that_expect_no_answer() {
+    assert!(ClientMethod::SessionUpdate.is_notification(false));
+    assert!(ClientMethod::ElicitationComplete.is_notification(false));
+    assert!(ClientMethod::Ext(ExtMethodName::new("my_tool").unwrap()).is_notification(false));
+    assert!(!ClientMethod::Ext(ExtMethodName::new("my_tool").unwrap()).is_notification(true));
+    assert!(!ClientMethod::SessionRequestPermission.is_notification(false));
+    assert!(!ClientMethod::FsReadTextFile.is_notification(true));
 }

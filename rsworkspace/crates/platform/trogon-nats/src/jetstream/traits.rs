@@ -194,7 +194,7 @@ pub trait JetStreamPublishMessage: Send + Sync + Clone + 'static {
 
 pub trait JetStreamGetStream: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
-    type Stream: JetStreamCreateConsumer + Send;
+    type Stream: JetStreamCreateConsumer + JetStreamDeleteConsumer + Send;
 
     fn get_stream<T: AsRef<str> + Send>(
         &self,
@@ -254,6 +254,22 @@ pub trait JetStreamCreateConsumer: Send + 'static {
 
     fn create_consumer(&self, config: pull::Config)
     -> impl Future<Output = Result<Self::Consumer, Self::Error>> + Send;
+}
+
+/// Binds to an existing durable consumer, or creates it from `config` when no
+/// consumer of that name exists.
+///
+/// [`JetStreamCreateConsumer::create_consumer`] creates or updates, and NATS
+/// refuses to change an existing durable's deliver policy or start position.
+/// A caller that creates the same durable with different start positions (a
+/// lost durable recreated where the old one stopped) binds to the one already
+/// there instead, keeping its configuration and ack state.
+pub trait JetStreamGetOrCreateConsumer: JetStreamCreateConsumer {
+    fn get_or_create_consumer(
+        &self,
+        name: &str,
+        config: pull::Config,
+    ) -> impl Future<Output = Result<Self::Consumer, Self::Error>> + Send;
 }
 
 pub trait JetStreamDeleteConsumer: Send + Sync + 'static {
@@ -371,6 +387,12 @@ impl JetStreamCreateConsumer for jetstream::stream::Stream {
 
     async fn create_consumer(&self, config: pull::Config) -> Result<Self::Consumer, Self::Error> {
         self.create_consumer(config).await
+    }
+}
+
+impl JetStreamGetOrCreateConsumer for jetstream::stream::Stream {
+    async fn get_or_create_consumer(&self, name: &str, config: pull::Config) -> Result<Self::Consumer, Self::Error> {
+        jetstream::stream::Stream::get_or_create_consumer(self, name, config).await
     }
 }
 

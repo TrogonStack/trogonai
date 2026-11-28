@@ -13,7 +13,6 @@
 
 mod constants;
 pub use constants::HEARTBEAT_INTERVAL;
-mod fit_output;
 mod replies;
 
 use std::sync::{Arc, Mutex, PoisonError};
@@ -39,7 +38,8 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_protocol::{
     AuthorityHostError, DETACHED_EXIT_POLL_FAILURES, DETACHED_EXIT_POLL_INTERVAL, await_detached_exit,
-    lifecycle_subject, publish_command_exit, spawn_heartbeat_loop, subjects, subscribe_verified,
+    encode_read_file_response_within, fit_poll_command_response, fit_run_command_response, lifecycle_subject,
+    publish_command_exit, spawn_heartbeat_loop, subjects, subscribe_verified,
 };
 use trogon_std::env::ReadEnv;
 
@@ -650,7 +650,7 @@ async fn handle_run_command_msg(
 
     let response = exec_streamed(&agent, js, &request).await;
 
-    let response = fit_output::fit_run(response, client.server_info().max_payload);
+    let response = fit_run_command_response(response, client.server_info().max_payload);
     respond(&client, reply, &response).await
 }
 
@@ -713,7 +713,7 @@ async fn handle_poll_command_msg(
         .await
         .unwrap_or_else(|e| PollCommandResponse::Denied(backend(&e)));
 
-    let response = fit_output::fit_poll(response, client.server_info().max_payload);
+    let response = fit_poll_command_response(response, client.server_info().max_payload);
     respond(&client, reply, &response).await
 }
 
@@ -866,7 +866,7 @@ async fn handle_read_file_msg(
         .await
         .unwrap_or_else(|e| ReadFileResponse::Denied(backend(&e)));
 
-    let body = fit_output::read_file_body(&response, &request.path, client.server_info().max_payload)?;
+    let body = encode_read_file_response_within(&response, &request.path, client.server_info().max_payload)?;
     trogon_sandbox_protocol::nats_transfer::respond(&client, reply.as_str(), body.into()).await?;
     Ok(())
 }

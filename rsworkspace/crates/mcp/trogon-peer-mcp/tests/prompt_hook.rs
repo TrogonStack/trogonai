@@ -640,8 +640,18 @@ async fn jsonrpc_dispatch_rejects_invalid_inputs_and_maps_unconfigured_model_por
         "This connector belongs to another native session; reconnect it for this session.",
     );
     early_wire_error(&results[7], "roster", "Peer metadata is unavailable.");
-    for result in &results[8..] {
-        early_wire_error(result, "invalid_arguments", "Peer tool arguments are invalid.");
+    for (result, (tool, field)) in results[8..].iter().zip([
+        ("peer_send", "recipient_peer_id"),
+        ("peer_status", "idempotency_key"),
+        ("peer_acknowledge_batch", "batch_id"),
+    ]) {
+        assert_eq!(result["structuredContent"], json!({"code":"invalid_arguments"}));
+        let text = result["content"][0]["text"].as_str().expect("diagnostic");
+        assert!(
+            text.starts_with(&format!("Invalid {tool} arguments: `{field}` is required.")),
+            "{text}"
+        );
+        assert!(text.contains(" Example: {"), "{text}");
     }
     assert_eq!(
         calls.lock().expect("calls").len(),
@@ -1244,7 +1254,14 @@ async fn jsonrpc_errors_expose_actionable_diagnostics_without_backend_details() 
             5,
             "This connector belongs to another native session; reconnect it for this session.",
         ),
-        (6, "Peer tool arguments are invalid."),
+        (
+            6,
+            "Invalid peer_send arguments: `recipient_peer_id` must be exactly 64 lowercase hex characters, copied \
+             from peer_roster or from a delivered message's sender_peer_id; the value sent has 5 characters. \
+             peer_send takes recipient_peer_id, idempotency_key, text (optional: reply_to_message_id). Example: \
+             {\"recipient_peer_id\":\"<64-hex peerId from peer_roster>\",\"idempotency_key\":\"ask-api-1\",\
+             \"text\":\"your message\"} Call peer_roster to list the peers you can message.",
+        ),
         (7, "Peer metadata is unavailable."),
         (
             8,
@@ -1253,7 +1270,8 @@ async fn jsonrpc_errors_expose_actionable_diagnostics_without_backend_details() 
         (9, "Peer metadata is unavailable."),
         (
             10,
-            "Peer application acknowledgment was not confirmed; retry the same batch.",
+            "No delivered peer messages have batch_id \"batch_1\"; do not retry it. No batch is waiting for \
+             acknowledgment.",
         ),
     ] {
         assert_wire_error(&results[index], diagnostic);

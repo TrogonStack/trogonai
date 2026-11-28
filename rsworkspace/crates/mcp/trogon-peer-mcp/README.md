@@ -27,14 +27,36 @@ The result is one MCP text item containing native hook JSON with
 `hookSpecificOutput.additionalContext`. The adapter returns the backend's same
 unacknowledged assignment on retry and records no acknowledgment of its own.
 
+A connector-written reply guide precedes the rendered batch. It names the bound
+peer id and says not to send to it, lists each sender's peer id with its roster
+display name, says how to answer with `peer_send`, and gives the exact
+`batch_id` to acknowledge, warning that newer messages wait until then. Display
+names are peer-chosen labels and are quoted as bounded, markup-escaped JSON
+strings. When a sender has no known name, the hook reads one roster page within
+at most 500 ms of its budget; a slow or failed roster leaves the sender unnamed
+and never costs the delivery.
+
 Prompt hook backends must yield: the two-second budget is cooperative, so a
 `PreparePeerBatch` or `EnrollPeer` future that blocks the executor cannot be
 interrupted. A reply that completes only after the deadline is reported as a
 deadline, never as a delivery.
 
-Tool failures become MCP application error results with bounded static messages
-and a stable per-variant `structuredContent.code` from `PeerMcpError::code()`,
-so callers can distinguish failures without matching diagnostic text. Typed
+Tool failures become MCP application error results with bounded messages and a
+stable `structuredContent.code` from `PeerMcpError::code()`, so callers can
+distinguish failures without matching diagnostic text. Host hook failures keep
+static messages. Model tool failures are written for the model to recover:
+- Invalid arguments name the unknown, missing or mistyped field, suggest the
+  right name for common aliases such as `content` or `receiver`, list the
+  fields the tool takes and show a working example call.
+- A malformed `recipient_peer_id` reports its length. A send to the bound peer
+  id is refused before the backend with `own_recipient`. Both list the peers
+  last observed in the roster.
+- A failed send to a peer id absent from a complete roster page becomes
+  `unknown_recipient` and lists the valid recipients. Otherwise the uncertain
+  `send` outcome stands.
+- A failed acknowledgment of a batch id this connector did not deliver becomes
+  `unknown_batch`, says not to retry, and names the batch still waiting, if any.
+  A failure for the delivered batch keeps the retryable `acknowledge` outcome. Typed
 backend sources remain available through the direct `invoke` API; peer bodies
 are excluded from adapter `Debug` output. The backend remains responsible for
 durability, current authorization, generation fencing, content retrieval and

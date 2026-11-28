@@ -35,6 +35,10 @@ fn echo_double(guest: &mut WasmGuest, value: i32) -> Result<i32, Box<dyn std::er
     Ok(guest.sandbox_mut().call_guest_function("echo_double", (value,))?)
 }
 
+fn fill(guest: &mut WasmGuest, len: i32) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    Ok(guest.sandbox_mut().call_guest_function("fill", (len,))?)
+}
+
 fn available() -> Result<WasmHypervisor, Box<dyn std::error::Error>> {
     let hypervisor = WasmHypervisor::default();
     if !hypervisor.is_available() {
@@ -56,6 +60,31 @@ fn a_loaded_module_runs_and_hands_its_runtime_back() -> TestResult {
     let warm = hypervisor.unload(guest)?;
     let mut again = hypervisor.load_module(warm, &module)?;
     assert_eq!(echo_double(&mut again, 3)?, 6);
+    Ok(())
+}
+
+#[test]
+#[ignore = "needs a hypervisor and HYPERLIGHT_TEST_MODULE"]
+fn a_guest_returns_more_than_hyperlights_default_output_buffer() -> TestResult {
+    // Hyperlight's default output buffer is 16 KiB; the backend sizes its own.
+    let hypervisor = available()?;
+    let mut guest = hypervisor.load_module(hypervisor.build_warm()?, &module()?)?;
+    let len = 64 * 1024;
+    assert_eq!(fill(&mut guest, len)?, vec![7; len as usize]);
+    Ok(())
+}
+
+#[test]
+#[ignore = "needs a hypervisor and HYPERLIGHT_TEST_MODULE"]
+fn a_result_larger_than_the_output_buffer_fails_and_the_guest_resets() -> TestResult {
+    let hypervisor = available()?;
+    let mut guest = hypervisor.load_module(hypervisor.build_warm()?, &module()?)?;
+    assert!(
+        fill(&mut guest, 320 * 1024).is_err(),
+        "320 KiB fit a 256 KiB output buffer"
+    );
+    guest.reset()?;
+    assert_eq!(echo_double(&mut guest, 21)?, 42);
     Ok(())
 }
 

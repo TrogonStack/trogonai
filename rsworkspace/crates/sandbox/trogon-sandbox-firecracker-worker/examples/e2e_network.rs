@@ -109,7 +109,7 @@ async fn run() -> anyhow::Result<()> {
             memory_mib: NonZeroU32::new(256).context("memory")?,
             snapshot_out: None,
             network_policy: Some(serde_json::from_str::<NetworkPolicy>(
-                r#"{"user_defined": {"rules": [], "allow_ranges": ["127.0.0.1/32"], "deny_ranges": []}}"#,
+                r#"{"user_defined": {"rules": [], "allow_ranges": ["127.0.0.1/32"], "deny_ranges": [], "opaque_tunnels": "allow"}}"#,
             )?),
             mounts: vec![],
             drives: vec![],

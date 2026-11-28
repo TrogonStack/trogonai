@@ -32,7 +32,7 @@ use crate::parent_pool::ParentPool;
 use crate::policy::{Decision, Ruling, address_allowed_exactly, allow_rests_on_sni, decide, rule};
 use crate::postgres::{self, PgHandshakeOutcome, PgProbe};
 use crate::request_filter::{DeniedRequestObserver, RequestChecks, RequestFilter};
-use crate::resolve::{AllowRanges, NameBindingError, VettedAddr, VettedEndpoint, VettingResolver};
+use crate::resolve::{AllowRanges, VettedAddr, VettedEndpoint, VettingResolver};
 use crate::secret_substitution::{SecretSubstitution, SubstitutionScope};
 use crate::sni::{SniExtraction, extract_sni};
 use crate::tls_ca::SandboxCa;
@@ -710,8 +710,7 @@ async fn confirm_sni_binding(
     };
     match resolver.confirm_binding(&name, port, dest_ip).await {
         Ok(()) => None,
-        Err(NameBindingError::NotAnAnswer) => denied(EgressViolationReason::SniDestinationMismatch),
-        Err(NameBindingError::Unresolved(_)) => denied(EgressViolationReason::SniResolutionFailed),
+        Err(err) => denied(err.sni_violation()),
     }
 }
 

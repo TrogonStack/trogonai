@@ -3,14 +3,12 @@ use std::sync::Arc;
 
 use hyperlight_wasm::{OciTag, SandboxBuilder, Snapshot, WasmSandbox, is_hypervisor_present};
 
+use crate::constants::{DEFAULT_GUEST_HEAP_BYTES, DEFAULT_GUEST_INPUT_BUFFER_BYTES, DEFAULT_GUEST_OUTPUT_BUFFER_BYTES};
 use crate::{Hypervisor, HypervisorError, WasmGuest, WasmHypervisorError};
 
 /// The tag a snapshot carries inside the layout directory the worker ships. The registry
 /// addresses the artifact by digest, so this name only has to agree between save and load.
 const LAYOUT_TAG: &str = "snapshot";
-
-const DEFAULT_GUEST_INPUT_BUFFER_BYTES: usize = 256 * 1024;
-const DEFAULT_GUEST_HEAP_BYTES: u64 = 1280 * 1024;
 
 /// The Hyperlight backend: every guest is a hyperlight-wasm sandbox on KVM, MSHV or WHP.
 ///
@@ -21,24 +19,30 @@ const DEFAULT_GUEST_HEAP_BYTES: u64 = 1280 * 1024;
 #[derive(Debug, Clone, Copy)]
 pub struct WasmHypervisor {
     guest_input_buffer_bytes: usize,
+    guest_output_buffer_bytes: usize,
     guest_heap_bytes: u64,
 }
 
 impl WasmHypervisor {
-    /// A backend whose guests get `guest_input_buffer_bytes` of input buffer and
-    /// `guest_heap_bytes` of heap.
-    pub fn new(guest_input_buffer_bytes: usize, guest_heap_bytes: u64) -> Self {
+    /// A backend whose guests get `guest_input_buffer_bytes` of input buffer,
+    /// `guest_output_buffer_bytes` of output buffer and `guest_heap_bytes` of heap.
+    pub fn new(guest_input_buffer_bytes: usize, guest_output_buffer_bytes: usize, guest_heap_bytes: u64) -> Self {
         Self {
             guest_input_buffer_bytes,
+            guest_output_buffer_bytes,
             guest_heap_bytes,
         }
     }
 }
 
 impl Default for WasmHypervisor {
-    /// A 256 KiB input buffer and a 1.25 MiB heap per guest.
+    /// A 256 KiB input buffer, a 256 KiB output buffer and a 1.25 MiB heap per guest.
     fn default() -> Self {
-        Self::new(DEFAULT_GUEST_INPUT_BUFFER_BYTES, DEFAULT_GUEST_HEAP_BYTES)
+        Self::new(
+            DEFAULT_GUEST_INPUT_BUFFER_BYTES,
+            DEFAULT_GUEST_OUTPUT_BUFFER_BYTES,
+            DEFAULT_GUEST_HEAP_BYTES,
+        )
     }
 }
 
@@ -57,6 +61,7 @@ impl Hypervisor for WasmHypervisor {
     fn build_warm(&self) -> Result<Self::Warm, HypervisorError> {
         let proto = SandboxBuilder::new()
             .with_guest_input_buffer_size(self.guest_input_buffer_bytes)
+            .with_guest_output_buffer_size(self.guest_output_buffer_bytes)
             .with_guest_heap_size(self.guest_heap_bytes)
             .build()
             .map_err(WasmHypervisorError::Build)?;

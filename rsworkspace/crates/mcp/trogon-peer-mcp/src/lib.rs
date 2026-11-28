@@ -1,15 +1,20 @@
 mod acknowledgment_metadata_projection;
 mod application_acknowledgment;
+mod argument_issue;
 mod backend;
 mod connector_config;
 mod connector_config_input;
+mod constants;
 mod message_metadata_projection;
 mod model_inputs;
 mod model_operation;
+mod model_text;
 mod model_tool_definitions;
+mod model_tool_spec;
 mod model_tools;
 mod native_binding;
 mod operation_metadata;
+mod peer_directory;
 mod peer_mcp;
 mod peer_mcp_error;
 mod peer_mcp_error_code;
@@ -21,7 +26,11 @@ mod prompt_hook_input;
 mod prompt_hook_output;
 mod prompt_id;
 mod prompt_tool;
+mod recipient_list;
+mod roster_page;
 mod status_metadata_projection;
+mod tool_argument_error;
+mod waiting_batch;
 
 pub use backend::{
     AcknowledgePeerBatch, DetachPeer, EnrollPeer, HeartbeatPeer, PreparePeerBatch, ReadPeerMessageStatus,
@@ -31,6 +40,8 @@ pub use connector_config_input::ConnectorConfigInput;
 pub use peer_mcp::PeerMcp;
 pub use peer_mcp_error::PeerMcpError;
 pub use peer_mcp_error_code::PeerMcpErrorCode;
+pub use recipient_list::RecipientList;
+pub use tool_argument_error::ToolArgumentError;
 
 mod availability_observation;
 pub use availability_observation::AvailabilityObservation;

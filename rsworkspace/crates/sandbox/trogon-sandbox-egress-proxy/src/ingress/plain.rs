@@ -431,7 +431,15 @@ impl Ingress {
             parsed.headers = framed_headers(&parsed.headers, &authority_for(&target));
         }
 
-        let scope = tls_intercept.plaintext_scope(&target.host().to_string(), target.port().get());
+        // Bindings scoped to a path or method are decided per request, as on a
+        // terminated tunnel; the connection-level scope alone never injects them.
+        let request_path = parsed
+            .target
+            .split_once('?')
+            .map_or(parsed.target.as_str(), |(path, _)| path);
+        let scope = tls_intercept
+            .plaintext_scope(&target.host().to_string(), target.port().get())
+            .map(|scope| scope.for_request(&parsed.method, request_path));
         let mut body_scan = None;
         if let Some(scope) = &scope {
             if expects_continue

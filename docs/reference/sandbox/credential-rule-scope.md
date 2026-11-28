@@ -14,8 +14,9 @@ serde-defaulted, so existing bindings and clients keep their behavior until they
 | `methods` | non-empty list of HTTP methods | absent | Only requests with one of these methods receive the credential. |
 | `scope_version` | `1` or `2` | `1` | `1`: a host pattern without a port spans every port. `2`: it means port 443. |
 
-The proxy enforces these on terminated requests, after the existing Host and target validation, and decides per request,
-so a keep-alive connection can carry a matching and a non-matching request.
+The proxy enforces these on terminated requests, and on plain-HTTP proxy requests when plaintext injection is on, after
+the existing Host and target validation. It decides per request, so a keep-alive connection can carry a matching and a
+non-matching request. The path is the request target without its query.
 
 ### Path prefix
 

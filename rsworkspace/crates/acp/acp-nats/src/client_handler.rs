@@ -11,6 +11,11 @@ use agent_client_protocol::{Error, Result};
 /// Bridge-owned replacement for the SDK's removed `Client` trait.
 ///
 /// See ADR#0020 for why this trait exists instead of implementing an SDK trait directly.
+///
+/// The client proxy calls the notification methods (`session_notification`,
+/// `ext_notification`, `elicitation_complete`) one at a time, in arrival order, on
+/// its intake loop. They must hand the message off without waiting on the client,
+/// or they stall every later message.
 #[async_trait::async_trait]
 pub trait ClientHandler {
     async fn request_permission(&self, args: RequestPermissionRequest) -> Result<RequestPermissionResponse>;

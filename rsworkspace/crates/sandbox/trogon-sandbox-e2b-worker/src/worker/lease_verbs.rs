@@ -11,11 +11,10 @@ use trogon_sandbox_contract::{
     SandboxFreezeResponse, SandboxSuspendRequest, SandboxSuspendResponse, SandboxWakeRequest, SandboxWakeResponse,
     SnapshotExportError, SnapshotExportOutcome, SuspendLevel, WriteFilesRequest, WriteStdinRequest,
 };
-use trogon_sandbox_protocol::nats_transfer;
+use trogon_sandbox_protocol::{encode_read_file_response_within, fit_poll_command_response, nats_transfer};
 
 use crate::worker::E2bWorkerError;
 use crate::worker::constants as subjects;
-use crate::worker::fit_output::{fit_poll, fit_read_file};
 use crate::worker::respond_if_held::serve;
 use crate::{E2bWorkerProvider, LeaseSandbox};
 
@@ -37,7 +36,7 @@ async fn poll_command(e2b: Provider, sandbox: LeaseSandbox, request: PollCommand
         .exec()
         .handle_poll_command(&sandbox, request.lease_id.as_str(), request.execution_id.as_str())
         .await;
-    encode(&fit_poll(reply, max))
+    encode(&fit_poll_command_response(reply, max))
 }
 
 async fn list_processes(e2b: Provider, sandbox: LeaseSandbox, request: ListProcessesRequest, _max: usize) -> Reply {
@@ -66,11 +65,11 @@ async fn write_files(e2b: Provider, sandbox: LeaseSandbox, request: WriteFilesRe
 
 async fn read_file(e2b: Provider, sandbox: LeaseSandbox, request: ReadFileRequest, _max: usize) -> Reply {
     let response = e2b.exec().handle_read_file(&sandbox, &request).await;
-    encode(&fit_read_file(
-        response,
+    Ok(encode_read_file_response_within(
+        &response,
         &request.path,
         nats_transfer::MAX_TRANSFER_BYTES,
-    ))
+    )?)
 }
 
 async fn file_op(e2b: Provider, sandbox: LeaseSandbox, request: FileOpRequest, _max: usize) -> Reply {

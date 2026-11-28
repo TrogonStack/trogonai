@@ -9,15 +9,31 @@ fn sid(s: &str) -> AcpSessionId {
 }
 
 #[test]
-fn commands_observer_delivers_all() {
-    let config = commands_observer();
-    assert_eq!(config.deliver_policy, DeliverPolicy::All);
+fn agent_commands_consumer_is_durable_and_starts_at_new_commands() {
+    let config = agent_commands_consumer();
+    assert_eq!(config.durable_name.as_deref(), Some(COMMANDS_CONSUMER_DURABLE));
+    assert_eq!(config.deliver_policy, DeliverPolicy::New);
     assert_eq!(config.ack_policy, AckPolicy::Explicit);
+    assert_eq!(config.ack_wait, std::time::Duration::from_secs(5 * 60));
 }
 
 #[test]
-fn commands_observer_no_filter() {
-    let config = commands_observer();
+fn resumed_agent_commands_consumer_only_changes_where_it_starts() {
+    let policy = DeliverPolicy::ByStartSequence { start_sequence: 43 };
+    let config = resumed_agent_commands_consumer(policy);
+    assert_eq!(config.deliver_policy, policy);
+    assert_eq!(
+        Config {
+            deliver_policy: DeliverPolicy::New,
+            ..config
+        },
+        agent_commands_consumer()
+    );
+}
+
+#[test]
+fn agent_commands_consumer_no_filter() {
+    let config = agent_commands_consumer();
     assert_eq!(config.filter_subject, String::new());
 }
 

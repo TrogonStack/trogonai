@@ -188,7 +188,7 @@ async fn a_lease_that_needs_more_than_the_worker_advertises_is_refused() -> Resu
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     type SpecChange = Box<dyn FnOnce(&mut SandboxSpecParts)>;

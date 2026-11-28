@@ -15,7 +15,8 @@ use crate::token;
 
 /// A validated single NATS subject token.
 ///
-/// Rejects empty, non-ASCII, dots, wildcards (`*`, `>`), and whitespace.
+/// Rejects empty, non-ASCII, dots, wildcards (`*`, `>`), whitespace, and
+/// control characters.
 /// Max 128 characters. Wraps an `Arc<str>` so cloning is cheap.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NatsToken(Arc<str>);
@@ -33,7 +34,7 @@ impl NatsToken {
             if char_count > MAX_NATS_TOKEN_LENGTH {
                 return Err(SubjectTokenViolationError::TooLong(char_count));
             }
-            if !ch.is_ascii() || ch == '.' || ch == '*' || ch == '>' || ch.is_whitespace() {
+            if !ch.is_ascii() || ch == '.' || token::is_unsafe_char(ch) {
                 return Err(SubjectTokenViolationError::InvalidCharacter(ch));
             }
         }
@@ -68,7 +69,8 @@ impl AsRef<str> for NatsToken {
 /// A validated dotted NATS subject segment.
 ///
 /// Allows `.` as a token separator but rejects malformed dots (consecutive,
-/// leading, trailing). Rejects wildcards (`*`, `>`) and whitespace.
+/// leading, trailing). Rejects wildcards (`*`, `>`), whitespace, and control
+/// characters.
 /// Max 128 bytes. Wraps an `Arc<str>` so cloning is cheap.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DottedNatsToken(Arc<str>);
@@ -80,7 +82,7 @@ impl DottedNatsToken {
         if s.is_empty() {
             return Err(SubjectTokenViolationError::Empty);
         }
-        if let Some(ch) = token::has_wildcards_or_whitespace(s) {
+        if let Some(ch) = token::first_unsafe_char(s) {
             return Err(SubjectTokenViolationError::InvalidCharacter(ch));
         }
         if token::has_consecutive_or_boundary_dots(s) {

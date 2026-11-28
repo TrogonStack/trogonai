@@ -39,14 +39,9 @@ pub const SNAPSHOT_EXPORT_UNSUPPORTED: &str =
 pub const CHECKPOINT_NEEDS_NATIVE: &str = "E2B snapshots are provider-native; ask for a native snapshot";
 pub const NETWORK_POLICY_AT_CREATE: &str = "E2B applies network settings at sandbox create time only";
 pub const INVALID_COMMAND_SCOPE: &str = "command request lacks exact verified assignment authority";
-pub const INVALID_CLEANUP_SCOPE: &str = "targeted cleanup requires exact verified assignment authority";
 pub const LEDGER_UNAVAILABLE: &str = "targeted dispatch ledger is unavailable";
 pub const ASSIGNMENT_REQUIRED: &str = "targeted dispatch requires an assignment";
 pub const ASSIGNED_ON_SHARED_INTAKE: &str = "assigned dispatch must use the exact worker intake subject";
-
-/// Encoding room reserved for both streams' truncation markers: a marker is under 64 bytes, and the number-array
-/// encoding costs up to four bytes per byte.
-pub const MARKER_ROOM: usize = 2 * 64 * 4;
 
 pub const INVALID_RUN_COMMAND: &str = "invalid run command request";
 pub const INVALID_CANCEL_COMMAND_LAUNCH: &str = "invalid command launch cancellation request";

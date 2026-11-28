@@ -1,9 +1,11 @@
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use serde_json::json;
 use trogon_nats::test_support::JetStreamTestServer;
+use trogon_sandbox_conformance::{CountingProvider, ensure_launches_once, ensure_relaunches_after_cancel};
 use trogon_sandbox_contract::SandboxUserName;
 use trogon_sandbox_protocol::subjects::{evidence_subject, provider_token};
 
@@ -226,101 +228,63 @@ async fn sandbox_user_verbs_are_answered_with_a_denial_when_the_lease_is_held_he
     Ok(())
 }
 
-/// Counts launches so a repeat dispatch can be told from a second sandbox.
-struct CountingProvider {
-    launches: AtomicU32,
-}
-
-#[async_trait]
-impl Provider for CountingProvider {
-    fn kind(&self) -> ProviderKind {
-        ProviderKind::Subprocess
-    }
-
-    async fn lease(&self, _req: &LeaseRequest, lease_id: &LeaseId) -> Result<ProviderLease, ProviderError> {
-        let n = self.launches.fetch_add(1, Ordering::SeqCst);
-        Ok(ProviderLease {
-            epoch: None,
-            sandbox_id: SandboxId::new(format!("sandbox-{n}")).map_err(ProviderError::backend)?,
-            evidence_subject: evidence_subject(lease_id),
-            worker_id: None,
-            attempt_id: None,
-        })
-    }
-
-    async fn cancel(&self, _lease_id: &LeaseId) -> Result<(), ProviderError> {
-        Ok(())
-    }
-}
-
-async fn dispatch_reply(
-    client: &Client,
-    js: &jetstream::Context,
-    provider: &Arc<dyn Provider>,
-    active: &ActiveLeases,
-    grants: &Arc<RedispatchGuard>,
-    lease_id: &LeaseId,
-) -> Result<ProviderLease, Box<dyn std::error::Error>> {
-    let payload = ProviderDispatchPayload {
-        lease_id: lease_id.clone(),
-        request: sample_lease_request()?,
-        correlation_id: None,
-        resolved_drives: vec![],
-        target: None,
-    };
-    let inbox = client.new_inbox();
-    let mut replies = client.subscribe(inbox.clone()).await?;
-    let body = serde_json::to_vec(&payload)?;
-    let msg = async_nats::Message {
-        subject: "dispatch".into(),
-        reply: Some(inbox.into()),
-        payload: body.clone().into(),
-        headers: None,
-        status: None,
-        description: None,
-        length: body.len(),
-    };
-    handle_lease_msg(
-        msg,
-        client.clone(),
-        js.clone(),
-        Arc::clone(provider),
-        Arc::clone(active),
-        Arc::clone(grants),
-        WorkerId::new("subprocess-test-worker")?,
-    )
-    .await?;
-    let reply = tokio::time::timeout(Duration::from_secs(5), replies.next())
-        .await?
-        .ok_or("the reply subscription ended")?;
-    Ok(serde_json::from_slice(&reply.payload)?)
+/// The worker's own lease handler over `provider`, as the redispatch checks drive it.
+fn lease_handler(
+    client: Client,
+    js: jetstream::Context,
+    provider: Arc<dyn Provider>,
+    active: ActiveLeases,
+    grants: Arc<RedispatchGuard>,
+) -> Result<impl Fn(async_nats::Message) -> BoxFuture<'static, anyhow::Result<()>>, Box<dyn std::error::Error>> {
+    let worker = WorkerId::new("subprocess-test-worker")?;
+    Ok(move |msg| {
+        handle_lease_msg(
+            msg,
+            client.clone(),
+            js.clone(),
+            Arc::clone(&provider),
+            Arc::clone(&active),
+            Arc::clone(&grants),
+            worker.clone(),
+        )
+        .boxed()
+    })
 }
 
 #[tokio::test]
 async fn redispatching_a_lease_id_returns_the_first_grant_without_launching_again() -> TestResult {
     let server = JetStreamTestServer::start().await;
     let client = server.client().await;
-    let js = jetstream::new(client.clone());
-    let counting = Arc::new(CountingProvider {
-        launches: AtomicU32::new(0),
-    });
-    let provider: Arc<dyn Provider> = counting.clone();
+    let counting = CountingProvider::new(ProviderKind::Subprocess);
+    let handle = lease_handler(
+        client.clone(),
+        jetstream::new(client.clone()),
+        counting.clone(),
+        Arc::new(Mutex::new(HashMap::new())),
+        Arc::new(RedispatchGuard::new()),
+    )?;
+
+    ensure_launches_once(&client, &counting, &LeaseId::new("redispatch-lease"), handle).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_cancelled_lease_id_launches_afresh_when_dispatched_again() -> TestResult {
+    let server = JetStreamTestServer::start().await;
+    let client = server.client().await;
+    let counting = CountingProvider::new(ProviderKind::Subprocess);
     let active: ActiveLeases = Arc::new(Mutex::new(HashMap::new()));
     let grants = Arc::new(RedispatchGuard::new());
-    let lease_id = LeaseId::new("redispatch-lease");
+    let handle = lease_handler(
+        client.clone(),
+        jetstream::new(client.clone()),
+        counting.clone(),
+        Arc::clone(&active),
+        Arc::clone(&grants),
+    )?;
+    let provider: Arc<dyn Provider> = counting.clone();
+    let cancel = move |msg| handle_cancel_msg(msg, Arc::clone(&provider), Arc::clone(&active), Arc::clone(&grants));
 
-    let first = dispatch_reply(&client, &js, &provider, &active, &grants, &lease_id).await?;
-    let second = dispatch_reply(&client, &js, &provider, &active, &grants, &lease_id).await?;
-
-    assert_eq!(first, second);
-    assert_eq!(
-        counting.launches.load(Ordering::SeqCst),
-        1,
-        "the repeat must not start a second sandbox"
-    );
-
-    grants.forget(&lease_id);
-    let fresh = dispatch_reply(&client, &js, &provider, &active, &grants, &lease_id).await?;
-    assert_ne!(fresh.sandbox_id, first.sandbox_id, "a released id launches afresh");
+    ensure_relaunches_after_cancel(&client, &counting, &LeaseId::new("redispatch-cancel"), handle, cancel).await?;
     Ok(())
 }

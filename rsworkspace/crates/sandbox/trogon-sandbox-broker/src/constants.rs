@@ -54,10 +54,6 @@ pub const PERSISTENT_RUNTIME_ENV: &str = "V8_WASM_PERSISTENT_RUNTIME";
 /// Largest memory, in MiB, a substrate size class offers (the `large` class).
 pub const SUBSTRATE_MAX_MEMORY_MIB: u32 = 32_768;
 
-/// Encoding room reserved for both streams' truncation markers: a marker is under 64 bytes, and the number-array
-/// encoding costs up to four bytes per byte.
-pub(crate) const COMMAND_REPLY_MARKER_ROOM: usize = 2 * 64 * 4;
-
 /// NATS header carrying the caller's bearer token.
 pub const AUTHORIZATION_HEADER: &str = "Authorization";
 /// Scheme prefix of the bearer token value.

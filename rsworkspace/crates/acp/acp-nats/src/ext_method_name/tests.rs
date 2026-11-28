@@ -68,3 +68,15 @@ fn ext_method_name_error_display() {
         "method is too long: 200 bytes (max 128)"
     );
 }
+
+#[test]
+fn ext_method_name_accepts_sdk_names() {
+    assert_eq!(ExtMethodName::new("_vendor/method").unwrap().as_str(), "_vendor/method");
+}
+
+#[test]
+fn ext_protocol_method_adds_the_underscore_only_when_missing() {
+    assert_eq!(ext_protocol_method("_vendor/method"), "_vendor/method");
+    assert_eq!(ext_protocol_method("vendor/method"), "_vendor/method");
+    assert_eq!(ext_protocol_method("__double"), "__double");
+}

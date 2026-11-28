@@ -14,5 +14,6 @@ workspace_crate(
         "binary": {"tags": ["requires-network"]},
         "docker_targeted_quota": {"tags": ["requires-network"]},
         "e2b_targeted_quota": {"tags": ["requires-network"]},
+        "vercel_targeted_quota": {"tags": ["requires-network"]},
     },
 )

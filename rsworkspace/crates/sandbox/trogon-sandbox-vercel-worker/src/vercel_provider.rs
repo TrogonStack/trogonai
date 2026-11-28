@@ -17,7 +17,11 @@ use crate::sizing::resources_for;
 use crate::{NewSandbox, SandboxAndSession, VercelApiError, VercelProviderError, VercelWorkerProvider};
 
 impl VercelWorkerProvider {
-    async fn launch(&self, req: &LeaseRequest, lease_id: &LeaseId) -> Result<ProviderLease, VercelProviderError> {
+    pub(crate) async fn launch(
+        &self,
+        req: &LeaseRequest,
+        lease_id: &LeaseId,
+    ) -> Result<ProviderLease, VercelProviderError> {
         let gate = self.lease_gate(lease_id);
         let _held = gate.lock().await;
         if self.active.lock().await.contains_key(lease_id.as_str()) {

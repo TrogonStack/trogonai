@@ -204,7 +204,7 @@ fn a_full_spec_round_trips_against_literal_json() -> TestResult {
             "rules": [{ "domain": "*.example.com", "action": "pass_through" }],
             "allow_ranges": [],
             "deny_ranges": [],
-            "denied_domains": ["admin.example.com"],
+            "denied_domains": ["admin.example.com"], "opaque_tunnels": "refuse",
         } },
         "mounts": [{
             "source": { "backend": "s3", "bucket": "team-data", "prefix": "inputs/" },

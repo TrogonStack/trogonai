@@ -6,12 +6,13 @@ use tokio_util::sync::CancellationToken;
 use trogon_sandbox_contract::{
     CancelCommandLaunchRequest, CancelCommandLaunchResponse, LeaseError, RunCommandRequest, RunCommandResponse,
 };
-use trogon_sandbox_protocol::{VerifiedRequest, VerifiedVerbScope, nats_transfer, subscribe_verified_context};
+use trogon_sandbox_protocol::{
+    VerifiedRequest, VerifiedVerbScope, fit_run_command_response, nats_transfer, subscribe_verified_context,
+};
 
 use crate::E2bWorkerProvider;
 use crate::worker::E2bWorkerError;
 use crate::worker::constants as subjects;
-use crate::worker::fit_output::fit_run;
 use crate::worker::log_exit;
 
 pub(crate) fn invalid_command_scope() -> LeaseError {
@@ -113,7 +114,7 @@ async fn respond_run_command(
         Ok(None) => return Ok(()),
         Err(error) => RunCommandResponse::Denied(error),
     };
-    let fitted = fit_run(response, client.server_info().max_payload);
+    let fitted = fit_run_command_response(response, client.server_info().max_payload);
     client.publish(reply, serde_json::to_vec(&fitted)?.into()).await?;
     Ok(())
 }

@@ -226,7 +226,7 @@ impl BrokerCore {
         let prewarm = req.prewarm;
         let potentially_targeted = req.provider_pref.iter().copied().any(|provider| {
             crate::worker_registry::requires_targeted_dispatch(provider)
-                || matches!(provider, ProviderKind::E2b | ProviderKind::LocalDocker)
+                || crate::worker_registry::prefers_targeted_dispatch(provider)
         });
         let mut initial_quota_reserved = false;
 

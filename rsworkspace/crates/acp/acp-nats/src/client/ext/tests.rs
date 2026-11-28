@@ -77,6 +77,10 @@ impl ClientHandler for FailingClient {
     }
 }
 
+fn name(method: &str) -> ExtMethodName {
+    ExtMethodName::new(method).unwrap()
+}
+
 fn empty_headers() -> HeaderMap {
     HeaderMap::new()
 }
@@ -84,7 +88,7 @@ fn empty_headers() -> HeaderMap {
 fn make_ext_wire_request(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>) {
     let raw = RawValue::from_string(params_json.to_string()).unwrap();
     crate::client::test_support::encode_wire_request(
-        &format!("_{method}"),
+        &name(method).protocol_method(),
         RequestId::Number(1),
         &Arc::<RawValue>::from(raw),
     )
@@ -92,7 +96,7 @@ fn make_ext_wire_request(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>
 
 fn make_ext_wire_notification(method: &str, params_json: &str) -> (HeaderMap, Vec<u8>) {
     let value: serde_json::Value = serde_json::from_str(params_json).unwrap();
-    crate::client::test_support::encode_wire_notification(&format!("_{method}"), &value)
+    crate::client::test_support::encode_wire_notification(&name(method).protocol_method(), &value)
 }
 
 // --- request/response tests ---
@@ -103,7 +107,15 @@ async fn request_publishes_response_to_reply_subject() {
     let client = MockClient::new();
     let (headers, payload) = make_ext_wire_request("my_method", r#"{"key":"value"}"#);
 
-    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "my_method").await;
+    handle(
+        &headers,
+        &payload,
+        &client,
+        Some("_INBOX.reply"),
+        &nats,
+        &name("my_method"),
+    )
+    .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
     let payloads = nats.published_payloads();
@@ -122,7 +134,7 @@ async fn request_invalid_payload_publishes_error_reply() {
         &client,
         Some("_INBOX.err"),
         &nats,
-        "my_method",
+        &name("my_method"),
     )
     .await;
 
@@ -137,7 +149,15 @@ async fn request_client_error_publishes_error_reply() {
     let client = FailingClient;
     let (headers, payload) = make_ext_wire_request("my_method", r#"{}"#);
 
-    handle(&headers, &payload, &client, Some("_INBOX.err"), &nats, "my_method").await;
+    handle(
+        &headers,
+        &payload,
+        &client,
+        Some("_INBOX.err"),
+        &nats,
+        &name("my_method"),
+    )
+    .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
     let published_headers = nats.published_headers()[0].clone();
@@ -154,7 +174,15 @@ async fn request_publish_failure_exercises_error_path() {
     let client = MockClient::new();
     let (headers, payload) = make_ext_wire_request("my_method", r#"{}"#);
 
-    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "my_method").await;
+    handle(
+        &headers,
+        &payload,
+        &client,
+        Some("_INBOX.reply"),
+        &nats,
+        &name("my_method"),
+    )
+    .await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -166,7 +194,15 @@ async fn request_flush_failure_exercises_warn_path() {
     let client = MockClient::new();
     let (headers, payload) = make_ext_wire_request("my_method", r#"{}"#);
 
-    handle(&headers, &payload, &client, Some("_INBOX.reply"), &nats, "my_method").await;
+    handle(
+        &headers,
+        &payload,
+        &client,
+        Some("_INBOX.reply"),
+        &nats,
+        &name("my_method"),
+    )
+    .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -176,7 +212,15 @@ async fn request_missing_params_publishes_error_reply() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
 
-    handle(&empty_headers(), b"{}", &client, Some("_INBOX.err"), &nats, "my_method").await;
+    handle(
+        &empty_headers(),
+        b"{}",
+        &client,
+        Some("_INBOX.err"),
+        &nats,
+        &name("my_method"),
+    )
+    .await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.err"]);
     let headers = nats.published_headers()[0].clone();
@@ -191,7 +235,7 @@ async fn notification_forwards_to_client() {
     let client = MockClient::new();
     let (headers, payload) = make_ext_wire_notification("my_notify", r#"{"event":"ping"}"#);
 
-    handle(&headers, &payload, &client, None, &nats, "my_notify").await;
+    handle(&headers, &payload, &client, None, &nats, &name("my_notify")).await;
 
     assert_eq!(client.notification_count(), 1);
     assert!(nats.published_messages().is_empty());
@@ -202,7 +246,7 @@ async fn notification_invalid_payload_does_not_panic() {
     let nats = MockNatsClient::new();
     let client = MockClient::new();
 
-    handle(&empty_headers(), b"not json", &client, None, &nats, "my_notify").await;
+    handle(&empty_headers(), b"not json", &client, None, &nats, &name("my_notify")).await;
 
     assert_eq!(client.notification_count(), 0);
 }
@@ -213,7 +257,7 @@ async fn notification_client_error_does_not_panic() {
     let client = FailingClient;
     let (headers, payload) = make_ext_wire_notification("my_notify", r#"{"event":"ping"}"#);
 
-    handle(&headers, &payload, &client, None, &nats, "my_notify").await;
+    handle(&headers, &payload, &client, None, &nats, &name("my_notify")).await;
 }
 
 // --- error type tests ---
@@ -259,7 +303,7 @@ fn ext_error_source() {
 async fn forward_request_invalid_payload_returns_error() {
     let client = MockClient::new();
 
-    let result = forward_request(&empty_headers(), b"{}", &client, "my_method", "ext/my_method").await;
+    let result = forward_request(&empty_headers(), b"{}", &client, &name("my_method"), "ext/my_method").await;
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), ExtError::MalformedJson(_)));
 }

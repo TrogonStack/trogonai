@@ -30,6 +30,27 @@ appears in `Debug` output or logs.
 | `SANDBOX_VERCEL_REGIONS` / `--regions` | Regions to advertise, comma separated. Default none, so a lease that names a region never reaches this worker. |
 | `SANDBOX_MAX_CONCURRENT_LEASES` / `--max-concurrent-leases` | Capacity announced in the heartbeat. Default 4. |
 | `SANDBOX_DISPATCH_FENCE_FILE` / `--dispatch-fence-file` | Dispatch fence file. See [Sign worker dispatches](./sign-worker-dispatches.md). |
+| `SANDBOX_VERCEL_DISPATCH_LEDGER_FILE` / `--dispatch-ledger-file` | Dispatch ledger. Set it to have the worker take dispatches and cleanups addressed to it alone. See [Targeted dispatch](#targeted-dispatch). |
+
+## Targeted dispatch
+
+With `SANDBOX_VERCEL_DISPATCH_LEDGER_FILE` set, the worker takes its id from the
+ledger and announces the `TargetedV1` dispatch protocol. The broker then sends a
+Vercel lease to a worker that announces it when one has capacity, and to legacy
+workers otherwise, so a fleet can move over one worker at a time.
+
+- Each dispatch attempt is recorded in the ledger. A repeat of an attempt gets
+  its first receipt, and an attempt that was cleaned up is refused.
+- A cancel becomes a cleanup the worker must confirm. The broker keeps the lease
+  as cancelling and retries the cleanup until the worker reports the sandbox
+  deleted, so a delete that fails is retried instead of leaking the sandbox.
+- A cleanup finds the sandbox by the attempt's receipt, so it still works after
+  the worker restarts.
+- The worker keeps serving the shared lease subject, so legacy dispatches still
+  reach it during a rollout.
+
+Keep the ledger file on storage that survives a restart, and give each worker
+its own file.
 
 ## How a lease maps to Vercel
 
@@ -142,8 +163,10 @@ against a loopback server, so it runs with the normal suite.
 
 The worker refuses these with `InvalidNetworkPolicy`: denied domains, request
 rules, a policy that refuses opaque tunnels, any rule that is not pass-through,
-and any rule that names a port. Changing the policy of a running lease is
-refused. The worker applies it at create time only.
+and any rule that names a port. A user defined policy refuses opaque tunnels
+unless it sets `"opaque_tunnels": "allow"`, so one sent to this worker has to
+say so. Changing the policy of a running lease is refused. The worker applies it
+at create time only.
 
 ## Commands, files and ports
 

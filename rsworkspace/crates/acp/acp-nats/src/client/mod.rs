@@ -57,8 +57,19 @@ async fn publish_backpressure_error_reply<N: PublishClient + FlushClient>(
 
 /// Runs the client proxy, subscribing to client subjects and dispatching to handlers.
 ///
-/// Dispatch tasks are spawned with [`tokio::spawn`], so this runs on any multi-threaded
-/// runtime and does not require a [`tokio::task::LocalSet`].
+/// Notifications (`session/update`, `elicitation/complete`, ext notifications) are
+/// delivered to the client inline, one at a time, in the order NATS delivered them, so
+/// a streamed reply reaches the client in the order the agent sent it. That makes the
+/// [`ClientHandler`] notification methods part of this loop: they must hand the
+/// message off, not wait on the client. A slow handler slows intake instead of
+/// dropping updates; core NATS buffers behind it and reports a slow consumer if the
+/// buffer overflows.
+///
+/// Requests wait on a client answer (a permission prompt can take minutes), so each
+/// runs in its own [`tokio::spawn`] task and never holds up the notifications behind
+/// it. Only requests count toward `max_concurrent_client_tasks`; past that limit a
+/// request is answered with an overloaded error so the agent can retry. Spawned tasks
+/// need no [`tokio::task::LocalSet`], so this runs on any multi-threaded runtime.
 pub async fn run<
     N: SubscribeClient + RequestClient + PublishClient + FlushClient,
     Cl: ClientHandler + Send + Sync + 'static,
@@ -86,7 +97,7 @@ pub async fn run<
     let max_concurrent = bridge.config.max_concurrent_client_tasks();
 
     while let Some(msg) = subscriber.next().await {
-        process_message(msg, &nats, client.clone(), bridge.clone(), &in_flight, max_concurrent).await;
+        process_message(msg, &nats, &client, &bridge, &in_flight, max_concurrent).await;
     }
 
     info!("Client proxy subscriber ended");
@@ -100,8 +111,8 @@ async fn process_message<
 >(
     msg: Message,
     nats: &N,
-    client: Arc<Cl>,
-    bridge: Arc<Bridge<N, C, J>>,
+    client: &Arc<Cl>,
+    bridge: &Arc<Bridge<N, C, J>>,
     in_flight: &Arc<AtomicUsize>,
     max_concurrent: usize,
 ) where
@@ -123,6 +134,16 @@ async fn process_message<
     let reply = msg.reply.as_ref().map(|r| r.to_string());
     let headers = msg.headers.clone().unwrap_or_default();
 
+    if parsed.method.is_notification(reply.is_some()) {
+        let ctx = DispatchContext {
+            nats,
+            client: client.as_ref(),
+            bridge: bridge.as_ref(),
+        };
+        dispatch_client_method(&subject, parsed, &headers, payload, reply, &ctx).await;
+        return;
+    }
+
     let current_in_flight = in_flight.load(Ordering::Acquire);
     if current_in_flight >= max_concurrent {
         warn!(
@@ -139,6 +160,8 @@ async fn process_message<
         return;
     }
     let nats = nats.clone();
+    let client = client.clone();
+    let bridge = bridge.clone();
     let in_flight_guard = InFlightSlotGuard::new(in_flight.clone());
     tokio::spawn(async move {
         let _in_flight_guard = in_flight_guard;

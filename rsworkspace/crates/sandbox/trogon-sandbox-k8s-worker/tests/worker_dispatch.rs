@@ -40,6 +40,32 @@ async fn a_dispatch_is_granted_once_and_a_cancel_releases_it() -> TestResult {
     running.stop().await
 }
 
+/// Pins today's behaviour, pending a decision on which one every worker should have: the cancel handler forgets the
+/// grant only once a cancel succeeds, so a redispatch after a failed cancel is answered with the original grant.
+/// The aca, modal, daytona and vercel workers forget the grant first and refuse the redispatch instead.
+#[tokio::test]
+async fn a_redispatch_after_a_failed_cancel_is_answered_with_the_original_grant() -> TestResult {
+    let mut running = Running::start().await?;
+    let first = running
+        .dispatch("lease-stuck", serde_json::to_value(lease_request()?)?)
+        .await?;
+    running.world.cluster.state().fail_deletes = 100;
+
+    let cancel = subjects::provider_cancel(ProviderKind::K8sMicroVm, &LeaseId::new("lease-stuck"));
+    running.publish(cancel, &serde_json::json!({})).await?;
+    let cluster = &running.world.cluster;
+    until(|| cluster.state().fail_deletes < 100).await?;
+    let second = running
+        .dispatch("lease-stuck", serde_json::to_value(lease_request()?)?)
+        .await?;
+
+    assert_eq!(first, second);
+    assert_eq!(running.world.cluster.state().jobs_created, 1);
+    assert!(running.world.provider.holds_lease(&lease_id("lease-stuck")).await);
+    running.world.cluster.state().fail_deletes = 0;
+    running.stop().await
+}
+
 #[tokio::test]
 async fn a_cancel_of_a_lease_nobody_holds_is_harmless() -> TestResult {
     let mut running = Running::start().await?;
@@ -131,6 +157,42 @@ async fn snapshot_exports_report_receipts_and_failures() -> TestResult {
             SnapshotExportOutcome::Err(SnapshotExportError::Transient { .. })
         ),
         "{failed:?}"
+    );
+    running.stop().await
+}
+
+/// Pins today's behaviour: a cancel whose delete failed is not retried, and the broker forgets a lease once it has
+/// published the cancel, so only another cancel releases the job.
+#[tokio::test]
+async fn a_failed_cancel_is_not_retried_until_another_cancel_arrives() -> TestResult {
+    let mut running = Running::start().await?;
+    running
+        .dispatch("lease-stuck", serde_json::to_value(lease_request()?)?)
+        .await?;
+    running.world.cluster.state().fail_deletes = 1;
+    let cancel = subjects::provider_cancel(ProviderKind::K8sMicroVm, &LeaseId::new("lease-stuck"));
+    running.publish(cancel.clone(), &serde_json::json!({})).await?;
+    let cluster = &running.world.cluster;
+    until(|| cluster.state().fail_deletes == 0).await?;
+
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    assert!(running.world.provider.holds_lease(&lease_id("lease-stuck")).await);
+
+    running.publish(cancel, &serde_json::json!({})).await?;
+    let provider = running.world.provider.clone();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while provider.holds_lease(&lease_id("lease-stuck")).await {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    running
+        .dispatch("lease-stuck", serde_json::to_value(lease_request()?)?)
+        .await?;
+    assert_eq!(
+        running.world.cluster.state().jobs_created,
+        2,
+        "the reused id launched a new job"
     );
     running.stop().await
 }

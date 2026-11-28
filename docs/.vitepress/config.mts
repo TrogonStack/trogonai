@@ -57,6 +57,7 @@ export default async () => {
             items: [
               { text: "Overview", link: "/releases/" },
               { text: "Release channels", link: "/releases/channels" },
+              { text: "Unreleased", link: "/releases/unreleased" },
             ],
           },
         ],

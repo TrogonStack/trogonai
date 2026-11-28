@@ -69,7 +69,7 @@ fn policy(allow_loopback: bool) -> TestResult<NetworkPolicy> {
         },
         deny_ranges: vec![],
         denied_domains: vec!["blocked.test".parse()?],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }

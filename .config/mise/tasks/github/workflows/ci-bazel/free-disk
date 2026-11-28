@@ -52,6 +52,30 @@ if [[ -d /mnt && -n ${GITHUB_ENV:-} ]]; then
   sudo mkdir -p /mnt/bazel
   sudo chown "$(id -u):$(id -g)" /mnt/bazel
   echo "BAZEL_OUTPUT_USER_ROOT=/mnt/bazel" >>"$GITHUB_ENV"
+
+  # The disk and repository caches still sat under RUNNER_TEMP on the root
+  # disk, and a cold build writes every output into the disk cache a second
+  # time, so root filled up anyway. Bind mounts keep the RUNNER_TEMP paths the
+  # cache restore and save steps use while the bytes land on /mnt; a symlink
+  # would not survive the restore, since tar replaces it with a directory.
+  for cache in bazel-disk-cache bazel-repository-cache; do
+    sudo mkdir -p "/mnt/$cache" "${RUNNER_TEMP:?}/$cache"
+    sudo chown "$(id -u):$(id -g)" "/mnt/$cache" "$RUNNER_TEMP/$cache"
+    sudo mount --bind "/mnt/$cache" "$RUNNER_TEMP/$cache"
+  done
+
+  # With Bazel's outputs and caches on /mnt, the test step still filled root
+  # until the runner could not write its own log. The NATS and sandbox tests
+  # run Docker containers, whose images, writable layers and logs live under
+  # Docker's data root on the root disk, and a test Bazel kills at its timeout can
+  # leave its container behind. Docker's data root moves to /mnt as well.
+  sudo systemctl stop docker.socket docker.service
+  daemon_json=/etc/docker/daemon.json
+  { sudo cat "$daemon_json" 2>/dev/null || echo '{}'; } |
+    jq '. + {"data-root": "/mnt/docker"}' | sudo tee "$daemon_json.new" >/dev/null
+  sudo mv "$daemon_json.new" "$daemon_json"
+  sudo systemctl start docker.service
+  docker info --format 'Docker data root: {{.DockerRootDir}}'
 fi
 
 df -h / /mnt 2>/dev/null || df -h /

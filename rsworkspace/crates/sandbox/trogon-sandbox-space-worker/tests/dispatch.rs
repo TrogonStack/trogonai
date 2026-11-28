@@ -358,3 +358,69 @@ async fn cancelling_a_create_that_has_a_sandbox_deletes_it() -> TestResult {
     assert_eq!(rig.provider.current_leases().await, 0);
     Ok(())
 }
+
+#[tokio::test]
+async fn a_repeated_targeted_dispatch_returns_the_same_receipt_without_a_second_create() -> TestResult {
+    let rig = Rig::start().await?;
+    let payload = dispatch("lease-1", Some((&rig.worker(), "attempt-1")))?;
+
+    let first = rig.provider.lease_dispatch(&payload).await?;
+    let second = rig.provider.lease_dispatch(&payload).await?;
+
+    assert_eq!(first, second);
+    assert_eq!(rig.space.state().create_bodies.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_targeted_dispatch_after_its_cleanup_is_refused_without_creating() -> TestResult {
+    let rig = Rig::start().await?;
+    let payload = dispatch("lease-1", Some((&rig.worker(), "attempt-1")))?;
+    rig.provider.lease_dispatch(&payload).await?;
+    let release = rig
+        .provider
+        .cleanup_dispatch(&cleanup_request(&rig, "lease-1", "attempt-1", "release")?)
+        .await;
+    assert!(
+        matches!(release, ProviderCleanupResponse::Cleaned { .. }),
+        "{release:?}"
+    );
+
+    let again = rig.provider.lease_dispatch(&payload).await;
+
+    assert!(
+        matches!(
+            again,
+            Err(SpaceProviderError::Ledger(
+                trogon_sandbox_protocol::AttemptLedgerError::Cancelled
+            ))
+        ),
+        "{again:?}"
+    );
+    assert_eq!(rig.space.state().create_bodies.len(), 1);
+    assert!(rig.space.state().sandboxes.is_empty());
+    Ok(())
+}
+
+/// The ledger gives a lease id one attempt per worker, so an old attempt can never gain authority over a later
+/// sandbox for the same lease.
+#[tokio::test]
+async fn a_new_attempt_for_a_released_lease_is_refused_without_creating() -> TestResult {
+    let rig = Rig::start().await?;
+    let worker = rig.worker();
+    rig.provider
+        .lease_dispatch(&dispatch("lease-1", Some((&worker, "attempt-1")))?)
+        .await?;
+    rig.provider
+        .cleanup_dispatch(&cleanup_request(&rig, "lease-1", "attempt-1", "release")?)
+        .await;
+
+    let second = rig
+        .provider
+        .lease_dispatch(&dispatch("lease-1", Some((&worker, "attempt-2")))?)
+        .await;
+
+    assert!(matches!(second, Err(SpaceProviderError::Ledger(_))), "{second:?}");
+    assert_eq!(rig.space.state().create_bodies.len(), 1);
+    Ok(())
+}

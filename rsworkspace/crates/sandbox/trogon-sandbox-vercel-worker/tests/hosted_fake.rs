@@ -18,7 +18,8 @@ async fn an_allow_list_reaches_the_create_body_as_sorted_hosts_and_subnets() -> 
             "user_defined": {
                 "rules": [{"domain": "b.example.com"}, {"domain": "a.example.com"}],
                 "allow_ranges": ["192.168.0.0/16"],
-                "deny_ranges": ["192.168.9.0/24"]
+                "deny_ranges": ["192.168.9.0/24"],
+                "opaque_tunnels": "allow"
             }
         });
     })?;

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 use std::future::Future as _;
 use std::time::Duration;
@@ -11,18 +12,21 @@ use rmcp::service::{RequestContext, RoleServer};
 use serde_json::Value;
 use tokio::sync::{Mutex, Notify, OnceCell, watch};
 use tokio_util::sync::CancellationToken;
-use trogon_peer::AttachmentRef;
+use trogon_peer::{AttachmentRef, BatchId};
 use trogon_peer_context::{PeerContext, PeerContextError};
 use trogonai_proto::peers::v1alpha1 as v1;
 
 use crate::backend::{DetachPeer, HeartbeatPeer};
 use crate::connector_config::ConnectorConfig;
+use crate::constants::{DIRECTORY_BUDGET, DIRECTORY_MARGIN};
 use crate::detach_hook_input::DetachHookInput;
 use crate::detach_tool::detach_tool;
 use crate::model_operation::ModelOperation;
+use crate::model_text::quoted;
 use crate::model_tool_definitions::model_tool;
 use crate::model_tools;
 use crate::native_binding::NativeBinding;
+use crate::peer_directory::PeerDirectory;
 use crate::peer_mcp_error_content::PeerMcpErrorContent;
 use crate::prompt_hook_context::PromptHookContext;
 use crate::prompt_hook_event::PromptHookEvent;
@@ -45,6 +49,8 @@ pub struct PeerMcp<B> {
     stopped: CancellationToken,
     bound: Notify,
     prompt_arrived: Notify,
+    directory: Mutex<PeerDirectory>,
+    pending_batch: Mutex<Option<BatchId>>,
 }
 
 impl<B> fmt::Debug for PeerMcp<B> {
@@ -74,6 +80,8 @@ where
             stopped: CancellationToken::new(),
             bound: Notify::new(),
             prompt_arrived: Notify::new(),
+            directory: Mutex::default(),
+            pending_batch: Mutex::default(),
         })
     }
 
@@ -223,10 +231,14 @@ where
             .attachment()
             .ok_or(PeerMcpError::EnrollmentUncertain)?;
         match operation {
-            ModelOperation::Roster => model_tools::roster(&self.backend, request, &attachment).await,
-            ModelOperation::Send => model_tools::send(&self.backend, request, &attachment, &self.config).await,
+            ModelOperation::Roster => model_tools::roster(&self.backend, request, &attachment, &self.directory).await,
+            ModelOperation::Send => {
+                model_tools::send(&self.backend, request, &attachment, &self.config, &self.directory).await
+            }
             ModelOperation::Status => model_tools::status(&self.backend, request, &attachment, &self.config).await,
-            ModelOperation::Acknowledge => model_tools::acknowledge(&self.backend, request, &attachment).await,
+            ModelOperation::Acknowledge => {
+                model_tools::acknowledge(&self.backend, request, &attachment, &self.pending_batch).await
+            }
         }
     }
 
@@ -304,6 +316,7 @@ where
                 ) {
                     return Err(contract_error());
                 }
+                *self.pending_batch.lock().await = None;
                 String::new()
             }
             None => return Err(contract_error()),
@@ -327,10 +340,17 @@ where
                         return Err(contract_error());
                     }
                 }
-                PeerContext::render(batch, &response.messages)
-                    .map_err(PeerMcpError::InvalidBatch)?
-                    .as_str()
-                    .to_owned()
+                let rendered = PeerContext::render(batch, &response.messages).map_err(PeerMcpError::InvalidBatch)?;
+                let batch_id = batch
+                    .batch_id
+                    .as_deref()
+                    .and_then(|id| BatchId::new(id).ok())
+                    .ok_or_else(contract_error)?;
+                let guide = self
+                    .reply_guide(&attachment, &batch_id, &response.messages, deadline)
+                    .await;
+                *self.pending_batch.lock().await = Some(batch_id);
+                format!("{guide}\n{}", rendered.as_str())
             }
         };
         let output = PromptHookOutput {
@@ -342,6 +362,52 @@ where
         let value = serde_json::to_value(output).map_err(PeerMcpError::Encode)?;
         let text = serde_json::to_string(&value).map_err(PeerMcpError::Encode)?;
         Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+    }
+}
+
+impl<B: ReadPeerRoster> PeerMcp<B> {
+    /// Connector-written lines ahead of the batch: who sent it, how to answer, and what to acknowledge.
+    async fn reply_guide(
+        &self,
+        attachment: &AttachmentRef,
+        batch_id: &BatchId,
+        messages: &[v1::PreparedMessage],
+        deadline: tokio::time::Instant,
+    ) -> String {
+        let senders: BTreeSet<&str> = messages
+            .iter()
+            .filter_map(|message| message.metadata.as_option()?.sender_peer_id.as_deref())
+            .collect();
+        let unnamed = {
+            let directory = self.directory.lock().await;
+            senders.iter().any(|sender| directory.name(sender).is_none())
+        };
+        if unnamed {
+            // Names are a courtesy: a slow roster must not cost the delivery its hook budget.
+            let budget = (tokio::time::Instant::now() + DIRECTORY_BUDGET).min(deadline - DIRECTORY_MARGIN);
+            let _named = tokio::time::timeout_at(
+                budget,
+                model_tools::refresh_directory(&self.backend, attachment, &self.directory),
+            )
+            .await;
+        }
+        let directory = self.directory.lock().await;
+        let named = senders
+            .iter()
+            .map(|sender| match directory.name(sender) {
+                Some(name) => format!("{} has peerId {sender}", quoted(name.as_str())),
+                None => format!("an unnamed peer has peerId {sender}"),
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!(
+            "Peer reply guide (written by this connector, not by a peer): your own peerId is {own}; never send to \
+             it. Senders in this batch: {named}. To answer, call peer_send with recipient_peer_id set to the \
+             sender's peerId; your chat reply is never seen by peers. After reading, call peer_acknowledge_batch \
+             with {{\"batch_id\":{batch}}}; newer peer messages wait until you do.",
+            own = attachment.peer_id().as_str(),
+            batch = quoted(batch_id.as_str()),
+        )
     }
 }
 

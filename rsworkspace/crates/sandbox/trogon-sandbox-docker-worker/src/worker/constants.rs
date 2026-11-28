@@ -28,9 +28,5 @@ pub(super) const RESUME_SUBJECT: &str = "sandbox.provider.local_docker.resume.>"
 pub(super) const RESOURCE_USAGE_SUBJECT: &str = "sandbox.provider.local_docker.resource_usage.>";
 pub(super) const NATIVE_HANDLE_SUBJECT: &str = "sandbox.provider.local_docker.native_handle.>";
 
-/// Encoding room reserved for both streams' truncation markers: a marker is under 64 bytes, and
-/// the number-array encoding costs up to four bytes per byte.
-pub(super) const MARKER_ROOM: usize = 2 * 64 * 4;
-
 /// Span field recorded once the lease id is known.
 pub(super) const LEASE_ID_FIELD: &str = "lease_id";

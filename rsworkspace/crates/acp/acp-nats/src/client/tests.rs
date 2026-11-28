@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use jsonrpc_nats::RequestId;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use trogon_nats::{AdvancedMockNatsClient, MockNatsClient};
 use trogon_std::time::SystemClock;
 
@@ -409,21 +410,8 @@ async fn run_processes_messages_then_exits_when_stream_ends() {
             let bridge = make_bridge(nats.clone());
             let client = Arc::new(MockClient::new());
 
-            let notification = SessionNotification::new(
-                "sess1",
-                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hi"))),
-            );
-            let (wire_headers, payload_bytes) =
-                crate::client::test_support::encode_wire_notification("session/update", &notification);
-            let msg = make_msg(
-                "acp.v1.session.sess1.client.session.update",
-                Some(wire_headers),
-                &payload_bytes,
-                None,
-            );
-
             let tx = nats.inject_messages();
-            tx.unbounded_send(msg).unwrap();
+            tx.unbounded_send(session_update_msg("sess1", "hi")).unwrap();
             drop(tx);
 
             run(nats, client.clone(), bridge).await;
@@ -1026,7 +1014,7 @@ async fn process_message_invalid_subject_no_reply_does_not_publish() {
     let in_flight = Arc::new(AtomicUsize::new(0));
 
     let msg = make_msg("acp.sess.unknown.method", None, b"{}", None);
-    process_message(msg, &nats, client, bridge, &in_flight, 256).await;
+    process_message(msg, &nats, &client, &bridge, &in_flight, 256).await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -1039,21 +1027,24 @@ async fn process_message_invalid_subject_with_reply_is_ignored() {
     let in_flight = Arc::new(AtomicUsize::new(0));
 
     let msg = make_msg("acp.sess.unknown.method", None, b"{}", Some("_INBOX.reply"));
-    process_message(msg, &nats, client, bridge, &in_flight, 256).await;
+    process_message(msg, &nats, &client, &bridge, &in_flight, 256).await;
 
     assert!(nats.published_messages().is_empty());
 }
 
+/// Notifications are not subject to the request limit: dropping one would leave a
+/// gap in the client's transcript, so a full request slot table must not stop it.
 #[tokio::test]
-async fn process_message_backpressure_no_reply_does_not_publish() {
+async fn process_message_delivers_a_notification_while_requests_are_at_the_limit() {
     let nats = MockNatsClient::new();
     let bridge = make_bridge(nats.clone());
     let client = Arc::new(MockClient::new());
     let in_flight = Arc::new(AtomicUsize::new(1));
 
-    let msg = make_msg("acp.v1.session.sess1.client.session.update", None, b"{}", None);
-    process_message(msg, &nats, client, bridge, &in_flight, 1).await;
+    let msg = session_update_msg("sess1", "hi");
+    process_message(msg, &nats, &client, &bridge, &in_flight, 1).await;
 
+    assert_eq!(client.notifications.lock().unwrap().len(), 1);
     assert!(nats.published_messages().is_empty());
 }
 
@@ -1075,7 +1066,7 @@ async fn process_message_backpressure_with_reply_publishes_error() {
         &payload,
         Some("_INBOX.reply"),
     );
-    process_message(msg, &nats, client, bridge, &in_flight, 1).await;
+    process_message(msg, &nats, &client, &bridge, &in_flight, 1).await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -1099,7 +1090,7 @@ async fn process_message_backpressure_with_reply_flush_failure_exercises_warn_pa
         &payload,
         Some("_INBOX.reply"),
     );
-    process_message(msg, &nats, client, bridge, &in_flight, 1).await;
+    process_message(msg, &nats, &client, &bridge, &in_flight, 1).await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
@@ -1123,7 +1114,7 @@ async fn process_message_backpressure_with_reply_publish_failure_exercises_error
         &payload,
         Some("_INBOX.reply"),
     );
-    process_message(msg, &nats, client, bridge, &in_flight, 1).await;
+    process_message(msg, &nats, &client, &bridge, &in_flight, 1).await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -1146,41 +1137,185 @@ async fn process_message_backpressure_first_serialize_fails_uses_fallback() {
         &payload,
         Some("_INBOX.reply"),
     );
-    process_message(msg, &nats, client, bridge, &in_flight, 1).await;
+    process_message(msg, &nats, &client, &bridge, &in_flight, 1).await;
 
     assert_eq!(nats.published_messages(), vec!["_INBOX.reply"]);
 }
 
 #[tokio::test]
-async fn process_message_valid_dispatch_spawns_task() {
-    let local = tokio::task::LocalSet::new();
-    local
-        .run_until(async {
-            let nats = MockNatsClient::new();
-            let bridge = make_bridge(nats.clone());
-            let client = Arc::new(MockClient::new());
-            let in_flight = Arc::new(AtomicUsize::new(0));
+async fn process_message_delivers_a_notification_before_returning() {
+    let nats = MockNatsClient::new();
+    let bridge = make_bridge(nats.clone());
+    let client = Arc::new(MockClient::new());
+    let in_flight = Arc::new(AtomicUsize::new(0));
 
-            let notification = SessionNotification::new(
-                "sess1",
-                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hi"))),
-            );
-            let (wire_headers, payload_bytes) =
-                crate::client::test_support::encode_wire_notification("session/update", &notification);
-            let msg = make_msg(
-                "acp.v1.session.sess1.client.session.update",
-                Some(wire_headers),
-                &payload_bytes,
-                None,
-            );
-            process_message(msg, &nats, client.clone(), bridge, &in_flight, 256).await;
+    process_message(
+        session_update_msg("sess1", "hi"),
+        &nats,
+        &client,
+        &bridge,
+        &in_flight,
+        256,
+    )
+    .await;
 
-            // Yield to allow the spawned local task to run.
-            tokio::task::yield_now().await;
+    assert_eq!(client.notifications.lock().unwrap().len(), 1);
+}
 
-            assert_eq!(client.notifications.lock().unwrap().len(), 1);
-        })
-        .await;
+fn session_update_msg(session_id: &str, text: &str) -> async_nats::Message {
+    let notification = SessionNotification::new(
+        session_id.to_string(),
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from(text.to_string()))),
+    );
+    let (headers, payload) = crate::client::test_support::encode_wire_notification("session/update", &notification);
+    make_msg(
+        &format!("acp.v1.session.{session_id}.client.session.update"),
+        Some(headers),
+        &payload,
+        None,
+    )
+}
+
+/// Records streamed text chunks in delivery order. Its permission prompt stays
+/// open until `release_permission` fires, like a user who has not answered yet.
+struct StreamingClient {
+    chunks: Mutex<Vec<String>>,
+    chunk_arrived: tokio::sync::Notify,
+    release_permission: tokio::sync::Notify,
+}
+
+impl StreamingClient {
+    fn new() -> Self {
+        Self {
+            chunks: Mutex::new(Vec::new()),
+            chunk_arrived: tokio::sync::Notify::new(),
+            release_permission: tokio::sync::Notify::new(),
+        }
+    }
+
+    async fn wait_for_chunks(&self, count: usize) -> Vec<String> {
+        loop {
+            let arrived = self.chunk_arrived.notified();
+            {
+                let chunks = self.chunks.lock().unwrap();
+                if chunks.len() >= count {
+                    return chunks.clone();
+                }
+            }
+            arrived.await;
+        }
+    }
+}
+
+#[async_trait]
+impl ClientHandler for StreamingClient {
+    async fn session_notification(&self, n: SessionNotification) -> agent_client_protocol::Result<()> {
+        if let SessionUpdate::AgentMessageChunk(ContentChunk {
+            content: ContentBlock::Text(text),
+            ..
+        }) = n.update
+        {
+            self.chunks.lock().unwrap().push(text.text);
+            self.chunk_arrived.notify_waiters();
+        }
+        Ok(())
+    }
+
+    async fn request_permission(
+        &self,
+        _: RequestPermissionRequest,
+    ) -> agent_client_protocol::Result<RequestPermissionResponse> {
+        self.release_permission.notified().await;
+        Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
+    }
+}
+
+const STREAMED_CHUNKS: usize = 1000;
+
+fn streamed_chunks() -> Vec<String> {
+    (0..STREAMED_CHUNKS).map(|i| i.to_string()).collect()
+}
+
+/// Runs the client proxy on its own task, fed by the returned sender.
+fn spawn_streaming_proxy() -> (
+    MockNatsClient,
+    futures::channel::mpsc::UnboundedSender<async_nats::Message>,
+    Arc<StreamingClient>,
+    tokio::task::JoinHandle<()>,
+) {
+    let nats = MockNatsClient::new();
+    let inbound = nats.inject_messages();
+    let bridge = make_bridge(nats.clone());
+    let client = Arc::new(StreamingClient::new());
+    let proxy = tokio::spawn(run(nats.clone(), client.clone(), bridge));
+    (nats, inbound, client, proxy)
+}
+
+/// Regression: with one spawned task per message on a multi-threaded runtime,
+/// a streamed reply reached the client out of order (126 of 516 chunks in a
+/// chaos run with no faults injected).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn run_delivers_streamed_session_updates_in_publish_order() {
+    let (_nats, inbound, client, proxy) = spawn_streaming_proxy();
+    let sent = streamed_chunks();
+    for text in &sent {
+        inbound.unbounded_send(session_update_msg("sess1", text)).unwrap();
+    }
+
+    let received = tokio::time::timeout(Duration::from_secs(10), client.wait_for_chunks(STREAMED_CHUNKS))
+        .await
+        .expect("every chunk reaches the client");
+    proxy.abort();
+
+    assert_eq!(received, sent);
+}
+
+/// A permission prompt the user has not answered must not hold back the updates
+/// that follow it: the client only answers once it has seen the whole stream, so
+/// queuing updates behind the prompt would deadlock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn run_keeps_streaming_updates_while_a_permission_prompt_is_open() {
+    let (nats, inbound, client, proxy) = spawn_streaming_proxy();
+    let sent = streamed_chunks();
+    let (before, after) = sent.split_at(STREAMED_CHUNKS / 2);
+    for text in before {
+        inbound.unbounded_send(session_update_msg("sess1", text)).unwrap();
+    }
+    let tool_call = agent_client_protocol::v1::schema::ToolCallUpdate::new(
+        "call-1",
+        agent_client_protocol::v1::schema::ToolCallUpdateFields::new(),
+    );
+    let (headers, payload) = crate::client::test_support::encode_wire_request(
+        "session/request_permission",
+        RequestId::Number(7),
+        &RequestPermissionRequest::new("sess1", tool_call, vec![]),
+    );
+    inbound
+        .unbounded_send(make_msg(
+            "acp.v1.session.sess1.client.session.request_permission",
+            Some(headers),
+            &payload,
+            Some("_INBOX.permission"),
+        ))
+        .unwrap();
+    for text in after {
+        inbound.unbounded_send(session_update_msg("sess1", text)).unwrap();
+    }
+
+    let received = tokio::time::timeout(Duration::from_secs(10), client.wait_for_chunks(STREAMED_CHUNKS))
+        .await
+        .expect("updates after the open prompt still reach the client");
+    assert_eq!(received, sent);
+
+    client.release_permission.notify_one();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !nats.published_messages().contains(&"_INBOX.permission".to_string()) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the permission answer is published once the user responds");
+    proxy.abort();
 }
 
 /// Compile-time guard: the client proxy must stay `Send`.

@@ -4,7 +4,6 @@ mod api_wire;
 mod check;
 mod constants;
 mod denied_body;
-mod fit_output;
 mod guest_process;
 mod lease_proxy;
 mod lease_proxy_error;

@@ -125,6 +125,31 @@ async fn a_cancelled_lease_id_launches_again_when_reused() -> TestResult {
     running.stop().await
 }
 
+/// Pins today's behaviour, pending a decision on which one every worker should have: the cancel handler forgets the
+/// grant before it cancels, so a redispatch after a failed cancel is not answered with the grant. The provider still
+/// holds the sandbox it could not delete, so it refuses to launch another and the redispatch gets a provider error.
+/// The k8s, v8-wasm and kubevirt workers keep the grant until a cancel succeeds and answer with it instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_redispatch_after_a_failed_cancel_is_refused_while_the_sandbox_is_held() -> TestResult {
+    let mut running = Running::start().await?;
+    running.dispatch(LEASE).await?;
+    running.fake.delete_status(500);
+
+    running.cancel_lease(LEASE).await?;
+    let fake = &running.fake;
+    until(|| fake.deletes() == 1).await?;
+    let reply = running.dispatch(LEASE).await?;
+
+    assert!(
+        reply["provider_error"]
+            .as_str()
+            .is_some_and(|error| error.contains("settle cleanup before reallocating")),
+        "{reply}"
+    );
+    assert_eq!(running.fake.creates(), 1, "no second sandbox was created");
+    running.stop().await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cancel_that_arrives_during_a_launch_waits_for_it_and_releases_the_sandbox() -> TestResult {
     let mut running = Running::start().await?;
@@ -520,4 +545,34 @@ async fn every_worker_error_has_a_message() -> TestResult {
     }
     assert_eq!(errors.len(), 11);
     Ok(())
+}
+
+/// Pins today's behaviour: a cancel whose delete failed is not retried, and the broker forgets a lease once it has
+/// published the cancel, so only another cancel deletes the sandbox.
+#[tokio::test]
+async fn a_failed_cancel_is_not_retried_until_another_cancel_arrives() -> TestResult {
+    let mut running = Running::start().await?;
+    running.dispatch(LEASE).await?;
+    running.fake.delete_status(500);
+    running.cancel_lease(LEASE).await?;
+    let fake = &running.fake;
+    until(|| fake.deletes() == 1).await?;
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(running.fake.deletes(), 1, "nothing retried the delete");
+    assert_eq!(running.provider.active_lease_count().await, 1);
+    // The fake reads the status after it logs the DELETE, so it only recovers once the first delete has long failed.
+    running.fake.delete_status(200);
+
+    running.cancel_lease(LEASE).await?;
+    let provider = Arc::clone(&running.provider);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while provider.active_lease_count().await != 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    running.dispatch(LEASE).await?;
+    assert_eq!(running.fake.creates(), 2);
+    running.stop().await
 }

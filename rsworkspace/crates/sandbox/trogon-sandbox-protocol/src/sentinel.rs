@@ -1,8 +1,8 @@
 use std::fmt;
 
 use crate::RealValue;
-use crate::constants::PADDING_ALPHABET;
 pub use crate::constants::SENTINEL_PREFIX;
+use crate::constants::{FAKE_SIGNATURE, PADDING_ALPHABET};
 use crate::jwt_structure::is_fake_jwt;
 
 /// The stand-in a sandboxed process sees: `fake_value_<uuid4>`.
@@ -31,6 +31,18 @@ impl Sentinel {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Whether `text` carries any sentinel, registered or not: the `fake_value_` prefix every minted sentinel starts
+    /// with, or the signature every fake JWT ends with. The comparison ignores ASCII case, because a host name is
+    /// lowercased before it is resolved. Use it to keep a value that names a secret's stand-in off a channel the proxy
+    /// does not inspect, such as a DNS query.
+    pub fn appears_in(text: &str) -> bool {
+        [SENTINEL_PREFIX, FAKE_SIGNATURE].iter().any(|marker| {
+            text.as_bytes()
+                .windows(marker.len())
+                .any(|window| window.eq_ignore_ascii_case(marker.as_bytes()))
+        })
     }
 
     /// Accepts `raw` as a sentinel only when it has the sentinel alphabet or the shape of a fake JWT.

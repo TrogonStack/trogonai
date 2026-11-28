@@ -192,7 +192,7 @@ fn network_hosts_come_from_the_rules_and_the_denies() -> TestResult {
         allow_ranges: Vec::new(),
         deny_ranges: Vec::new(),
         denied_domains: vec![DeniedDomain::new("evil.example.com")?],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: Vec::new(),
     };
     let restriction = NetworkRestriction::of(&policy);
@@ -272,6 +272,7 @@ fn real_path_reads_a_relative_path_from_the_working_directory() -> TestResult {
     Ok(())
 }
 
+#[cfg(unix)]
 #[test]
 fn store_deny_fails_when_the_directory_cannot_be_resolved() {
     let missing = std::env::temp_dir().join("trogon-no-such-credential-store-dir");
@@ -281,6 +282,7 @@ fn store_deny_fails_when_the_directory_cannot_be_resolved() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn store_deny_names_the_resolved_directory() -> TestResult {
     let dir = tempfile::tempdir()?;

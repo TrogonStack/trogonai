@@ -206,7 +206,7 @@ async fn start(setup: Setup, mitm: Option<&Mitm>, parent: Option<&Parent>, termi
         opaque_tunnels: if setup.refuse_opaque {
             OpaqueTunnelPolicy::Refuse
         } else {
-            Default::default()
+            OpaqueTunnelPolicy::Allow
         },
         request_rules: vec![],
     };

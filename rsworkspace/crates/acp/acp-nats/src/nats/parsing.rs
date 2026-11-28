@@ -62,7 +62,7 @@ impl GlobalAgentMethod {
             Self::ProvidersList => "providers/list".to_string(),
             Self::ProvidersSet => "providers/set".to_string(),
             Self::ProvidersDisable => "providers/disable".to_string(),
-            Self::Ext(name) => format!("_{}", name.as_str()),
+            Self::Ext(name) => name.protocol_method().into_owned(),
         }
     }
 
@@ -193,14 +193,15 @@ pub enum ClientMethod {
     TerminalWaitForExit,
     ElicitationCreate,
     ElicitationComplete,
-    Ext(String),
+    Ext(ExtMethodName),
 }
 
 impl ClientMethod {
     /// ACP protocol method for the canonical JSON-RPC body (ADR#0056).
     ///
     /// Subject terminals are the dotted projection of this string (except
-    /// [`Self::Ext`], which projects to `ext.{name}` while the body uses `_{name}`).
+    /// [`Self::Ext`], which projects to `ext.{name}` while the body uses the name with
+    /// a leading `_`, added only when missing).
     pub fn protocol_method(&self) -> String {
         match self {
             Self::FsReadTextFile => "fs/read_text_file".to_string(),
@@ -214,7 +215,27 @@ impl ClientMethod {
             Self::TerminalWaitForExit => "terminal/wait_for_exit".to_string(),
             Self::ElicitationCreate => "elicitation/create".to_string(),
             Self::ElicitationComplete => "elicitation/complete".to_string(),
-            Self::Ext(name) => format!("_{name}"),
+            Self::Ext(name) => name.protocol_method().into_owned(),
+        }
+    }
+
+    /// Whether a message for this method is a notification: it expects no answer,
+    /// so the client proxy delivers it in arrival order instead of concurrently.
+    ///
+    /// Ext methods are notifications exactly when sent without a reply subject.
+    pub fn is_notification(&self, has_reply: bool) -> bool {
+        match self {
+            Self::SessionUpdate | Self::ElicitationComplete => true,
+            Self::Ext(_) => !has_reply,
+            Self::FsReadTextFile
+            | Self::FsWriteTextFile
+            | Self::SessionRequestPermission
+            | Self::TerminalCreate
+            | Self::TerminalKill
+            | Self::TerminalOutput
+            | Self::TerminalRelease
+            | Self::TerminalWaitForExit
+            | Self::ElicitationCreate => false,
         }
     }
 
@@ -233,8 +254,7 @@ impl ClientMethod {
             "elicitation.complete" => Some(Self::ElicitationComplete),
             other => {
                 let ext_name = other.strip_prefix(EXT_SUBJECT_PREFIX)?;
-                ExtMethodName::new(ext_name).ok()?;
-                Some(Self::Ext(ext_name.to_string()))
+                ExtMethodName::new(ext_name).ok().map(Self::Ext)
             }
         }
     }

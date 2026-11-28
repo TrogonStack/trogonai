@@ -28,6 +28,7 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_oci::RegistryHost;
 use trogon_sandbox_protocol::subjects::worker_heartbeat;
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -628,7 +629,11 @@ async fn substrate_prebuild_reports_an_unreachable_control_plane() -> TestResult
 #[tokio::test]
 #[ignore = "needs a live Agent Substrate control plane: set SANDBOX_ADMIN_LIVE_SUBSTRATE_ENDPOINT"]
 async fn substrate_prebuild_builds_a_template_on_a_live_control_plane() -> TestResult {
-    let need = |name: &str| std::env::var(name).map_err(|_| format!("{name} is required for this test"));
+    let need = |name: &str| {
+        SystemEnv
+            .var(name)
+            .map_err(|_| format!("{name} is required for this test"))
+    };
     let endpoint = need("SANDBOX_ADMIN_LIVE_SUBSTRATE_ENDPOINT")?;
     let image = need("SANDBOX_ADMIN_LIVE_SUBSTRATE_IMAGE")?;
     let agent_image = need("SANDBOX_ADMIN_LIVE_SUBSTRATE_AGENT_IMAGE")?;
@@ -640,7 +645,7 @@ async fn substrate_prebuild_builds_a_template_on_a_live_control_plane() -> TestR
     let token = dir.path().join("token");
     std::fs::write(
         &token,
-        std::env::var("SANDBOX_ADMIN_LIVE_SUBSTRATE_TOKEN").unwrap_or_default(),
+        SystemEnv.var("SANDBOX_ADMIN_LIVE_SUBSTRATE_TOKEN").unwrap_or_default(),
     )?;
     let mut request = prebuild_request(&endpoint, &image, token)?;
     request.agent_image = agent_image;

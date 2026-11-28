@@ -399,7 +399,7 @@ async fn push_network_policy_patches_config_map_with_new_policy_json() -> TestRe
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
 

@@ -3,6 +3,7 @@ pub mod claim_check;
 pub mod claim_retention;
 pub mod client;
 pub mod conditional_kv;
+pub mod consumer_loss;
 pub mod create_conflicts;
 pub mod message;
 mod native_kv_cas_error;
@@ -18,6 +19,7 @@ pub mod object_store;
 pub mod processor;
 pub mod publish;
 pub mod stream_max_age;
+pub mod stream_sequence;
 pub mod strict_kv;
 pub mod traits;
 
@@ -33,6 +35,7 @@ pub use client::{
     PublishError, StreamError,
 };
 pub use conditional_kv::conditional_native_kv_update;
+pub use consumer_loss::ConsumerLoss;
 pub use create_conflicts::{
     is_create_key_already_exists, is_create_key_value_already_exists, is_create_stream_already_exists,
 };
@@ -49,14 +52,15 @@ pub use object_store::{ClaimBucketBinding, ObjectStoreGet, ObjectStorePut};
 pub use processor::{HandlerVerdict, MessageHandler, PoisonReason, Processor, ProcessorError, RedeliveryPolicy};
 pub use publish::{PublishOutcome, publish_event};
 pub use stream_max_age::StreamMaxAge;
+pub use stream_sequence::stream_sequence;
 pub use strict_kv::{
     JetStreamStrictKvRead, NativeKvReadError, StrictNativeKvStore, strict_native_kv_operation,
     strict_native_kv_raw_operation,
 };
 pub use traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
-    JetStreamFirstRawMessageBySubject, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStream,
-    JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamDeleteConsumer,
+    JetStreamFirstRawMessageBySubject, JetStreamGetKeyValue, JetStreamGetOrCreateConsumer, JetStreamGetRawMessage,
+    JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision,
     JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet,
     JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage, JetStreamPublisher,
     JetStreamSubjectPurger, JsMessageOf, ProvisionedStreamField, PurgeOutcome, reconciled_stream_config,

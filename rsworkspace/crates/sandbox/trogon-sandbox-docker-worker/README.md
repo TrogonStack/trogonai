@@ -55,7 +55,7 @@ cargo test -p trogon-sandbox-docker-worker --test live_checkpoint -- --ignored -
 | Test target | Needs |
 | --- | --- |
 | `live_checkpoint` | Docker in experimental mode, CRIU, and a local zot registry. |
-| `egress_sidecar` | Docker, the `sandbox-egress-proxyd:dev` image (override with `SANDBOX_EGRESS_PROXY_IMAGE`), and a cached `busybox:1.36.1`. |
+| `egress_sidecar` | Docker, the `sandbox-egress-proxyd:dev` image (override with `SANDBOX_EGRESS_PROXY_IMAGE`), and a cached `busybox:1.36.1`. `only_proxied_tcp_leaves_the_sandbox` also needs internet access: it checks that DNS to `1.1.1.1` is refused and that `example.com` is reached through the proxy. |
 | `conformance_egress_probe` | `SANDBOX_DOCKER_EGRESS_PROBE_TEST=1`, a cached Python 3 image without `nc` named in `SANDBOX_DOCKER_PYTHON_NO_NC_IMAGE`, the cached egress image, Docker and `nats-server`. Its invalid endpoint lane runs by default. |
 | `command_readiness_process`, `custodian_signal_process`, `targeted_command_fence` | Docker, a cached `node:22`, `nats-server`, and a static command supervisor named in `SANDBOX_DOCKER_COMMAND_SUPERVISOR`. |
 | `trusted_native_observer` | `SANDBOX_DOCKER_TRUSTED_OBSERVER=1`, Docker on Unix, and cached `python:3.12-slim` and `node:22` images. |

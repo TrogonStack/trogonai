@@ -8,9 +8,7 @@ use trogon_sandbox_contract::{
     CommandOutput, FileOpErrorKind, FileOpResponse, LeaseError, OutputTruncation, PollCommandResponse,
     ReadFileResponse, RunCommandResponse,
 };
-use trogon_sandbox_protocol::recap;
-
-use super::constants::MARKER_ROOM;
+use trogon_sandbox_protocol::{COMMAND_REPLY_MARKER_ROOM, recap};
 
 /// Encodes a run reply. Output that would not fit is trimmed to its head and tail and flagged
 /// truncated. Only a reply that cannot fit even with empty output becomes a denial that keeps the
@@ -97,7 +95,7 @@ fn fit_output<T: Serialize>(
         ..output.clone()
     };
     let empty_len = encoded_len(&empty);
-    let envelope = empty_len.saturating_add(MARKER_ROOM);
+    let envelope = empty_len.saturating_add(COMMAND_REPLY_MARKER_ROOM);
     let retained = output.stdout.len() + output.stderr.len();
     if envelope >= max_payload || retained == 0 {
         return None;

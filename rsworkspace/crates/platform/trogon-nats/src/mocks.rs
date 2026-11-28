@@ -10,6 +10,23 @@ use std::sync::{Arc, Mutex};
 #[error("{0}")]
 pub struct MockError(pub String);
 
+impl MockError {
+    const CONSUMER_DELETED: &str = "consumer deleted";
+
+    /// A consumer message-stream error that [`ConsumerLoss`] reads as a lost consumer.
+    ///
+    /// [`ConsumerLoss`]: crate::jetstream::ConsumerLoss
+    pub fn consumer_deleted() -> Self {
+        Self(Self::CONSUMER_DELETED.to_owned())
+    }
+}
+
+impl crate::jetstream::ConsumerLoss for MockError {
+    fn consumer_lost(&self) -> bool {
+        self.0 == Self::CONSUMER_DELETED
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct MockNatsClient {
     published: Arc<Mutex<Vec<PublishedMessage>>>,

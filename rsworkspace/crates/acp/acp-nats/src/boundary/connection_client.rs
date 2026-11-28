@@ -1,4 +1,5 @@
 use crate::client_handler::ClientHandler;
+use crate::ext_method_name::ext_protocol_method;
 use agent_client_protocol::v1::ConnectionTo;
 use agent_client_protocol::v1::schema::{
     CompleteElicitationNotification, CreateElicitationRequest, CreateElicitationResponse, CreateTerminalRequest,
@@ -65,7 +66,7 @@ impl ClientHandler for ConnectionClient {
     }
 
     async fn ext_method(&self, args: ExtRequest) -> Result<ExtResponse> {
-        let wire_method = format!("_{}", args.method);
+        let wire_method = ext_protocol_method(&args.method);
         let value = self
             .cx
             .send_request(UntypedMessage::new(&wire_method, args.params)?)
@@ -76,7 +77,7 @@ impl ClientHandler for ConnectionClient {
     }
 
     async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
-        let wire_method = format!("_{}", args.method);
+        let wire_method = ext_protocol_method(&args.method);
         self.cx
             .send_notification(UntypedMessage::new(&wire_method, args.params)?)
     }

@@ -138,6 +138,9 @@ fn the_command_line_has_working_defaults() -> TestResult {
     assert_eq!(args.max_warm_sandboxes, 4);
     assert_eq!(args.snapshot_registry, "127.0.0.1:5000");
     assert_eq!(args.dispatch_fence_file, None);
+    assert_eq!(args.guest_input_buffer_bytes, 256 * 1024);
+    assert_eq!(args.guest_output_buffer_bytes, 256 * 1024);
+    assert_eq!(args.guest_heap_bytes, 1280 * 1024);
     assert!(WorkerArgs::try_parse_from(["worker"]).is_err());
     let args = WorkerArgs::try_parse_from([
         "worker",
@@ -147,9 +150,12 @@ fn the_command_line_has_working_defaults() -> TestResult {
         "a:5000,b:5000",
         "--max-warm-sandboxes",
         "0",
+        "--guest-output-buffer-bytes",
+        "1048576",
     ])?;
     assert_eq!(args.insecure_registries, ["a:5000", "b:5000"]);
     assert_eq!(args.max_warm_sandboxes, 0);
+    assert_eq!(args.guest_output_buffer_bytes, 1024 * 1024);
     Ok(())
 }
 

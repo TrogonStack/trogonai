@@ -8,6 +8,7 @@ use agent_client_protocol::v1::schema::{
 };
 use agent_client_protocol::{Error as AcpError, ErrorCode};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing_subscriber::util::SubscriberInitExt;
 use trogon_nats::MockNatsClient;
 use trogon_nats::jetstream::{MockJetStreamConsumer, MockJetStreamConsumerFactory};
@@ -279,6 +280,20 @@ async fn dispatch_invalid_payload_publishes_error_reply() {
 
     assert!(!*agent.initialized.lock().unwrap());
     let error = published_wire_error(&nats);
+    assert_eq!(error.code, ErrorCode::PARSE_ERROR);
+}
+
+#[tokio::test]
+async fn dispatch_well_formed_json_with_bad_params_publishes_invalid_params() {
+    let (nats, agent) = dispatch(
+        "acp.v1.global.agent.initialize",
+        &serde_json::json!({"protocolVersion": "not a version"}),
+        Some("_INBOX.err"),
+    )
+    .await;
+
+    assert!(!*agent.initialized.lock().unwrap());
+    let error = published_wire_error(&nats);
     assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
 }
 
@@ -289,8 +304,28 @@ async fn dispatch_request_without_reply_subject_does_not_publish() {
 }
 
 #[tokio::test]
-async fn dispatch_unknown_subject_is_silently_ignored() {
-    let (nats, _) = dispatch_raw("acp.something.else", b"{}", Some("_INBOX.1")).await;
+async fn dispatch_unrecognized_subject_with_reply_publishes_method_not_found() {
+    let too_long_ext_name = "x".repeat(129);
+    for subject in [
+        "acp.something.else".to_owned(),
+        "acp.v1.global.agent.no_such_method".to_owned(),
+        format!("acp.v1.global.agent.ext.{too_long_ext_name}"),
+        format!("acp.v1.session.s1.agent.ext.{too_long_ext_name}"),
+    ] {
+        let (nats, _) = dispatch_raw(&subject, b"{}", Some("_INBOX.1")).await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.1"], "{subject}");
+        assert_eq!(
+            published_wire_error(&nats).code,
+            ErrorCode::METHOD_NOT_FOUND,
+            "{subject}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn dispatch_unrecognized_subject_without_reply_publishes_nothing() {
+    let (nats, _) = dispatch_raw("acp.v1.global.agent.no_such_method", b"{}", None).await;
     assert!(nats.published_messages().is_empty());
 }
 
@@ -790,7 +825,7 @@ async fn dispatch_js_message_bad_payload_terms() {
 
     assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
     let error = published_wire_error(&nats);
-    assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+    assert_eq!(error.code, ErrorCode::PARSE_ERROR);
 }
 
 #[tokio::test]
@@ -1292,8 +1327,8 @@ async fn handle_request_with_keepalive_completes_fast() {
     let js_msg = make_js_msg("acp.v1.global.agent.initialize", &init, Some("_INBOX.1"));
 
     let agent = MockAgent::new();
-    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, |req: InitializeRequest| {
-        agent.initialize(req)
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req: InitializeRequest| {
+        with_keepalive(&js_msg, agent.initialize(req))
     })
     .await;
     assert!(result.is_ok());
@@ -1311,7 +1346,10 @@ async fn handle_request_with_keepalive_no_reply_subject() {
     let mut msg = msg;
     msg.headers = Some(encoded.headers);
     let js_msg = make_js_msg("acp.v1.global.agent.initialize", &init, None);
-    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req| {
+        with_keepalive(&js_msg, init_handler_error(req))
+    })
+    .await;
     assert!(result.is_err());
 }
 
@@ -1320,7 +1358,10 @@ async fn handle_request_with_keepalive_bad_payload() {
     let nats = MockNatsClient::new();
     let msg = make_nats_message("acp.v1.global.agent.initialize", b"not json", Some("_INBOX.1"));
     let js_msg = make_js_msg_raw("acp.v1.global.agent.initialize", b"not json", Some("_INBOX.1"));
-    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req| {
+        with_keepalive(&js_msg, init_handler_error(req))
+    })
+    .await;
     assert!(result.is_err());
 }
 
@@ -1333,7 +1374,10 @@ async fn handle_request_with_keepalive_handler_returns_error() {
     let mut msg = msg;
     msg.headers = Some(encoded.headers);
     let js_msg = make_js_msg("acp.v1.global.agent.initialize", &init, Some("_INBOX.1"));
-    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req| {
+        with_keepalive(&js_msg, init_handler_error(req))
+    })
+    .await;
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
     let error = published_wire_error(&nats);
@@ -1363,12 +1407,13 @@ async fn handle_request_with_keepalive_progress_ack_failure() {
     });
 
     let agent = MockAgent::new();
-    let result =
-        handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, |req: InitializeRequest| async {
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req: InitializeRequest| {
+        with_keepalive(&js_msg, async {
             tokio::time::sleep(Duration::from_secs(20)).await;
             agent.initialize(req).await
         })
-        .await;
+    })
+    .await;
     assert!(result.is_ok());
 }
 
@@ -1383,11 +1428,10 @@ async fn handle_request_with_keepalive_handler_error() {
     let js_msg = make_js_msg("acp.v1.global.agent.authenticate", &auth, Some("_INBOX.1"));
 
     let agent = MockAgent::new();
-    let result =
-        handle_jsonrpc_request_with_keepalive(&msg, "authenticate", &nats, &js_msg, |req: AuthenticateRequest| {
-            agent.authenticate(req)
-        })
-        .await;
+    let result = handle_jsonrpc_request(&msg, "authenticate", &nats, |req: AuthenticateRequest| {
+        with_keepalive(&js_msg, agent.authenticate(req))
+    })
+    .await;
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
     let error = published_wire_error(&nats);
@@ -1450,4 +1494,318 @@ async fn schema_1_15_durable_dispatch_preserves_request_and_response() {
         assert_eq!(published_response::<serde_json::Value>(&nats), result);
         assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
     }
+}
+
+/// Agent whose prompts block until released, counting how many it received.
+#[derive(Default)]
+struct GatedPromptAgent {
+    prompts: AtomicUsize,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl AgentHandler for GatedPromptAgent {
+    async fn initialize(&self, _args: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
+        Err(AcpError::method_not_found())
+    }
+
+    async fn authenticate(&self, _args: AuthenticateRequest) -> agent_client_protocol::Result<AuthenticateResponse> {
+        Err(AcpError::method_not_found())
+    }
+
+    async fn new_session(&self, _args: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
+        Err(AcpError::method_not_found())
+    }
+
+    async fn prompt(&self, _args: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
+        self.prompts.fetch_add(1, Ordering::SeqCst);
+        self.release.notified().await;
+        Ok(PromptResponse::new(StopReason::EndTurn))
+    }
+
+    async fn cancel(&self, _args: CancelNotification) -> agent_client_protocol::Result<()> {
+        Ok(())
+    }
+}
+
+/// Yields to the spawned tasks until `reached` holds.
+async fn yield_until(mut reached: impl FnMut() -> bool) {
+    for _ in 0..10_000 {
+        if reached() {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("condition not reached");
+}
+
+#[tokio::test]
+async fn serve_js_does_not_dispatch_a_redelivery_of_an_in_flight_command() {
+    let nats = MockNatsClient::new();
+    let agent = Rc::new(GatedPromptAgent::default());
+    let factory = MockJetStreamConsumerFactory::new();
+    let (consumer, tx) = MockJetStreamConsumer::new();
+    factory.add_consumer(consumer);
+
+    let original = make_js_msg(
+        "acp.v1.session.s1.agent.prompt",
+        &PromptRequest::new("s1", Vec::new()),
+        Some("$JS.ACK.ACP_COMMANDS.AGENT_COMMANDS.1.7.1.0.0"),
+    );
+    // A redelivery carries the same stream sequence, with its own ack handle.
+    let redelivered = MockJsMessage::new(original.message().clone());
+    let redelivered_signals = redelivered.clone();
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let serve = tokio::task::spawn_local({
+                let (agent, nats) = (agent.clone(), nats.clone());
+                async move {
+                    serve_js(agent, nats, factory, &test_prefix(), |fut| {
+                        tokio::task::spawn_local(fut);
+                    })
+                    .await
+                }
+            });
+
+            tx.unbounded_send(Ok(original)).unwrap();
+            yield_until(|| agent.prompts.load(Ordering::SeqCst) > 0).await;
+            tx.unbounded_send(Ok(redelivered)).unwrap();
+            for _ in 0..100 {
+                tokio::task::yield_now().await;
+            }
+
+            assert_eq!(
+                agent.prompts.load(Ordering::SeqCst),
+                1,
+                "the redelivery must not reach the agent"
+            );
+            assert!(
+                redelivered_signals.signals().is_empty(),
+                "the redelivery waits for the original"
+            );
+            assert!(nats.published_messages().is_empty());
+
+            agent.release.notify_one();
+            yield_until(|| !redelivered_signals.signals().is_empty()).await;
+            assert_eq!(nats.published_messages(), ["acp.v1.session.s1.agent.response"]);
+            assert_eq!(
+                redelivered_signals.signals(),
+                [AckKindSnapshot::Ack],
+                "the redelivery is settled with the original"
+            );
+
+            drop(tx);
+            serve.await.unwrap().unwrap();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn serve_js_recreates_a_lost_consumer() {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let factory = MockJetStreamConsumerFactory::new();
+    let (lost, lost_tx) = MockJetStreamConsumer::new();
+    let (recreated, recreated_tx) = MockJetStreamConsumer::new();
+    factory.add_consumer(lost);
+    factory.add_consumer(recreated);
+
+    lost_tx
+        .unbounded_send(Err(trogon_nats::mocks::MockError::consumer_deleted()))
+        .unwrap();
+    recreated_tx
+        .unbounded_send(Ok(make_js_msg(
+            "acp.v1.session.s1.agent.load",
+            &LoadSessionRequest::new("s1", "/tmp"),
+            None,
+        )))
+        .unwrap();
+    drop(recreated_tx);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let result = serve_js(Rc::new(agent), nats.clone(), factory.clone(), &test_prefix(), |fut| {
+                tokio::task::spawn_local(fut);
+            })
+            .await;
+            yield_until(|| !nats.published_messages().is_empty()).await;
+
+            assert!(result.is_ok());
+            assert_eq!(factory.get_stream_calls(), ["ACP_COMMANDS", "ACP_COMMANDS"]);
+            assert_js_response_method_not_found(&nats, "acp.v1.session.s1.agent.response");
+        })
+        .await;
+}
+
+/// Runs `serve_js` over a consumer that yields `before_loss` and is then
+/// deleted, and returns the configs it bound the durable with.
+async fn durable_configs_around_a_loss(
+    before_loss: Vec<MockJsMessage>,
+) -> Vec<async_nats::jetstream::consumer::pull::Config> {
+    let nats = MockNatsClient::new();
+    let factory = MockJetStreamConsumerFactory::new();
+    let (lost, lost_tx) = MockJetStreamConsumer::new();
+    let (recreated, recreated_tx) = MockJetStreamConsumer::new();
+    factory.add_consumer(lost);
+    factory.add_consumer(recreated);
+    for msg in before_loss {
+        lost_tx.unbounded_send(Ok(msg)).unwrap();
+    }
+    lost_tx
+        .unbounded_send(Err(trogon_nats::mocks::MockError::consumer_deleted()))
+        .unwrap();
+    drop(recreated_tx);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            serve_js(
+                Rc::new(MockAgent::new()),
+                nats,
+                factory.clone(),
+                &test_prefix(),
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+            )
+            .await
+            .unwrap();
+        })
+        .await;
+    factory.consumer_configs()
+}
+
+fn cancel_delivered_at(stream_sequence: u64) -> MockJsMessage {
+    let reply = format!("$JS.ACK.ACP_COMMANDS.AGENT_COMMANDS.1.{stream_sequence}.1.0.0");
+    make_js_msg(
+        "acp.v1.session.s1.agent.cancel",
+        &CancelNotification::new("s1"),
+        Some(&reply),
+    )
+}
+
+#[tokio::test]
+async fn recreated_consumer_starts_at_the_oldest_command_still_running() {
+    // Both are still running when the durable is lost, so the recreated one
+    // must deliver them again for another host to take over if this one dies.
+    let configs = durable_configs_around_a_loss(vec![cancel_delivered_at(41), cancel_delivered_at(40)]).await;
+
+    let policies: Vec<_> = configs.iter().map(|config| config.deliver_policy).collect();
+    assert_eq!(
+        policies,
+        [
+            DeliverPolicy::New,
+            DeliverPolicy::ByStartSequence { start_sequence: 40 }
+        ]
+    );
+    assert!(
+        configs
+            .iter()
+            .all(|config| config.durable_name.as_deref() == Some(COMMANDS_CONSUMER_DURABLE))
+    );
+}
+
+#[tokio::test]
+async fn recreated_consumer_starts_before_subscribing_when_nothing_arrived() {
+    let before = SystemTime::now();
+    let configs = durable_configs_around_a_loss(Vec::new()).await;
+
+    let DeliverPolicy::ByStartTime { start_time } = configs[1].deliver_policy else {
+        panic!("expected a start time, got {:?}", configs[1].deliver_policy);
+    };
+    let start_time = SystemTime::from(start_time);
+    let earliest = before - RESUME_REWIND;
+    assert!(
+        (earliest..earliest + Duration::from_secs(5)).contains(&start_time),
+        "{start_time:?} is not {RESUME_REWIND:?} before subscribing"
+    );
+}
+
+/// One request of every session-scoped kind, each naming session `s2` in its body.
+fn requests_naming_another_session() -> Vec<(&'static str, serde_json::Value)> {
+    fn body<T: serde::Serialize>(request: T) -> serde_json::Value {
+        serde_json::to_value(request).unwrap()
+    }
+    vec![
+        ("load", body(LoadSessionRequest::new("s2", "/tmp"))),
+        ("prompt", body(PromptRequest::new("s2", vec![]))),
+        ("set_mode", body(SetSessionModeRequest::new("s2", "code"))),
+        (
+            "set_config_option",
+            body(SetSessionConfigOptionRequest::new("s2", "key", "val")),
+        ),
+        ("fork", body(ForkSessionRequest::new("s2", "/tmp"))),
+        ("resume", body(ResumeSessionRequest::new("s2", "/tmp"))),
+        ("close", body(CloseSessionRequest::new("s2"))),
+        ("archive", body(ArchiveSessionRequest::new("s2"))),
+        ("unarchive", body(UnarchiveSessionRequest::new("s2"))),
+        ("status", body(SessionStatusRequest::new("s2"))),
+        ("set_title", body(SetSessionTitleRequest::new("s2", "Renamed"))),
+        ("delete", body(DeleteSessionRequest::new("s2"))),
+    ]
+}
+
+fn assert_session_mismatch_error(nats: &MockNatsClient, terminal: &str) {
+    let error = published_wire_error(nats);
+    assert_eq!(error.code, ErrorCode::INVALID_PARAMS, "{terminal}");
+    assert!(
+        error.message.contains("does not match subject session id"),
+        "{terminal}"
+    );
+}
+
+#[tokio::test]
+async fn dispatch_rejects_request_whose_body_names_another_session() {
+    for (terminal, params) in requests_naming_another_session() {
+        let subject = format!("acp.v1.session.s1.agent.{terminal}");
+        let (nats, agent) = dispatch(&subject, &params, Some("_INBOX.mismatch")).await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.mismatch"], "{terminal}");
+        assert_session_mismatch_error(&nats, terminal);
+        assert!(agent.schema_calls.lock().unwrap().is_empty(), "{terminal}");
+    }
+}
+
+#[tokio::test]
+async fn dispatch_drops_cancel_whose_body_names_another_session() {
+    let (nats, agent) = dispatch("acp.v1.session.s1.agent.cancel", &CancelNotification::new("s2"), None).await;
+
+    assert!(agent.cancelled.lock().unwrap().is_empty());
+    assert!(nats.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn dispatch_js_message_rejects_request_whose_body_names_another_session() {
+    for (terminal, params) in requests_naming_another_session() {
+        let nats = MockNatsClient::new();
+        let agent = MockAgent::new();
+        let js_msg = make_js_msg(&format!("acp.v1.session.s1.agent.{terminal}"), &params, None);
+
+        dispatch_js_message(js_msg.clone(), &agent, &nats, &test_prefix()).await;
+
+        assert_eq!(
+            nats.published_messages(),
+            vec!["acp.v1.session.s1.agent.response"],
+            "{terminal}"
+        );
+        assert_session_mismatch_error(&nats, terminal);
+        assert!(agent.schema_calls.lock().unwrap().is_empty(), "{terminal}");
+        assert_eq!(js_msg.signals(), vec![AckKindSnapshot::Ack], "{terminal}");
+    }
+}
+
+#[tokio::test]
+async fn dispatch_js_message_drops_cancel_whose_body_names_another_session() {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let js_msg = make_js_msg("acp.v1.session.s1.agent.cancel", &CancelNotification::new("s2"), None);
+
+    dispatch_js_message(js_msg.clone(), &agent, &nats, &test_prefix()).await;
+
+    assert!(agent.cancelled.lock().unwrap().is_empty());
+    assert!(nats.published_messages().is_empty());
+    assert_eq!(js_msg.signals(), vec![AckKindSnapshot::Ack]);
 }

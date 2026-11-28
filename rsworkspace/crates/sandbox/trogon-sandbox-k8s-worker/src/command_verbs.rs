@@ -7,10 +7,11 @@ use trogon_sandbox_contract::{
     PollCommandResponse, RestartCommandRequest, RunCommandRequest, RunCommandResponse, RunCommandStartedResponse,
     StopCommandRequest, WriteStdinRequest,
 };
-use trogon_sandbox_protocol::{effective_max_output_bytes, resolve_exec_cwd};
+use trogon_sandbox_protocol::{
+    effective_max_output_bytes, fit_poll_command_response, fit_run_command_response, resolve_exec_cwd,
+};
 use trogon_sandbox_providers::PodExecOutput;
 
-use crate::fit_output::{fit_poll, fit_run};
 use crate::inbound::Inbound;
 use crate::run_command_violation_error::RunCommandViolationError;
 use crate::shell_wrap::shell_wrap;
@@ -91,7 +92,9 @@ pub(crate) async fn run_command(ctx: &VerbContext, msg: Message) {
                 .exec_bounded_for_lease(&request.lease_id, |id| build(id), timeout, max_output_bytes)
                 .await;
             result.map(|result| match result {
-                Ok(output) => fit_run(RunCommandResponse::Completed(output_of(output)), ctx.max_payload()),
+                Ok(output) => {
+                    fit_run_command_response(RunCommandResponse::Completed(output_of(output)), ctx.max_payload())
+                }
                 Err(error) => RunCommandResponse::Denied(LeaseError::Backend {
                     message: error.to_string(),
                 }),
@@ -119,7 +122,8 @@ pub(crate) async fn poll_command(ctx: &VerbContext, msg: Message) {
         PollOutcome::Failed(message) => PollCommandResponse::Denied(LeaseError::Backend { message }),
         PollOutcome::NotFound => PollCommandResponse::NotFound,
     };
-    ctx.reply(inbound.reply, &fit_poll(response, ctx.max_payload())).await;
+    ctx.reply(inbound.reply, &fit_poll_command_response(response, ctx.max_payload()))
+        .await;
 }
 
 pub(crate) async fn kill_command(ctx: &VerbContext, msg: Message) {

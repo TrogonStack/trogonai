@@ -1,5 +1,6 @@
 //! Live check of the egress sidecar hardening against a real Docker daemon: the sidecar's capability set, pids and
-//! swap limits, process privileges, and the proxy's allow and deny behaviour for the workload.
+//! swap limits, process privileges, the proxy's allow and deny behaviour for the workload, and that nothing but TCP
+//! through the proxy leaves the sandbox (no DNS, no other UDP, no ICMP, no IPv6).
 //!
 //! Needs the `sandbox-egress-proxyd:dev` image (built from the `trogon-sandbox-egress-proxy` crate; override with
 //! `SANDBOX_EGRESS_PROXY_IMAGE`) and the cached `busybox:1.36.1` stub image.
@@ -11,11 +12,13 @@
 mod docker_support;
 
 use std::collections::BTreeMap;
+use std::panic::AssertUnwindSafe;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use docker_support::{ALPINE_IMAGE, TestResult, fresh_id, fresh_lease_id};
+use futures::FutureExt as _;
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_sandbox_contract::{
     AllowRange, BootMode, CommandEnv, DeniedDomain, DomainPattern, DomainRule, DomainRuleAction, LeaseId, LeaseRequest,
@@ -32,6 +35,11 @@ const STUB_IMAGE: &str = "busybox:1.36.1";
 const DEFAULT_EGRESS_IMAGE: &str = "sandbox-egress-proxyd:dev";
 const ALLOWED_PORT: u16 = 18081;
 const DENIED_PORT: u16 = 18082;
+/// UDP port the stub server records datagrams on, so a datagram that left the sandbox is visible on the stub.
+const UDP_PROBE_PORT: u16 = 18083;
+const UDP_PROBE_FILE: &str = "/tmp/udp-probe";
+/// A public name the proxy resolves on the workload's behalf.
+const PUBLIC_HOST: &str = "example.com";
 
 /// `SANDBOX_EGRESS_PROXY_IMAGE` overrides the sidecar image under test.
 fn egress_image() -> String {
@@ -76,6 +84,7 @@ impl StubServer {
             "-c",
             &format!(
                 "mkdir /www && echo stub-ok > /www/index.html && \
+                 (nc -l -u -p {UDP_PROBE_PORT} > {UDP_PROBE_FILE} &) && \
                  httpd -p {ALLOWED_PORT} -h /www && httpd -f -p {DENIED_PORT} -h /www"
             ),
         ])
@@ -102,11 +111,18 @@ impl Drop for StubServer {
 }
 
 fn lease_request(stub_ip: &str) -> TestResult<LeaseRequest> {
-    let policy = NetworkPolicy::UserDefined {
-        rules: vec![DomainRule {
+    lease_request_with_rules(
+        stub_ip,
+        vec![DomainRule {
             domain: DomainPattern::new(&format!("{stub_ip}:{ALLOWED_PORT}"))?,
             action: DomainRuleAction::PassThrough,
         }],
+    )
+}
+
+fn lease_request_with_rules(stub_ip: &str, rules: Vec<DomainRule>) -> TestResult<LeaseRequest> {
+    let policy = NetworkPolicy::UserDefined {
+        rules,
         // The proxy refuses private destinations unless an allow range names them. The range admits every port on
         // the stub, so the second port is denied by name.
         allow_ranges: vec![AllowRange::new(format!("{stub_ip}/32"))?],
@@ -117,7 +133,7 @@ fn lease_request(stub_ip: &str) -> TestResult<LeaseRequest> {
     };
     let spec = SandboxSpec::new(SandboxSpecParts {
         image: SandboxImage::Registry {
-            reference: OciImageRef::parse_unqualified(""),
+            reference: OciImageRef::parse_unqualified(ALPINE_IMAGE),
             pull_secret: None,
         },
         workspace: WorkspaceSource::empty(),
@@ -367,4 +383,112 @@ async fn assertions(
     );
 
     Ok(sidecar)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires a Docker daemon, internet access, the sandbox-egress-proxyd:dev image and the cached busybox:1.36.1 image; run with --ignored"]
+async fn only_proxied_tcp_leaves_the_sandbox() -> TestResult {
+    let image = egress_image();
+    if !image_present(&image) {
+        return Err(format!("build {image} from the trogon-sandbox-egress-proxy crate first").into());
+    }
+    let server = JetStreamTestServer::start().await;
+    let provider = build_provider(&server).await?;
+    let stub = StubServer::start("egress-udp-stub")?;
+
+    let rules = vec![
+        DomainRule {
+            domain: DomainPattern::new(&format!("{}:{ALLOWED_PORT}", stub.ip))?,
+            action: DomainRuleAction::PassThrough,
+        },
+        DomainRule {
+            domain: DomainPattern::new(&format!("{PUBLIC_HOST}:80"))?,
+            action: DomainRuleAction::PassThrough,
+        },
+    ];
+    let lease_id = fresh_lease_id();
+    provider
+        .lease(&lease_request_with_rules(&stub.ip, rules)?, &lease_id)
+        .await?;
+
+    // The lease is cancelled even when an assertion panics, so a failing run leaves no containers behind.
+    let outcome = AssertUnwindSafe(egress_bypass_assertions(&provider, &lease_id, &stub))
+        .catch_unwind()
+        .await;
+    provider.cancel(&lease_id).await?;
+    match outcome {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+async fn egress_bypass_assertions(provider: &DockerWorkerProvider, lease: &LeaseId, stub: &StubServer) -> TestResult {
+    let stub_ip = &stub.ip;
+    let mut allowed = (1, String::new());
+    for _ in 0..30 {
+        allowed = sh(
+            provider,
+            lease,
+            &format!("wget -q -T 5 -O - http://{stub_ip}:{ALLOWED_PORT}/"),
+        )
+        .await?;
+        if allowed.0 == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    assert_eq!(
+        allowed.0, 0,
+        "the allowed host must be reachable through the proxy: {}",
+        allowed.1
+    );
+    assert!(allowed.1.contains("stub-ok"), "unexpected body: {}", allowed.1);
+
+    // DNS through the resolver Docker configured, and straight to a public resolver, are both UDP the proxy never
+    // sees.
+    let resolver = sh(provider, lease, &format!("timeout 8 nslookup {PUBLIC_HOST}")).await?;
+    assert_ne!(
+        resolver.0, 0,
+        "DNS through the container's resolver must not leave the sandbox: {}",
+        resolver.1
+    );
+    let public = sh(provider, lease, &format!("timeout 8 nslookup {PUBLIC_HOST} 1.1.1.1")).await?;
+    assert_ne!(
+        public.0, 0,
+        "DNS straight to 1.1.1.1 must not leave the sandbox: {}",
+        public.1
+    );
+
+    // Any other datagram: the stub records what reaches it.
+    sh(
+        provider,
+        lease,
+        &format!("echo udp-probe | timeout 3 nc -u -w 1 {stub_ip} {UDP_PROBE_PORT}"),
+    )
+    .await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let received = docker(&["exec", &stub.name, "cat", UDP_PROBE_FILE]).unwrap_or_default();
+    assert!(
+        !received.contains("udp-probe"),
+        "a UDP datagram reached a host outside the sandbox"
+    );
+
+    let ping = sh(provider, lease, &format!("timeout 5 ping -c 1 -W 2 {stub_ip}")).await?;
+    assert_ne!(ping.0, 0, "ICMP must not leave the sandbox: {}", ping.1);
+
+    // IPv6 is closed too, whether or not this daemon gives the sandbox an IPv6 route.
+    let (_, workload_id) = sh(provider, lease, "hostname").await?;
+    let sidecar = find_sidecar(workload_id.trim())?;
+    let v6 = docker(&["exec", "-u", "0", &sidecar, "ip6tables", "-S", "OUTPUT"]).unwrap_or_default();
+    assert!(v6.contains("-j REJECT"), "no IPv6 egress rule:\n{v6}");
+
+    // A name the policy allows still works: the proxy resolves it for the workload.
+    let named = sh(provider, lease, &format!("wget -q -T 10 -O - http://{PUBLIC_HOST}/")).await?;
+    assert_eq!(
+        named.0, 0,
+        "an allowed name must be reachable through the proxy: {}",
+        named.1
+    );
+    assert!(named.1.contains("Example Domain"), "unexpected body: {}", named.1);
+    Ok(())
 }

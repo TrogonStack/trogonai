@@ -154,7 +154,7 @@ fn example_network_policy(
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: denied,
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }

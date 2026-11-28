@@ -71,6 +71,18 @@ The docker worker applies these defaults to every sandbox container. They are wo
 
 The egress sidecar keeps only `NET_ADMIN`, `SETUID`, `SETGID` and `SETPCAP`, which it needs to install its rules and drop to the proxy user.
 
+For a `UserDefined` policy the sidecar's firewall, in the network namespace it shares with the workload, allows:
+
+| Traffic | IPv4 | IPv6 |
+| --- | --- | --- |
+| Workload TCP | Redirected to the proxy | Rejected |
+| Workload UDP, DNS included, and ICMP | Rejected | Rejected |
+| Proxy uid TCP, and UDP to port 53 | Allowed | Allowed |
+| Loopback to `127.0.0.1` / `::1` | Allowed | Allowed |
+| Replies on connections opened from outside (published ports) | Allowed | Allowed |
+
+The workload resolves names through the proxy: its `HTTP_PROXY`, `HTTPS_PROXY` (and lowercase forms) carry the sidecar's explicit listener at `127.0.0.1:3129` with a per-lease password, and `NO_PROXY` covers loopback. A launch whose sidecar does not confirm the firewall within 15 seconds fails, and both containers are killed. When the namespace has no IPv6 stack the IPv6 rules are skipped, since there is no IPv6 egress to refuse.
+
 Per-lease overrides go in `platform.container` (`ContainerOverrides`: `pids_limit`, `writable_rootfs`, `extra_capabilities`, `shm_size_mib`). Only workers that declare `supports_hardening_overrides` accept them, and the broker denies them for every tenant unless the tenant is listed in `--hardening-override-tenants` (`SANDBOX_HARDENING_OVERRIDE_TENANTS`, comma separated).
 
 ## Related pages

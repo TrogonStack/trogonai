@@ -1,4 +1,7 @@
-use acp_nats::jetstream::consumers::commands_observer;
+use acp_nats::constants::RESUME_REWIND;
+use acp_nats::jetstream::consumers::{
+    COMMANDS_CONSUMER_DURABLE, agent_commands_consumer, resumed_agent_commands_consumer,
+};
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
@@ -10,19 +13,29 @@ use agent_client_protocol::v1::schema::{
     ArchiveSessionRequest, AuthStatusRequest, AuthenticateRequest, CancelNotification, CloseSessionRequest,
     DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
     ListProvidersRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest,
-    ResumeSessionRequest, SessionStatusRequest, SetProviderRequest, SetSessionConfigOptionRequest,
+    ResumeSessionRequest, SessionId, SessionStatusRequest, SetProviderRequest, SetSessionConfigOptionRequest,
     SetSessionModeRequest, SetSessionTitleRequest, UnarchiveSessionRequest,
 };
 use async_nats::Message;
 use async_nats::jetstream::AckKind;
+use async_nats::jetstream::consumer::{DeliverPolicy, pull};
+use async_nats::jetstream::context::GetStreamError;
 #[cfg(test)]
 use bytes::Bytes;
 use futures::StreamExt;
-use futures::future::LocalBoxFuture;
+use futures::future::{Either, LocalBoxFuture, Ready, ready};
 use serde::de::Error;
+use serde_json::value::RawValue;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::time::Duration;
-use tracing::{info, warn};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+use tracing::{debug, info, warn};
+use trogon_nats::jetstream::{
+    ConsumerLoss, JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetOrCreateConsumer, JetStreamGetStream, JsAck,
+    JsAckWith, JsDispatchMessage, JsMessageRef, is_get_stream_not_found, stream_sequence,
+};
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 
 #[derive(Debug, thiserror::Error)]
@@ -31,6 +44,8 @@ pub enum ConnectionError {
     Subscribe(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("jetstream error: {0}")]
     JetStream(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("stream {stream} no longer exists; restart the host to provision it again")]
+    CommandsStreamMissing { stream: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -49,7 +64,9 @@ enum DispatchError {
     Wire(#[from] acp_nats::wire::WireError),
 }
 
-use crate::constants::{DEFAULT_OPERATION_TIMEOUT, KEEPALIVE_INTERVAL};
+use crate::constants::{
+    DEFAULT_OPERATION_TIMEOUT, KEEPALIVE_INTERVAL, RESUBSCRIBE_DEADLINE, RESUBSCRIBE_MAX_DELAY, RESUBSCRIBE_MIN_DELAY,
+};
 
 pub struct AgentSideNatsConnection<N> {
     nats: N,
@@ -88,8 +105,10 @@ where
         spawn: impl Fn(LocalBoxFuture<'static, ()>) + Copy + 'static,
     ) -> (Self, impl std::future::Future<Output = Result<(), ConnectionError>>)
     where
-        J: JetStreamGetStream + 'static,
+        J: JetStreamGetStream<Error = GetStreamError> + 'static,
+        J::Stream: JetStreamGetOrCreateConsumer,
         trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
+        CommandsMessagesError<J>: ConsumerLoss,
     {
         let nats_for_serve = nats.clone();
         let nats_for_js = nats.clone();
@@ -220,9 +239,9 @@ where
 async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync>(msg: Message, agent: &A, nats: &N) {
     let subject = msg.subject.as_str();
 
-    let parsed = match parse_agent_subject(subject) {
-        Some(p) => p,
-        None => return,
+    let Some(parsed) = parse_agent_subject(subject) else {
+        reply_method_not_found(&msg, nats).await;
+        return;
     };
 
     let (result, session_id) = match parsed {
@@ -231,7 +250,7 @@ async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync
             (r, None)
         }
         ParsedAgentSubject::Session { session_id, method } => {
-            let r = dispatch_session(method, &msg, agent, nats).await;
+            let r = dispatch_session(method, &session_id, &msg, agent, nats).await;
             (r, Some(session_id))
         }
     };
@@ -327,14 +346,19 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
             )
             .await
         }
-        GlobalAgentMethod::Ext(_) => {
+        GlobalAgentMethod::Ext(ref name) => {
+            // `method` is `#[serde(skip)]` in the ACP schema, so the body carries only
+            // the params; the subject token carries the exact name.
             if msg.reply.is_some() {
-                handle_jsonrpc_request(msg, method.protocol_method().as_str(), nats, |req: ExtRequest| {
-                    agent.ext_method(req)
+                handle_jsonrpc_request(msg, &name.protocol_method(), nats, |params: Arc<RawValue>| {
+                    agent.ext_method(ExtRequest::new(name.as_str(), params))
                 })
                 .await
             } else {
-                handle_notification(msg, |req: ExtNotification| agent.ext_notification(req)).await
+                handle_notification(msg, |params: Arc<RawValue>| {
+                    agent.ext_notification(ExtNotification::new(name.as_str(), params))
+                })
+                .await
             }
         }
     }
@@ -342,33 +366,45 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
 
 async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync>(
     method: SessionAgentMethod,
+    session_id: &AcpSessionId,
     msg: &Message,
     agent: &A,
     nats: &N,
 ) -> Result<(), DispatchError> {
     match method {
         SessionAgentMethod::Load => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: LoadSessionRequest| {
-                agent.load_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: LoadSessionRequest| agent.load_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Prompt => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: PromptRequest| {
-                agent.prompt(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: PromptRequest| agent.prompt(req)),
+            )
             .await
         }
         SessionAgentMethod::Cancel => {
-            handle_wire_notification(msg, method.protocol_method(), |req: CancelNotification| {
-                agent.cancel(req)
-            })
+            handle_wire_notification(
+                msg,
+                method.protocol_method(),
+                in_session(session_id, |req: CancelNotification| agent.cancel(req)),
+            )
             .await
         }
         SessionAgentMethod::SetMode => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: SetSessionModeRequest| {
-                agent.set_session_mode(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: SetSessionModeRequest| agent.set_session_mode(req)),
+            )
             .await
         }
         SessionAgentMethod::SetConfigOption => {
@@ -376,59 +412,177 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync
                 msg,
                 method.protocol_method(),
                 nats,
-                |req: SetSessionConfigOptionRequest| agent.set_session_config_option(req),
+                in_session(session_id, |req: SetSessionConfigOptionRequest| {
+                    agent.set_session_config_option(req)
+                }),
             )
             .await
         }
         SessionAgentMethod::Fork => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: ForkSessionRequest| {
-                agent.fork_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: ForkSessionRequest| agent.fork_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Resume => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: ResumeSessionRequest| {
-                agent.resume_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: ResumeSessionRequest| agent.resume_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Close => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: CloseSessionRequest| {
-                agent.close_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: CloseSessionRequest| agent.close_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Archive => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: ArchiveSessionRequest| {
-                agent.archive_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: ArchiveSessionRequest| agent.archive_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Unarchive => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: UnarchiveSessionRequest| {
-                agent.unarchive_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: UnarchiveSessionRequest| agent.unarchive_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Status => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: SessionStatusRequest| {
-                agent.session_status(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: SessionStatusRequest| agent.session_status(req)),
+            )
             .await
         }
         SessionAgentMethod::SetTitle => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: SetSessionTitleRequest| {
-                agent.set_session_title(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: SetSessionTitleRequest| agent.set_session_title(req)),
+            )
             .await
         }
         SessionAgentMethod::Delete => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: DeleteSessionRequest| {
-                agent.delete_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: DeleteSessionRequest| agent.delete_session(req)),
+            )
             .await
         }
     }
+}
+
+/// Requests and notifications that name the session they act on in their body.
+trait SessionScoped {
+    fn session_id(&self) -> &SessionId;
+}
+
+macro_rules! session_scoped {
+    ($($request:ty),+ $(,)?) => {
+        $(impl SessionScoped for $request {
+            fn session_id(&self) -> &SessionId {
+                &self.session_id
+            }
+        })+
+    };
+}
+
+session_scoped!(
+    LoadSessionRequest,
+    PromptRequest,
+    CancelNotification,
+    SetSessionModeRequest,
+    SetSessionConfigOptionRequest,
+    ForkSessionRequest,
+    ResumeSessionRequest,
+    CloseSessionRequest,
+    ArchiveSessionRequest,
+    UnarchiveSessionRequest,
+    SessionStatusRequest,
+    SetSessionTitleRequest,
+    DeleteSessionRequest,
+);
+
+/// Runs `handler` only when the body's `sessionId` is the session the subject
+/// names. The subject is what NATS permissions authorize, so a body naming
+/// another session is refused with invalid params instead of acting on it.
+fn in_session<'a, ReqT, Resp, F>(
+    subject_session: &'a AcpSessionId,
+    handler: impl FnOnce(ReqT) -> F + 'a,
+) -> impl FnOnce(ReqT) -> Either<F, Ready<agent_client_protocol::Result<Resp>>> + 'a
+where
+    ReqT: SessionScoped,
+    F: std::future::Future<Output = agent_client_protocol::Result<Resp>>,
+{
+    move |request| {
+        let body_session = request.session_id();
+        if body_session.0.as_ref() == subject_session.as_str() {
+            return Either::Left(handler(request));
+        }
+        warn!(
+            subject_session_id = subject_session.as_str(),
+            body_session_id = %body_session,
+            "Rejecting session request whose body names another session"
+        );
+        Either::Right(ready(Err(agent_client_protocol::Error::new(
+            agent_client_protocol::ErrorCode::INVALID_PARAMS,
+            format!("params.sessionId ({body_session}) does not match subject session id ({subject_session})"),
+        ))))
+    }
+}
+
+/// Answers a request on a subject that names no method this agent serves, so
+/// the caller gets `-32601` instead of waiting out its timeout. Notifications
+/// (no reply subject) are dropped.
+async fn reply_method_not_found<N: PublishClient + FlushClient>(msg: &Message, nats: &N) {
+    let subject = msg.subject.as_str();
+    let Some(reply_to) = msg.reply.as_deref() else {
+        debug!(subject, "Ignoring notification on unrecognized agent subject");
+        return;
+    };
+    let id = msg
+        .headers
+        .as_ref()
+        .map_or(jsonrpc_nats::ResponseId::Null, response_id_from_request_headers);
+    let encoded = encode_agent_error(id, &agent_client_protocol::Error::method_not_found());
+    let _ = reply_wire(nats, reply_to, encoded)
+        .await
+        .inspect_err(|error| warn!(subject, %error, "Failed to reply to unrecognized agent subject"));
+}
+
+/// Maps a request decode failure to its JSON-RPC error: a body that is not
+/// JSON at all is `-32700` Parse error; anything else is `-32602` Invalid params.
+fn request_decode_error(error: &acp_nats::wire::WireError) -> agent_client_protocol::Error {
+    let code = match error {
+        acp_nats::wire::WireError::Codec(jsonrpc_nats::CodecError::Deserialize(json))
+            if json.is_syntax() || json.is_eof() =>
+        {
+            agent_client_protocol::ErrorCode::PARSE_ERROR
+        }
+        _ => agent_client_protocol::ErrorCode::INVALID_PARAMS,
+    };
+    agent_client_protocol::Error::new(code, format!("Failed to deserialize request: {error}"))
 }
 
 async fn reply_wire<N: PublishClient + FlushClient>(
@@ -466,12 +620,8 @@ where
     let request: ReqT = match acp_nats::wire::decode_request_params(method, &headers, &msg.payload) {
         Ok(req) => req,
         Err(e) => {
-            let error = agent_client_protocol::Error::new(
-                agent_client_protocol::ErrorCode::INVALID_PARAMS,
-                format!("Failed to deserialize request: {e}"),
-            );
             let id = response_id_from_request_headers(&headers);
-            let encoded = encode_agent_error(id, &error);
+            let encoded = encode_agent_error(id, &request_decode_error(&e));
             let _ = reply_wire(nats, reply_to, encoded).await;
             return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
                 "{e}"
@@ -518,64 +668,16 @@ where
     handler(request).await.map_err(DispatchError::NotificationHandler)
 }
 
-use trogon_nats::jetstream::{
-    JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JsAckWith, JsDispatchMessage,
-};
-
-async fn handle_jsonrpc_request_with_keepalive<N, Resp, ReqT, F, M>(
-    msg: &Message,
-    method: &str,
-    nats: &N,
-    js_msg: &M,
-    handler: impl FnOnce(ReqT) -> F,
-) -> Result<(), DispatchError>
-where
-    N: PublishClient + FlushClient,
-    ReqT: serde::de::DeserializeOwned,
-    F: std::future::Future<Output = agent_client_protocol::Result<Resp>>,
-    Resp: serde::Serialize,
-    M: JsAckWith,
-{
-    let reply_to = msg.reply.as_deref().ok_or(DispatchError::NoReplySubject)?;
-    let headers = msg.headers.clone().unwrap_or_default();
-
-    let request: ReqT = match acp_nats::wire::decode_request_params(method, &headers, &msg.payload) {
-        Ok(req) => req,
-        Err(e) => {
-            let error = agent_client_protocol::Error::new(
-                agent_client_protocol::ErrorCode::INVALID_PARAMS,
-                format!("Failed to deserialize request: {e}"),
-            );
-            let id = response_id_from_request_headers(&headers);
-            let encoded = encode_agent_error(id, &error);
-            let _ = reply_wire(nats, reply_to, encoded).await;
-            return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
-                "{e}"
-            ))));
-        }
-    };
-
-    let response_id = response_id_from_request_headers(&headers);
-    let handler_fut = handler(request);
-    tokio::pin!(handler_fut);
-
+/// Runs `fut` while sending JetStream in-progress acks every
+/// [`KEEPALIVE_INTERVAL`], so a long-running handler is not redelivered.
+async fn with_keepalive<M: JsAckWith, F: std::future::Future>(js_msg: &M, fut: F) -> F::Output {
+    tokio::pin!(fut);
     let mut keepalive = tokio::time::interval(KEEPALIVE_INTERVAL);
     keepalive.tick().await;
 
     loop {
         tokio::select! {
-            result = &mut handler_fut => {
-                return match result {
-                    Ok(resp) => {
-                        let encoded = encode_success(response_id, &resp)?;
-                        reply_wire(nats, reply_to, encoded).await
-                    }
-                    Err(err) => {
-                        let encoded = encode_agent_error(response_id, &err);
-                        reply_wire(nats, reply_to, encoded).await
-                    }
-                };
-            }
+            output = &mut fut => return output,
             _ = keepalive.tick() => {
                 let _ = js_msg.ack_with(AckKind::Progress).await
                     .inspect_err(|e| warn!(error = %e, "Failed to send in_progress keepalive"));
@@ -593,43 +695,52 @@ async fn serve_js<N, J, A>(
 ) -> Result<(), ConnectionError>
 where
     N: PublishClient + FlushClient + Clone + 'static,
-    J: JetStreamGetStream + 'static,
+    J: JetStreamGetStream<Error = GetStreamError> + 'static,
+    J::Stream: JetStreamGetOrCreateConsumer,
     trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
+    CommandsMessagesError<J>: ConsumerLoss,
     A: AgentHandler + Sync + 'static,
 {
     let stream_name = commands_stream_name(prefix);
-    let config = commands_observer();
 
     info!(stream = %stream_name, "Starting JetStream consumer for COMMANDS stream");
 
-    let stream = js
-        .get_stream(&stream_name)
-        .await
-        .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
-
-    let consumer = stream
-        .create_consumer(config)
-        .await
-        .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
-
-    let mut messages = consumer
-        .messages()
-        .await
-        .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
+    let resume = CommandsResume::starting_now();
+    let mut messages = subscribe_commands(&js, &stream_name, agent_commands_consumer()).await?;
 
     let nats = Rc::new(nats);
-
     let prefix = Rc::new(prefix.clone());
 
     while let Some(msg_result) = messages.next().await {
         match msg_result {
             Ok(js_msg) => {
+                let (js_msg, settle) = match resume.receive(js_msg) {
+                    Received::New(js_msg, settle) => (js_msg, settle),
+                    // Held and settled with the original (see `CommandsResume`).
+                    Received::Running => {
+                        info!("Command redelivered while still running; not dispatching it again");
+                        continue;
+                    }
+                    Received::Settled(js_msg) => {
+                        info!(subject = %js_msg.message().subject, "Command replayed after this host settled it; acking it");
+                        ack_redelivered(&js_msg).await;
+                        continue;
+                    }
+                };
                 let agent = agent.clone();
                 let nats = nats.clone();
                 let prefix = prefix.clone();
                 spawn(Box::pin(async move {
                     dispatch_js_message(js_msg, agent.as_ref(), nats.as_ref(), &prefix).await;
+                    if let Some(settle) = settle {
+                        settle.finish().await;
+                    }
                 }));
+            }
+            Err(e) if e.consumer_lost() => {
+                warn!(error = %e, "COMMANDS consumer is gone; recreating it");
+                let config = resumed_agent_commands_consumer(resume.start_replay());
+                messages = resubscribe_commands(&js, &stream_name, config).await?;
             }
             Err(e) => {
                 warn!(error = %e, "JetStream consumer error");
@@ -639,6 +750,258 @@ where
 
     info!("JetStream COMMANDS consumer ended");
     Ok(())
+}
+
+type CommandsConsumer<J> = <<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer;
+type CommandsMessages<J> = <CommandsConsumer<J> as JetStreamConsumer>::Messages;
+/// The error the COMMANDS consumer's message stream yields for a JetStream
+/// client `J`. The JetStream constructors bound it by `ConsumerLoss`, so
+/// generic callers name it in their own bounds.
+pub type CommandsMessagesError<J> = <CommandsConsumer<J> as JetStreamConsumer>::MessagesError;
+
+/// Opens the stream, creates or updates the durable consumer from `config`,
+/// and starts pulling from it.
+///
+/// An update that NATS refuses binds to the existing durable as it is. NATS
+/// will not move a durable's start position, and the start positions here
+/// differ: `New` at startup, the [`CommandsResume`] point on a recreate, and
+/// whatever another host recreated it with. Updating when NATS allows it still
+/// rolls out changes such as a new `ack_wait` to a durable that already exists.
+async fn subscribe_commands<J>(
+    js: &J,
+    stream_name: &str,
+    config: pull::Config,
+) -> Result<CommandsMessages<J>, ConnectionError>
+where
+    J: JetStreamGetStream<Error = GetStreamError>,
+    J::Stream: JetStreamGetOrCreateConsumer,
+{
+    let stream = js.get_stream(stream_name).await.map_err(|e| {
+        if is_get_stream_not_found(&e) {
+            ConnectionError::CommandsStreamMissing {
+                stream: stream_name.to_owned(),
+            }
+        } else {
+            ConnectionError::JetStream(Box::new(e))
+        }
+    })?;
+
+    let consumer = match stream.create_consumer(config.clone()).await {
+        Ok(consumer) => consumer,
+        Err(error) => {
+            debug!(%error, "COMMANDS consumer update refused; binding to the existing one");
+            stream
+                .get_or_create_consumer(COMMANDS_CONSUMER_DURABLE, config)
+                .await
+                .map_err(|e| ConnectionError::JetStream(Box::new(e)))?
+        }
+    };
+
+    consumer
+        .messages()
+        .await
+        .map_err(|e| ConnectionError::JetStream(Box::new(e)))
+}
+
+/// Recreates the consumer after it was lost, starting from `config`'s deliver
+/// policy (see [`CommandsResume`]).
+///
+/// The durable is recreated in place, since its config lives here; one that
+/// another host recreated first, or that was never really gone, is bound to
+/// as it is (see [`subscribe_commands`]). The stream is not: its subjects,
+/// retention and limits are provisioned by the host at startup, together with the other ACP streams, which were most likely lost
+/// with it. So a missing stream ends serving with
+/// [`ConnectionError::CommandsStreamMissing`], and the supervisor's restart
+/// provisions everything again.
+///
+/// Other failures (NATS unreachable) are retried with backoff for up to
+/// [`RESUBSCRIBE_DEADLINE`], then serving ends so the supervisor restarts the
+/// host.
+async fn resubscribe_commands<J>(
+    js: &J,
+    stream_name: &str,
+    config: pull::Config,
+) -> Result<CommandsMessages<J>, ConnectionError>
+where
+    J: JetStreamGetStream<Error = GetStreamError>,
+    J::Stream: JetStreamGetOrCreateConsumer,
+{
+    let deadline = tokio::time::Instant::now() + RESUBSCRIBE_DEADLINE;
+    let mut delay = RESUBSCRIBE_MIN_DELAY;
+    loop {
+        match subscribe_commands(js, stream_name, config.clone()).await {
+            Ok(messages) => {
+                info!(stream = stream_name, "Recreated the COMMANDS consumer");
+                return Ok(messages);
+            }
+            Err(e @ ConnectionError::JetStream(_)) if tokio::time::Instant::now() + delay < deadline => {
+                warn!(error = %e, retry_in = ?delay, "Failed to recreate the COMMANDS consumer");
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(RESUBSCRIBE_MAX_DELAY);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Where a recreated COMMANDS durable starts, and which of the commands it
+/// replays this host already has.
+///
+/// It starts at the oldest command this host is still running, or right after
+/// the highest stream sequence it saw when none is running. A running command
+/// must be on the new durable: an ack on the lost one settles nothing, and if
+/// this host dies first, only the new durable's `ack_wait` hands the command
+/// to another host. Before any command arrived, it starts at the time this
+/// host subscribed, less [`RESUME_REWIND`] for clock skew between host and
+/// server, which may run a command acked just before then a second time.
+///
+/// A delivery of a command this host is running (a replay, or acks lost in a
+/// partition) is held and acked with the original; one it already settled is
+/// acked without running it again. Commands that another host held unsettled
+/// are delivered again, as they would be after that host's `ack_wait`.
+///
+/// Per host on purpose: a command left unsettled by a host that stopped or
+/// crashed must run on the next host, which starts with nothing tracked.
+struct CommandsResume<M> {
+    subscribed_at: SystemTime,
+    deliveries: Rc<RefCell<Deliveries<M>>>,
+}
+
+struct Deliveries<M> {
+    last_sequence: Option<u64>,
+    /// Commands from the oldest running one on. Settled ones are kept while a
+    /// replay may still deliver them.
+    by_sequence: BTreeMap<u64, Delivery<M>>,
+    /// The highest sequence a recreated durable replays, while it does.
+    replaying_through: Option<u64>,
+}
+
+enum Delivery<M> {
+    /// Not settled yet, with the latest redelivery to ack along with it.
+    /// Boxed so settled entries stay small.
+    Running(Option<Box<M>>),
+    Settled,
+}
+
+/// What to do with a command the COMMANDS consumer delivered.
+enum Received<M> {
+    /// Not seen before: dispatch it, then [`Settle::finish`] it.
+    New(M, Option<Settle<M>>),
+    /// Still running here; held to settle with the original.
+    Running,
+    /// Already settled here: ack it without running it again.
+    Settled(M),
+}
+
+impl<M: JsDispatchMessage> CommandsResume<M> {
+    fn starting_now() -> Self {
+        Self {
+            subscribed_at: SystemTime::now(),
+            deliveries: Rc::new(RefCell::new(Deliveries {
+                last_sequence: None,
+                by_sequence: BTreeMap::new(),
+                replaying_through: None,
+            })),
+        }
+    }
+
+    fn receive(&self, js_msg: M) -> Received<M> {
+        let Some(sequence) = stream_sequence(js_msg.message()) else {
+            return Received::New(js_msg, None);
+        };
+        let mut deliveries = self.deliveries.borrow_mut();
+        deliveries.last_sequence = deliveries.last_sequence.max(Some(sequence));
+        let received = match deliveries.by_sequence.get_mut(&sequence) {
+            Some(Delivery::Running(held)) => {
+                *held = Some(Box::new(js_msg));
+                Received::Running
+            }
+            Some(Delivery::Settled) => Received::Settled(js_msg),
+            None => {
+                deliveries.by_sequence.insert(sequence, Delivery::Running(None));
+                Received::New(
+                    js_msg,
+                    Some(Settle {
+                        deliveries: self.deliveries.clone(),
+                        sequence,
+                    }),
+                )
+            }
+        };
+        if deliveries.replaying_through.is_some_and(|through| sequence >= through) {
+            deliveries.replaying_through = None;
+            deliveries.prune();
+        }
+        received
+    }
+
+    /// The deliver policy for recreating the lost durable. Starts the replay
+    /// it delivers, so call it once per recreate.
+    fn start_replay(&self) -> DeliverPolicy {
+        let mut deliveries = self.deliveries.borrow_mut();
+        let oldest_running = deliveries
+            .by_sequence
+            .iter()
+            .find_map(|(sequence, delivery)| matches!(delivery, Delivery::Running(_)).then_some(*sequence));
+        if oldest_running.is_some() {
+            deliveries.replaying_through = deliveries.last_sequence;
+        }
+        match oldest_running.or_else(|| deliveries.last_sequence.map(|sequence| sequence.saturating_add(1))) {
+            Some(start_sequence) => DeliverPolicy::ByStartSequence { start_sequence },
+            None => DeliverPolicy::ByStartTime {
+                start_time: self
+                    .subscribed_at
+                    .checked_sub(RESUME_REWIND)
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
+                    .into(),
+            },
+        }
+    }
+}
+
+impl<M> Deliveries<M> {
+    /// Drops the settled commands before the oldest running one.
+    fn prune(&mut self) {
+        while let Some(entry) = self.by_sequence.first_entry()
+            && matches!(entry.get(), Delivery::Settled)
+        {
+            entry.remove();
+        }
+    }
+}
+
+/// Marks a dispatched command settled.
+struct Settle<M> {
+    deliveries: Rc<RefCell<Deliveries<M>>>,
+    sequence: u64,
+}
+
+impl<M: JsAck> Settle<M> {
+    /// Call once the command is settled; also acks a redelivery held meanwhile.
+    async fn finish(self) {
+        let held = {
+            let mut deliveries = self.deliveries.borrow_mut();
+            let held = match deliveries.by_sequence.insert(self.sequence, Delivery::Settled) {
+                Some(Delivery::Running(held)) => held,
+                _ => None,
+            };
+            if deliveries.replaying_through.is_none() {
+                deliveries.prune();
+            }
+            held
+        };
+        if let Some(redelivered) = held {
+            ack_redelivered(redelivered.as_ref()).await;
+        }
+    }
+}
+
+/// Acks a delivery of a command this host already ran or is running.
+async fn ack_redelivered(js_msg: &impl JsAck) {
+    let _ = js_msg
+        .ack()
+        .await
+        .inspect_err(|e| warn!(error = %e, "Failed to ack redelivered command"));
 }
 
 async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + Sync, M: JsDispatchMessage>(
@@ -690,91 +1053,18 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
     let subject = msg.subject.as_str();
 
     let result = match method {
-        SessionAgentMethod::Load => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: LoadSessionRequest| {
-                agent.load_session(req)
-            })
-            .await
-        }
         SessionAgentMethod::Prompt => {
-            handle_jsonrpc_request_with_keepalive(
-                &msg,
-                method.protocol_method(),
-                nats,
-                &js_msg,
-                |req: PromptRequest| agent.prompt(req),
-            )
-            .await
-        }
-        SessionAgentMethod::Cancel => {
-            handle_wire_notification(&msg, method.protocol_method(), |req: CancelNotification| {
-                agent.cancel(req)
-            })
-            .await
-        }
-        SessionAgentMethod::SetMode => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: SetSessionModeRequest| {
-                agent.set_session_mode(req)
-            })
-            .await
-        }
-        SessionAgentMethod::SetConfigOption => {
             handle_jsonrpc_request(
                 &msg,
                 method.protocol_method(),
                 nats,
-                |req: SetSessionConfigOptionRequest| agent.set_session_config_option(req),
+                in_session(&session_id, |req: PromptRequest| {
+                    with_keepalive(&js_msg, agent.prompt(req))
+                }),
             )
             .await
         }
-        SessionAgentMethod::Fork => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: ForkSessionRequest| {
-                agent.fork_session(req)
-            })
-            .await
-        }
-        SessionAgentMethod::Resume => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: ResumeSessionRequest| {
-                agent.resume_session(req)
-            })
-            .await
-        }
-        SessionAgentMethod::Close => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: CloseSessionRequest| {
-                agent.close_session(req)
-            })
-            .await
-        }
-        SessionAgentMethod::Archive => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: ArchiveSessionRequest| {
-                agent.archive_session(req)
-            })
-            .await
-        }
-        SessionAgentMethod::Unarchive => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: UnarchiveSessionRequest| {
-                agent.unarchive_session(req)
-            })
-            .await
-        }
-        SessionAgentMethod::Status => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: SessionStatusRequest| {
-                agent.session_status(req)
-            })
-            .await
-        }
-        SessionAgentMethod::SetTitle => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: SetSessionTitleRequest| {
-                agent.set_session_title(req)
-            })
-            .await
-        }
-        SessionAgentMethod::Delete => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: DeleteSessionRequest| {
-                agent.delete_session(req)
-            })
-            .await
-        }
+        other => dispatch_session(other, &session_id, &msg, agent, nats).await,
     };
 
     match &result {

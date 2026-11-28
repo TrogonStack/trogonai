@@ -23,6 +23,8 @@ user-visible changes, migration work, compatibility impact, and verification
 status for that release.
 
 There are no published version notes in this documentation snapshot yet.
+Changes merged since the last release, with their migration work, are listed in
+[unreleased](/releases/unreleased) until a versioned note picks them up.
 
 ## Keeping up to date
 
