@@ -31,9 +31,16 @@ for path in "${unused[@]}"; do
   sudo rm -rf "$path" &
   pids+=("$!")
 done
+# Under set -e a bare failing wait would exit while the other deletions are
+# still running, so every one is waited on before the step reports a failure.
+failed=0
 for pid in "${pids[@]}"; do
-  wait "$pid"
+  wait "$pid" || failed=1
 done
+if ((failed)); then
+  echo "::error::Could not remove every unused toolchain directory."
+  exit 1
+fi
 
 sudo docker image prune --all --force >/dev/null
 
