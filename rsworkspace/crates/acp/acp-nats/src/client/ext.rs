@@ -1,5 +1,6 @@
 use crate::client::rpc_reply;
 use crate::client_handler::ClientHandler;
+use crate::ext_method_name::ExtMethodName;
 use crate::nats::{FlushClient, PublishClient};
 use crate::wire::{decode_notification_params, decode_request_params, response_id_from_request_headers};
 use agent_client_protocol::ErrorCode;
@@ -40,7 +41,7 @@ pub async fn handle<N: PublishClient + FlushClient, C: ClientHandler + Sync>(
     client: &C,
     reply: Option<&str>,
     nats: &N,
-    ext_method_name: &str,
+    ext_method_name: &ExtMethodName,
 ) {
     match reply {
         Some(reply_to) => {
@@ -58,9 +59,9 @@ async fn handle_request<N: PublishClient + FlushClient, C: ClientHandler + Sync>
     client: &C,
     reply_to: &str,
     nats: &N,
-    ext_method_name: &str,
+    ext_method_name: &ExtMethodName,
 ) {
-    let wire_method = format!("_{ext_method_name}");
+    let wire_method = ext_method_name.protocol_method();
     let response_id = response_id_from_request_headers(headers);
     match forward_request(headers, payload, client, ext_method_name, &wire_method).await {
         Ok(response) => {
@@ -78,9 +79,9 @@ async fn handle_notification<C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,
-    ext_method_name: &str,
+    ext_method_name: &ExtMethodName,
 ) {
-    let wire_method = format!("_{ext_method_name}");
+    let wire_method = ext_method_name.protocol_method();
     let params: Arc<RawValue> = match decode_notification_params(&wire_method, headers, payload) {
         Ok(v) => v,
         Err(e) => {
@@ -89,7 +90,7 @@ async fn handle_notification<C: ClientHandler + Sync>(
         }
     };
 
-    let notification = ExtNotification::new(ext_method_name, params);
+    let notification = ExtNotification::new(ext_method_name.as_str(), params);
     if let Err(e) = client.ext_notification(notification).await {
         warn!(error = %e, "Failed to send ext notification to client");
     }
@@ -99,12 +100,12 @@ async fn forward_request<C: ClientHandler + Sync>(
     headers: &HeaderMap,
     payload: &[u8],
     client: &C,
-    ext_method_name: &str,
+    ext_method_name: &ExtMethodName,
     wire_method: &str,
 ) -> Result<ExtResponse, ExtError> {
     let params: Arc<RawValue> =
         decode_request_params(wire_method, headers, payload).map_err(|e| ExtError::MalformedJson(e.to_string()))?;
-    let request = ExtRequest::new(ext_method_name, params);
+    let request = ExtRequest::new(ext_method_name.as_str(), params);
     client.ext_method(request).await.map_err(ExtError::ClientError)
 }
 

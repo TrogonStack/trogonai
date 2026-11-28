@@ -4,5 +4,6 @@ workspace_crate(
     compile_data = ["README.md"],
     integration_tests = {
         "commands_replay": {"tags": ["requires-network"]},
+        "ext_method_name_round_trip": {"tags": ["requires-network"]},
     },
 )

@@ -62,7 +62,7 @@ impl GlobalAgentMethod {
             Self::ProvidersList => "providers/list".to_string(),
             Self::ProvidersSet => "providers/set".to_string(),
             Self::ProvidersDisable => "providers/disable".to_string(),
-            Self::Ext(name) => format!("_{}", name.as_str()),
+            Self::Ext(name) => name.protocol_method().into_owned(),
         }
     }
 
@@ -193,14 +193,15 @@ pub enum ClientMethod {
     TerminalWaitForExit,
     ElicitationCreate,
     ElicitationComplete,
-    Ext(String),
+    Ext(ExtMethodName),
 }
 
 impl ClientMethod {
     /// ACP protocol method for the canonical JSON-RPC body (ADR#0056).
     ///
     /// Subject terminals are the dotted projection of this string (except
-    /// [`Self::Ext`], which projects to `ext.{name}` while the body uses `_{name}`).
+    /// [`Self::Ext`], which projects to `ext.{name}` while the body uses the name with
+    /// a leading `_`, added only when missing).
     pub fn protocol_method(&self) -> String {
         match self {
             Self::FsReadTextFile => "fs/read_text_file".to_string(),
@@ -214,7 +215,7 @@ impl ClientMethod {
             Self::TerminalWaitForExit => "terminal/wait_for_exit".to_string(),
             Self::ElicitationCreate => "elicitation/create".to_string(),
             Self::ElicitationComplete => "elicitation/complete".to_string(),
-            Self::Ext(name) => format!("_{name}"),
+            Self::Ext(name) => name.protocol_method().into_owned(),
         }
     }
 
@@ -253,8 +254,7 @@ impl ClientMethod {
             "elicitation.complete" => Some(Self::ElicitationComplete),
             other => {
                 let ext_name = other.strip_prefix(EXT_SUBJECT_PREFIX)?;
-                ExtMethodName::new(ext_name).ok()?;
-                Some(Self::Ext(ext_name.to_string()))
+                ExtMethodName::new(ext_name).ok().map(Self::Ext)
             }
         }
     }

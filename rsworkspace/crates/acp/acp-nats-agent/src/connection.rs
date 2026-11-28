@@ -23,7 +23,9 @@ use futures::future::LocalBoxFuture;
 use serde::de::Error;
 use std::cell::RefCell;
 use std::collections::HashSet;
+use serde_json::value::RawValue;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
 use trogon_nats::jetstream::{
@@ -337,14 +339,19 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
             )
             .await
         }
-        GlobalAgentMethod::Ext(_) => {
+        GlobalAgentMethod::Ext(ref name) => {
+            // `method` is `#[serde(skip)]` in the ACP schema, so the body carries only
+            // the params; the subject token carries the exact name.
             if msg.reply.is_some() {
-                handle_jsonrpc_request(msg, method.protocol_method().as_str(), nats, |req: ExtRequest| {
-                    agent.ext_method(req)
+                handle_jsonrpc_request(msg, &name.protocol_method(), nats, |params: Arc<RawValue>| {
+                    agent.ext_method(ExtRequest::new(name.as_str(), params))
                 })
                 .await
             } else {
-                handle_notification(msg, |req: ExtNotification| agent.ext_notification(req)).await
+                handle_notification(msg, |params: Arc<RawValue>| {
+                    agent.ext_notification(ExtNotification::new(name.as_str(), params))
+                })
+                .await
             }
         }
     }

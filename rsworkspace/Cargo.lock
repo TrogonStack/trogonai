@@ -313,11 +313,13 @@ version = "0.0.1"
 dependencies = [
  "acp-nats",
  "agent-client-protocol",
+ "async-compat",
  "async-nats",
  "async-trait",
  "bytes",
  "futures",
  "jsonrpc-nats",
+ "opentelemetry",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
