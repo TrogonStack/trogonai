@@ -11,19 +11,20 @@ pub enum ProbeOutcome {
     Unreachable,
     Skipped,
     Error,
-    Other(String),
 }
 
 impl ProbeOutcome {
-    pub(crate) fn parse(s: Option<&str>) -> Self {
+    /// Parse a reported outcome. A name this release does not know is refused:
+    /// guessing could read an attempt that got through as one that did not.
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         match s {
-            None | Some("skipped") => Self::Skipped,
-            Some("blocked") => Self::Blocked,
-            Some("connected") => Self::Connected,
-            Some("refused") => Self::Refused,
-            Some("unreachable") => Self::Unreachable,
-            Some("error") => Self::Error,
-            Some(other) => Self::Other(other.to_string()),
+            "skipped" => Some(Self::Skipped),
+            "blocked" => Some(Self::Blocked),
+            "connected" => Some(Self::Connected),
+            "refused" => Some(Self::Refused),
+            "unreachable" => Some(Self::Unreachable),
+            "error" => Some(Self::Error),
+            _ => None,
         }
     }
 
@@ -41,7 +42,6 @@ impl fmt::Display for ProbeOutcome {
             Self::Unreachable => "unreachable",
             Self::Skipped => "skipped",
             Self::Error => "error",
-            Self::Other(s) => s,
         })
     }
 }

@@ -11,7 +11,7 @@ fn user(real: &str, session: Option<&str>) -> Result<SandboxUserStatus, Box<dyn 
         r#"{{"user":{{"user":{{"exists":true,"group_exists":true,"in_builtin_users":false,
         "in_sandbox_group":true,"hidden_from_logon":true}},"cred_present":true,
         "real_user_sid":"{real}"{}}},
-        "wfp":{{"state":"installed","filters":1}}}}"#,
+        "wfp":{{"state":"installed","filters":1,"allow_loopback":false}}}}"#,
         session.map_or(String::new(), |s| format!(r#","session_user_sid":"{s}""#))
     );
     Ok(parse_sandbox_status(&json, &["status".to_string()])?.user)

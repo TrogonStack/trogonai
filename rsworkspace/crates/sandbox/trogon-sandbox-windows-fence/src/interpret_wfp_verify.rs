@@ -34,18 +34,55 @@ pub fn interpret_wfp_verify(run: &VerifyRun, install: &InstallContext) -> Result
             ),
         ));
     };
-    let outcome = |v: &Option<String>| ProbeOutcome::parse(v.as_deref());
-    let allow_loopback = raw.allow_loopback == Some(true);
+    let bad = |why: String| {
+        WindowsSandboxError::for_subcommand(
+            Code::FenceHelperBadJson,
+            format!("fence-helper wfp verify: {why}"),
+            "wfp",
+        )
+    };
+    let Some(allow_loopback) = raw.allow_loopback else {
+        return Err(bad("the report does not say `allow_loopback`".to_string()));
+    };
+    let session = InstallContext {
+        allow_loopback,
+        ..install.clone()
+    };
+    if ExitCode::LOOPBACK_MISMATCH.matches(run.status) || raw.allow_loopback_mismatch == Some(true) {
+        return Err(WindowsSandboxError::new(
+            Code::WfpLoopbackMismatch,
+            format!(
+                "WFP egress fence does not match the configured loopback mode - {}. Through this \
+                 package: `{}`.",
+                raw.hint
+                    .as_deref()
+                    .unwrap_or("the installed filter set has a different loopback mode"),
+                install_command(&session, true)
+            ),
+        ));
+    }
+    let outcome = |name: &str, v: &Option<String>| match v.as_deref() {
+        None => Err(bad(format!("the report has no `{name}`"))),
+        Some(text) => ProbeOutcome::parse(text)
+            .ok_or_else(|| bad(format!("`{name}` is {text:?}, an outcome this release does not know"))),
+    };
     let probes = WfpVerifyProbes {
-        plain: outcome(&raw.egress_probe),
-        anonymous: outcome(&raw.anonymous_probe),
-        anonymous_loopback: outcome(&raw.anonymous_loopback_probe),
-        deny_only: outcome(&raw.deny_only_probe),
-        low_integrity: outcome(&raw.low_integrity_probe),
-        low_integrity_loopback: outcome(&raw.low_integrity_loopback_probe),
-        untrusted_integrity: outcome(&raw.untrusted_integrity_probe),
-        untrusted_integrity_loopback: outcome(&raw.untrusted_integrity_loopback_probe),
-        open_loopback: allow_loopback.then(|| outcome(&raw.open_loopback_probe)),
+        plain: outcome("egress_probe", &raw.egress_probe)?,
+        anonymous: outcome("anonymous_probe", &raw.anonymous_probe)?,
+        anonymous_loopback: outcome("anonymous_loopback_probe", &raw.anonymous_loopback_probe)?,
+        deny_only: outcome("deny_only_probe", &raw.deny_only_probe)?,
+        low_integrity: outcome("low_integrity_probe", &raw.low_integrity_probe)?,
+        low_integrity_loopback: outcome("low_integrity_loopback_probe", &raw.low_integrity_loopback_probe)?,
+        untrusted_integrity: outcome("untrusted_integrity_probe", &raw.untrusted_integrity_probe)?,
+        untrusted_integrity_loopback: outcome(
+            "untrusted_integrity_loopback_probe",
+            &raw.untrusted_integrity_loopback_probe,
+        )?,
+        open_loopback: if allow_loopback {
+            Some(outcome("open_loopback_probe", &raw.open_loopback_probe)?)
+        } else {
+            None
+        },
     };
     let off_loopback = raw.anonymous_target.as_deref().unwrap_or("no target");
     let blocked_target = raw.egress_target.as_deref().unwrap_or(&raw.target);
@@ -64,23 +101,6 @@ pub fn interpret_wfp_verify(run: &VerifyRun, install: &InstallContext) -> Result
     );
     if let Some(open) = &probes.open_loopback {
         summary.push_str(&format!(", open-loopback={open} ({})", raw.target));
-    }
-    let session = InstallContext {
-        allow_loopback: raw.allow_loopback.unwrap_or(install.allow_loopback),
-        ..install.clone()
-    };
-    if ExitCode::LOOPBACK_MISMATCH.matches(run.status) || raw.allow_loopback_mismatch == Some(true) {
-        return Err(WindowsSandboxError::new(
-            Code::WfpLoopbackMismatch,
-            format!(
-                "WFP egress fence does not match the configured loopback mode - {}. Through this \
-                 package: `{}`.",
-                raw.hint
-                    .as_deref()
-                    .unwrap_or("the installed filter set has a different loopback mode"),
-                install_command(&session, true)
-            ),
-        ));
     }
     let low_il = "the sandbox user under a low-integrity copy of its token";
     let untrusted_il = "the sandbox user under an untrusted-integrity copy of its token";

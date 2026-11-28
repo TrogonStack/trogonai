@@ -85,10 +85,10 @@ fn a_missing_secondary_logon_service_blocks() -> TestResult {
 
 #[test]
 fn absent_filters_ask_for_the_install() -> TestResult {
-    let s = status("", r#"{"state":"absent","filters":0}"#)?;
+    let s = status("", r#"{"state":"absent","filters":0,"allow_loopback":false}"#)?;
     let error = check(&s, false).error().ok_or("expected an error")?;
     assert!(error.message().contains("WFP filters not installed"));
-    let unreadable = status("", r#"{"state":"cannot-read","filters":0}"#)?;
+    let unreadable = status("", r#"{"state":"cannot-read","filters":0,"allow_loopback":false}"#)?;
     assert!(check(&unreadable, false).error().is_none());
     Ok(())
 }
