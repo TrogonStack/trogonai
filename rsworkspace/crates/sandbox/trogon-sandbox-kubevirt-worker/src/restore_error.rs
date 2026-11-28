@@ -12,6 +12,12 @@ pub enum RestoreError {
     NoLayers,
     #[error("restore staging needs an S3 volume backend")]
     UnsupportedBackend,
+    #[error(
+        "the staging credentials need both an access key id and a secret access key, with an optional session token"
+    )]
+    IncompleteCredentials,
+    #[error("the staging credential variable {name} is not valid Unicode")]
+    CredentialNotUnicode { name: &'static str },
     #[error("the staging store failed: {0}")]
     Store(#[from] object_store::Error),
 }
