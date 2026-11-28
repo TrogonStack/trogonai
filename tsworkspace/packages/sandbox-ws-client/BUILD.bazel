@@ -10,6 +10,14 @@ npm_link_all_packages(name = "node_modules")
 js_library(name = "package_metadata", srcs = ["package.json"])
 
 filegroup(name = "sources", srcs = glob(["src/**/*.ts"]))
+
+# Read by the protocol crate's test that keeps this table equal to the Rust classifier.
+filegroup(
+    name = "error_classes",
+    srcs = ["src/error-classes.ts"],
+    visibility = ["//rsworkspace/crates/sandbox/trogon-sandbox-protocol:__pkg__"],
+)
+
 filegroup(name = "public_api_types", srcs = glob(["tests/types/**/*.ts"]))
 filegroup(name = "unit_tests", srcs = glob(["tests/**/*.test.ts", "tests/harness.ts"]))
 filegroup(name = "gateway_tests", srcs = glob(["tests/gateway/**/*.gateway.ts"]))

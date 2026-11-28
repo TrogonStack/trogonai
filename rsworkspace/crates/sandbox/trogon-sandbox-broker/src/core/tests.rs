@@ -663,6 +663,11 @@ mod rollback_flow;
     dylint_lib = "trogon_dylint_lints",
     expect(test_module_naming, reason = "the test module is named for the behavior it covers")
 )]
+mod command_bounds;
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(test_module_naming, reason = "the test module is named for the behavior it covers")
+)]
 mod command_launch_cancellation;
 #[cfg_attr(
     dylint_lib = "trogon_dylint_lints",
@@ -758,12 +763,22 @@ mod native_snapshot_delete;
     dylint_lib = "trogon_dylint_lints",
     expect(test_module_naming, reason = "the test module is named for the behavior it covers")
 )]
+mod network_policy_inference;
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(test_module_naming, reason = "the test module is named for the behavior it covers")
+)]
 mod operation_cancellation;
 #[cfg_attr(
     dylint_lib = "trogon_dylint_lints",
     expect(test_module_naming, reason = "the test module is named for the behavior it covers")
 )]
 mod pause_resume;
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(test_module_naming, reason = "the test module is named for the behavior it covers")
+)]
+mod persistent_snapshot_image;
 #[cfg_attr(
     dylint_lib = "trogon_dylint_lints",
     expect(test_module_naming, reason = "the test module is named for the behavior it covers")

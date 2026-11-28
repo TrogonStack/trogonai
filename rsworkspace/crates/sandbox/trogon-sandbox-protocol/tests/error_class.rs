@@ -128,6 +128,36 @@ fn every_lease_error_variant_is_classified_with_a_matching_kind() -> TestResult 
     Ok(())
 }
 
+/// The TS client carries a fallback copy of the lease error table. This keeps its key set and retryable flags equal
+/// to the Rust classifier.
+#[test]
+fn the_ts_client_table_matches_the_rust_classifier() -> TestResult {
+    let ts = include_str!("../../../../../tsworkspace/packages/sandbox-ws-client/src/error-classes.ts");
+    let block = ts
+        .split("export const LEASE_ERROR_CLASSES")
+        .nth(1)
+        .and_then(|rest| rest.split("\n};").next())
+        .ok_or("LEASE_ERROR_CLASSES block")?;
+    let mut ts_table = std::collections::BTreeMap::new();
+    for line in block.lines() {
+        let Some((kind, rest)) = line.trim().split_once(": ") else {
+            continue;
+        };
+        if rest.starts_with("permanent(") {
+            ts_table.insert(kind.to_string(), false);
+        } else if rest.starts_with("transient(") {
+            ts_table.insert(kind.to_string(), true);
+        }
+    }
+    let mut rust_table = std::collections::BTreeMap::new();
+    for (sample, _) in lease_error_samples() {
+        let error: LeaseError = serde_json::from_value(sample)?;
+        rust_table.insert(error.kind().to_string(), error.class().retryable);
+    }
+    assert_eq!(ts_table, rust_table);
+    Ok(())
+}
+
 #[test]
 fn lease_error_exposes_the_provider_and_lease_it_names() -> TestResult {
     let error: LeaseError =
