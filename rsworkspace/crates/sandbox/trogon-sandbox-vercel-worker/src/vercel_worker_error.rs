@@ -3,7 +3,7 @@ use trogon_sandbox_contract::{LeaseError, TokenError};
 use trogon_sandbox_observability::ObservabilityError;
 use trogon_sandbox_protocol::{AuthorityModeError, NatsConnectError, NatsTransferError};
 
-use crate::{VercelApiError, VercelProviderError};
+use crate::{VercelApiError, VercelDispatchError, VercelProviderError};
 
 /// The worker could not start, or one request it served failed.
 #[derive(Debug, thiserror::Error)]
@@ -30,4 +30,8 @@ pub enum VercelWorkerError {
     Api(#[from] VercelApiError),
     #[error(transparent)]
     Observability(#[from] ObservabilityError),
+    #[error(transparent)]
+    Dispatch(#[from] VercelDispatchError),
+    #[error("the dispatch ledger could not be opened: {0}")]
+    Ledger(#[from] trogon_sandbox_protocol::AttemptLedgerError),
 }

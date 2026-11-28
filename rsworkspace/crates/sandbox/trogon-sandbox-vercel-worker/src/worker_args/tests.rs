@@ -31,6 +31,7 @@ fn defaults_apply_when_only_credentials_are_given() -> Result<(), clap::Error> {
     assert_eq!(args.nats_url, "nats://127.0.0.1:4222");
     assert!(args.regions.is_empty());
     assert!(args.dispatch_fence_file.is_none());
+    assert!(args.dispatch_ledger_file.is_none());
     Ok(())
 }
 
@@ -51,6 +52,8 @@ fn flags_override_the_defaults() -> Result<(), clap::Error> {
         "http://127.0.0.1:9",
         "--dispatch-fence-file",
         "/tmp/fence",
+        "--dispatch-ledger-file",
+        "/tmp/ledger.sqlite3",
     ])?;
     assert_eq!(args.plan, VercelPlan::Enterprise);
     assert_eq!(args.max_vcpus, 16);
@@ -59,6 +62,7 @@ fn flags_override_the_defaults() -> Result<(), clap::Error> {
     assert_eq!(args.http_timeout_secs, 10);
     assert_eq!(args.api_url.as_str(), "http://127.0.0.1:9/");
     assert_eq!(args.dispatch_fence_file, Some(PathBuf::from("/tmp/fence")));
+    assert_eq!(args.dispatch_ledger_file, Some(PathBuf::from("/tmp/ledger.sqlite3")));
     Ok(())
 }
 

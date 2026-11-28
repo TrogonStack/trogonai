@@ -747,3 +747,45 @@ fn restore_capable_profile(provider: ProviderKind) -> ProviderCapabilityProfile 
         ingress: Default::default(),
     }
 }
+
+/// Every provider part way through moving to targeted dispatch sends a lease to a targeted worker when one can take
+/// it, and to its legacy workers otherwise.
+#[tokio::test]
+async fn providers_moving_to_targeted_dispatch_prefer_a_target_and_keep_legacy_workers()
+-> Result<(), Box<dyn std::error::Error>> {
+    for provider in [ProviderKind::E2b, ProviderKind::LocalDocker, ProviderKind::Vercel] {
+        assert!(prefers_targeted_dispatch(provider), "{provider:?}");
+        let registry = InMemoryWorkerRegistry::new(Duration::from_secs(30));
+        let mut legacy = hb("legacy", provider, 0, 4, Duration::ZERO)?;
+        legacy.profile.provider = provider;
+        registry.inject(legacy).await;
+        let only_legacy = select_provider(registry.as_ref(), &[provider], None, None)
+            .await
+            .map_err(|error| format!("{error:?}"))?;
+        assert_eq!(only_legacy.provider, provider);
+        assert!(
+            only_legacy.worker_id.is_none(),
+            "{provider:?} falls back to legacy dispatch"
+        );
+
+        let mut targeted = hb("targeted", provider, 1, 4, Duration::ZERO)?;
+        targeted.profile.provider = provider;
+        targeted.supports_lease_epoch = CapabilitySupport::Supported;
+        targeted.dispatch_protocol = WorkerDispatchProtocol::TargetedV1;
+        registry.inject(targeted).await;
+        let selected = select_provider(registry.as_ref(), &[provider], None, None)
+            .await
+            .map_err(|error| format!("{error:?}"))?;
+        assert_eq!(
+            selected.worker_id.as_ref().map(|worker| worker.as_str()),
+            Some("targeted"),
+            "{provider:?} prefers the targeted worker"
+        );
+    }
+    assert!(!prefers_targeted_dispatch(ProviderKind::Modal));
+    assert!(
+        !prefers_targeted_dispatch(ProviderKind::Fly),
+        "fly requires targeted dispatch outright"
+    );
+    Ok(())
+}

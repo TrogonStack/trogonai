@@ -8,7 +8,8 @@ use trogon_sandbox_contract::{
 
 use crate::{VercelPlan, profile_with_resources, resources};
 
-/// What the worker tells the broker about itself: its capacity and what the plan lets it offer.
+/// What the worker tells the broker about itself: its capacity, what the plan lets it offer, and whether it takes
+/// dispatches addressed to it alone.
 pub fn build_heartbeat(
     worker_id: &WorkerId,
     max_concurrent_leases: u32,
@@ -16,13 +17,14 @@ pub fn build_heartbeat(
     regions: &[String],
     max_vcpus: u32,
     plan: VercelPlan,
+    dispatch_protocol: WorkerDispatchProtocol,
 ) -> WorkerHeartbeat {
     let mut profile = profile_with_resources(resources(max_vcpus));
     profile.placement.regions = regions.to_vec();
     profile.lifecycle.max_lease_lifetime_seconds = Some(plan.max_session_seconds());
     WorkerHeartbeat {
         worker_id: worker_id.clone(),
-        dispatch_protocol: WorkerDispatchProtocol::Legacy,
+        dispatch_protocol,
         native_volume_bindings: Vec::new(),
         provider: ProviderKind::Vercel,
         capacity: WorkerCapacity {
