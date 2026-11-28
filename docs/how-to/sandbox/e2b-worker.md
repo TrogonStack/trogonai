@@ -135,8 +135,10 @@ Deploy the worker, broker and gateway together before using native retirement.
 
 The worker refuses these with `InvalidNetworkPolicy`: denied domains, request
 rules, a policy that refuses opaque tunnels, any rule that is not pass-through,
-and any rule that names a port. Changing the policy of a running lease is
-refused, because E2B takes it at create time.
+and any rule that names a port. A user defined policy refuses opaque tunnels
+unless it sets `"opaque_tunnels": "allow"`, so one sent to this worker has to
+say so. Changing the policy of a running lease is refused, because E2B takes it
+at create time.
 
 Blocked TCP connections can appear open without delivering application traffic.
 A successful `connect()` or `nc -z` alone does not show a deny-all violation.

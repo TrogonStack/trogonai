@@ -192,7 +192,7 @@ fn network_hosts_come_from_the_rules_and_the_denies() -> TestResult {
         allow_ranges: Vec::new(),
         deny_ranges: Vec::new(),
         denied_domains: vec![DeniedDomain::new("evil.example.com")?],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: Vec::new(),
     };
     let restriction = NetworkRestriction::of(&policy);

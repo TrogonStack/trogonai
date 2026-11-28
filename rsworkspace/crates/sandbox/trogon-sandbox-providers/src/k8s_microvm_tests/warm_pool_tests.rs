@@ -212,7 +212,7 @@ async fn a_claimed_warm_pod_refuses_a_policy_only_the_egress_proxy_can_enforce()
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
 

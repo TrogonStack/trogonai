@@ -45,7 +45,34 @@ fn the_unrestricted_modes_are_bare_strings() -> TestResult {
 }
 
 #[test]
-fn a_minimal_user_defined_policy_omits_its_optional_fields() -> TestResult {
+fn a_minimal_user_defined_policy_omits_its_optional_fields_but_states_its_tunnel_stance() -> TestResult {
+    let policy = NetworkPolicy::UserDefined {
+        rules: Vec::new(),
+        allow_ranges: Vec::new(),
+        deny_ranges: Vec::new(),
+        denied_domains: Vec::new(),
+        opaque_tunnels: OpaqueTunnelPolicy::Refuse,
+        request_rules: Vec::new(),
+    };
+    let wire =
+        json!({"user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": [], "opaque_tunnels": "refuse"}});
+    assert_eq!(serde_json::to_value(&policy)?, wire);
+    assert_eq!(serde_json::from_value::<NetworkPolicy>(wire)?, policy);
+    Ok(())
+}
+
+#[test]
+fn a_user_defined_policy_that_does_not_mention_opaque_tunnels_refuses_them() -> TestResult {
+    let wire = json!({"user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": []}});
+    match serde_json::from_value::<NetworkPolicy>(wire)? {
+        NetworkPolicy::UserDefined { opaque_tunnels, .. } => assert_eq!(opaque_tunnels, OpaqueTunnelPolicy::Refuse),
+        other => return Err(format!("{other:?}").into()),
+    }
+    Ok(())
+}
+
+#[test]
+fn an_opaque_tunnel_opt_in_is_written_out_so_no_reader_has_to_guess() -> TestResult {
     let policy = NetworkPolicy::UserDefined {
         rules: Vec::new(),
         allow_ranges: Vec::new(),
@@ -54,7 +81,7 @@ fn a_minimal_user_defined_policy_omits_its_optional_fields() -> TestResult {
         opaque_tunnels: OpaqueTunnelPolicy::Allow,
         request_rules: Vec::new(),
     };
-    let wire = json!({"user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": []}});
+    let wire = json!({"user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": [], "opaque_tunnels": "allow"}});
     assert_eq!(serde_json::to_value(&policy)?, wire);
     assert_eq!(serde_json::from_value::<NetworkPolicy>(wire)?, policy);
     Ok(())
@@ -155,8 +182,8 @@ fn a_user_defined_policy_rejects_a_bad_pattern() -> TestResult {
 }
 
 #[test]
-fn opaque_tunnels_allow_by_default() -> TestResult {
-    assert_eq!(OpaqueTunnelPolicy::default(), OpaqueTunnelPolicy::Allow);
+fn opaque_tunnels_are_refused_by_default() -> TestResult {
+    assert_eq!(OpaqueTunnelPolicy::default(), OpaqueTunnelPolicy::Refuse);
     assert!(OpaqueTunnelPolicy::Allow.is_allow());
     assert!(!OpaqueTunnelPolicy::Allow.refuses());
     assert!(!OpaqueTunnelPolicy::Refuse.is_allow());

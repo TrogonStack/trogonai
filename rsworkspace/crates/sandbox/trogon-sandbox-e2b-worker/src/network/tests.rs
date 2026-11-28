@@ -92,15 +92,15 @@ fn what_e2b_cannot_express_is_refused() -> TestResult {
     }))?;
     assert!(translate_network_policy(Some(&user_defined(vec![forwarded], vec![], vec![]))).is_err());
     let denied: NetworkPolicy = serde_json::from_value(json!({
-        "user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": [], "denied_domains": ["bad.example.com"]}
+        "user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": [], "opaque_tunnels": "allow", "denied_domains": ["bad.example.com"]}
     }))?;
     assert!(translate_network_policy(Some(&denied)).is_err());
     let requests: NetworkPolicy = serde_json::from_value(json!({
-        "user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": [], "request_rules": [{"action": "deny", "domains": ["example.com"]}]}
+        "user_defined": {"rules": [], "allow_ranges": [], "deny_ranges": [], "opaque_tunnels": "allow", "request_rules": [{"action": "deny", "domains": ["example.com"]}]}
     }))?;
     assert!(translate_network_policy(Some(&requests)).is_err());
     let scoped: NetworkPolicy = serde_json::from_value(json!({
-        "user_defined": {"rules": [], "allow_ranges": ["10.0.0.5:8080"], "deny_ranges": []}
+        "user_defined": {"rules": [], "allow_ranges": ["10.0.0.5:8080"], "deny_ranges": [], "opaque_tunnels": "allow"}
     }))?;
     assert!(matches!(
         translate_network_policy(Some(&scoped)),
@@ -112,7 +112,7 @@ fn what_e2b_cannot_express_is_refused() -> TestResult {
 #[test]
 fn a_single_address_allow_range_is_sent_as_a_one_address_block() -> TestResult {
     let policy: NetworkPolicy = serde_json::from_value(json!({
-        "user_defined": {"rules": [], "allow_ranges": ["10.0.0.6"], "deny_ranges": []}
+        "user_defined": {"rules": [], "allow_ranges": ["10.0.0.6"], "deny_ranges": [], "opaque_tunnels": "allow"}
     }))?;
     let network = translate_network_policy(Some(&policy))?
         .network
@@ -135,5 +135,17 @@ fn internet_access_serializes_as_the_provider_flag() -> TestResult {
         serde_json::to_value(&sandbox)?,
         json!({"templateID": "base", "timeout": 60, "allow_internet_access": false})
     );
+    Ok(())
+}
+
+#[test]
+fn a_policy_that_does_not_opt_in_to_opaque_tunnels_is_refused() -> TestResult {
+    let silent: NetworkPolicy = serde_json::from_value(json!({
+        "user_defined": {"rules": [{"domain": "example.com"}], "allow_ranges": [], "deny_ranges": []}
+    }))?;
+    assert!(matches!(
+        translate_network_policy(Some(&silent)),
+        Err(LeaseError::InvalidNetworkPolicy { .. })
+    ));
     Ok(())
 }

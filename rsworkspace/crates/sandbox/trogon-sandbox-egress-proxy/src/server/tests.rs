@@ -38,7 +38,7 @@ fn user_defined() -> NetworkPolicy {
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     }
 }
@@ -248,7 +248,7 @@ async fn a_replacement_outside_the_ca_constraints_is_rejected_and_keeps_the_old_
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let result = handle.replace(outside).await;

@@ -111,7 +111,7 @@ fn policy() -> TestResult<NetworkPolicy> {
         allow_ranges: vec![loopback_range()?],
         deny_ranges: vec![],
         denied_domains: vec!["blocked.test".parse()?],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -632,7 +632,7 @@ fn pass_through(domains: &[&str], allow_loopback: bool) -> TestResult<NetworkPol
         },
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -821,7 +821,7 @@ async fn terminated_tunnels_lose_the_network_wide_stripped_headers() -> TestResu
         allow_ranges: vec![loopback_range()?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let (server, proxy) = start_custom(policy, sandbox_ca, options, Arc::new(InMemorySink::default()), true).await?;

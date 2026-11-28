@@ -256,7 +256,7 @@ async fn launch_with_domain_rules_wires_ca_trust_into_agent_container() -> TestR
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     });
 

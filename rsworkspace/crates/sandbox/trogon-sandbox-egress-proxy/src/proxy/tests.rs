@@ -557,7 +557,7 @@ async fn postgres_tls_upgrade_with_matching_sni_is_spliced() -> TestResult {
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let tls_intercept = test_tls_intercept_context()?;
@@ -622,7 +622,7 @@ async fn postgres_tls_upgrade_with_non_matching_sni_is_denied_and_upstream_sees_
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let tls_intercept = test_tls_intercept_context()?;
@@ -696,7 +696,7 @@ async fn postgres_plaintext_declined_is_always_denied() -> TestResult {
             allow_ranges,
             deny_ranges: vec![],
             denied_domains: vec![],
-            opaque_tunnels: Default::default(),
+            opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
             request_rules: vec![],
         };
         let tls_intercept = test_tls_intercept_context()?;
@@ -752,7 +752,7 @@ async fn postgres_gss_enc_request_is_denied_without_contacting_upstream() -> Tes
         allow_ranges: vec![allow_range("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let tls_intercept = test_tls_intercept_context()?;
@@ -811,7 +811,7 @@ async fn pass_through_matched_sni_connection_is_spliced_byte_for_byte() -> TestR
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let tls_intercept = test_tls_intercept_context()?;
@@ -872,7 +872,7 @@ fn rule_policy(allow_ranges: &[&str]) -> Result<NetworkPolicy, Box<dyn std::erro
             .collect::<Result<Vec<_>, _>>()?,
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -992,7 +992,7 @@ fn unlisted_policy() -> NetworkPolicy {
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     }
 }
@@ -1307,7 +1307,7 @@ async fn transform_matched_sni_connection_injects_credential_into_upstream_reque
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let proxy_task = tokio::spawn(async move {
@@ -1392,7 +1392,7 @@ async fn transform_matched_rule_with_no_sni_returns_defensive_outcome_without_pa
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let tls_intercept = test_tls_intercept_context()?;
@@ -1758,7 +1758,7 @@ async fn an_exempt_flow_bypasses_credential_injection_and_inspection() -> TestRe
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let (terminated, _) = transparent_connection_configured(
@@ -2013,7 +2013,7 @@ fn loopback_ranges_policy() -> Result<NetworkPolicy, Box<dyn std::error::Error>>
         allow_ranges: vec![allow_range("127.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }

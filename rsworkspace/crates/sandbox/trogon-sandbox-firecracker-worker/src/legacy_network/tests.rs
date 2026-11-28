@@ -85,7 +85,7 @@ fn allow_lists_are_enforceable_but_tls_interception_is_not() -> Result<(), Box<d
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     assert!(enforceable(&allow).is_ok());

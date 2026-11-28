@@ -112,8 +112,9 @@ rule, a secret binding, the terminate-all switch and `RequireTermination`.
    TLS with no SNI.
 4. An exempt flow gets no HTTP inspection and no credential injection: request
    rules, secret substitution and `Transform`/`Forward` actions do not run.
-   `opaque_tunnels` still applies: a policy that refuses opaque tunnels refuses
-   an exempt flow.
+   `opaque_tunnels` still applies: a policy that refuses opaque tunnels, which
+   is every `user_defined` policy that does not set `"opaque_tunnels": "allow"`,
+   refuses an exempt flow.
 
 This is distinct from `tls_exclusions`, which only keeps a host out
 of terminate-all and secret termination and requires no binding.

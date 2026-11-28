@@ -68,7 +68,7 @@ fn allow_loopback_policy() -> Result<NetworkPolicy, Box<dyn Error>> {
         allow_ranges: vec![AllowRange::new("127.0.0.1/32")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -94,7 +94,7 @@ fn intercepting_policy() -> Result<NetworkPolicy, Box<dyn Error>> {
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }

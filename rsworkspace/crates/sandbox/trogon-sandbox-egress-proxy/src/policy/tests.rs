@@ -52,7 +52,7 @@ fn user_defined(
             .collect::<Result<_, _>>()?,
         deny_ranges: deny_ranges.iter().map(|r| IpRange::new(*r)).collect::<Result<_, _>>()?,
         denied_domains: denied.iter().map(|d| d.parse()).collect::<Result<_, _>>()?,
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -364,7 +364,7 @@ fn user_defined_allows_matching_sni_domain() -> Result<(), Box<dyn std::error::E
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     assert_eq!(
@@ -385,7 +385,7 @@ fn user_defined_allows_matching_ip_range() -> Result<(), Box<dyn std::error::Err
         allow_ranges: vec![AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     assert_eq!(decide(&policy, None, ip4("10.1.2.3")?, 5432), Decision::Allow);
@@ -400,7 +400,7 @@ fn an_allow_range_with_a_port_allows_that_port_only() -> Result<(), Box<dyn std:
         allow_ranges: vec![AllowRange::new("10.0.0.5:5432")?, AllowRange::new("[fc00::1]:9")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     assert_eq!(decide(&policy, None, ip4("10.0.0.5")?, 5432), Decision::Allow);
@@ -421,7 +421,7 @@ fn deny_ranges_take_precedence_over_allow_ranges() -> Result<(), Box<dyn std::er
         allow_ranges: vec![AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![IpRange::new("10.1.0.0/16")?],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     // In both ranges: deny wins.
@@ -438,7 +438,7 @@ fn deny_ranges_take_precedence_over_matching_sni() -> Result<(), Box<dyn std::er
         allow_ranges: vec![],
         deny_ranges: vec![IpRange::new("203.0.113.0/24")?],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     assert_eq!(
@@ -455,7 +455,7 @@ fn user_defined_denies_by_default_with_no_sni_and_no_range_match() -> Result<(),
         allow_ranges: vec![AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     assert_eq!(decide(&policy, None, ip4("198.51.100.7")?, 443), Decision::Deny);
@@ -469,7 +469,7 @@ fn decide_with_action_returns_pass_through_action_on_domain_match() -> Result<()
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let (decision, action) = decide_with_action(&policy, Some("api.example.com"), ip4("203.0.113.5")?, 443);
@@ -488,7 +488,7 @@ fn decide_with_action_returns_transform_action_on_domain_match() -> Result<(), B
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let (decision, action) = decide_with_action(&policy, Some("api.example.com"), ip4("203.0.113.5")?, 443);
@@ -511,7 +511,7 @@ fn decide_with_action_returns_forward_action_on_domain_match() -> Result<(), Box
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let (decision, action) = decide_with_action(&policy, Some("api.example.com"), ip4("203.0.113.5")?, 443);
@@ -527,7 +527,7 @@ fn decide_with_action_returns_none_on_ip_range_match() -> Result<(), Box<dyn std
         allow_ranges: vec![AllowRange::new("10.0.0.0/8")?],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let (decision, action) = decide_with_action(&policy, None, ip4("10.1.2.3")?, 443);
@@ -552,7 +552,7 @@ fn decide_with_action_returns_none_on_deny() -> Result<(), Box<dyn std::error::E
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     let (decision, action) = decide_with_action(&policy, Some("other.example.net"), ip4("203.0.113.5")?, 443);
@@ -600,7 +600,7 @@ fn sni_policy(allow_ranges: &[&str]) -> Result<NetworkPolicy, Box<dyn std::error
             .collect::<Result<_, _>>()?,
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     })
 }
@@ -642,7 +642,7 @@ fn an_allow_through_an_address_rule_does_not_rest_on_the_sni() -> Result<(), Box
         allow_ranges: vec![],
         deny_ranges: vec![],
         denied_domains: vec![],
-        opaque_tunnels: Default::default(),
+        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
         request_rules: vec![],
     };
     assert!(!allow_rests_on_sni(
@@ -804,7 +804,7 @@ fn only_an_exact_address_counts_as_an_exact_address_allow() -> Result<(), Box<dy
             allow_ranges: ranges.iter().map(|r| AllowRange::new(*r)).collect::<Result<_, _>>()?,
             deny_ranges: vec![],
             denied_domains: vec![],
-            opaque_tunnels: Default::default(),
+            opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
             request_rules: vec![],
         })
     };

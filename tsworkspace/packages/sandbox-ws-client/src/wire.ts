@@ -214,10 +214,24 @@ export interface DomainRule {
 
 export type IpRange = string;
 
+/**
+ * Whether the egress proxy carries a connection it cannot read (raw bytes after
+ * `CONNECT`, SOCKS5, or TLS it relays without terminating). Omitted means
+ * `'refuse'`; `'allow'` is the explicit opt-in.
+ */
+export type OpaqueTunnelPolicy = 'allow' | 'refuse';
+
 export type NetworkPolicy =
   | 'allow_all'
   | 'deny_all'
-  | { user_defined: { rules: DomainRule[]; allow_ranges: IpRange[]; deny_ranges: IpRange[] } };
+  | {
+      user_defined: {
+        rules: DomainRule[];
+        allow_ranges: IpRange[];
+        deny_ranges: IpRange[];
+        opaque_tunnels?: OpaqueTunnelPolicy;
+      };
+    };
 
 export interface DriveId {
   tenant: TenantId;

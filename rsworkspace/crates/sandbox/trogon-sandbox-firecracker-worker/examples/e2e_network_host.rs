@@ -58,7 +58,7 @@ async fn run() -> anyhow::Result<()> {
         }
     });
     let policy: NetworkPolicy = serde_json::from_str(
-        r#"{"user_defined": {"rules": [], "allow_ranges": ["127.0.0.1/32"], "deny_ranges": []}}"#,
+        r#"{"user_defined": {"rules": [], "allow_ranges": ["127.0.0.1/32"], "deny_ranges": [], "opaque_tunnels": "allow"}}"#,
     )?;
     let mut network = LeaseNetwork::prepare(&config, 2, &dir, policy, None, None).await?;
     let namespace_path = network.namespace_path();

@@ -74,7 +74,8 @@ approximating it.
 - A user defined policy becomes an allow list. A host rule is accepted only
   when it names an IP literal, which becomes a single address block.
 - Denied domains, request rules and a policy that refuses opaque tunnels are
-  refused.
+  refused. A user defined policy refuses opaque tunnels unless it sets
+  `"opaque_tunnels": "allow"`, so one sent to this worker has to say so.
 
 The profile declares best-effort egress enforcement. Verify enforcement on your
 own account before relying on it for isolation. Changing the policy of a running
