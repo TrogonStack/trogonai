@@ -15,6 +15,8 @@ pub enum S3ExportError {
     UnpackTask(#[source] tokio::task::JoinError),
     #[error("invalid KMS key id: {0}")]
     KmsKey(#[from] KmsKeyIdError),
+    #[error("the KMS key id environment variable is not valid unicode")]
+    KmsKeyEnvNotUnicode,
     #[error("cannot push the workspace to the volume: {0}")]
     Volume(#[from] VolumeError),
 }

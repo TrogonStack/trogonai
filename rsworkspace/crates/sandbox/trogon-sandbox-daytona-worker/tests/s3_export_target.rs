@@ -3,7 +3,7 @@
 use trogon_sandbox_contract::S3BucketName;
 use trogon_sandbox_daytona_worker::{S3ExportError, S3ExportTarget};
 use trogon_sandbox_volumes::{VolumePrefix, VolumeRegion};
-use trogon_std::env::InMemoryEnv;
+use trogon_std::env::{InMemoryEnv, ReadEnv};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -38,5 +38,20 @@ fn a_blank_key_variable_is_refused() -> TestResult {
     env.set(S3ExportTarget::KMS_KEY_ENV, "  ");
     let refused = target()?.with_kms_key_from_env(&env);
     assert!(matches!(refused, Err(S3ExportError::KmsKey(_))));
+    Ok(())
+}
+
+struct NonUnicodeEnv;
+
+impl ReadEnv for NonUnicodeEnv {
+    fn var(&self, _key: &str) -> Result<String, std::env::VarError> {
+        Err(std::env::VarError::NotUnicode(std::ffi::OsString::new()))
+    }
+}
+
+#[test]
+fn a_key_variable_that_is_not_unicode_is_refused_instead_of_read_as_unset() -> TestResult {
+    let refused = target()?.with_kms_key_from_env(&NonUnicodeEnv);
+    assert!(matches!(refused, Err(S3ExportError::KmsKeyEnvNotUnicode)));
     Ok(())
 }
