@@ -56,7 +56,7 @@ pub use strict_kv::{
     strict_native_kv_raw_operation,
 };
 pub use traits::{
-    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue,
+    JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamDeleteConsumer,
     JetStreamFirstRawMessageBySubject, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStream,
     JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision,
     JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet,

@@ -389,6 +389,15 @@ async fn js_request_recreates_a_failed_consumer_and_returns_the_answer_once() {
         result.expect("the answer survives the consumer failure").stop_reason,
         agent_client_protocol::v1::schema::StopReason::EndTurn
     );
+
+    // Both the failed consumer and its replacement are deleted, not left to expire.
+    tokio::task::yield_now().await;
+    let deleted = js.consumer_factory.deleted_consumers();
+    assert_eq!(
+        deleted.iter().collect::<std::collections::HashSet<_>>().len(),
+        2,
+        "{deleted:?}"
+    );
 }
 
 /// The response consumer is session-scoped, so it sees replies belonging to the
