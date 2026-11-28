@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use common::{MockBus, TestResult, lease_id, tenant};
-use trogon_sandbox_client::{BusMessage, ClientError};
+use trogon_sandbox_client::{BusMessage, ClientError, TransportError};
 use trogon_sandbox_contract::{LeaseReleased, LeaseReleasedReason};
 
 fn released(reason: LeaseReleasedReason) -> Result<BusMessage, Box<dyn std::error::Error>> {
@@ -42,16 +42,16 @@ async fn wait_released_with_reason_reports_why() -> TestResult {
 }
 
 #[tokio::test]
-async fn an_undecodable_announcement_reads_as_completed() -> TestResult {
+async fn an_undecodable_announcement_is_a_decode_error_not_completed() -> TestResult {
     let message = BusMessage {
         subject: "sandbox.lease.released.lease-1".to_string(),
         payload: Bytes::from("not json"),
     };
     let client = MockBus::with_subscribe_items(vec![message]).into_client();
-    let reason = client
+    let result = client
         .wait_released_with_reason(&lease_id(), Duration::from_secs(5))
-        .await?;
-    assert_eq!(reason, LeaseReleasedReason::Completed);
+        .await;
+    assert!(matches!(result, Err(ClientError::Transport(TransportError::Decode(_)))));
     Ok(())
 }
 

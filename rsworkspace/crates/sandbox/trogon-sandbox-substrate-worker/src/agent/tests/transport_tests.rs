@@ -59,7 +59,7 @@ async fn readiness_waits_for_a_bound_lease_and_gives_up_on_the_deadline() -> Tes
 
 #[tokio::test]
 async fn an_unreachable_actor_is_distinguished_from_a_refusal() -> TestResult {
-    let agent = ActorAgent::new("127.0.0.1:1".parse()?, target()?, &InMemoryEnv::new());
+    let agent = ActorAgent::new("127.0.0.1:1".parse()?, target()?, &InMemoryEnv::new())?;
     let request: ReadFileRequest = parse(r#"{"lease_id":"01J0","path":"/workspace/x"}"#)?;
 
     let error = agent.read_file(&request).await.err().ok_or("nothing is listening")?;
@@ -79,11 +79,11 @@ async fn a_connect_request_carries_the_routing_header_and_the_target_port() -> T
     .await?;
     let router = agent_router(&agent);
 
-    let matching = ActorAgent::new(router.clone(), target()?, &InMemoryEnv::new());
+    let matching = ActorAgent::new(router.clone(), target()?, &InMemoryEnv::new())?;
     matching.wait_ready(Duration::from_secs(1)).await?;
 
     let other_tenant = target_for_tenant("tenant-b")?;
-    let mismatched = ActorAgent::new(router.clone(), other_tenant, &InMemoryEnv::new());
+    let mismatched = ActorAgent::new(router.clone(), other_tenant, &InMemoryEnv::new())?;
     let error = mismatched
         .wait_ready(Duration::from_millis(200))
         .await
@@ -96,7 +96,7 @@ async fn a_connect_request_carries_the_routing_header_and_the_target_port() -> T
         ActorName::for_lease(&trogon_sandbox_contract::LeaseId::new("01J0"))?,
         9999,
     );
-    let wrong_port = ActorAgent::new(router, other_port, &InMemoryEnv::new());
+    let wrong_port = ActorAgent::new(router, other_port, &InMemoryEnv::new())?;
     let error = wrong_port
         .wait_ready(Duration::from_millis(200))
         .await
@@ -109,7 +109,7 @@ async fn a_connect_request_carries_the_routing_header_and_the_target_port() -> T
 #[tokio::test]
 async fn a_router_that_hangs_up_before_answering_connect_is_unreachable() -> TestResult {
     let router = serve_raw_reply(b"").await?;
-    let agent = ActorAgent::new(router, target()?, &InMemoryEnv::new());
+    let agent = ActorAgent::new(router, target()?, &InMemoryEnv::new())?;
 
     let error = agent.identity().await.err().ok_or("the router hung up")?;
     assert!(
@@ -122,7 +122,7 @@ async fn a_router_that_hangs_up_before_answering_connect_is_unreachable() -> Tes
 #[tokio::test]
 async fn a_router_that_refuses_connect_is_unreachable_with_its_status() -> TestResult {
     let router = serve_raw_reply(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await?;
-    let agent = ActorAgent::new(router, target()?, &InMemoryEnv::new());
+    let agent = ActorAgent::new(router, target()?, &InMemoryEnv::new())?;
 
     let error = agent.identity().await.err().ok_or("the router refused")?;
     assert!(
@@ -135,7 +135,7 @@ async fn a_router_that_refuses_connect_is_unreachable_with_its_status() -> TestR
 #[tokio::test]
 async fn a_router_that_answers_gibberish_is_unreachable() -> TestResult {
     let router = serve_raw_reply(b"gibberish\r\n\r\n").await?;
-    let agent = ActorAgent::new(router, target()?, &InMemoryEnv::new());
+    let agent = ActorAgent::new(router, target()?, &InMemoryEnv::new())?;
 
     let error = agent.identity().await.err().ok_or("the router answered gibberish")?;
     assert!(
@@ -224,7 +224,7 @@ async fn a_router_tls_identity_that_cannot_be_loaded_makes_the_actor_unreachable
         "/nonexistent/client.key",
         "localhost",
     )?;
-    let agent = ActorAgent::new("127.0.0.1:1".parse()?, target()?, &InMemoryEnv::new()).with_router_tls(tls);
+    let agent = ActorAgent::new("127.0.0.1:1".parse()?, target()?, &InMemoryEnv::new())?.with_router_tls(tls);
     let request: ReadFileRequest = parse(r#"{"lease_id":"01J0","path":"/workspace/x"}"#)?;
 
     let error = agent

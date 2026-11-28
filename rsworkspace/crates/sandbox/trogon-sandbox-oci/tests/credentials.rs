@@ -110,8 +110,11 @@ async fn stored_docker_credentials_are_used_for_matching_registries() -> TestRes
         authorization_for(Some(with_fields), "other.invalid", false).await?,
         None
     );
-    for unusable in [invalid, half, no_colon.as_str(), not_utf8.as_str(), "{}"] {
+    for unusable in [half, "{}"] {
         assert_eq!(authorization_for(Some(unusable), "{host}", false).await?, None);
+    }
+    for malformed in [invalid, no_colon.as_str(), not_utf8.as_str()] {
+        assert!(authorization_for(Some(malformed), "{host}", false).await.is_err());
     }
     assert_eq!(authorization_for(None, "{host}", false).await?, None);
     Ok(())

@@ -16,7 +16,7 @@ const FULL: &str = r#"{
     "persistent_grants": {"state": "present", "roots": ["C:\\w"]},
     "profile_grant": {"state": "weird"},
     "session_user_sid": "S-1-5-21-1-2-3-1000",
-    "capabilities": ["exec-holder", 5, "kept-grant-holders"]
+    "capabilities": ["exec-holder", "kept-grant-holders"]
   },
   "wfp": {"state": "installed", "filters": 6, "port_range": [60080, 60089],
           "allow_loopback": true, "user_sid": "S-1-5-21-1-2-3-1001"}
@@ -57,7 +57,7 @@ fn maps_every_field() -> TestResult {
 fn none_states_and_missing_fields() -> TestResult {
     let json = r#"{"user":{"user":{"exists":false,"group_exists":false,"in_builtin_users":false,
       "in_sandbox_group":false,"hidden_from_logon":false},"cred_present":false,
-      "real_user_sid":"S-1","seclogon":"bogus","persistent_grants":{"state":"none"},
+      "real_user_sid":"S-1","persistent_grants":{"state":"none"},
       "profile_grant":{"state":"none"}},
       "wfp":{"state":"cannot-read","filters":0,"hint":"run elevated"}}"#;
     let s = parse_sandbox_status(json, &args())?;

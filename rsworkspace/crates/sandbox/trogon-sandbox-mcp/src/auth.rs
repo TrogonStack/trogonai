@@ -8,23 +8,32 @@ use trogon_std::env::ReadEnv;
 use crate::auth_error::AuthError;
 use crate::constants::{API_KEY_FILE_MODE, API_KEY_PATH_SEGMENTS};
 
-/// The key given on the command line, else the one in the user's key file. A missing or unusable file is no key.
-pub fn resolve_api_key(cli_key: Option<String>, env: &impl ReadEnv) -> Option<String> {
+/// The key given on the command line, else the one in the user's key file.
+///
+/// No key file, or no home directory to look in, is no key. A key file that exists but is unreadable, readable by
+/// others or empty is an error rather than a silent absence, so a misconfigured key is never mistaken for none.
+pub fn resolve_api_key(cli_key: Option<String>, env: &impl ReadEnv) -> Result<Option<String>, AuthError> {
     if let Some(key) = cli_key.filter(|k| !k.is_empty()) {
-        return Some(key);
+        return Ok(Some(key));
     }
-    read_api_key_file(&default_api_key_path(env)).ok()
+    let Some(path) = default_api_key_path(env) else {
+        return Ok(None);
+    };
+    match read_api_key_file(&path) {
+        Ok(key) => Ok(Some(key)),
+        Err(AuthError::NotAFile { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
-/// `$HOME` (or `$USERPROFILE`, or the working directory) joined with the key file's relative path.
-pub fn default_api_key_path(env: &impl ReadEnv) -> PathBuf {
-    let home = env
-        .var("HOME")
-        .or_else(|_| env.var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-    API_KEY_PATH_SEGMENTS
-        .iter()
-        .fold(PathBuf::from(home), |path, segment| path.join(segment))
+/// `$HOME` (or `$USERPROFILE`) joined with the key file's relative path, or `None` when neither is set.
+pub fn default_api_key_path(env: &impl ReadEnv) -> Option<PathBuf> {
+    let home = env.var("HOME").or_else(|_| env.var("USERPROFILE")).ok()?;
+    Some(
+        API_KEY_PATH_SEGMENTS
+            .iter()
+            .fold(PathBuf::from(home), |path, segment| path.join(segment)),
+    )
 }
 
 /// Reads a key from `path`, which must be a file only its owner can touch.

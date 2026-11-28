@@ -18,7 +18,7 @@ const CLEAN: &str = r#"{"egress_probe":"blocked","target":"127.0.0.1:50000",
   "anonymous_loopback_probe":"connected","deny_only_probe":"blocked",
   "low_integrity_probe":"blocked","low_integrity_loopback_probe":"blocked",
   "untrusted_integrity_probe":"blocked","untrusted_integrity_loopback_probe":"blocked",
-  "residuals":["anonymous-egress","anonymous-loopback","unknown-one"]}"#;
+  "residuals":["anonymous-egress","anonymous-loopback"]}"#;
 
 #[test]
 fn clean_pass_carries_residual_warnings() -> TestResult {
@@ -172,5 +172,18 @@ fn a_probe_outcome_not_known_is_kept_and_every_outcome_displays() -> TestResult 
         .map(ToString::to_string)
         .collect();
     assert_eq!(shown, ["refused", "odd"]);
+    Ok(())
+}
+
+#[test]
+fn a_residual_this_release_does_not_know_is_still_reported() -> TestResult {
+    let json = CLEAN.replace("\"anonymous-loopback\"]", "\"anonymous-loopback\",\"unknown-one\"]");
+    let r = interpret_wfp_verify(&run(0, &json), &InstallContext::default())?;
+    assert_eq!(
+        r.residuals,
+        [WfpResidual::AnonymousEgress, WfpResidual::AnonymousLoopback]
+    );
+    assert_eq!(r.warnings.len(), 3);
+    assert!(r.warnings[2].contains("'unknown-one'") && r.warnings[2].contains("treat it as a gap"));
     Ok(())
 }

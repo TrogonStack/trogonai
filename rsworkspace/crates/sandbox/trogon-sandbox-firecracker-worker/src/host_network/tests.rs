@@ -52,3 +52,23 @@ fn pools_and_recovery_identities_are_bounded() -> Result<(), Box<dyn std::error:
     );
     Ok(())
 }
+
+#[test]
+fn a_host_route_that_cannot_be_read_refuses_the_subnet_choice() -> Result<(), Box<dyn std::error::Error>> {
+    let subnet: Ipv4Net = "10.231.0.0/30".parse()?;
+    let clear = vec![
+        serde_json::json!({"dst": "default"}),
+        serde_json::json!({"dst": "192.168.0.0/24"}),
+        serde_json::json!({"dst": "192.168.1.7"}),
+    ];
+    assert!(!overlaps_existing_route(&clear, subnet)?);
+    let colliding = vec![serde_json::json!({"dst": "10.231.0.0/16"})];
+    assert!(overlaps_existing_route(&colliding, subnet)?);
+    assert!(overlaps_existing_route(
+        &[serde_json::json!({"dst": "10.231.0.2"})],
+        subnet
+    )?);
+    assert!(overlaps_existing_route(&[serde_json::json!({"dst": "bogus"})], subnet).is_err());
+    assert!(overlaps_existing_route(&[serde_json::json!({"gateway": "10.0.0.1"})], subnet).is_err());
+    Ok(())
+}

@@ -74,6 +74,7 @@ pub struct State {
     pub snapshot_polls_before_ready: usize,
     pub snapshot_never_ready: bool,
     pub snapshot_status: Option<String>,
+    pub snapshot_omits_status: bool,
     pub snapshot_without_id: bool,
     pub snapshot_create_fails: bool,
     pub retention_days: Option<u64>,
@@ -302,8 +303,8 @@ fn snapshots(state: &mut State) -> ResponseTemplate {
         return reply(json!([]));
     }
     let mut entry = json!({"id": "vs_snap1", "size": 4096, "retention_days": state.retention_days});
-    if let Some(chosen) = &state.snapshot_status {
-        entry["status"] = json!(chosen);
+    if !state.snapshot_omits_status {
+        entry["status"] = json!(state.snapshot_status.as_deref().unwrap_or("created"));
     }
     reply(json!([entry]))
 }

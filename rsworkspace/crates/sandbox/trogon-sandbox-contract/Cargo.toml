@@ -17,3 +17,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 unicode-ident = { workspace = true }
 url = { workspace = true }
+
+[dev-dependencies]
+trogon-std = { workspace = true }

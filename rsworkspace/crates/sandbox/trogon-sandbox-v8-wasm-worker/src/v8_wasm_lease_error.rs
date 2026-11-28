@@ -27,6 +27,9 @@ pub enum V8WasmLeaseError {
     /// A persistent runtime was requested for a Wasm guest.
     #[error("V8_WASM_PERSISTENT_RUNTIME is only supported for js guests")]
     PersistentRuntimeNeedsJs,
+    /// The persistent runtime setting is not a recognised boolean.
+    #[error("invalid V8_WASM_PERSISTENT_RUNTIME value {0:?}: expected \"true\", \"1\", \"false\" or \"0\"")]
+    InvalidPersistentRuntime(String),
     /// The guest source could not be read.
     #[error("failed to read {path}: {source}")]
     ReadSource {

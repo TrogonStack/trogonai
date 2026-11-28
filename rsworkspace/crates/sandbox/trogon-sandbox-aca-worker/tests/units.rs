@@ -94,10 +94,12 @@ fn a_volume_credential_takes_an_account_and_a_key() -> TestResult {
     assert_eq!(plain.account, "account");
     assert_eq!(plain.key.expose_secret(), "key");
     assert_eq!(with_session.key.expose_secret(), "key");
-    assert!(matches!(
-        VolumeCredential::parse(&ShortLivedToken::new("account")),
-        Err(AcaError::VolumeCredentialFormat)
-    ));
+    for malformed in ["account", "account:", ":key", ":"] {
+        assert!(matches!(
+            VolumeCredential::parse(&ShortLivedToken::new(malformed)),
+            Err(AcaError::VolumeCredentialFormat)
+        ));
+    }
     Ok(())
 }
 

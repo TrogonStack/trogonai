@@ -13,7 +13,7 @@ pub(super) fn client_from_env() -> Result<VolumeClient, VolumeCacheError> {
 }
 
 pub(super) fn client_from(env: &impl ReadEnv) -> Result<VolumeClient, VolumeCacheError> {
-    let settings = VolumeCacheEnv::from_env(env).ok_or(VolumeCacheError::BucketUnset)?;
+    let settings = VolumeCacheEnv::from_env(env)?.ok_or(VolumeCacheError::BucketUnset)?;
     let config = CloneCacheConfig {
         bucket: S3BucketName::new(settings.bucket).map_err(|error| setting(BUCKET_ENV, error))?,
         region: VolumeRegion::new(settings.region).map_err(|error| setting(REGION_ENV, error))?,

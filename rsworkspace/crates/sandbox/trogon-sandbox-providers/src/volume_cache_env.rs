@@ -2,7 +2,11 @@
 
 pub(crate) mod constants;
 
+use std::env::VarError;
+
 use trogon_std::env::ReadEnv;
+
+use crate::VolumeCacheError;
 
 use constants::{BUCKET_ENV, DEFAULT_REGION, ENDPOINT_ENV, KMS_KEY_ID_ENV, REGION_ENV};
 
@@ -16,13 +20,29 @@ pub struct VolumeCacheEnv {
 
 impl VolumeCacheEnv {
     /// Reads the cache settings, or `None` when no bucket is configured.
-    pub fn from_env(env: &impl ReadEnv) -> Option<Self> {
-        let bucket = env.var(BUCKET_ENV).ok()?;
-        Some(Self {
+    ///
+    /// A variable that is set but is not valid Unicode is an error rather than an absent setting, so an unreadable
+    /// KMS key or endpoint can never silently turn into an unencrypted or default-endpoint cache.
+    pub fn from_env(env: &impl ReadEnv) -> Result<Option<Self>, VolumeCacheError> {
+        let Some(bucket) = optional(env, BUCKET_ENV)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
             bucket,
-            region: env.var(REGION_ENV).unwrap_or_else(|_| DEFAULT_REGION.to_string()),
-            endpoint: env.var(ENDPOINT_ENV).ok(),
-            kms_key_id: env.var(KMS_KEY_ID_ENV).ok(),
-        })
+            region: optional(env, REGION_ENV)?.unwrap_or_else(|| DEFAULT_REGION.to_string()),
+            endpoint: optional(env, ENDPOINT_ENV)?,
+            kms_key_id: optional(env, KMS_KEY_ID_ENV)?,
+        }))
+    }
+}
+
+fn optional(env: &impl ReadEnv, variable: &'static str) -> Result<Option<String>, VolumeCacheError> {
+    match env.var(variable) {
+        Ok(value) => Ok(Some(value)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(error @ VarError::NotUnicode(_)) => Err(VolumeCacheError::InvalidSetting {
+            variable,
+            source: Box::new(error),
+        }),
     }
 }

@@ -70,13 +70,14 @@ fn the_repository_glob_covers_every_tag_of_the_repository() {
 }
 
 #[test]
-fn the_config_directory_prefers_docker_config_then_home_then_tmp() {
+fn the_config_directory_prefers_docker_config_then_home_and_never_guesses() -> TestResult {
     let env = InMemoryEnv::new();
-    assert_eq!(docker_config_dir(&env), PathBuf::from("/tmp/.docker"));
+    assert!(docker_config_dir(&env).is_err());
     env.set("HOME", "/home/worker");
-    assert_eq!(docker_config_dir(&env), PathBuf::from("/home/worker/.docker"));
+    assert_eq!(docker_config_dir(&env)?, PathBuf::from("/home/worker/.docker"));
     env.set("DOCKER_CONFIG", "/etc/docker-auth");
-    assert_eq!(docker_config_dir(&env), PathBuf::from("/etc/docker-auth"));
+    assert_eq!(docker_config_dir(&env)?, PathBuf::from("/etc/docker-auth"));
+    Ok(())
 }
 
 #[test]
@@ -99,7 +100,7 @@ fn writing_auth_keeps_other_registries_and_replaces_the_same_one() -> TestResult
 }
 
 #[test]
-fn writing_auth_creates_the_directory_and_recovers_from_an_unreadable_config() -> TestResult {
+fn writing_auth_creates_the_directory_and_refuses_an_unreadable_config() -> TestResult {
     let dir = tempfile::tempdir()?;
     let nested = dir.path().join("a").join("b");
     write_docker_config_auth(&nested, "", &RegistryAuth::from_token(&ShortLivedToken::new("tok")))?;
@@ -110,15 +111,13 @@ fn writing_auth_creates_the_directory_and_recovers_from_an_unreadable_config() -
     );
 
     std::fs::write(nested.join("config.json"), "not json")?;
-    write_docker_config_auth(
+    let refused = write_docker_config_auth(
         &nested,
         "ghcr.io",
         &RegistryAuth::from_token(&ShortLivedToken::new("u:p")),
-    )?;
-    assert_eq!(
-        read_config(&nested)?["auths"]["https://ghcr.io"]["auth"],
-        encoded("u:p")
     );
+    assert!(refused.is_err());
+    assert_eq!(std::fs::read_to_string(nested.join("config.json"))?, "not json");
     Ok(())
 }
 

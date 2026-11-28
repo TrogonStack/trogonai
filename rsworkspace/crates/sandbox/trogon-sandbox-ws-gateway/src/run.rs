@@ -11,7 +11,8 @@ use trogon_std::env::SystemEnv;
 
 use crate::{
     AppState, CapabilityRegistry, GatewayArgs, GatewayError, NatsKvSessionStore, NatsObservability, NatsSandboxBackend,
-    ObservabilityConfig, SandboxBackend, preview_from_env, router, serve_tls_with_shutdown, serve_with_shutdown,
+    ObservabilityConfig, SandboxBackend, parse_cors_origins, preview_from_env, router, serve_tls_with_shutdown,
+    serve_with_shutdown,
 };
 
 /// Connects to NATS, starts observability and serves the gateway until `shutdown` resolves.
@@ -60,7 +61,8 @@ where
 
     let listener = TcpListener::bind(args.listen).await.map_err(GatewayError::Bind)?;
     tracing::info!(listen = %args.listen, "sandbox ws gateway listening");
-    let app = router(state, args.cors_origin).merge(health.router());
+    let cors_origins = parse_cors_origins(&args.cors_origin)?;
+    let app = router(state, cors_origins).merge(health.router());
     health.mark_started();
     let stopping = health.clone();
     let shutdown = async move {

@@ -19,8 +19,8 @@ use trogon_sandbox_contract::Port;
 use trogon_sandbox_contract::{AllowRange, DomainRule, DomainRuleAction, IpRange, NetworkPolicy, OpaqueTunnelPolicy};
 use trogon_sandbox_contract::{
     AllowedTlsTermination, CaFiles, DeniedDomainReasons, DenyReason, ExternalProxy, ExtraCaCertPaths, LoopbackNames,
-    MitmUnixSocket, NamesMatchedByName, NetworkOptions, NoProxy, ParentProxy, ParentProxyUrl, PatternTarget,
-    PlaintextHeaderSet, PrivateRangesByName, ReasonedRefusals, TlsExclusions, TunnelCap, UnlistedDestinations,
+    MitmUnixSocket, NamesMatchedByName, NetworkOptions, ParentProxyUrl, PatternTarget, PlaintextHeaderSet,
+    PrivateRangesByName, ReasonedRefusals, TlsExclusions, TunnelCap, UnlistedDestinations,
 };
 use trogon_sandbox_contract::{
     DeniedDomain, DomainPattern, FsPathEntry, FsPolicy, GlobPattern, LiteralPath, MachServiceName,
@@ -961,12 +961,13 @@ impl SandboxSettings {
             options.unlisted = UnlistedDestinations::Refuse;
         }
         if let Some(parent) = &network.parent_proxy {
-            options.parent_proxy = resolve_parent_proxy(
+            options.parent_proxy = trogon_sandbox_protocol::resolve_parent_proxy(
                 parent.http.as_ref().map(|url| url.0.as_str()),
                 parent.https.as_ref().map(|url| url.0.as_str()),
                 parent.no_proxy.as_deref(),
-                env,
-            );
+                |name| env.var(name).ok(),
+            )
+            .map_err(|error| SettingsError::new("network.parentProxy", error.to_string()))?;
         }
         if let Some(mitm) = &network.mitm_proxy {
             options.mitm = Some(MitmUnixSocket {
@@ -1293,32 +1294,6 @@ impl SandboxSettings {
         }
         Ok(config)
     }
-}
-
-/// Resolves explicit settings first and the environment second (`HTTP_PROXY`,
-/// `HTTPS_PROXY`, `NO_PROXY`, either case). `https` falls back to `http`. A URL
-/// that does not parse is ignored; with none left there is no parent proxy.
-fn resolve_parent_proxy(
-    http: Option<&str>,
-    https: Option<&str>,
-    no_proxy: Option<&str>,
-    env: &impl ReadEnv,
-) -> Option<ParentProxy> {
-    let lookup = |upper: &str, lower: &str| env.var(upper).ok().or_else(|| env.var(lower).ok());
-    let http = http.map(str::to_string).or_else(|| lookup("HTTP_PROXY", "http_proxy"));
-    let https = https
-        .map(str::to_string)
-        .or_else(|| lookup("HTTPS_PROXY", "https_proxy"))
-        .or_else(|| http.clone());
-    let no_proxy = no_proxy
-        .map(str::to_string)
-        .or_else(|| lookup("NO_PROXY", "no_proxy"))
-        .unwrap_or_default();
-    let parse = |raw: Option<String>| {
-        raw.filter(|raw| !raw.is_empty())
-            .and_then(|raw| ParentProxyUrl::new(&raw).ok())
-    };
-    ParentProxy::new(parse(http), parse(https), NoProxy::new(&no_proxy)).ok()
 }
 
 fn dropped_key(err: &serde_path_to_error::Error<serde_json::Error>) -> Option<(String, String)> {

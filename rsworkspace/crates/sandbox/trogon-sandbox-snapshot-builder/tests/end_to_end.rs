@@ -10,6 +10,7 @@
 //! ```
 
 use std::net::TcpListener;
+use std::num::NonZeroUsize;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -304,7 +305,7 @@ async fn end_to_end_scenario() -> TestResult {
     let config = BuilderConfig {
         nats_url: format!("nats://{}", server.address()),
         default_registry: registry.address.clone(),
-        max_concurrent: 2,
+        max_concurrent: NonZeroUsize::MIN.saturating_add(1),
         cosign_kms_uri: None,
         scan_cvss_threshold: 7.0,
         require_scan_pass: false,

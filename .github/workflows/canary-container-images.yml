@@ -364,7 +364,7 @@ jobs:
         uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
         with:
           cache: false
-          install_args: aqua:helm/helm aqua:mikefarah/yq aqua:oras-project/oras@1.3.0
+          install_args: aqua:helm/helm aqua:mikefarah/yq aqua:oras-project/oras
 
       - name: Skip when this commit is no longer the branch tip
         id: tip

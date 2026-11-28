@@ -15,6 +15,8 @@ pub enum PreviewConfigError {
     DuplicateKeyId { kid: String },
     #[error("active preview key id `{kid}` is not among the keys")]
     UnknownActiveKey { kid: String },
+    #[error("environment variable `{name}` is not valid Unicode")]
+    NotUnicode { name: &'static str },
     #[error("a public URL is required when preview signing keys are set")]
     MissingPublicUrl,
     #[error("preview http client could not be built: {0}")]

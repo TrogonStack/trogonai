@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use async_nats::Client;
 use async_nats::jetstream;
 use async_nats::jetstream::kv;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use serde::Serialize;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -162,7 +162,9 @@ impl NatsObservability {
 
     async fn kv_keys(&self, kv: &kv::Store) -> Result<Vec<String>, ObservabilityError> {
         let keys = kv.keys().await.map_err(ObservabilityError::read)?;
-        Ok(keys.filter_map(|key| async move { key.ok() }).collect().await)
+        keys.map(|key| key.map_err(ObservabilityError::read))
+            .try_collect()
+            .await
     }
 
     async fn fetch_live_snapshot(&self, tenant: &TenantId, digest: &Digest) -> Option<LiveSnapshotEntry> {

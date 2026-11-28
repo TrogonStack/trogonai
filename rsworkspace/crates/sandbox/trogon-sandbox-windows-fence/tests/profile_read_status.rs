@@ -7,15 +7,15 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const CURRENT: &str = r#"{
   "state": "current", "record_version": 1, "profile": "C:\\Users\\me",
-  "capabilities": ["a", 3, "b"],
+  "capabilities": ["a", "b"],
   "exclusions": ["C:\\Users\\me\\.ssh"], "ungranted_only": [],
-  "not_granted": [{"path": "C:\\x", "reason": "owned"}, {"reason": "no path"}],
+  "not_granted": [{"path": "C:\\x", "reason": "owned"}],
   "stale_allow": [{"path": "C:\\y", "reason": "gone", "entry": "inherited"}],
   "replaced_files": ["C:\\z"], "extra_exclusions": [".cfg"],
   "containers": 2, "granted": 3, "files": 4, "denied": 5,
   "env": {"NPM_CONFIG_USERCONFIG": "C:\\n", "CARGO_HOME": "", "OTHER": "x",
           "GIT_CONFIG_GLOBAL": "C:\\g"},
-  "paths": [{"path": "C:\\p", "kind": "granted"}, {"path": "C:\\q", "kind": "odd"}]
+  "paths": [{"path": "C:\\p", "kind": "granted"}]
 }"#;
 
 #[test]

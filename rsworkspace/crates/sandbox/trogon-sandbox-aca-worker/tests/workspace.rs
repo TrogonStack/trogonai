@@ -323,6 +323,25 @@ async fn a_failed_upload_stops_the_directory_upload() -> TestResult {
     Ok(())
 }
 
+#[tokio::test]
+async fn an_unreadable_directory_fails_the_upload_instead_of_uploading_nothing() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let aca = FakeAca::default();
+
+    let error = upload_directory(
+        &aca,
+        &ShortLivedToken::new("t"),
+        &SessionIdentifier::new("s"),
+        &dir.path().join("missing"),
+    )
+    .await
+    .err();
+
+    assert!(matches!(error, Some(AcaError::Io(_))));
+    assert!(aca.uploads().is_empty());
+    Ok(())
+}
+
 #[tokio::test(start_paused = true)]
 async fn waiting_ends_on_an_error_other_than_a_missing_session() -> TestResult {
     let aca = FakeAca::default();

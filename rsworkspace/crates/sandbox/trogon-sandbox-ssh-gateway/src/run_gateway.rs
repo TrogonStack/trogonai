@@ -37,15 +37,14 @@ where
     }
 
     let broker = match &args.credential_broker_url {
-        Some(url) => async_nats::connect(url).await.ok(),
-        None => Some(nats),
+        Some(url) => async_nats::connect(url).await?,
+        None => nats,
     };
-    let key_mint = broker
-        .map(|client| SessionKeyMint::new(client, args.ssh_gateway_tenant.clone(), args.ssh_pull_secret_id.clone()))
-        .map(Arc::new);
-    if key_mint.is_none() {
-        warn!("credential broker unavailable; session tokens will not be registered");
-    }
+    let key_mint = Some(Arc::new(SessionKeyMint::new(
+        broker,
+        args.ssh_gateway_tenant.clone(),
+        args.ssh_pull_secret_id.clone(),
+    )));
 
     let host_key = load_or_generate_host_key(&args.host_key_path)?;
     let listener = TcpListener::bind(args.listen).await.map_err(GatewayRunError::Bind)?;

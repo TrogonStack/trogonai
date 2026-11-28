@@ -24,7 +24,7 @@ The subprocess worker reads its FUSE configuration from environment variables at
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `SANDBOX_FUSE_ENABLED` | Yes | `false` | Set to `1` or `true` to enable FUSE support. Capability advertising is static per provider, so a worker with FUSE disabled still advertises `supports_fuse_mounts` on Linux and fails mount-bearing leases at launch time with a clear error. Enable this on every subprocess worker host or on none of them. |
+| `SANDBOX_FUSE_ENABLED` | Yes | `false` | Set to `1` or `true` to enable FUSE support, or `0` or `false` to disable it; any other value stops the worker at startup. Capability advertising is static per provider, so a worker with FUSE disabled still advertises `supports_fuse_mounts` on Linux and fails mount-bearing leases at launch time with a clear error. Enable this on every subprocess worker host or on none of them. |
 | `SANDBOX_FUSE_MOUNT_S3_BINARY` | No | `mount-s3` | Path to the `mount-s3` binary. If omitted the binary must be on `PATH`. |
 | `SANDBOX_FUSE_REGION` | No | empty | AWS region passed to `mount-s3` with `--region`. If omitted, `mount-s3` resolves the region itself. |
 | `SANDBOX_FUSE_ENDPOINT_URL` | No | unset | Custom S3 endpoint URL for S3-compatible stores. Passed to `mount-s3` with `--endpoint-url`. Leave unset for AWS S3. |

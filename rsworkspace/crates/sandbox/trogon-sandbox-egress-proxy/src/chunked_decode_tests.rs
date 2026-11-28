@@ -26,3 +26,15 @@ fn well_formed_body_still_decodes() -> Result<(), Box<dyn std::error::Error>> {
     );
     Ok(())
 }
+
+#[test]
+fn chunk_size_the_relay_would_refuse_is_refused() {
+    for body in [
+        &b"+4\r\nWiki\r\n0\r\n\r\n"[..],
+        b" 4\r\nWiki\r\n0\r\n\r\n",
+        b"\r\nWiki\r\n0\r\n\r\n",
+        b"4 \r\nWiki\r\n0\r\n\r\n",
+    ] {
+        assert!(decode_chunked_body(body).is_err());
+    }
+}

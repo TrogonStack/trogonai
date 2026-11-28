@@ -257,6 +257,21 @@ fn a_signalled_process_has_no_clean_exit() -> TestResult {
 }
 
 #[test]
+fn output_that_is_not_base64_fails_the_stream_instead_of_reading_as_empty() -> TestResult {
+    for stream in ["stdout", "stderr"] {
+        let body = test_stream(
+            &[
+                json!({"event": {"data": {stream: "!!not base64!!"}}}),
+                json!({"event": {"end": {"exited": true, "status": "exit status 0"}}}),
+            ],
+            None,
+        )?;
+        assert!(matches!(parse_process_stream(&body), Err(ApiError::Transport(_))));
+    }
+    Ok(())
+}
+
+#[test]
 fn a_deadline_without_native_end_preserves_uncertainty() -> TestResult {
     for code in ["deadline_exceeded", "canceled"] {
         let body = test_stream(

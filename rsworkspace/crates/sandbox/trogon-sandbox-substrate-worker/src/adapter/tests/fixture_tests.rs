@@ -58,3 +58,24 @@ async fn a_broken_index_fails_every_operation() -> TestResult {
     assert!(BrokenIndex.compare_exchange(None, Some(&entry)).await.is_err());
     Ok(())
 }
+
+#[test]
+fn an_unparseable_minimum_override_refuses_the_provider() -> TestResult {
+    let env = trogon_std::env::InMemoryEnv::new();
+    env.set(
+        trogon_sandbox_actor_agent::MIN_AGENT_PROTOCOL_VERSION_ENV,
+        "not-a-number",
+    );
+    let result = super::super::tests_support::provider_in(
+        super::super::tests_support::config()?,
+        Arc::new(FakeControl::running()),
+        Arc::new(crate::actor_index::memory::MemoryActorIndex::default()),
+        &env,
+    );
+    assert!(
+        matches!(result, Err(SubstrateError::MinProtocolVersion(_))),
+        "{:?}",
+        result.err()
+    );
+    Ok(())
+}

@@ -23,14 +23,22 @@ struct DockerAuthEntry {
 
 impl DockerAuthEntry {
     /// The encoded `auth` pair wins over separate `username` and `password` fields.
-    fn into_credentials(self) -> Option<RegistryCredentials> {
-        if let Some((username, password)) = self.auth.as_deref().and_then(decode_basic_auth) {
-            return Some(RegistryCredentials::new(username, SecretString::from(password)));
+    ///
+    /// An `auth` value that is present but not a base64 `user:password` pair is refused, not
+    /// skipped: skipping it would send the request anonymously under the wrong identity.
+    fn into_credentials(self, registry: &str) -> Result<Option<RegistryCredentials>, OciError> {
+        if let Some(encoded) = self.auth.as_deref().filter(|encoded| !encoded.is_empty()) {
+            let (username, password) = decode_basic_auth(encoded).ok_or_else(|| {
+                OciError::Config(format!(
+                    "docker config.json auth for {registry} is not a base64 user:password pair"
+                ))
+            })?;
+            return Ok(Some(RegistryCredentials::new(username, SecretString::from(password))));
         }
-        match (self.username, self.password) {
+        Ok(match (self.username, self.password) {
             (Some(username), Some(password)) => Some(RegistryCredentials::new(username, SecretString::from(password))),
             _ => None,
-        }
+        })
     }
 }
 
@@ -45,7 +53,7 @@ impl DockerCredentials {
         let path = match source {
             DockerConfigSource::Disabled => return Ok(Self::default()),
             DockerConfigSource::Directory(directory) => directory.join("config.json"),
-            DockerConfigSource::Environment => config_path(env.var_os("DOCKER_CONFIG"), env.var_os("HOME")),
+            DockerConfigSource::Environment => config_path(env.var_os("DOCKER_CONFIG"), env.var_os("HOME"))?,
         };
         Self::load_file(&path)
     }
@@ -57,12 +65,12 @@ impl DockerCredentials {
         let raw = std::fs::read_to_string(path)?;
         let parsed: DockerConfigFile = serde_json::from_str(&raw)
             .map_err(|error| OciError::Config(format!("invalid docker config.json: {error}")))?;
-        let by_registry = parsed
-            .auths
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|(registry, entry)| Some((registry, entry.into_credentials()?)))
-            .collect();
+        let mut by_registry = BTreeMap::new();
+        for (registry, entry) in parsed.auths.unwrap_or_default() {
+            if let Some(credentials) = entry.into_credentials(&registry)? {
+                by_registry.insert(registry, credentials);
+            }
+        }
         Ok(Self { by_registry })
     }
 
@@ -75,14 +83,16 @@ impl DockerCredentials {
     }
 }
 
-fn config_path(docker_config: Option<OsString>, home: Option<OsString>) -> PathBuf {
-    match docker_config {
-        Some(directory) => PathBuf::from(directory).join("config.json"),
-        None => home
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".docker")
-            .join("config.json"),
+/// Where the Docker config file lives. Without `DOCKER_CONFIG` or `HOME` there is no place to
+/// look: the working directory is never searched, because credentials would then come from
+/// whatever directory the process started in.
+fn config_path(docker_config: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, OciError> {
+    match (docker_config, home) {
+        (Some(directory), _) => Ok(PathBuf::from(directory).join("config.json")),
+        (None, Some(home)) => Ok(PathBuf::from(home).join(".docker").join("config.json")),
+        (None, None) => Err(OciError::Config(
+            "cannot locate the docker config: neither DOCKER_CONFIG nor HOME is set".into(),
+        )),
     }
 }
 

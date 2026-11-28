@@ -161,12 +161,16 @@ async fn a_native_snapshot_failure_is_typed_by_what_a_retry_can_change() -> Test
     let (fake, provider) = leased().await?;
     let failed = json!({"snapshot": {"id": "snap_f", "status": "failed"}});
     let unnamed = json!({"snapshot": {"id": "not a valid id", "status": "created"}});
+    let unreported = json!({"snapshot": {"id": "snap_u"}});
+    let deleted = json!({"snapshot": {"id": "snap_d", "status": "deleted"}});
     let cases = [
         (404, error_body("no"), true),
         (401, error_body("no"), true),
         (400, error_body("no"), true),
         (200, failed, true),
         (200, unnamed, true),
+        (200, unreported, true),
+        (200, deleted, true),
         (503, error_body("later"), false),
         (409, error_body("busy"), false),
         (429, error_body("slow"), false),

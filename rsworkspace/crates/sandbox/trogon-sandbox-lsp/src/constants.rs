@@ -6,6 +6,9 @@ pub(crate) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// The JSON-RPC code for a method the client does not implement.
 pub(crate) const METHOD_NOT_FOUND: i64 = -32601;
 
+/// The JSON-RPC code for parameters that do not have the shape the method requires.
+pub(crate) const INVALID_PARAMS: i64 = -32602;
+
 pub(crate) const HEADER_TERMINATOR: &[u8] = b"\r\n\r\n";
 pub(crate) const MAX_HEADER_BYTES: usize = 8 * 1024;
 pub(crate) const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;

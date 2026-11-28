@@ -148,12 +148,15 @@ impl DispatchVerifier {
         if mode == EnforcementMode::Require && verifier.keys.is_empty() {
             return Err(DispatchVerifierConfigError::RequireWithoutKeys);
         }
-        let fence_file = lookup(ENV_FENCE_FILE)
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from)
-            .or(default_fence);
-        if let Some(path) = fence_file {
-            // A journal that cannot be read leaves the fence in memory; the verifier and its keys still work.
+        let configured_fence = lookup(ENV_FENCE_FILE).filter(|path| !path.is_empty());
+        if let Some(path) = configured_fence {
+            // The operator asked for a durable fence, so a journal that cannot be opened is a startup error, never a
+            // silent downgrade to a fence that forgets leases on restart.
+            *verifier.fence() = DispatchFence::open(Path::new(&path))
+                .map_err(|source| DispatchVerifierConfigError::FenceFile { path, source })?;
+        } else if let Some(path) = default_fence {
+            // The default location is best effort: a journal that cannot be read leaves the fence in memory; the
+            // verifier and its keys still work.
             match DispatchFence::open(&path) {
                 Ok(fence) => *verifier.fence() = fence,
                 Err(error) => tracing::error!(

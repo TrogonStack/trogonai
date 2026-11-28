@@ -55,7 +55,7 @@ impl PtyStream {
                     .and_then(|data| data.get("pty"))
                     .and_then(Value::as_str)
                 {
-                    return Ok(Some(PtyEvent::Data(decode_b64(data))));
+                    return Ok(Some(PtyEvent::Data(decode_b64(data)?)));
                 }
                 if let Some(end) = event.get("end") {
                     return Ok(Some(PtyEvent::Ended(exit_code_of(end))));

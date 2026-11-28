@@ -126,3 +126,14 @@ fn discarding_an_existing_file_keeps_it_and_a_missing_directory_is_not_synced() 
     sync_parent(&root_path.join("absent"));
     Ok(())
 }
+
+#[test]
+fn a_directory_outside_the_root_is_refused_rather_than_taken_for_the_root() -> TestResult {
+    let root = TempDir::new()?;
+    let elsewhere = TempDir::new()?;
+    let refused = dirfd::mkdir(root.path(), &elsewhere.path().join("child"), false);
+    assert_eq!(refused.err().map(|e| e.kind()), Some(std::io::ErrorKind::InvalidInput));
+    assert!(!elsewhere.path().join("child").exists());
+    assert!(dirfd::mkdir(root.path(), root.path(), false)?);
+    Ok(())
+}

@@ -41,9 +41,10 @@ use trogon_sandbox_egress_proxy::violation::{NatsViolationSink, ViolationRateLim
 #[cfg(unix)]
 use trogon_sandbox_protocol::RegistryHandoff;
 use trogon_sandbox_protocol::SentinelRegistry;
-use trogon_std::env::{ReadEnv as _, SystemEnv};
+use trogon_std::env::{EnumerateEnv as _, ReadEnv as _, SystemEnv};
 
 mod constants;
+mod env_encoding;
 use constants::{
     CA_CERT_FILE_ENV_VAR, CA_KEY_FILE_ENV_VAR, CA_OUT_FILE_ENV_VAR, CREDENTIAL_BROKER_LEASE_ID_ENV_VAR,
     CREDENTIAL_BROKER_NATS_URL_ENV_VAR, CREDENTIAL_BROKER_POLICY_REVISION_ENV_VAR, CREDENTIAL_BROKER_TENANT_ID_ENV_VAR,
@@ -738,6 +739,10 @@ async fn serve(
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+    if let Err(err) = env_encoding::reject_non_unicode(SystemEnv.vars_os()) {
+        tracing::error!(error = %err, "invalid configuration");
+        std::process::exit(1);
+    }
     std::process::exit(serve(std::env::args().skip(1), process_env, read_policy_file).await);
 }
 

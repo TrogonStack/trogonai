@@ -1,3 +1,5 @@
+use std::env::VarError;
+
 use trogon_sandbox_contract::S3BucketName;
 use trogon_sandbox_volumes::{KmsKeyId, VolumeBackend, VolumeClientConfig, VolumeEndpoint, VolumePrefix, VolumeRegion};
 use trogon_std::env::ReadEnv;
@@ -39,9 +41,14 @@ impl S3ExportTarget {
         self
     }
 
-    /// Reads the KMS key from [`Self::KMS_KEY_ENV`]; an unset variable means no key.
+    /// Reads the KMS key from [`Self::KMS_KEY_ENV`]; an unset variable means no key, while a value that is not valid
+    /// unicode is refused rather than read as unset, which would export without the encryption key that was asked for.
     pub fn with_kms_key_from_env(self, env: &impl ReadEnv) -> Result<Self, S3ExportError> {
-        let key = env.var(Self::KMS_KEY_ENV).ok().map(KmsKeyId::new).transpose()?;
+        let key = match env.var(Self::KMS_KEY_ENV) {
+            Ok(value) => Some(KmsKeyId::new(value)?),
+            Err(VarError::NotPresent) => None,
+            Err(VarError::NotUnicode(_)) => return Err(S3ExportError::KmsKeyEnvNotUnicode),
+        };
         Ok(self.with_kms_key_id(key))
     }
 

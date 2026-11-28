@@ -132,14 +132,28 @@ async fn an_invalid_signing_key_stops_the_gateway() -> TestResult {
 }
 
 #[tokio::test]
-async fn an_occupied_port_stops_the_gateway_and_an_absent_broker_is_tolerated() -> TestResult {
+async fn an_occupied_port_stops_the_gateway() -> TestResult {
     let server = JetStreamTestServer::start().await;
     let dir = tempfile::tempdir()?;
     let occupied = TcpListener::bind("127.0.0.1:0").await?;
+    let status = failing_start(&mut gateway(
+        &format!("nats://{}", server.address()),
+        occupied.local_addr()?,
+        &dir.path().join("key"),
+    ))
+    .await?;
+    assert!(!status.success());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_configured_but_unreachable_broker_stops_the_gateway() -> TestResult {
+    let server = JetStreamTestServer::start().await;
+    let dir = tempfile::tempdir()?;
     let status = failing_start(
         gateway(
             &format!("nats://{}", server.address()),
-            occupied.local_addr()?,
+            free_addr().await?,
             &dir.path().join("key"),
         )
         .args(["--credential-broker-url", "nats://127.0.0.1:1"]),

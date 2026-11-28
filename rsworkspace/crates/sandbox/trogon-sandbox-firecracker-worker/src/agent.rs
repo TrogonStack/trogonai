@@ -32,8 +32,8 @@ use trogon_sandbox_actor_agent::{
     ActorIdentity, BIND_PATH, BindLeaseRequest, BindLeaseResponse, EXEC_KILL_PATH, EXEC_PATH, EXEC_POLL_PATH,
     EXEC_WRITE_STDIN_PATH, ExecFrame, FILES_READ_PATH, FILES_WRITE_PATH, GROUP_MEMBERSHIP_PATH, GROUPS_CREATE_PATH,
     GuestEntropyReseedMethod, GuestProtocolError, IDENTITY_PATH, MIN_AGENT_PROTOCOL_VERSION_ENV,
-    MIN_SUPPORTED_AGENT_PROTOCOL_VERSION, PROTOCOL_REFUSED_STATUS, READYZ_PATH, USERS_CREATE_PATH,
-    min_protocol_version_from_env,
+    MIN_SUPPORTED_AGENT_PROTOCOL_VERSION, MinProtocolVersionError, PROTOCOL_REFUSED_STATUS, READYZ_PATH,
+    USERS_CREATE_PATH, try_min_protocol_version_from_env,
 };
 use trogon_sandbox_contract::{
     CommandEnv, CommandExecution, CommandOutputChunk, CreateSandboxGroupRequest, CreateSandboxGroupResponse,
@@ -132,14 +132,15 @@ impl GuestAgent {
     }
 
     /// Applies the oldest agent protocol named by [`MIN_AGENT_PROTOCOL_VERSION_ENV`] in `env`,
-    /// keeping the current minimum when it is unset or unreadable.
-    pub fn with_env(mut self, env: &impl ReadEnv) -> Self {
-        self.min_agent_protocol_version = min_protocol_version_from_env(
+    /// keeping the current minimum when it is unset. An override that is set but is not an
+    /// unsigned integer is refused.
+    pub fn with_env(mut self, env: &impl ReadEnv) -> Result<Self, MinProtocolVersionError> {
+        self.min_agent_protocol_version = try_min_protocol_version_from_env(
             env,
             MIN_AGENT_PROTOCOL_VERSION_ENV,
             MIN_SUPPORTED_AGENT_PROTOCOL_VERSION,
-        );
-        self
+        )?;
+        Ok(self)
     }
 
     /// Overrides the oldest agent protocol this client drives (zero admits guest images that

@@ -53,3 +53,17 @@ pub const FIRECRACKER_WORKER: u16 = 8111;
 pub const E2B_WORKER: u16 = 8112;
 pub const VERCEL_WORKER: u16 = 8113;
 pub const SPACE_WORKER: u16 = 8114;
+
+/// How long a required dependency may report down before readiness fails.
+///
+/// A shared dependency that blips would otherwise take every pod out of rotation together.
+pub const DEPENDENCY_GRACE: Duration = Duration::from_secs(15);
+
+/// Path answering liveness on every listener.
+pub(crate) const LIVENESS_PATH: &str = "/-/liveness";
+
+/// Path answering readiness on every listener.
+pub(crate) const READINESS_PATH: &str = "/-/readiness";
+
+/// Environment variable holding the log filter directives.
+pub(crate) const LOG_FILTER_ENV: &str = "RUST_LOG";

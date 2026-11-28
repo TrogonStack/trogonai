@@ -10,9 +10,9 @@ use trogon_sandbox_contract::{
 use trogon_sandbox_protocol::{
     AuthorityHost, AuthorityResourceId, FreezeOutcome, HeldLease, PurgeOutcome, ThawOutcome,
 };
-use trogon_sandbox_v8_wasm_worker::V8WasmProvider;
+use trogon_sandbox_v8_wasm_worker::{PERSISTENT_RUNTIME_ENV, V8WasmLeaseError, V8WasmProvider};
 
-use support::lease::{Lease, command_request, eval_request, provider};
+use support::lease::{Lease, command_request, eval_request, lease_error, provider};
 use support::{TestResult, cpu_permit};
 use trogon_sandbox_protocol::{LifecycleEmitter, Provider};
 
@@ -365,5 +365,36 @@ async fn a_persistent_lease_abandoned_after_its_script_ran_releases_its_runtime(
 
     assert!(abandoned.is_err());
     assert!(released.is_ok());
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_unrecognised_persistent_runtime_setting_is_refused_not_ignored() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    std::fs::write(dir.path().join("index.js"), "1;")?;
+    let (_, provider) = provider();
+    for value in ["TRUE", "yes", ""] {
+        let request = Lease::mounted(dir.path(), "js")
+            .env(json!({ "V8_WASM_GUEST": "js", PERSISTENT_RUNTIME_ENV: value }))
+            .build()?;
+        let error = provider.lease(&request, &LeaseId::new("lease-typo")).await.err();
+        assert!(matches!(
+            lease_error(error, "expected a refusal")?,
+            V8WasmLeaseError::InvalidPersistentRuntime(_)
+        ));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_explicit_false_persistent_runtime_setting_is_an_ordinary_lease() -> TestResult {
+    let _permit = cpu_permit().await?;
+    let dir = tempfile::tempdir()?;
+    std::fs::write(dir.path().join("index.js"), "1;")?;
+    let (_, provider) = provider();
+    let request = Lease::mounted(dir.path(), "js")
+        .env(json!({ "V8_WASM_GUEST": "js", PERSISTENT_RUNTIME_ENV: "false" }))
+        .build()?;
+    provider.lease(&request, &LeaseId::new("lease-plain")).await?;
     Ok(())
 }

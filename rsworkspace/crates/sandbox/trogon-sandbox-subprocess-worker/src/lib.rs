@@ -71,7 +71,7 @@ pub mod worker_authority;
 
 pub use backend_kind::IsolationBackendKind;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub use config::{FuseConfig, WorkerConfig};
+pub use config::{FuseConfig, FuseConfigError, WorkerConfig};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use isolation::{IsolationBackend, LaunchedProcess};
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]

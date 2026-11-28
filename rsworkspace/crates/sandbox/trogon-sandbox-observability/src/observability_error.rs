@@ -5,6 +5,8 @@ use std::net::SocketAddr;
 pub enum ObservabilityError {
     #[error("failed to build the OTLP span exporter")]
     Exporter(#[source] opentelemetry_otlp::ExporterBuildError),
+    #[error("RUST_LOG is not a valid log filter: {0}")]
+    LogFilter(String),
     #[error("prometheus registry operation failed")]
     Metrics(#[source] prometheus::Error),
     #[error("metrics listener on {addr} failed")]

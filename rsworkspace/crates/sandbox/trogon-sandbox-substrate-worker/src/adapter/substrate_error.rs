@@ -17,6 +17,8 @@ pub enum SubstrateError {
     #[error("{0}")]
     InvalidSpec(String),
     #[error(transparent)]
+    MinProtocolVersion(#[from] trogon_sandbox_actor_agent::MinProtocolVersionError),
+    #[error(transparent)]
     Config(#[from] SubstrateConfigError),
     #[error(transparent)]
     ImageDigest(#[from] ImageDigestError),
