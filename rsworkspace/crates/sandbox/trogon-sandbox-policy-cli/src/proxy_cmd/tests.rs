@@ -319,7 +319,10 @@ fn a_listen_fd_that_is_not_a_descriptor_is_refused_not_replaced() -> TestResult 
             matches!(&refused, Err(message) if message.contains("fd must be an integer from 0 to 2147483647")),
             "{bad}: {refused:?}"
         );
-        assert!(choice(&["--listen-fd", bad, "--listen", "127.0.0.1:1"])?.is_err(), "{bad}");
+        assert!(
+            choice(&["--listen-fd", bad, "--listen", "127.0.0.1:1"])?.is_err(),
+            "{bad}"
+        );
     }
     Ok(())
 }

@@ -105,7 +105,7 @@ fn install_cancelled_message() -> TestResult {
     let dir = tempfile::tempdir()?;
     let fence = fake_fence(
         &dir,
-        r#"case "$1" in install) exit 10;; status) echo '{"user":{"user":{"exists":false,"group_exists":false,"in_builtin_users":false,"in_sandbox_group":false,"hidden_from_logon":false},"cred_present":false,"real_user_sid":"S-1-5-21-1","session_user_sid":"S-1-5-21-1"},"wfp":{"state":"absent","filters":0}}';; esac"#,
+        r#"case "$1" in install) exit 10;; status) echo '{"user":{"user":{"exists":false,"group_exists":false,"in_builtin_users":false,"in_sandbox_group":false,"hidden_from_logon":false},"cred_present":false,"real_user_sid":"S-1-5-21-1","session_user_sid":"S-1-5-21-1"},"wfp":{"state":"absent","filters":0,"allow_loopback":false}}';; esac"#,
     )?;
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let got = run_install(&fence, &InstallOptions::default(), &NoEnv, &mut out, &mut err);
