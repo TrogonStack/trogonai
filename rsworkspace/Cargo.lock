@@ -1543,7 +1543,7 @@ checksum = "b15b05c8418f1e200e406e5b19df97400dffa833e2450e4392c506896cbc97ac"
 dependencies = [
  "buffa",
  "bytes",
- "jiff 0.2.35",
+ "jiff 0.2.38",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -4286,7 +4286,7 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "http",
- "jiff 0.2.35",
+ "jiff 0.2.38",
  "reqwest 0.13.4",
  "rustc_version",
  "rustls",
@@ -5531,17 +5531,18 @@ checksum = "4754a1731458af0443709c9667302793d3f63cc90ec4ba4c8259f2b9515478e5"
 
 [[package]]
 name = "jiff"
-version = "0.2.35"
+version = "0.2.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "668b7183bd07af9a4885f5c35b0cc5c83c4607a913c16b7e17291832910d2dcc"
+checksum = "b2b005715dcbeb0089a3c0dab99f2ff1cc3b2525323552703d648585d342a383"
 dependencies = [
  "defmt",
  "jiff-core 0.1.0",
- "jiff-static 0.2.35",
+ "jiff-static 0.2.38",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "windows-link",
 ]
 
 [[package]]
@@ -5578,9 +5579,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.35"
+version = "0.2.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a69dcb3a21cfb32ce1cd056169337ca284af0766dd766e7878819b251a49204"
+checksum = "2cc9817253cf7c7ee4684451bd327e88d6f3658014e54a29198625590650695c"
 dependencies = [
  "jiff-core 0.1.0",
  "proc-macro2",
@@ -5838,7 +5839,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c6922f6afe80418dd6019818af5d0d34584c371780ff09b9752370c25b4abb"
 dependencies = [
  "base64 0.22.1",
- "jiff 0.2.35",
+ "jiff 0.2.38",
  "serde",
  "serde_json",
 ]
@@ -5907,7 +5908,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-timeout",
  "hyper-util",
- "jiff 0.2.35",
+ "jiff 0.2.38",
  "jsonpath-rust",
  "k8s-openapi",
  "kube-core",
@@ -5936,7 +5937,7 @@ dependencies = [
  "derive_more 2.1.1",
  "form_urlencoded",
  "http",
- "jiff 0.2.35",
+ "jiff 0.2.38",
  "json-patch",
  "k8s-openapi",
  "serde",
@@ -13472,6 +13473,24 @@ dependencies = [
  "trogon-std",
  "trogon-workload-identity",
  "trogonai-proto",
+]
+
+[[package]]
+name = "trogonai-harness-tool-text"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "trogonai-harness-types"
+version = "0.0.1"
+dependencies = [
+ "jiff 0.2.38",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

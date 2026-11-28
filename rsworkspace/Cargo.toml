@@ -125,6 +125,8 @@ trogon-credential-domain = { path = "crates/credential/trogon-credential-domain"
 trogon-secret-store = { path = "crates/credential/trogon-secret-store" }
 trogon-secrets-client = { path = "crates/credential/trogon-secrets-client" }
 trogon-secrets-service = { path = "crates/credential/trogon-secrets-service" }
+trogonai-harness-types = { path = "crates/harness/trogonai-harness-types" }
+trogonai-harness-tool-text = { path = "crates/harness/trogonai-harness-tool-text" }
 
 # A2A
 a2a = { package = "a2a-lf", version = "=0.3.0" }
@@ -350,6 +352,9 @@ rustls-native-certs = "=0.8.3"
 sha1 = "=0.10.7"
 socket2 = { version = "=0.6.5", features = ["all"] }
 subtle = "=2.6.1"
+# The local UTC offset and zone abbreviation for a timestamp, from TZ or the
+# system zone, without unsafe or a libc lookup.
+jiff = { version = "=0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 
 [profile.release]
 lto = "thin"

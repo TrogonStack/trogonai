@@ -1,0 +1,20 @@
+[package]
+name = "trogonai-harness-tool-text"
+description = "The model-facing text of tools served both natively and as components, written once."
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.90"
+license = "Apache-2.0"
+repository = "https://github.com/TrogonStack/trogonai"
+
+[dependencies]
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
