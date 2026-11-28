@@ -4,4 +4,4 @@
 mod connection;
 pub mod constants;
 
-pub use connection::{AgentSideNatsConnection, ConnectionError};
+pub use connection::{AgentSideNatsConnection, CommandsMessagesError, ConnectionError};

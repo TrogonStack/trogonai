@@ -653,7 +653,10 @@ where
 
 type CommandsConsumer<J> = <<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer;
 type CommandsMessages<J> = <CommandsConsumer<J> as JetStreamConsumer>::Messages;
-type CommandsMessagesError<J> = <CommandsConsumer<J> as JetStreamConsumer>::MessagesError;
+/// The error the COMMANDS consumer's message stream yields for a JetStream
+/// client `J`. The JetStream constructors bound it by `ConsumerLoss`, so
+/// generic callers name it in their own bounds.
+pub type CommandsMessagesError<J> = <CommandsConsumer<J> as JetStreamConsumer>::MessagesError;
 
 /// Opens the stream, creates (or resumes) the durable consumer and starts
 /// pulling from it.
