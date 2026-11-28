@@ -15,56 +15,36 @@ use trogon_nats::jetstream::{
 };
 
 use crate::acp_prefix::AcpPrefix;
-use crate::constants::SESSION_ID_HEADER;
+use crate::constants::{RESUME_BACKOFF_MAX, RESUME_BACKOFF_MIN, RESUME_REWIND, SESSION_ID_HEADER};
 use crate::jetstream::{consumers, streams};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
 use crate::wire::{decode_response, encode_request, req_id_from_request_headers};
-
-/// How far before the request a recreated response consumer starts reading.
-///
-/// The first consumer delivers only new messages, which is exact because it
-/// exists before the request is published. A consumer recreated after a
-/// failure cannot know which responses it missed, so it rereads the session's
-/// responses from a wall-clock point before the request. The margin absorbs
-/// clock skew between this host and the NATS server; replies to other requests
-/// it rereads are skipped by `Jsonrpc-Id`.
-const RESUME_REWIND: Duration = Duration::from_secs(60);
-const RESUME_BACKOFF_MIN: Duration = Duration::from_millis(100);
-const RESUME_BACKOFF_MAX: Duration = Duration::from_secs(2);
 
 type StreamOf<J> = <J as JetStreamGetStream>::Stream;
 type ConsumerOf<J> = <StreamOf<J> as JetStreamCreateConsumer>::Consumer;
 type MessagesOf<J> = <ConsumerOf<J> as JetStreamConsumer>::Messages;
 
 /// Why the response consumer could not deliver.
-pub(crate) enum ConsumerFailure<J: JetStreamGetStream> {
+#[derive(thiserror::Error)]
+pub(crate) enum ResponseConsumerError<J: JetStreamGetStream> {
+    #[error("get responses stream: {0}")]
     GetStream(J::Error),
+    #[error("create response consumer: {0}")]
     Create(<StreamOf<J> as JetStreamCreateConsumer>::Error),
+    #[error("response messages: {0}")]
     Messages(<ConsumerOf<J> as JetStreamConsumer>::StreamError),
+    #[error("response consumer: {0}")]
     Delivery(<ConsumerOf<J> as JetStreamConsumer>::MessagesError),
+    #[error("response stream closed unexpectedly")]
     Closed,
 }
 
-impl<J: JetStreamGetStream> fmt::Display for ConsumerFailure<J> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::GetStream(e) => write!(f, "get responses stream: {e}"),
-            Self::Create(e) => write!(f, "create response consumer: {e}"),
-            Self::Messages(e) => write!(f, "response messages: {e}"),
-            Self::Delivery(e) => write!(f, "response consumer: {e}"),
-            Self::Closed => f.write_str("response stream closed unexpectedly"),
-        }
-    }
-}
-
-impl<J: JetStreamGetStream> fmt::Debug for ConsumerFailure<J> {
+impl<J: JetStreamGetStream> fmt::Debug for ResponseConsumerError<J> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
 }
-
-impl<J: JetStreamGetStream> std::error::Error for ConsumerFailure<J> {}
 
 /// Why a request ended without the runner's answer.
 pub(crate) enum JsRequestError<J: JetStreamGetStream> {
@@ -72,10 +52,10 @@ pub(crate) enum JsRequestError<J: JetStreamGetStream> {
     Rejected(Error),
     /// The correlated response arrived but its body could not be decoded.
     BadPayload,
-    /// The deadline passed. Carries the last consumer failure, if any, because
-    /// a timeout after consumer failures usually means the network, not the runner.
+    /// The deadline passed. Carries the last consumer error, if any, because
+    /// a timeout after consumer errors usually means the network, not the runner.
     TimedOut {
-        last_consumer_failure: Option<ConsumerFailure<J>>,
+        last_consumer_error: Option<ResponseConsumerError<J>>,
     },
 }
 
@@ -85,10 +65,10 @@ impl<J: JetStreamGetStream> JsRequestError<J> {
             Self::Rejected(error) => error,
             Self::BadPayload => Error::new(ErrorCode::INTERNAL_ERROR, "bad response payload"),
             Self::TimedOut {
-                last_consumer_failure: None,
+                last_consumer_error: None,
             } => Error::new(ErrorCode::INTERNAL_ERROR, timeout_message),
             Self::TimedOut {
-                last_consumer_failure: Some(last),
+                last_consumer_error: Some(last),
             } => Error::new(
                 ErrorCode::INTERNAL_ERROR,
                 format!("{timeout_message} (last response consumer error: {last})"),
@@ -174,7 +154,7 @@ where
     match timeout_at(Instant::now() + operation_timeout, responses.await_response(req_id)).await {
         Ok(result) => result,
         Err(_elapsed) => Err(JsRequestError::TimedOut {
-            last_consumer_failure: responses.last_failure.take(),
+            last_consumer_error: responses.last_failure.take(),
         }),
     }
 }
@@ -186,7 +166,7 @@ struct ResponseConsumer<'a, J: JetStreamGetStream> {
     /// Config for recreated consumers: the original filter, rewound in time.
     resume_config: pull::Config,
     messages: MessagesOf<J>,
-    last_failure: Option<ConsumerFailure<J>>,
+    last_failure: Option<ResponseConsumerError<J>>,
 }
 
 impl<'a, J> ResponseConsumer<'a, J>
@@ -194,7 +174,7 @@ where
     J: JetStreamGetStream,
     JsMessageOf<J>: JsRequestMessage,
 {
-    async fn open(js: &'a J, prefix: &AcpPrefix, session_id: &AcpSessionId) -> Result<Self, ConsumerFailure<J>> {
+    async fn open(js: &'a J, prefix: &AcpPrefix, session_id: &AcpSessionId) -> Result<Self, ResponseConsumerError<J>> {
         let stream_name = streams::responses_stream_name(prefix);
         let config = consumers::response_consumer(prefix, session_id);
         let rewind_to = SystemTime::now()
@@ -245,8 +225,8 @@ where
                         }
                     };
                 }
-                Some(Err(e)) => ConsumerFailure::Delivery(e),
-                None => ConsumerFailure::Closed,
+                Some(Err(e)) => ResponseConsumerError::Delivery(e),
+                None => ResponseConsumerError::Closed,
             };
             warn!(error = %failure, "Response consumer failed; recreating it");
             self.last_failure = Some(failure);
@@ -278,10 +258,16 @@ async fn subscribe<J: JetStreamGetStream>(
     js: &J,
     stream_name: &str,
     config: pull::Config,
-) -> Result<MessagesOf<J>, ConsumerFailure<J>> {
-    let stream = js.get_stream(stream_name).await.map_err(ConsumerFailure::GetStream)?;
-    let consumer = stream.create_consumer(config).await.map_err(ConsumerFailure::Create)?;
-    consumer.messages().await.map_err(ConsumerFailure::Messages)
+) -> Result<MessagesOf<J>, ResponseConsumerError<J>> {
+    let stream = js
+        .get_stream(stream_name)
+        .await
+        .map_err(ResponseConsumerError::GetStream)?;
+    let consumer = stream
+        .create_consumer(config)
+        .await
+        .map_err(ResponseConsumerError::Create)?;
+    consumer.messages().await.map_err(ResponseConsumerError::Messages)
 }
 
 #[cfg(test)]

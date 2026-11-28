@@ -18,6 +18,18 @@ pub const DEFAULT_STREAM_MAX_AGE: Duration = Duration::from_hours(30 * 24);
 pub const SESSION_READY_DELAY: Duration = Duration::from_millis(100);
 pub const TEST_PROMPT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How far before the request a recreated response consumer starts reading.
+///
+/// The first consumer delivers only new messages, which is exact because it
+/// exists before the request is published. A consumer recreated after a
+/// failure cannot know which responses it missed, so it rereads the session's
+/// responses from a wall-clock point before the request. The margin absorbs
+/// clock skew between this host and the NATS server; replies to other requests
+/// it rereads are skipped by `Jsonrpc-Id`.
+pub const RESUME_REWIND: Duration = Duration::from_secs(60);
+pub const RESUME_BACKOFF_MIN: Duration = Duration::from_millis(100);
+pub const RESUME_BACKOFF_MAX: Duration = Duration::from_secs(2);
+
 pub const AGENT_UNAVAILABLE: i32 = -32001;
 
 pub const SESSION_PREFIX: &str = ".session.";
