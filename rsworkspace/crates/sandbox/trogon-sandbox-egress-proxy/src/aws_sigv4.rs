@@ -439,3 +439,6 @@ pub(crate) fn sign(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod suite_tests;
