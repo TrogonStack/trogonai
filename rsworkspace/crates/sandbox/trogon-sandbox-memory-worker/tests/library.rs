@@ -105,8 +105,11 @@ async fn the_default_commands_behave_like_their_namesakes() -> TestResult {
         b"hi\n"
     );
 
-    for argument in ["0", "NaN", "abc", "-5"] {
-        assert_eq!(run(&table, &["sleep", argument], ctx(&fs, &[])).await.exit_code, 0);
+    assert_eq!(run(&table, &["sleep", "0"], ctx(&fs, &[])).await.exit_code, 0);
+    for argument in ["NaN", "abc", "-5", ""] {
+        let refused = run(&table, &["sleep", argument], ctx(&fs, &[])).await;
+        assert_eq!(refused.exit_code, 1);
+        assert!(refused.stderr.starts_with(b"sleep: invalid time interval"));
     }
     assert_eq!(run(&table, &["sleep"], ctx(&fs, &[])).await.exit_code, 0);
     let cancelled = ctx(&fs, &[]);
@@ -144,6 +147,20 @@ async fn serve_announces_its_port_until_cancelled() {
         assert_eq!(live.is_listening(8080), listening);
         cancel.cancel();
         assert!(matches!(task.await, Ok(output) if output.exit_code == 143));
+    }
+}
+
+#[tokio::test]
+async fn serve_refuses_a_port_that_is_not_a_port() {
+    let table = CommandTable::default();
+    let fs = Arc::new(Mutex::new(MemoryFs::default()));
+    for argument in ["abc", "70000", "-1", ""] {
+        let context = ctx(&fs, &[]);
+        let live = context.live.clone();
+        let refused = run(&table, &["serve", argument], context).await;
+        assert_eq!(refused.exit_code, 2);
+        assert!(refused.stderr.starts_with(b"serve: invalid port"));
+        assert!(!live.contains(b"listening on"));
     }
 }
 
