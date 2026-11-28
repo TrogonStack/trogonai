@@ -35,15 +35,37 @@ fn map_wfp(raw: WfpStatusWire) -> WfpStatus {
     }
 }
 
-fn map_user(raw: UserStatusWire) -> SandboxUserStatus {
+fn map_user(raw: UserStatusWire) -> Result<SandboxUserStatus, WindowsSandboxError> {
+    let seclogon = match raw.seclogon.as_deref() {
+        None => None,
+        Some(state) => Some(SeclogonState::parse(state).ok_or_else(|| {
+            WindowsSandboxError::for_subcommand(
+                Code::FenceHelperBadJson,
+                format!("fence-helper status: unknown seclogon state {state:?}"),
+                "status",
+            )
+        })?),
+    };
+    let bad = |why: &str| {
+        WindowsSandboxError::for_subcommand(
+            Code::FenceHelperBadJson,
+            format!("fence-helper status: `capabilities` {why}"),
+            "status",
+        )
+    };
     let capabilities = match raw.capabilities {
+        None | Some(serde_json::Value::Null) => Vec::new(),
         Some(serde_json::Value::Array(items)) => items
             .into_iter()
-            .filter_map(|i| i.as_str().map(str::to_string))
-            .collect(),
-        _ => Vec::new(),
+            .map(|i| {
+                i.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| bad("has an entry that is not text"))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(_) => return Err(bad("is not a list")),
     };
-    SandboxUserStatus {
+    Ok(SandboxUserStatus {
         provisioned: raw.user.exists,
         sid: non_empty(raw.user.sid),
         group_exists: raw.user.group_exists,
@@ -57,7 +79,7 @@ fn map_user(raw: UserStatusWire) -> SandboxUserStatus {
         real_user_sid: raw.real_user_sid,
         ca_cert_thumb: non_empty(raw.ca_cert_thumb),
         ca_cert_pem: non_empty(raw.ca_cert_pem),
-        seclogon: raw.seclogon.as_deref().and_then(SeclogonState::parse),
+        seclogon,
         // Anything but an explicit "none" counts: a state this code does not
         // know must not read as "no grants".
         persistent_grants: raw
@@ -77,7 +99,7 @@ fn map_user(raw: UserStatusWire) -> SandboxUserStatus {
             }),
         capabilities,
         session_user_sid: non_empty(raw.session_user_sid),
-    }
+    })
 }
 
 /// Map the stdout of `fence-helper status` (`{user, wfp}`).
@@ -94,7 +116,7 @@ pub fn parse_sandbox_status(stdout: &str, args: &[String]) -> Result<SandboxStat
         )
     })?;
     Ok(SandboxStatus {
-        user: map_user(raw.user),
+        user: map_user(raw.user)?,
         wfp: map_wfp(raw.wfp),
     })
 }

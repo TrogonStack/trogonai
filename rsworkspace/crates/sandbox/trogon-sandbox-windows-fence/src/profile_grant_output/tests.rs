@@ -27,9 +27,8 @@ fn parses_result_and_item_details() -> Result<(), Box<dyn std::error::Error>> {
       "placeholders":1,"writes":4,"unchanged":2,"removed":0,
       "skipped":[{"path":"j","reason":"junction"}],
       "unverifiable":[{"path":"u","reason":"r","caller_reads":"unknown","cause":"acl_unreadable"},
-                      {"path":"v","caller_reads":true,"entry":"inherited","protected_exclusion":false},
-                      {"reason":"no path"}],
-      "stale_allow":"not a list","elapsed_ms":1234}"#;
+                      {"path":"v","caller_reads":true,"entry":"inherited","protected_exclusion":false}],
+      "elapsed_ms":1234}"#;
     let r = parse_profile_grant(&profile_grant_args(&[], false), json)?;
     assert_eq!((r.granted, r.denied, r.elapsed_ms), (8, 3, 1234));
     assert_eq!(r.skipped.len(), 1);
@@ -50,4 +49,22 @@ fn bad_json_is_typed() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(e.code(), Code::FenceHelperBadJson);
     assert_eq!(e.subcommand(), Some("profile"));
     Ok(())
+}
+
+#[test]
+fn a_malformed_item_list_is_refused() {
+    for field in ["skipped", "not_granted", "stale_allow"] {
+        for bad in [r#""not a list""#, r#"[{"reason":"no path"}]"#] {
+            let json = format!(
+                r#"{{"profile":"p","containers":0,"granted":0,"files":0,"denied":0,"placeholders":0,
+                "writes":0,"unchanged":0,"removed":0,"{field}":{bad},"elapsed_ms":1}}"#
+            );
+            let result = parse_profile_grant(&profile_grant_args(&[], false), &json);
+            assert_eq!(
+                result.err().map(|e| e.code()),
+                Some(Code::FenceHelperBadJson),
+                "{field} {bad}"
+            );
+        }
+    }
 }

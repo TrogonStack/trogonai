@@ -11,23 +11,43 @@ use crate::profile_read_var::ProfileReadVar;
 use crate::windows_sandbox_error::WindowsSandboxError;
 use crate::windows_sandbox_error_code::WindowsSandboxErrorCode as Code;
 
-fn text_list(value: Option<&serde_json::Value>) -> Vec<String> {
-    value
-        .and_then(|v| v.as_array())
-        .map(|rows| rows.iter().filter_map(|row| row.as_str().map(String::from)).collect())
-        .unwrap_or_default()
+fn bad(field: &str, why: &str) -> WindowsSandboxError {
+    WindowsSandboxError::for_subcommand(
+        Code::FenceHelperBadJson,
+        format!("fence-helper profile status: `{field}` {why}"),
+        "profile",
+    )
 }
 
-fn grant_path(row: &serde_json::Value) -> Option<ProfileGrantPath> {
-    let path = row.get("path")?.as_str()?.to_string();
-    let kind = match row.get("kind")?.as_str()? {
-        "container" => ProfileGrantPathKind::Container,
-        "granted" => ProfileGrantPathKind::Granted,
-        "file" => ProfileGrantPathKind::File,
-        "denied" => ProfileGrantPathKind::Denied,
-        _ => return None,
+fn text_list(field: &str, value: Option<&serde_json::Value>) -> Result<Vec<String>, WindowsSandboxError> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+        Some(serde_json::Value::Array(rows)) => rows
+            .iter()
+            .map(|row| {
+                row.as_str()
+                    .map(String::from)
+                    .ok_or_else(|| bad(field, "has an entry that is not text"))
+            })
+            .collect(),
+        Some(_) => Err(bad(field, "is not a list")),
+    }
+}
+
+fn grant_path(row: &serde_json::Value) -> Result<ProfileGrantPath, WindowsSandboxError> {
+    let path = row
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| bad("paths", "has a row without a text `path`"))?
+        .to_string();
+    let kind = match row.get("kind").and_then(|v| v.as_str()) {
+        Some("container") => ProfileGrantPathKind::Container,
+        Some("granted") => ProfileGrantPathKind::Granted,
+        Some("file") => ProfileGrantPathKind::File,
+        Some("denied") => ProfileGrantPathKind::Denied,
+        _ => return Err(bad("paths", "has a row of an unknown `kind`")),
     };
-    Some(ProfileGrantPath { path, kind })
+    Ok(ProfileGrantPath { path, kind })
 }
 
 fn string_list(value: Option<&serde_json::Value>) -> Option<Vec<String>> {
@@ -105,14 +125,14 @@ pub fn parse_profile_read_status(stdout: &str) -> Result<ProfileReadStatus, Wind
             ungranted_only: string_list(raw.ungranted_only.as_ref()).unwrap_or_default(),
         },
         profile: raw.profile.filter(|text| !text.is_empty()),
-        capabilities: text_list(raw.capabilities.as_ref()),
-        not_granted: items(raw.not_granted),
-        self_closed: items(raw.self_closed),
-        unverifiable: items(raw.unverifiable),
-        unprotected: items(raw.unprotected),
-        stale_allow: items(raw.stale_allow),
-        replaced_files: string_list(raw.replaced_files.as_ref()).unwrap_or_default(),
-        extra_exclusions: text_list(raw.extra_exclusions.as_ref()),
+        capabilities: text_list("capabilities", raw.capabilities.as_ref())?,
+        not_granted: items("not_granted", raw.not_granted)?,
+        self_closed: items("self_closed", raw.self_closed)?,
+        unverifiable: items("unverifiable", raw.unverifiable)?,
+        unprotected: items("unprotected", raw.unprotected)?,
+        stale_allow: items("stale_allow", raw.stale_allow)?,
+        replaced_files: text_list("replaced_files", raw.replaced_files.as_ref())?,
+        extra_exclusions: text_list("extra_exclusions", raw.extra_exclusions.as_ref())?,
         counts: ProfileGrantCounts {
             containers: raw.containers.unwrap_or(0),
             granted: raw.granted.unwrap_or(0),
@@ -120,6 +140,9 @@ pub fn parse_profile_read_status(stdout: &str) -> Result<ProfileReadStatus, Wind
             denied: raw.denied.unwrap_or(0),
         },
         env,
-        paths: raw.paths.map(|rows| rows.iter().filter_map(grant_path).collect()),
+        paths: raw
+            .paths
+            .map(|rows| rows.iter().map(grant_path).collect::<Result<Vec<_>, _>>())
+            .transpose()?,
     })
 }
