@@ -159,7 +159,7 @@ pub struct RequestGuard {
     client_sni: Option<String>,
     server_name: ClientServerName,
     ambiguous_targets: AmbiguousTargets,
-    host_match: HostMatch,
+    pub(crate) host_match: HostMatch,
 }
 
 impl RequestGuard {

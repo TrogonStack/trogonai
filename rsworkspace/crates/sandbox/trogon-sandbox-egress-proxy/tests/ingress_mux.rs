@@ -829,55 +829,6 @@ async fn plain_http_to_a_denied_name_gets_403() -> TestResult {
     Ok(())
 }
 
-async fn plain_exchange(request_tail: &str, host: &str) -> TestResult<String> {
-    let h = start(IngressLimits::default()).await?;
-    let mut stream = TcpStream::connect(h.addr).await?;
-    let request = format!(
-        "GET http://{host}/ HTTP/1.1\r\n{request_tail}Proxy-Authorization: {}\r\n\r\n",
-        basic(TOKEN)
-    );
-    stream.write_all(request.as_bytes()).await?;
-    let mut response = String::new();
-    let _ = stream.read_to_string(&mut response).await;
-    Ok(response)
-}
-
-#[tokio::test]
-async fn a_denied_name_is_refused_as_denied_before_its_host_header_is_compared() -> TestResult {
-    let response = plain_exchange("Host: elsewhere.test\r\n", "blocked.test").await?;
-    assert!(response.starts_with("HTTP/1.1 403 "), "{response}");
-    assert!(response.contains("X-Proxy-Error: blocked-by-allowlist"));
-    Ok(())
-}
-
-#[tokio::test]
-async fn an_allowed_name_with_another_host_header_gets_421_in_the_words_of_the_proxy() -> TestResult {
-    let response = plain_exchange("Host: elsewhere.test\r\n", "allowed.test").await?;
-    assert!(response.starts_with("HTTP/1.1 421 "), "{response}");
-    assert!(
-        response.ends_with(
-            "Transfer-Encoding: chunked\r\n\r\n2e\r\nHost header does not match the request target\n\r\n0\r\n\r\n"
-        ),
-        "{response}"
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn host_headers_that_do_not_spell_the_target_exactly_get_421() -> TestResult {
-    for host in ["allowed.test.", "ALLOWED.test:81", "allowed.test:", "allowed.test:080"] {
-        let response = plain_exchange(&format!("Host: {host}\r\n"), "allowed.test").await?;
-        assert!(response.starts_with("HTTP/1.1 421 "), "{host}: {response}");
-    }
-    let response = plain_exchange("Host: allowed.test\r\nHost: allowed.test\r\n", "allowed.test").await?;
-    assert!(response.starts_with("HTTP/1.1 421 "), "{response}");
-    assert!(
-        response.ends_with("Transfer-Encoding: chunked\r\n\r\n1a\r\nmore than one Host header\n\r\n0\r\n\r\n"),
-        "{response}"
-    );
-    Ok(())
-}
-
 #[tokio::test]
 async fn an_unknown_first_byte_gets_a_400_as_the_proxy_answers_it() -> TestResult {
     let mut h = start(IngressLimits::default()).await?;
@@ -2909,3 +2860,6 @@ async fn a_parent_connection_close_is_read_before_the_response_strip_drops_it() 
 
 #[path = "ingress_mux/reference_server_refusals.rs"]
 mod reference_server_refusals;
+
+#[path = "ingress_mux/host_headers.rs"]
+mod host_headers;

@@ -61,3 +61,13 @@ fn only_this_builds_marker_version_passes() -> Result<(), Box<dyn std::error::Er
     }
     Ok(())
 }
+
+#[test]
+fn an_unreadable_ambient_record_is_an_error_not_an_absent_target() {
+    let read = Ok(vec![r"C:\ProgramData".to_owned()]);
+    assert!(matches!(ambient_deny_recorded_in(read, r"C:\ProgramData"), Ok(true)));
+    let read = Ok(vec![r"C:\ProgramData".to_owned()]);
+    assert!(matches!(ambient_deny_recorded_in(read, r"C:\Other"), Ok(false)));
+    let unreadable = Err(crate::error::FenceHelperError::msg("registry unreadable"));
+    assert!(ambient_deny_recorded_in(unreadable, r"C:\ProgramData").is_err());
+}

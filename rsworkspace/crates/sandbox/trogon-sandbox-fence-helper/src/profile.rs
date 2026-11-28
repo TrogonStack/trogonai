@@ -944,7 +944,7 @@ fn db_rows(conn: &Connection) -> Result<Vec<Recorded>> {
             kind: Kind::parse(&kind)
                 .ok_or_else(|| FenceHelperError::msg(format!("profile_paths holds kind '{kind}' for '{path}'")))?,
             created: created != 0,
-            file_id: FileId::from_bytes(&id).ok(),
+            file_id: FileId::from_column(&id).with_context(|| format!("bad file id for '{path}'"))?,
             path,
         });
     }

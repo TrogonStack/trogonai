@@ -87,7 +87,6 @@ mod guest_exec;
 mod handoff_error;
 mod heartbeat;
 mod held_lease;
-mod host_match;
 mod illegal_transition_error;
 mod inject_scope_matching;
 mod js_regex;
@@ -272,7 +271,6 @@ pub use guest_exec::{
 pub use handoff_error::HandoffError;
 pub use heartbeat::{DEFAULT_HEARTBEAT_INTERVAL, spawn_heartbeat_loop};
 pub use held_lease::HeldLease;
-pub use host_match::HostMatch;
 pub use illegal_transition_error::IllegalTransitionError;
 pub use inject_scope_matching::{
     DEFAULT_INJECT_PORT, inject_effective_pattern, inject_host_matches, inject_omitted_port, inject_path_matches,
@@ -368,6 +366,7 @@ pub use terminal_limits::{
 pub use terminal_replay_ring::TerminalReplayRing;
 pub use thaw_outcome::ThawOutcome;
 pub use tls_trust::{CA_TRUST_ENV_VARS, ca_trust_env};
+pub use trogon_sandbox_contract::HostMatch;
 pub use unknown_provider_kind_error::UnknownProviderKindError;
 pub use unpaired_reason::UnpairedReason;
 pub use verb_scope::VerbScope;
