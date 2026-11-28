@@ -62,11 +62,10 @@ async fn single_manifests_are_judged_by_their_config() -> TestResult {
         .await
         .err();
     assert!(matches!(error, Some(OciError::Layout(_))), "{error:?}");
-    assert!(
-        client
-            .resolve_image_readiness(&image_ref(&registry.address, "absent"))
-            .await
-            .is_err()
-    );
+    let error = client
+        .resolve_image_readiness(&image_ref(&registry.address, "absent"))
+        .await
+        .err();
+    assert!(matches!(error, Some(OciError::NotFound(_))), "{error:?}");
     Ok(())
 }
