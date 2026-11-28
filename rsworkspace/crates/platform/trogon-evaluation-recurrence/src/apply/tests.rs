@@ -14,7 +14,8 @@ use trogonai_proto::session::sessions::v1alpha1::{SessionId, SessionPositionRef}
 use uuid::Uuid;
 
 use super::{RebuildFromZero, RecurrenceApply};
-use crate::projection::{FindingRecurrenceProjection, RubricKey};
+use crate::projection::FindingRecurrenceProjection;
+use crate::rubric_key::RubricKey;
 
 fn stream_event(event_type: &str, content: Vec<u8>, position: u64) -> StreamEvent {
     StreamEvent {
@@ -101,7 +102,7 @@ async fn folds_bound_and_recorded_events_and_returns_their_position() {
 
     assert_eq!(first, CheckpointSequence::new(1));
     assert_eq!(second, CheckpointSequence::new(2));
-    let rows = projection.ranked(&RubricKey::new("rubric-1", "v1"));
+    let rows = projection.ranked(&RubricKey::new("rubric-1", "v1").expect("valid rubric key"));
     assert_eq!(rows[0].distinct_run_count, 1);
 }
 

@@ -14,6 +14,8 @@
 
 mod apply;
 mod projection;
+mod rubric_key;
 
 pub use apply::{RebuildFromZero, RecurrenceApply, RecurrenceApplyError};
-pub use projection::{FindingRecurrence, FindingRecurrenceProjection, RecurrencePage, RecurrenceTarget, RubricKey};
+pub use projection::{FindingRecurrence, FindingRecurrenceProjection, RecurrencePage, RecurrenceTarget};
+pub use rubric_key::{RubricKey, RubricKeyError};

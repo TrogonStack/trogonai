@@ -9,7 +9,8 @@ use trogonai_proto::evaluation::bindings::{EvaluationBindingEventCase, FindingTa
 use trogonai_proto::evaluation::rubrics::v1alpha1::{RubricId, RubricVersionRef};
 use trogonai_proto::session::sessions::v1alpha1::{SessionId, SessionPositionRef};
 
-use super::{FindingRecurrenceProjection, RecurrenceTarget, RubricKey};
+use super::{FindingRecurrenceProjection, RecurrenceTarget};
+use crate::rubric_key::RubricKey;
 
 fn rubric_ref(rubric: &str, version: &str) -> RubricVersionRef {
     RubricVersionRef {
@@ -95,8 +96,12 @@ fn recorded(binding: &str, result: &str, session: &str, findings: Vec<Finding>) 
     event(recorded_raw(binding, result, session, findings).into())
 }
 
+fn rubric_key(rubric: &str, version: &str) -> RubricKey {
+    RubricKey::new(rubric, version).expect("valid rubric key")
+}
+
 fn key() -> RubricKey {
-    RubricKey::new("rubric-1", "v1")
+    rubric_key("rubric-1", "v1")
 }
 
 fn fold_all(events: Vec<EvaluationBindingEvent>) -> FindingRecurrenceProjection {
@@ -168,10 +173,10 @@ fn counts_are_scoped_to_the_rubric_version() {
 
     assert_eq!(projection.ranked(&key())[0].distinct_run_count, 1);
     assert_eq!(
-        projection.ranked(&RubricKey::new("rubric-1", "v2"))[0].distinct_run_count,
+        projection.ranked(&rubric_key("rubric-1", "v2"))[0].distinct_run_count,
         2
     );
-    assert!(projection.ranked(&RubricKey::new("rubric-2", "v1")).is_empty());
+    assert!(projection.ranked(&rubric_key("rubric-2", "v1")).is_empty());
 }
 
 #[test]
@@ -236,8 +241,8 @@ fn skips_malformed_inputs_without_failing() {
 }
 
 #[test]
-fn tolerates_absent_identifiers_with_empty_defaults() {
-    let binding = EvaluationBinding {
+fn skips_bindings_whose_rubric_reference_is_incomplete() {
+    let no_rubric_id = EvaluationBinding {
         binding_id: EvaluationBindingId {
             value: "b1".to_string(),
         }
@@ -249,25 +254,52 @@ fn tolerates_absent_identifiers_with_empty_defaults() {
         .into(),
         ..Default::default()
     };
+    let projection = fold_all(vec![
+        event(
+            RubricBound {
+                binding: no_rubric_id.into(),
+            }
+            .into(),
+        ),
+        bound("b2", "rubric-1", ""),
+        recorded("b1", "r1", "s1", vec![path_finding("tone", "a.b")]),
+        recorded("b2", "r2", "s2", vec![path_finding("tone", "a.b")]),
+    ]);
+
+    assert!(projection.ranked(&key()).is_empty());
+}
+
+#[test]
+fn tolerates_absent_result_and_session_identifiers_with_empty_defaults() {
     let mut no_ids = recorded_raw("b1", "r1", "s1", vec![path_finding("tone", "a.b")]);
     no_ids.evaluation_result_id = Default::default();
     no_ids.evaluated_ref = Default::default();
     let mut no_session = recorded_raw("b1", "r2", "s1", vec![path_finding("tone", "a.b")]);
     no_session.evaluated_ref = SessionPositionRef::default().into();
     let projection = fold_all(vec![
-        event(
-            RubricBound {
-                binding: binding.into(),
-            }
-            .into(),
-        ),
+        bound("b1", "rubric-1", "v1"),
         event(no_ids.into()),
         event(no_session.into()),
     ]);
 
-    let rows = projection.ranked(&RubricKey::new("", "v1"));
+    let rows = projection.ranked(&key());
 
     assert_eq!(rows[0].distinct_run_count, 1);
+    assert_eq!(rows[0].result_count, 2);
+}
+
+#[test]
+fn distinct_results_whose_ids_join_to_the_same_text_both_count() {
+    let projection = fold_all(vec![
+        bound("a/b", "rubric-1", "v1"),
+        bound("a", "rubric-1", "v1"),
+        recorded("a/b", "c", "s1", vec![path_finding("tone", "a.b")]),
+        recorded("a", "b/c", "s2", vec![path_finding("tone", "a.b")]),
+    ]);
+
+    let rows = projection.ranked(&key());
+
+    assert_eq!(rows[0].distinct_run_count, 2);
     assert_eq!(rows[0].result_count, 2);
 }
 

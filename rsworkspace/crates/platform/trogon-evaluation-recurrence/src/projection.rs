@@ -7,33 +7,8 @@ use trogonai_proto::evaluation::bindings::v1alpha1::{
     EvaluationBindingEvent, EvaluationResultRecorded, Finding, RubricBound,
 };
 use trogonai_proto::evaluation::bindings::{EvaluationBindingEventCase, FindingTargetCase};
-use trogonai_proto::evaluation::rubrics::v1alpha1::RubricVersionRef;
 
-/// One pinned rubric version. A finding category is meaningful only against the rubric that
-/// defined it, so every count is scoped by this key.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct RubricKey {
-    rubric_id: String,
-    version: String,
-}
-
-impl RubricKey {
-    pub fn new(rubric_id: impl Into<String>, version: impl Into<String>) -> Self {
-        Self {
-            rubric_id: rubric_id.into(),
-            version: version.into(),
-        }
-    }
-}
-
-impl From<&RubricVersionRef> for RubricKey {
-    fn from(reference: &RubricVersionRef) -> Self {
-        Self::new(
-            reference.rubric_id.as_option().map_or("", |id| id.value.as_str()),
-            reference.version.as_str(),
-        )
-    }
-}
+use crate::rubric_key::RubricKey;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum TargetKind {
@@ -99,7 +74,7 @@ pub struct RecurrencePage {
 #[derive(Default)]
 pub struct FindingRecurrenceProjection {
     bindings: HashMap<String, RubricKey>,
-    recorded: HashSet<String>,
+    recorded: HashSet<(String, String)>,
     tallies: HashMap<RubricKey, HashMap<FindingKey, Tally>>,
 }
 
@@ -128,8 +103,10 @@ impl FindingRecurrenceProjection {
         else {
             return;
         };
-        self.bindings
-            .insert(binding_id.value.clone(), RubricKey::from(reference));
+        let Ok(rubric) = RubricKey::try_from(reference) else {
+            return;
+        };
+        self.bindings.insert(binding_id.value.clone(), rubric);
     }
 
     fn record(&mut self, recorded: &EvaluationResultRecorded) {
@@ -141,7 +118,7 @@ impl FindingRecurrenceProjection {
             .evaluation_result_id
             .as_option()
             .map_or("", |id| id.value.as_str());
-        if !self.recorded.insert(format!("{binding_id}/{result_id}")) {
+        if !self.recorded.insert((binding_id.to_owned(), result_id.to_owned())) {
             return;
         }
         let session = recorded
