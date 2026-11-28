@@ -7,6 +7,10 @@ use crate::{
     TlsInterceptionExemptions, TunnelCap, UnlistedDestinations, UpstreamCaCertificates,
 };
 
+mod host_match;
+
+pub use host_match::HostMatch;
+
 /// Everything optional about the proxy's network behavior.
 ///
 /// Every option is off by default, and none of them loosens the proxy's own defaults. Each field is valid on its
@@ -34,6 +38,8 @@ pub struct NetworkOptions {
     pub request_body_cap: Option<RequestBodyCap>,
     pub handshake_timeout: Option<Duration>,
     pub ambiguous_targets: AmbiguousTargets,
+    /// Whether a request whose spelled target differs from where it was sent is refused.
+    pub host_match: HostMatch,
     pub domain_only_allows: DomainOnlyAllows,
     pub resweep_live_flows: LiveFlowResweep,
     pub tls_interception_exemptions: TlsInterceptionExemptions,

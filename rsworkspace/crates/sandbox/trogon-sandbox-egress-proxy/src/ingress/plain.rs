@@ -321,7 +321,7 @@ impl Ingress {
             Admission::Allowed { dest, fallbacks, .. } => (dest, fallbacks),
         };
 
-        {
+        if tls_intercept.network_options.host_match.is_required() {
             let canonical = match target.host().kind() {
                 HostKind::Ip(ip) => ip.to_string(),
                 HostKind::Domain(domain) => domain.as_str().to_string(),
