@@ -220,8 +220,9 @@ struct Args {
     cosign_public_key: Option<std::path::PathBuf>,
 
     /// What a restore does when that verification fails: `off`, `warn` (log and restore
-    /// anyway) or `require` (refuse). `require` needs a public key.
-    #[arg(long, env = "SANDBOX_COSIGN_VERIFY", default_value = "warn")]
+    /// anyway) or `require` (refuse). `require` is the default and needs a public key; `warn`
+    /// and `off` apply only when written explicitly.
+    #[arg(long, env = "SANDBOX_COSIGN_VERIFY", default_value = "require")]
     cosign_verify: trogon_sandbox_cosign::VerifyMode,
 
     #[command(flatten)]

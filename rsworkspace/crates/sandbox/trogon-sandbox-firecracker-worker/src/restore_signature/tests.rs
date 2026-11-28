@@ -20,23 +20,28 @@ fn require_without_a_key_is_a_startup_error() {
         mode: VerifyMode::Require,
     };
     assert!(policy.validate().is_err());
-    assert!(RestoreSignature::default().validate().is_ok());
+    assert!(RestoreSignature::required().validate().is_err());
+    let warn = RestoreSignature {
+        verifier: None,
+        mode: VerifyMode::Warn,
+    };
+    assert!(warn.validate().is_ok());
 }
 
 #[tokio::test]
 async fn warn_restores_and_require_refuses_an_unverifiable_snapshot() -> TestResult {
     let reference = reference()?;
-    let warn = RestoreSignature::default();
+    let warn = RestoreSignature {
+        verifier: None,
+        mode: VerifyMode::Warn,
+    };
     assert!(warn.check(&reference, None).await.is_ok());
     let off = RestoreSignature {
         verifier: None,
         mode: VerifyMode::Off,
     };
     assert!(off.check(&reference, None).await.is_ok());
-    let require = RestoreSignature {
-        verifier: None,
-        mode: VerifyMode::Require,
-    };
+    let require = RestoreSignature::required();
     assert!(require.check(&reference, None).await.is_err());
     Ok(())
 }

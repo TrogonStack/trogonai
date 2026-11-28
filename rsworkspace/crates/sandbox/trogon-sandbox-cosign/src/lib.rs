@@ -21,7 +21,7 @@ pub use constants::COSIGN_SIMPLE_SIGNING_MEDIA_TYPE;
 pub use cosign_error::CosignError;
 pub use cosign_signer::CosignSigner;
 pub use cosign_verifier::CosignVerifier;
-pub use restore::{apply_mode, enforce_restore_signature};
+pub use restore::{EnvDigestBinding, apply_mode, enforce_restore_signature};
 pub use snapshot_pull_error::{SnapshotPullError, into_pull_error, snapshot_signature_lease_error};
 pub use test_key_pair::generate_test_key_pair;
 pub use verify::{verify_if_configured, verify_snapshot_signature, verify_snapshot_signature_with_annotations};

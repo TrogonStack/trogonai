@@ -2,18 +2,27 @@
 
 use trogon_sandbox_contract::EnvDigest;
 use trogon_sandbox_contract::OciArtifactRef;
-use trogon_sandbox_cosign::{CosignVerifier, VerifyMode, enforce_restore_signature};
+use trogon_sandbox_cosign::{CosignVerifier, EnvDigestBinding, VerifyMode, enforce_restore_signature};
 
-/// The public key and strictness a restore applies to registry snapshots. The default is
-/// `warn` with no key: a restore logs that it could not verify and carries on, so existing
-/// deployments keep working until an operator configures a key and moves to `require`.
-#[derive(Debug, Clone, Default)]
+/// The public key and strictness a restore applies to registry snapshots. There is no derived
+/// default: `required` is the strict starting point, and `warn` or `off` loosen it only when the
+/// operator writes them.
+#[derive(Debug, Clone)]
 pub struct RestoreSignature {
     pub verifier: Option<CosignVerifier>,
     pub mode: VerifyMode,
 }
 
 impl RestoreSignature {
+    /// Refuse every registry snapshot that does not verify. Without a key nothing verifies, so
+    /// `validate` rejects this until a public key is configured.
+    pub fn required() -> Self {
+        Self {
+            verifier: None,
+            mode: VerifyMode::Require,
+        }
+    }
+
     /// `require` without a key could never succeed, so it is refused at startup.
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
@@ -27,9 +36,14 @@ impl RestoreSignature {
     /// snapshot carries; when present the signed payload must carry the same value, so a
     /// registry cannot relabel a signed snapshot for another environment.
     pub async fn check(&self, reference: &OciArtifactRef, recorded: Option<&EnvDigest>) -> anyhow::Result<()> {
-        enforce_restore_signature(self.mode, self.verifier.as_ref(), reference, recorded)
-            .await
-            .map_err(|error| anyhow::Error::from(trogon_sandbox_cosign::into_pull_error(error)))
+        enforce_restore_signature(
+            self.mode,
+            self.verifier.as_ref(),
+            reference,
+            EnvDigestBinding::from_recorded(recorded),
+        )
+        .await
+        .map_err(|error| anyhow::Error::from(trogon_sandbox_cosign::into_pull_error(error)))
     }
 }
 

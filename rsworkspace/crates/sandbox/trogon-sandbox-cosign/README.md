@@ -9,7 +9,7 @@ Cosign signing and verification for sandbox snapshot artifacts stored in an OCI 
 - Binds annotations, such as the environment digest (`EnvDigest::ANNOTATION_KEY`), into the signed payload.
 - Verifies the signature layers of a snapshot against a PEM public key (`CosignVerifier`), and optionally requires
   that the same signature carries the expected annotations, so a registry cannot relabel a signed snapshot.
-- Applies a `VerifyMode` (`off`, `warn`, `require`) when a restore verifies a snapshot, through
+- Applies a `VerifyMode` (`off`, `warn`, `require`; no default, the caller states one) when a restore verifies a snapshot, through
   `enforce_restore_signature` and `apply_mode`.
 
 ## Main items
