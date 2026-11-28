@@ -96,7 +96,7 @@ impl ProviderState {
         if active.contains_key(lease_id.as_str()) {
             return Err(V8WasmLeaseError::StillRetained);
         }
-        let persistent = wants_persistent_runtime(request);
+        let persistent = wants_persistent_runtime(request)?;
         (!persistent || active.values().filter(|held| held.persistent).count() < MAX_PERSISTENT_RUNTIMES)
             .then_some(())
             .ok_or(V8WasmLeaseError::PersistentRuntimeCap(MAX_PERSISTENT_RUNTIMES))?;

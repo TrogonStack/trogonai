@@ -61,7 +61,7 @@ async fn stages(
     })
     .await?;
     let kind = guest_kind(request)?;
-    let persistent = wants_persistent_runtime(request);
+    let persistent = wants_persistent_runtime(request)?;
     if persistent && kind != GuestKind::Js {
         return Err(V8WasmLeaseError::PersistentRuntimeNeedsJs);
     }
