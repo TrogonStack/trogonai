@@ -55,7 +55,7 @@ impl Peer {
     }
 
     async fn send(&mut self, message: Value) -> Result<(), TestError> {
-        self.writer.write_all(&encode_frame(&message)).await?;
+        self.writer.write_all(&encode_frame(&message)?).await?;
         Ok(())
     }
 

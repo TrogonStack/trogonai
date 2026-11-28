@@ -46,13 +46,13 @@ use trogon_std::env::{EnumerateEnv as _, ReadEnv as _, SystemEnv};
 mod constants;
 mod env_encoding;
 use constants::{
-    CA_CERT_FILE_ENV_VAR, CA_KEY_FILE_ENV_VAR, CA_OUT_FILE_ENV_VAR, CREDENTIAL_BROKER_LEASE_ID_ENV_VAR,
-    CREDENTIAL_BROKER_NATS_URL_ENV_VAR, CREDENTIAL_BROKER_POLICY_REVISION_ENV_VAR, CREDENTIAL_BROKER_TENANT_ID_ENV_VAR,
-    DECIDER_MAX_IN_FLIGHT_ENV_VAR, DECIDER_TIMEOUT_MS_ENV_VAR, DEFAULT_LISTEN_ADDR, DEFAULT_MUX_LISTEN_ADDR,
-    EXEMPT_UID_ENV_VAR, LISTEN_ADDR_ENV_VAR, MUX_LISTEN_ADDR_ENV_VAR, MUX_TOKEN_ENV_VAR, OIDC_LEASE_ID_ENV_VAR,
-    OIDC_SIGNING_KEY_PEM_FILE_ENV_VAR, OIDC_SUBJECT_ENV_VAR, OIDC_TENANT_ID_ENV_VAR, POLICY_FILE_ENV_VAR,
-    POLICY_RELOAD_POLL_INTERVAL, SECRETS_FD_ENV_VAR, TRANSPARENT_LISTENER_OFF, VIOLATION_LEASE_ID_ENV_VAR,
-    VIOLATION_NATS_URL_ENV_VAR,
+    ALLOW_NON_LOOPBACK_LISTEN_ENV_VAR, CA_CERT_FILE_ENV_VAR, CA_KEY_FILE_ENV_VAR, CA_OUT_FILE_ENV_VAR,
+    CREDENTIAL_BROKER_LEASE_ID_ENV_VAR, CREDENTIAL_BROKER_NATS_URL_ENV_VAR, CREDENTIAL_BROKER_POLICY_REVISION_ENV_VAR,
+    CREDENTIAL_BROKER_TENANT_ID_ENV_VAR, DECIDER_MAX_IN_FLIGHT_ENV_VAR, DECIDER_TIMEOUT_MS_ENV_VAR,
+    DEFAULT_LISTEN_ADDR, EXEMPT_UID_ENV_VAR, LISTEN_ADDR_ENV_VAR, MUX_LISTEN_ADDR_ENV_VAR, MUX_TOKEN_ENV_VAR,
+    OIDC_LEASE_ID_ENV_VAR, OIDC_SIGNING_KEY_PEM_FILE_ENV_VAR, OIDC_SUBJECT_ENV_VAR, OIDC_TENANT_ID_ENV_VAR,
+    POLICY_FILE_ENV_VAR, POLICY_RELOAD_POLL_INTERVAL, SECRETS_FD_ENV_VAR, TRANSPARENT_LISTENER_OFF,
+    VIOLATION_LEASE_ID_ENV_VAR, VIOLATION_NATS_URL_ENV_VAR,
 };
 
 /// Fully resolved startup configuration for the proxy daemon.
@@ -71,6 +71,38 @@ struct Config {
     secrets_fd: Option<i32>,
     upstream_exemption: UpstreamExemption,
     network_options: NetworkOptions,
+    allow_non_loopback_listen: bool,
+}
+
+impl Config {
+    /// Refuses a non-loopback TCP listen address unless the operator opted in,
+    /// because such a listener is reachable by every host on that network.
+    fn require_loopback_listeners(&self) -> Result<(), String> {
+        if self.allow_non_loopback_listen {
+            return Ok(());
+        }
+        let mux = self.mux.as_ref().filter(|mux| mux.inherited_fd.is_none());
+        let candidates = [
+            (LISTEN_ADDR_ENV_VAR, self.listen_addr.as_deref()),
+            (
+                MUX_LISTEN_ADDR_ENV_VAR,
+                match mux.map(|mux| &mux.listen_addr) {
+                    Some(ListenAddress::Tcp(addr)) => Some(addr.as_str()),
+                    _ => None,
+                },
+            ),
+        ];
+        for (name, addr) in candidates {
+            if let Some(addr) = addr
+                && !is_loopback_listen(addr)
+            {
+                return Err(format!(
+                    "{name} \"{addr}\" is not a loopback address (127.0.0.0/8, [::1] or localhost); pass --allow-non-loopback-listen or set {ALLOW_NON_LOOPBACK_LISTEN_ENV_VAR}=true to bind it anyway"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +123,7 @@ struct MuxConfig {
 struct ListenFlags {
     listen_fd: Option<i32>,
     listen: Option<String>,
-    any_interface: bool,
+    allow_non_loopback_listen: bool,
 }
 
 impl ListenFlags {
@@ -112,7 +144,7 @@ impl ListenFlags {
                 "--listen" => {
                     flags.listen = Some(args.next().ok_or("--listen needs an address")?);
                 }
-                "--listen-any-interface" => flags.any_interface = true,
+                "--allow-non-loopback-listen" => flags.allow_non_loopback_listen = true,
                 other => return Err(format!("unknown argument \"{other}\"")),
             }
         }
@@ -122,14 +154,13 @@ impl ListenFlags {
         Ok(flags)
     }
 
-    fn is_empty(&self) -> bool {
-        *self == Self::default()
-    }
-
     fn apply(&self, mut config: Config, token: impl Fn(&str) -> Option<String>) -> Result<Config, String> {
-        if self.is_empty() {
-            return Ok(config);
-        }
+        config.allow_non_loopback_listen |= self.allow_non_loopback_listen;
+        let (listen_addr, inherited_fd) = match (&self.listen, self.listen_fd) {
+            (Some(raw), _) => (ListenAddress::parse(raw), None),
+            (None, Some(fd)) => (ListenAddress::Tcp(format!("fd:{fd}")), Some(fd)),
+            (None, None) => return Ok(config),
+        };
         let mux_token = match &config.mux {
             Some(mux) => mux.token.clone(),
             None => {
@@ -138,26 +169,6 @@ impl ListenFlags {
                 })?;
                 ProxyToken::new(&raw).map_err(|err| format!("{MUX_TOKEN_ENV_VAR} is unusable: {err}"))?
             }
-        };
-        let previous = config.mux.as_ref().map(|mux| mux.listen_addr.clone());
-        let (listen_addr, inherited_fd) = match (&self.listen, self.listen_fd) {
-            (Some(raw), _) => {
-                let address = ListenAddress::parse(raw);
-                if let ListenAddress::Tcp(addr) = &address
-                    && !self.any_interface
-                    && !is_loopback_listen(addr)
-                {
-                    return Err(format!(
-                        "--listen \"{raw}\" is not a loopback address (127.0.0.0/8, [::1] or localhost); pass --listen-any-interface to bind it anyway"
-                    ));
-                }
-                (address, None)
-            }
-            (None, Some(fd)) => (ListenAddress::Tcp(format!("fd:{fd}")), Some(fd)),
-            (None, None) => (
-                previous.unwrap_or_else(|| ListenAddress::Tcp(DEFAULT_MUX_LISTEN_ADDR.to_string())),
-                None,
-            ),
         };
         config.mux = Some(MuxConfig {
             listen_addr,
@@ -234,7 +245,9 @@ fn policy_has_forward_rule(policy: &NetworkPolicy) -> bool {
 /// Reads and parses environment-driven configuration.
 ///
 /// The listen address comes from `EGRESS_PROXY_LISTEN_ADDR`, defaulting to
-/// `0.0.0.0:3128` when unset. The network policy is read from the JSON file
+/// `127.0.0.1:3128` when unset. A non-loopback address is refused unless
+/// `EGRESS_PROXY_ALLOW_NON_LOOPBACK_LISTEN=true` or `--allow-non-loopback-listen`
+/// says so. The network policy is read from the JSON file
 /// path in `EGRESS_PROXY_POLICY_FILE`, which is required: a sidecar container
 /// with no policy configured is not a safe default, so this fails fast
 /// instead of silently falling back to allow-all or deny-all.
@@ -405,6 +418,16 @@ fn load_config(
 
     let network_options = network_env::options_from_env(&get_env).map_err(|err| err.to_string())?;
 
+    let allow_non_loopback_listen = match get_env(ALLOW_NON_LOOPBACK_LISTEN_ENV_VAR).as_deref() {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(other) => {
+            return Err(format!(
+                "{ALLOW_NON_LOOPBACK_LISTEN_ENV_VAR} must be \"true\" or \"false\" (got \"{other}\")"
+            ));
+        }
+    };
+
     Ok(Config {
         listen_addr,
         policy_file,
@@ -419,6 +442,7 @@ fn load_config(
         secrets_fd,
         upstream_exemption,
         network_options,
+        allow_non_loopback_listen,
     })
 }
 
@@ -721,6 +745,7 @@ async fn serve(
 ) -> i32 {
     let config = match ListenFlags::parse(args)
         .and_then(|flags| load_config(&get_env, read_file).and_then(|config| flags.apply(config, &get_env)))
+        .and_then(|config| config.require_loopback_listeners().map(|()| config))
     {
         Ok(config) => config,
         Err(err) => {

@@ -95,7 +95,7 @@ impl DeciderTransport for InProcessDeciderTransport {
                 }
             }
         };
-        Ok(serde_json::to_vec(&response).unwrap_or_default())
+        serde_json::to_vec(&response).map_err(|err| DeciderTransportError::Unavailable(err.to_string()))
     }
 }
 

@@ -80,69 +80,6 @@ fn base_config() -> Result<Config, String> {
 }
 
 #[test]
-fn listen_flags_parse_and_reject_unknown_arguments() -> TestResult {
-    assert_eq!(flags(&[])?, ListenFlags::default());
-    let parsed = flags(&["--listen", "127.0.0.1:8080", "--listen-any-interface"])?;
-    assert_eq!(parsed.listen.as_deref(), Some("127.0.0.1:8080"));
-    assert!(parsed.any_interface);
-    assert_eq!(flags(&["--listen-fd", "7"])?.listen_fd, Some(7));
-    assert!(flags(&["--listen-fd", "1"]).is_err());
-    assert!(flags(&["--listen-fd", "x"]).is_err());
-    assert!(flags(&["--listen"]).is_err());
-    assert!(flags(&["--nope"]).is_err());
-    assert!(flags(&["--listen-fd", "7", "--listen", "127.0.0.1:1"]).is_err());
-    Ok(())
-}
-
-#[test]
-fn listen_refuses_a_non_loopback_address_unless_any_interface_is_given() -> TestResult {
-    let none = |_: &str| None;
-    for addr in ["0.0.0.0:3128", "192.168.1.5:3128", "[::]:3128", "example.com:80"] {
-        let err = flags(&["--listen", addr])?
-            .apply(base_config()?, none)
-            .err()
-            .ok_or("expected an error")?;
-        assert_eq!(
-            err,
-            format!(
-                "--listen \"{addr}\" is not a loopback address (127.0.0.0/8, [::1] or localhost); pass --listen-any-interface to bind it anyway"
-            )
-        );
-        let config = flags(&["--listen", addr, "--listen-any-interface"])?.apply(base_config()?, none)?;
-        assert_eq!(
-            config.mux.ok_or("expected a value")?.listen_addr,
-            ListenAddress::Tcp(addr.to_string())
-        );
-    }
-    for addr in ["127.0.0.1:0", "127.9.9.9:80", "[::1]:80", "localhost:80"] {
-        flags(&["--listen", addr])?.apply(base_config()?, none)?;
-    }
-    Ok(())
-}
-
-#[test]
-fn listen_fd_adopts_an_inherited_socket() -> TestResult {
-    let config = flags(&["--listen-fd", "9"])?.apply(base_config()?, |_| None)?;
-    assert_eq!(config.mux.ok_or("expected a value")?.inherited_fd, Some(9));
-    Ok(())
-}
-
-#[test]
-fn listen_flags_without_any_proxy_token_are_refused() -> TestResult {
-    let get_env = env_map(&[(POLICY_FILE_ENV_VAR, "/policy.json")]);
-    let config = load_config(get_env, file_map(&[("/policy.json", r#""deny_all""#)]))?;
-    let err = flags(&["--listen", "127.0.0.1:0"])?
-        .apply(config.clone(), |_| None)
-        .err()
-        .ok_or("expected an error")?;
-    assert!(err.contains(MUX_TOKEN_ENV_VAR), "{err}");
-    let with_token = flags(&["--listen", "127.0.0.1:0"])?
-        .apply(config, |key| (key == MUX_TOKEN_ENV_VAR).then(|| "token".to_string()))?;
-    assert!(with_token.mux.is_some());
-    Ok(())
-}
-
-#[test]
 fn transparent_listener_can_be_turned_off_when_the_explicit_proxy_is_configured() -> TestResult {
     let get_env = env_map(&[
         (LISTEN_ADDR_ENV_VAR, TRANSPARENT_LISTENER_OFF),
@@ -796,36 +733,6 @@ fn load_error(extra: &[(&str, &str)]) -> Result<String, TestError> {
 }
 
 #[test]
-fn empty_listen_flags_leave_the_config_untouched() -> TestResult {
-    let config = base_config()?;
-    let applied = ListenFlags::default().apply(config.clone(), |_| None)?;
-    assert_eq!(applied, config);
-    Ok(())
-}
-
-#[test]
-fn listen_flags_without_an_address_keep_the_default_explicit_address() -> TestResult {
-    let get_env = env_map(&[(POLICY_FILE_ENV_VAR, "/policy.json")]);
-    let config = load_config(get_env, file_map(&[("/policy.json", r#""deny_all""#)]))?;
-    let applied = flags(&["--listen-any-interface"])?
-        .apply(config, |key| (key == MUX_TOKEN_ENV_VAR).then(|| "token".to_string()))?;
-    assert_eq!(
-        applied.mux.ok_or("expected a value")?.listen_addr,
-        ListenAddress::Tcp(DEFAULT_MUX_LISTEN_ADDR.to_string())
-    );
-    Ok(())
-}
-
-#[test]
-fn a_listen_address_without_a_port_is_checked_as_a_host() -> TestResult {
-    assert!(is_loopback_listen("localhost"));
-    assert!(is_loopback_listen("127.0.0.1"));
-    assert!(is_loopback_listen("[::1]:80"));
-    assert!(!is_loopback_listen("example.com"));
-    Ok(())
-}
-
-#[test]
 fn only_transform_rules_name_credential_providers_once() -> TestResult {
     let two = format!(
         r#"{{"user_defined": {{"rules": [{{"domain": "a.example.com", "action": {TRANSFORM_ACTION_JSON}}}, {{"domain": "b.example.com", "action": {TRANSFORM_ACTION_JSON}}}, {{"domain": "c.example.com", "action": "pass_through"}}], "allow_ranges": [], "deny_ranges": []}}}}"#
@@ -1190,6 +1097,7 @@ async fn an_inherited_listening_descriptor_serves_the_explicit_proxy() -> TestRe
 }
 
 #[cfg(unix)]
+mod listen;
 mod secret_handoff_and_broker_tests;
 
 #[tokio::test]

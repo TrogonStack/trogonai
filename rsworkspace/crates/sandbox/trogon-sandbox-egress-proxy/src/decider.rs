@@ -112,7 +112,7 @@ impl PolicyPublisher for NatsPolicyPublisher {
             lease_id: lease.clone(),
             network_policy: policy.clone(),
         })
-        .unwrap_or_default();
+        .map_err(|err| format!("could not encode the policy update: {err}"))?;
         let reply = timeout(
             self.timeout,
             self.client.request(lease_network_policy_update(lease), payload.into()),
@@ -210,7 +210,13 @@ impl Shared {
             port: question.port,
             method,
         };
-        let payload = serde_json::to_vec(&request).unwrap_or_default();
+        let payload = match serde_json::to_vec(&request) {
+            Ok(payload) => payload,
+            Err(err) => {
+                warn!(lease_id = %self.lease_id.as_str(), error = %err, "could not encode the decider request");
+                return Judgment::Deny(EgressViolationReason::DeciderUnavailable);
+            }
+        };
 
         let reply = match timeout(
             self.limits.timeout,

@@ -214,7 +214,7 @@ pub fn build_egress_sidecar(
         env_var(exempt_uid_key, exempt_uid),
         env_var(
             "EGRESS_PROXY_LISTEN_ADDR",
-            format!("0.0.0.0:{EGRESS_PROXY_LISTEN_PORT}"),
+            format!("127.0.0.1:{EGRESS_PROXY_LISTEN_PORT}"),
         ),
         env_var("EGRESS_PROXY_POLICY_FILE", policy_file_path),
     ];

@@ -3,7 +3,15 @@ use std::time::Duration;
 /// Prefix shared by every variable the daemon reads, checked for valid Unicode at startup.
 pub(super) const ENV_VAR_PREFIX: &str = "EGRESS_PROXY_";
 
-pub(super) const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:3128";
+/// Loopback: the transparent redirect of a sidecar lands on 127.0.0.1, so
+/// nothing needs this port reachable from another host.
+pub(super) const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:3128";
+
+/// `true` lets the transparent or explicit listener bind a non-loopback
+/// address, where anything that can reach the port uses the proxy. Unset, a
+/// non-loopback address is refused at startup. The flag is
+/// `--allow-non-loopback-listen`.
+pub(super) const ALLOW_NON_LOOPBACK_LISTEN_ENV_VAR: &str = "EGRESS_PROXY_ALLOW_NON_LOOPBACK_LISTEN";
 
 /// `TRANSPARENT_LISTENER_OFF` here runs the explicit proxy alone, for a
 /// per-lease instance that must not open a second, unauthenticated port.
@@ -113,7 +121,5 @@ pub(super) const SECRETS_FD_ENV_VAR: &str = "EGRESS_PROXY_SECRETS_FD";
 /// unless this process runs as exactly this uid. When unset, upstream
 /// sockets are marked instead.
 pub(super) const EXEMPT_UID_ENV_VAR: &str = "EGRESS_PROXY_EXEMPT_UID";
-
-pub(super) const DEFAULT_MUX_LISTEN_ADDR: &str = "127.0.0.1:3128";
 
 pub(super) const POLICY_RELOAD_POLL_INTERVAL: Duration = Duration::from_secs(1);

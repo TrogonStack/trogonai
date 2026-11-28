@@ -195,7 +195,7 @@ fn build_egress_sidecar_sets_env_vars_and_iptables_command() -> TestResult {
             .find(|entry| entry.name == name)
             .and_then(|entry| entry.value.as_deref())
     };
-    assert_eq!(value_of("EGRESS_PROXY_LISTEN_ADDR"), Some("0.0.0.0:3128"));
+    assert_eq!(value_of("EGRESS_PROXY_LISTEN_ADDR"), Some("127.0.0.1:3128"));
     assert_eq!(
         value_of("EGRESS_PROXY_POLICY_FILE"),
         Some("/etc/sandbox-egress-proxy/policy.json")

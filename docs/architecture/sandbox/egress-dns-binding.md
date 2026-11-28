@@ -105,6 +105,14 @@ of terminate-all and secret termination and requires no binding.
 
 A malformed value stops the daemon at startup naming the variable. Set the revalidation interval at or below the binding TTL: a binding that expires between sweeps leaves a flow on a lapsed binding until the next sweep. Each sweep re-resolves every named open flow, so a very short interval costs DNS lookups.
 
+### Listen addresses
+
+| Variable or flag | Effect |
+|------------------|--------|
+| `EGRESS_PROXY_LISTEN_ADDR` | Transparent listener. Defaults to `127.0.0.1:3128`, where a sidecar's `iptables` redirect of locally generated traffic lands. `off` runs the explicit proxy alone. |
+| `EGRESS_PROXY_MUX_LISTEN_ADDR`, `--listen` | Authenticated explicit listener, a TCP address or `unix:<path>`. |
+| `EGRESS_PROXY_ALLOW_NON_LOOPBACK_LISTEN=true`, `--allow-non-loopback-listen` | Required to bind a non-loopback TCP address on either listener. Without it the daemon refuses to start, because every host that can reach the port would use the proxy. Set it only where traffic arrives on another interface, for example a proxy serving a VM tap, and give the listener that interface's address. |
+
 ## Residual risk
 
 - Within the TTL a name stays attributed to every address the proxy resolved

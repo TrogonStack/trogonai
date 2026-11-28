@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use async_trait::async_trait;
+#[cfg(test)]
 use base64::Engine as _;
+#[cfg(test)]
 use base64::engine::general_purpose::STANDARD;
 use serde::de::{self, DeserializeOwned, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -30,8 +32,11 @@ use crate::request_decision::{DenyMark, RequestDenial, fold_header_name};
 use crate::request_filter::{RequestDecision, RequestFilter, RequestView};
 
 mod constants;
+mod frame_encode;
 use constants::{BODYLESS_METHOD_BODY_REASON, ID_WINDOW, MAX_ID, QUEUED_REQUEST_FRAME_ROOM};
 pub use constants::{MAX_BODY_BYTES_HELD, MAX_READ_FRAME, PROTOCOL};
+pub use frame_encode::{FrameEncodeError, encode_frame};
+use frame_encode::{HelloOut, encode_body_frame};
 
 /// What the decider's hello says about egress: the entries that are allowed
 /// and the entries that are denied even when an allowed one matches.
@@ -241,10 +246,12 @@ impl FramedDecider {
             frames,
             dead,
         });
-        inner.send(encode_frame(&HelloOut {
+        let hello = encode_frame(&HelloOut {
             t: "hello",
             proto: PROTOCOL,
-        }));
+        })
+        .map_err(|err| format!("decider unavailable: {err}"))?;
+        inner.send(hello);
         tokio::spawn(write_loop(Arc::clone(&inner), writer, queue));
         tokio::spawn(read_loop(Arc::clone(&inner), reader));
         let hello = tokio::select! {
@@ -338,30 +345,6 @@ async fn read_exact<R: AsyncRead + Unpin>(reader: &mut R, buf: &mut [u8]) -> Res
         Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => Err("decider closed the stream".to_string()),
         Err(err) => Err(format!("read error: {err}")),
     }
-}
-
-#[derive(Serialize)]
-struct HelloOut {
-    t: &'static str,
-    proto: u64,
-}
-
-pub fn encode_frame(message: &impl Serialize) -> Vec<u8> {
-    let body = serde_json::to_vec(message).unwrap_or_default();
-    let mut frame = Vec::with_capacity(4 + body.len());
-    frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
-    frame.extend_from_slice(&body);
-    frame
-}
-
-fn encode_body_frame(id: u64, data: &[u8], cut: bool) -> Vec<u8> {
-    let encoded = STANDARD.encode(data);
-    let tail = if cut { ",\"cut\":true}" } else { "}" };
-    let body = format!("{{\"t\":\"body\",\"id\":{id},\"data\":\"{encoded}\"{tail}");
-    let mut frame = Vec::with_capacity(4 + body.len());
-    frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
-    frame.extend_from_slice(body.as_bytes());
-    frame
 }
 
 /// A JSON value that refuses what a lenient parser lets through: a `null`
@@ -864,15 +847,21 @@ impl FramedDecider {
             query: question.query.as_deref(),
             headers: &question.headers,
         };
-        if serde_json::to_vec(&build(MAX_ID)).map_or(true, |frame| frame.len() > MAX_READ_FRAME) {
-            return bad_request("request too large for the decider");
+        match encode_frame(&build(MAX_ID)) {
+            Ok(frame) if frame.len() - 4 <= MAX_READ_FRAME => {}
+            Ok(_) => return bad_request("request too large for the decider"),
+            Err(err) => return bad_request(&err.to_string()),
         }
         let Some(id) = self.next_id() else {
             self.inner.die("request ids exhausted");
             return unavailable("request decider unavailable");
         };
+        let frame = match encode_frame(&build(id)) {
+            Ok(frame) => frame,
+            Err(err) => return bad_request(&err.to_string()),
+        };
         let mut rx = self.register(id);
-        self.inner.send(encode_frame(&build(id)));
+        self.inner.send(frame);
         let first = self.wait(id, &mut rx, Late::Verdict).await;
         let verdict = match Self::settle(first) {
             Ok(verdict) => verdict,
