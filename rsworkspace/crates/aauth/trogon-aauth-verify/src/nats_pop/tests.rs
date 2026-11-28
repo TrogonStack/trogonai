@@ -191,12 +191,25 @@ fn invalid_confirmation_key_unsupported_alg_surfaces() {
 
 #[test]
 fn invalid_confirmation_key_bad_shape_surfaces_deserialize_source() {
-    // Missing required fields cause serde_json::from_value -> Err.
-    let jwk = serde_json::json!({"kty": "EC"});
+    // A value that is not a JSON object cannot become a JWK at all.
+    let jwk = serde_json::json!(["not", "a", "jwk"]);
     let err = verify_signature_with_jwk(&jwk, b"base", "sig").unwrap_err();
     assert!(matches!(
         err,
         NatsPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::Deserialize(_))
+    ));
+}
+
+#[test]
+fn invalid_confirmation_key_missing_curve_members_is_unsupported() {
+    // jsonwebtoken parses an EC key without its curve members into its
+    // catch-all variant rather than failing, so it has to be refused as an
+    // unsupported algorithm.
+    let jwk = serde_json::json!({"kty": "EC"});
+    let err = verify_signature_with_jwk(&jwk, b"base", "sig").unwrap_err();
+    assert!(matches!(
+        err,
+        NatsPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::UnsupportedAlgorithm)
     ));
 }
 

@@ -1314,11 +1314,23 @@ fn component_value_accepts_arbitrary_covered_header() {
 
 #[test]
 fn verify_signature_with_jwk_rejects_undeserializable_jwk() {
-    let jwk_val = serde_json::json!({"kty": "unsupported"});
+    let jwk_val = serde_json::json!(["not", "a", "jwk"]);
     let err = verify_signature_with_jwk(&jwk_val, None, b"base", "sig").unwrap_err();
     assert!(matches!(
         err,
         HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::Deserialize(_))
+    ));
+}
+
+#[test]
+fn verify_signature_with_jwk_rejects_unknown_kty_as_unsupported() {
+    // jsonwebtoken parses an unrecognised key type into its catch-all variant
+    // rather than failing, so it has to be refused as an unsupported algorithm.
+    let jwk_val = serde_json::json!({"kty": "unsupported"});
+    let err = verify_signature_with_jwk(&jwk_val, None, b"base", "sig").unwrap_err();
+    assert!(matches!(
+        err,
+        HttpPopError::InvalidConfirmationKey(InvalidConfirmationKeyError::UnsupportedAlgorithm)
     ));
 }
 

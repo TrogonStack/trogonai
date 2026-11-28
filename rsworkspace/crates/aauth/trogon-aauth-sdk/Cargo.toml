@@ -28,7 +28,7 @@ trogon-identity-types = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
-jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
+jsonwebtoken = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time"] }
 trogon-aauth-verify = { workspace = true }
 wiremock = { workspace = true }
