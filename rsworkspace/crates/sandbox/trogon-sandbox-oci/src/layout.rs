@@ -11,9 +11,7 @@ use tokio::time::Instant;
 use tracing::instrument;
 use trogon_sandbox_contract::{Digest, OciArtifactRef};
 
-use crate::constants::{
-    DEFAULT_REPOSITORY, EXPORT_DEADLINE, LAYOUT_MAX_CONFIG_BYTES, OCI_LAYOUT_FILE, REPO_ANNOTATION,
-};
+use crate::constants::{EXPORT_DEADLINE, LAYOUT_MAX_CONFIG_BYTES, OCI_LAYOUT_FILE, REPO_ANNOTATION};
 use crate::descriptor::descriptor_size;
 use crate::digests::verify_sha256;
 use crate::limited_writer::LimitedWriter;
@@ -81,7 +79,7 @@ pub async fn import_from_directory(
         .as_ref()
         .and_then(|annotations| annotations.get(REPO_ANNOTATION))
         .cloned()
-        .unwrap_or_else(|| DEFAULT_REPOSITORY.to_string());
+        .ok_or_else(|| OciError::Layout(format!("layout index.json has no {REPO_ANNOTATION} annotation")))?;
 
     let mut pushed = Vec::new();
     for entry in index.manifests {

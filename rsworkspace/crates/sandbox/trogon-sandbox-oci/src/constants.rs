@@ -5,7 +5,6 @@ use trogon_sandbox_contract::ArtifactType;
 use crate::metric::Metric;
 
 pub(crate) const REPO_ANNOTATION: &str = "org.opencontainers.image.ref.name";
-pub(crate) const DEFAULT_REPOSITORY: &str = "imported";
 pub(crate) const EXPORT_DEADLINE: Duration = Duration::from_secs(120);
 pub(crate) const LAYOUT_MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 pub(crate) const METADATA_DEADLINE: Duration = Duration::from_secs(120);

@@ -60,8 +60,7 @@ impl OciClient {
 
         let (manifest, _) = self.inner().pull_image_manifest(&reference, &auth).await?;
 
-        let artifact_type = manifest_artifact_type(manifest.artifact_type.as_deref(), &manifest.config.media_type)
-            .unwrap_or(target.artifact_type);
+        let artifact_type = requested_artifact_type(&manifest, target)?;
 
         let mut layers = Vec::with_capacity(manifest.layers.len());
         for descriptor in &manifest.layers {
@@ -75,7 +74,7 @@ impl OciClient {
             });
         }
 
-        let summary = manifest_summary_from(&manifest, target.digest.clone(), artifact_type);
+        let summary = manifest_summary_from(&manifest, target.digest.clone(), artifact_type)?;
         Ok(PulledArtifact {
             reference: OciArtifactRef {
                 registry: target.registry.clone(),
@@ -151,7 +150,8 @@ impl OciClient {
         let (raw, digest) = transport.manifest(target.digest.as_str()).await?;
         let manifest: OciImageManifest =
             serde_json::from_slice(&raw).map_err(|_| OciError::Layout("invalid artifact manifest".into()))?;
-        Ok(manifest_summary_from(&manifest, digest, target.artifact_type))
+        let artifact_type = requested_artifact_type(&manifest, target)?;
+        manifest_summary_from(&manifest, digest, artifact_type)
     }
 }
 
@@ -202,21 +202,34 @@ async fn pull_layers(
     Ok(layers)
 }
 
+/// The artifact type the manifest declares, which must be the one the reference asks for.
+fn requested_artifact_type(
+    manifest: &OciImageManifest,
+    target: &OciArtifactRef,
+) -> Result<trogon_sandbox_contract::ArtifactType, OciError> {
+    let artifact_type = manifest_artifact_type(manifest.artifact_type.as_deref(), &manifest.config.media_type)
+        .ok_or_else(|| OciError::UnsupportedMediaType("artifact type is missing or unknown".into()))?;
+    if artifact_type != target.artifact_type {
+        return Err(OciError::UnsupportedMediaType(
+            "artifact type differs from requested reference".into(),
+        ));
+    }
+    Ok(artifact_type)
+}
+
 fn manifest_summary_from(
     manifest: &OciImageManifest,
     digest: Digest,
-    fallback_type: trogon_sandbox_contract::ArtifactType,
-) -> ManifestSummary {
-    let artifact_type =
-        manifest_artifact_type(manifest.artifact_type.as_deref(), &manifest.config.media_type).unwrap_or(fallback_type);
-    ManifestSummary {
+    artifact_type: trogon_sandbox_contract::ArtifactType,
+) -> Result<ManifestSummary, OciError> {
+    Ok(ManifestSummary {
         digest,
         artifact_type,
         media_type: manifest
             .media_type
             .clone()
             .unwrap_or_else(|| IMAGE_MANIFEST_MEDIA_TYPE.to_string()),
-        size: u64::try_from(manifest.config.size).unwrap_or_default(),
+        size: descriptor_size(&manifest.config)?,
         annotations: manifest.annotations.clone().unwrap_or_default(),
-    }
+    })
 }

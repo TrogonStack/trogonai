@@ -177,3 +177,13 @@ fn container_limits_default_to_one_gibibyte() {
     assert_eq!(limits.max_blob_bytes, 1024 * 1024 * 1024);
     assert_eq!(limits.max_total_bytes, 1024 * 1024 * 1024);
 }
+
+#[test]
+fn a_resolved_image_without_its_byte_count_is_refused() -> TestResult {
+    let image = ResolvedContainerImage::new(pinned('a')?, digest('a')?, BTreeMap::new(), None, None, 7)?;
+    let mut value = serde_json::to_value(&image)?;
+    assert_eq!(serde_json::from_value::<ResolvedContainerImage>(value.clone())?, image);
+    value.as_object_mut().ok_or("not an object")?.remove("compressed_bytes");
+    assert!(serde_json::from_value::<ResolvedContainerImage>(value).is_err());
+    Ok(())
+}
