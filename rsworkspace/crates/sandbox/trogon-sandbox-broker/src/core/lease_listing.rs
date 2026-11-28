@@ -7,10 +7,17 @@ impl BrokerCore {
     /// belonging to a different tenant can never appear in the response or
     /// factor into pagination math.
     pub async fn handle_list_leases(&self, req: ListLeasesRequest) -> ListLeasesResponse {
-        let all_records = self.active_leases.all().await.unwrap_or_else(|e| {
-            warn!(error = %e, tenant = %req.tenant, "list leases: active lease store error, returning empty list");
-            Vec::new()
-        });
+        let all_records = match self.active_leases.all().await {
+            Ok(records) => records,
+            Err(e) => {
+                warn!(error = %e, tenant = %req.tenant, "list leases denied: active lease store error");
+                return ListLeasesResponse {
+                    denied: Some(LeaseError::Backend { message: e.to_string() }),
+                    leases: Vec::new(),
+                    next_cursor: None,
+                };
+            }
+        };
 
         let mut records: Vec<LeaseRecord> = all_records
             .into_iter()

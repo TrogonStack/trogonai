@@ -284,3 +284,59 @@ fn a_signing_key_in_the_environment_wraps_the_bus() -> TestResult {
     ));
     Ok(())
 }
+
+struct BrokenLeases;
+
+#[async_trait]
+impl ActiveLeaseStore for BrokenLeases {
+    async fn put(
+        &self,
+        _: &trogon_sandbox_contract::LeaseRecord,
+    ) -> Result<(), crate::active_lease::ActiveLeaseStoreError> {
+        Err(unavailable())
+    }
+    async fn get(
+        &self,
+        _: &LeaseId,
+    ) -> Result<Option<trogon_sandbox_contract::LeaseRecord>, crate::active_lease::ActiveLeaseStoreError> {
+        Err(unavailable())
+    }
+    async fn delete(&self, _: &LeaseId) -> Result<bool, crate::active_lease::ActiveLeaseStoreError> {
+        Err(unavailable())
+    }
+    async fn all(
+        &self,
+    ) -> Result<Vec<trogon_sandbox_contract::LeaseRecord>, crate::active_lease::ActiveLeaseStoreError> {
+        Err(unavailable())
+    }
+    async fn touch(&self, _: &LeaseId, _: SystemTime) -> Result<bool, crate::active_lease::ActiveLeaseStoreError> {
+        Err(unavailable())
+    }
+    async fn replace_if_unchanged(
+        &self,
+        _: &trogon_sandbox_contract::LeaseRecord,
+        _: &trogon_sandbox_contract::LeaseRecord,
+    ) -> Result<bool, crate::active_lease::ActiveLeaseStoreError> {
+        Err(unavailable())
+    }
+}
+
+fn unavailable() -> crate::active_lease::ActiveLeaseStoreError {
+    crate::active_lease::ActiveLeaseStoreError::nats(std::io::Error::other("kv unavailable"))
+}
+
+#[tokio::test]
+async fn an_unreadable_lease_store_refuses_the_request_instead_of_sending_it_unsigned() -> TestResult {
+    let recorder = Arc::new(Recorder::default());
+    let bus = SigningBus::new(
+        recorder.clone(),
+        Arc::new(BrokenLeases),
+        Arc::new(DispatchSigner::new("k1", seed(7))),
+    );
+    let result = bus
+        .request("sandbox.provider.mock.run_command.l1", Bytes::from_static(b"{}"))
+        .await;
+    assert!(result.is_err());
+    assert!(recorder.sent().is_empty());
+    Ok(())
+}

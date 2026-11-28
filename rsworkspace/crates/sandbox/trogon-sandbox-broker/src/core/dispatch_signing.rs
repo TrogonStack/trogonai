@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use tracing::{info, warn};
-use trogon_sandbox_protocol::{DispatchSigner, OP_LEASE_DISPATCH};
+use trogon_sandbox_protocol::{DispatchSignError, DispatchSigner, OP_LEASE_DISPATCH};
 use trogon_std::env::ReadEnv;
 
 use super::{BrokerCore, DispatchSigningError};
@@ -19,18 +19,13 @@ impl BrokerCore {
 
     /// Adds a fresh signed envelope to a lease dispatch when a signing key is
     /// configured. Called at send time, so a re-sent stored dispatch gets a
-    /// new expiry. A dispatch that cannot be signed is sent as it is.
-    pub(crate) fn sign_dispatch(&self, payload: Bytes) -> Bytes {
+    /// new expiry. A dispatch that cannot be signed is refused, never sent
+    /// unsigned, because a worker in `warn` mode would accept it.
+    pub(crate) fn sign_dispatch(&self, payload: Bytes) -> Result<Bytes, DispatchSignError> {
         let Some(signer) = &self.dispatch_signer else {
-            return payload;
+            return Ok(payload);
         };
-        match signer.sign_payload(&payload, OP_LEASE_DISPATCH) {
-            Ok(signed) => Bytes::from(signed),
-            Err(error) => {
-                warn!(%error, "dispatch could not be signed; sending it unsigned");
-                payload
-            }
-        }
+        signer.sign_payload(&payload, OP_LEASE_DISPATCH).map(Bytes::from)
     }
 
     /// Installs the signer configured in the environment. No key leaves
