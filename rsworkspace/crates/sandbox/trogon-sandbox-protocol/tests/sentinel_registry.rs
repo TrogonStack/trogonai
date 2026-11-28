@@ -287,3 +287,24 @@ fn the_debug_form_lists_names_and_sentinels_but_never_real_values() -> TestResul
     assert!(!rendered.contains("super-secret-value"), "{rendered}");
     Ok(())
 }
+
+#[test]
+fn a_sentinel_is_found_inside_other_text_whatever_its_case() -> TestResult {
+    let mut registry = SentinelRegistry::new();
+    let sentinel = registry.register(name("api")?, real("sk-real-value"), hosts(&["api.example.com"])?);
+    assert!(Sentinel::appears_in(&format!(
+        "x-{}.attacker.example",
+        sentinel.as_str()
+    )));
+    assert!(Sentinel::appears_in(&format!(
+        "{}.attacker.example",
+        sentinel.as_str().to_ascii_uppercase()
+    )));
+    assert!(Sentinel::appears_in("eyJhbGciOiJub25lIn0.e30.ZmFrZS1zaWduYXR1cmU"));
+    assert!(Sentinel::appears_in(
+        "eyjhbgcioijub25lin0.e30.zmfrzs1zawduyxr1cmu.attacker.example"
+    ));
+    assert!(!Sentinel::appears_in("api.example.com"));
+    assert!(!Sentinel::appears_in("fake-value.example.com"));
+    Ok(())
+}

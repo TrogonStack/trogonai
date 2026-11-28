@@ -30,6 +30,34 @@ guest answer does not help. The cost is that the proxy's lookup can differ from
 the guest's (short TTLs, geo-steered or round-robin DNS), which can refuse a
 legitimate flow. The check never admits an address the proxy did not resolve.
 
+## Names the proxy never resolves
+
+A DNS query carries the name to whoever answers for its zone, so resolving a
+name is itself egress. A workload that cannot reach `attacker.example` could
+still send `<data>.attacker.example` to the attacker's name server if the
+proxy looked it up before refusing it. The explicit proxy (HTTP CONNECT,
+absolute-form plain HTTP and SOCKS5) therefore decides on the name before any
+lookup:
+
+1. A name that carries a secret sentinel (the `fake_value_` prefix of a minted
+   sentinel or the signature of a fake JWT, in any case) is refused with
+   `PolicyDenied` and never resolved, even when a rule would allow it.
+   `VettingResolver` enforces the same rule on every lookup it makes,
+   including the binding checks of transparent flows, so no caller can send
+   such a name to DNS.
+2. A denied domain refuses the name unresolved.
+3. A domain rule that matches the name allows it; the name is then resolved
+   to find the address to dial.
+4. A name no rule lists is resolved only when an allow range open on the
+   destination port (an unscoped range, or one scoped to that port) exists,
+   because only then can its address still admit it. Otherwise it goes to the
+   decider, when there is one, or is refused, without a lookup.
+
+The cost of rule 4 is unchanged policy semantics: when an allow range is open
+on the port, an unlisted name on that port is still looked up, since its
+address is what the range judges. Scope allow ranges to the ports they serve
+to keep that window narrow.
+
 ## Name-only allows on pass-through flows
 
 `NetworkOptions::domain_only_allows` (`DomainOnlyAllows`):
