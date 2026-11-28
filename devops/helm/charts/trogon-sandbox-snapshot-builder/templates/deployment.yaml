@@ -18,7 +18,7 @@ spec:
       serviceAccountName: {{ include "trogon-sandbox-snapshot-builder.fullname" . }}
       containers:
         - name: sandbox-snapshot-builder
-          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-snapshot-builder:{{ .Values.global.imageTag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.serviceImage "name" "trogon-sandbox-snapshot-builder" "global" .Values.global "path" "trogon-sandbox-snapshot-builder.serviceImage") | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           args:
             - --max-concurrent={{ .Values.maxConcurrent }}

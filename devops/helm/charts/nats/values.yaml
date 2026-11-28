@@ -1,7 +1,8 @@
 replicaCount: 1
 image:
-  repository: nats
-  tag: 2.10-alpine
+  repository: ghcr.io/trogonstack/mirrors/docker-hub/library/nats
+  tag: 2.14.2-alpine
+  digest: sha256:952d157e28d5394a211229bd57a7b37ff9f184e58e2c8486a08fa909fd254e32
   pullPolicy: IfNotPresent
 jetstream:
   enabled: true

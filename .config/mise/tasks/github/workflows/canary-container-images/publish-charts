@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#MISE description="Publish every sandbox chart to the OCI registry at version 0.0.0-sha-<commit>, defaulting to that commit's images"
+set -euo pipefail
+# Stamps a copy of devops/helm/charts with the commit, then packages and pushes
+# each chart to oci://<CHART_REGISTRY> and lets Helm append the chart name.
+# The checkout is not modified. A chart whose version already exists is left
+# alone, so a rerun never moves a published tag.
+#
+# Needs helm, yq (mikefarah), oras and jq on PATH, and an authenticated GITHUB_TOKEN.
+
+: "${COMMIT:?COMMIT is required}"
+: "${DIGEST_DIR:?DIGEST_DIR is required}"
+: "${GITHUB_ACTOR:?GITHUB_ACTOR is required}"
+: "${GITHUB_TOKEN:?GITHUB_TOKEN is required}"
+: "${SOURCE_URL:?SOURCE_URL is required}"
+if [[ ! "$COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "COMMIT must be a full 40 character commit SHA" >&2
+    exit 1
+fi
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+repo_root="$(pwd)"
+registry="${CHART_REGISTRY:-ghcr.io/trogonstack/charts/trogonai}"
+export VERSION="0.0.0-sha-${COMMIT}"
+export COMMIT SOURCE_URL
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+cp -R devops/helm/charts "${work}/charts"
+rm -rf "${work}"/charts/*/charts "${work}"/charts/*/Chart.lock
+charts="${work}/charts"
+out="${work}/packages"
+mkdir -p "$out"
+
+echo "== stamp ${VERSION}"
+for dir in "$charts"/*/; do
+    dir="${dir%/}"
+    name="$(basename "$dir")"
+    yq -i '
+        .version = strenv(VERSION) |
+        .annotations["org.opencontainers.image.source"] = strenv(SOURCE_URL) |
+        .annotations["org.opencontainers.image.revision"] = strenv(COMMIT) |
+        .sources = [strenv(SOURCE_URL)] |
+        (.dependencies[]? | select(.repository | test("^file://")) | .version) = strenv(VERSION)
+    ' "${dir}/Chart.yaml"
+    if [ -f "${dir}/values.yaml" ] && [ "$(yq eval 'has("serviceImage")' "${dir}/values.yaml")" = "true" ]; then
+        digest="$(cat "${DIGEST_DIR}/${name}")"
+        if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "no valid digest for ${name}: ${digest}" >&2
+            exit 1
+        fi
+        export DIGEST="$digest"
+        yq -i '
+            .serviceImage.tag = strenv(COMMIT) |
+            .serviceImage.digest = strenv(DIGEST)
+        ' "${dir}/values.yaml"
+        yq -i '.appVersion = strenv(COMMIT)' "${dir}/Chart.yaml"
+    fi
+done
+
+echo "== package"
+# Every chart embeds the charts it depends on as they are when it is built, so
+# build from the leaves up: the library, then the charts that use it, then the umbrella.
+for dir in "$charts"/*/; do
+    dir="${dir%/}"
+    [ "$(basename "$dir")" = "trogon-sandbox" ] && continue
+    if [ "$(yq eval '.dependencies | length' "${dir}/Chart.yaml")" != "0" ]; then
+        helm dependency update "$dir" >/dev/null
+    fi
+    helm package "$dir" --destination "$out" >/dev/null
+done
+helm dependency update "${charts}/trogon-sandbox" >/dev/null
+helm package "${charts}/trogon-sandbox" --destination "$out" >/dev/null
+
+echo "== push to oci://${registry}"
+printf '%s' "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+for package in "$out"/*.tgz; do
+    name="$(helm show chart "$package" | yq eval '.name' -)"
+    ref="${registry}/${name}:${VERSION}"
+    if oras manifest fetch --descriptor "$ref" >/dev/null 2>&1; then
+        echo "${ref} is already published; leaving it alone"
+        continue
+    fi
+    helm push "$package" "oci://${registry}"
+    revision="$(oras manifest fetch "$ref" | jq -r '.annotations["org.opencontainers.image.revision"]')"
+    if [ "$revision" != "$COMMIT" ]; then
+        echo "${ref} carries revision ${revision}, expected ${COMMIT}" >&2
+        exit 1
+    fi
+done
+cd "$repo_root"

@@ -3,4 +3,8 @@ name: nats
 description: Minimal NATS JetStream for sandbox control plane
 type: application
 version: 0.1.0
-appVersion: "2.10"
+appVersion: "2.14.2"
+dependencies:
+  - name: trogon-sandbox-library
+    repository: file://../trogon-sandbox-library
+    version: 0.1.0

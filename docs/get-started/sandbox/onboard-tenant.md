@@ -53,7 +53,7 @@ zot:
 Then upgrade the release:
 
 ```bash
-helm upgrade <release> devops/helm/charts/trogon-sandbox/
+helm upgrade <release> devops/helm/charts/trogon-sandbox/ --reuse-values
 ```
 
 This grants `sandbox-acme-puller` read-only access to the `snapshots/acme` repository. The snapshot builder identity keeps push access to `snapshots/**`.
@@ -134,7 +134,7 @@ To off-board the tenant:
 trogon-sandbox-admin api-key revoke --token <token>
 trogon-sandbox-admin tenant-limit clear --tenant acme
 trogon-sandbox-admin image-policy clear --tenant acme
-helm upgrade <release> devops/helm/charts/trogon-sandbox/   # after removing acme from values.yaml
+helm upgrade <release> devops/helm/charts/trogon-sandbox/ --reuse-values   # after removing acme from values.yaml
 terraform destroy -var tenant_id=acme -var region=us-east-1
 ```
 

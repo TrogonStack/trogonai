@@ -1,0 +1,14 @@
+# Third-party images the sandbox charts pull, one per line:
+#
+#   <upstream> <path>:<tag>@sha256:<digest>
+#
+# The mirror-container-images workflow copies each one, with its referrers, to
+# ghcr.io/trogonstack/mirrors/<upstream>/<path>:<tag>. The path and tag stay
+# the upstream ones, and the digest is the upstream index digest, which a copy
+# keeps. <upstream> is docker-hub, quay or ghcr. Pin an exact version, never
+# latest, and update the chart values to the same digest.
+docker-hub authzed/spicedb:v1.35.0@sha256:7f1e18c18154ff0450e972d80d81828c1bfa513d82d181661d23012967a8a3d4
+docker-hub library/busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+docker-hub library/nats:2.14.2-alpine@sha256:952d157e28d5394a211229bd57a7b37ff9f184e58e2c8486a08fa909fd254e32
+ghcr oras-project/oras:v1.3.0@sha256:6ce045ce069a89934d6666b8b49f9c4c0145201bd6de6dbe2aee267814c55468
+ghcr project-zot/zot:v2.1.2@sha256:2930f0823199dfb34564dc19ab6c938a4aee9fadc71d9e0e038bacd8c439e63b

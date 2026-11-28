@@ -253,8 +253,21 @@ jobs:
         if: steps.tip.outputs.current == 'true'
         id: image
         env:
+          SERVICE: ${{ matrix.service }}
           DIGEST: ${{ steps.published.outputs.digest || steps.build_image.outputs.digest }}
+          DIGEST_DIR: ${{ runner.temp }}/image-digests
         run: mise run --skip-tools github:workflows:canary-container-images:image-digest
+
+      # The charts of this commit default to these digests, so the chart job
+      # reads them instead of looking the tags up again.
+      - name: Upload image digest
+        if: steps.tip.outputs.current == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-digest-${{ matrix.service }}
+          path: ${{ runner.temp }}/image-digests
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Scan image for vulnerabilities
         if: steps.tip.outputs.current == 'true'
@@ -284,3 +297,51 @@ jobs:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           RUNTIME_BASE: debian:trixie-20261104-slim
         run: mise run --skip-tools github:workflows:canary-container-images:image-audit-summary
+
+  # Publishes every chart under devops/helm/charts as 0.0.0-sha-<commit>, with
+  # the digests of the images this run built or found already published.
+  publish-charts:
+    name: Publish charts
+    needs: build-and-push
+    if: ${{ needs.build-and-push.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install tools
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          cache: false
+          install_args: aqua:helm/helm aqua:mikefarah/yq aqua:oras-project/oras@1.3.0
+
+      - name: Skip when this commit is no longer the branch tip
+        id: tip
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: mise run --skip-tools github:workflows:canary-container-images:canary-is-branch-tip
+
+      - name: Download image digests
+        if: steps.tip.outputs.current == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: image-digest-*
+          path: ${{ runner.temp }}/image-digests
+          merge-multiple: true
+
+      - name: Publish charts
+        if: steps.tip.outputs.current == 'true'
+        env:
+          COMMIT: ${{ github.sha }}
+          DIGEST_DIR: ${{ runner.temp }}/image-digests
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: mise run --skip-tools github:workflows:canary-container-images:publish-charts

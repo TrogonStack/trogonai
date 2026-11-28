@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Lint and render the sandbox Helm charts, then check and unit-test their alert rules"
 set -euo pipefail
-
 # Lints and renders the sandbox Helm charts, then checks and unit-tests the
 # Prometheus alert rules the charts ship.
 #
@@ -14,13 +13,22 @@ promtool --version
 
 charts_dir="$(pwd)/devops/helm/charts"
 chart="${charts_dir}/trogon-sandbox"
+pins="${chart}/ci/pinned-images-values.yaml"
 work="$(mktemp -d)"
 cleanup() {
-  rm -rf "${work}" "${chart}/charts" "${chart}/Chart.lock"
+  rm -rf "${work}" "${charts_dir}"/*/charts "${charts_dir}"/*/Chart.lock
 }
 trap cleanup EXIT
 
-echo "== helm dependency update (umbrella)"
+# Every chart but the umbrella embeds the shared library, and the umbrella
+# embeds the charts as they are when it updates, so build the leaves first.
+echo "== helm dependency update (every chart, umbrella last)"
+for sub in "${charts_dir}"/*/; do
+  [ "${sub%/}" = "${chart}" ] && continue
+  if [ "$(yq eval '.dependencies | length' "${sub}/Chart.yaml")" != "0" ]; then
+    helm dependency update "${sub}" >/dev/null
+  fi
+done
 helm dependency update "${chart}"
 
 echo "== helm lint (umbrella and every subchart)"
@@ -30,11 +38,47 @@ helm lint "${chart}"
 yq eval '{"global": .global}' "${chart}/values.yaml" > "${work}/global.yaml"
 for sub in "${charts_dir}"/*/; do
   [ "${sub%/}" = "${chart}" ] && continue
-  helm lint "${sub}" --values "${work}/global.yaml"
+  # The pins file keys each service's values by chart name; hand the chart its own.
+  name="$(basename "${sub}")"
+  yq eval ".\"${name}\" // {}" "${pins}" > "${work}/pins-${name}.yaml"
+  helm lint "${sub}" --values "${work}/global.yaml" --values "${work}/pins-${name}.yaml"
 done
 
-echo "== helm template (defaults)"
-helm template ci "${chart}" > "${work}/default.yaml"
+echo "== helm template (defaults must not render an unpinned image)"
+if helm template ci "${chart}" > "${work}/unpinned.yaml" 2> "${work}/unpinned.log"; then
+  echo "the default values must fail to render until every image is pinned" >&2
+  exit 1
+fi
+grep -q 'serviceImage.tag is required' "${work}/unpinned.log"
+
+echo "== helm template (defaults with every image pinned)"
+helm template ci "${chart}" -f "${pins}" > "${work}/default.yaml"
+
+echo "== every rendered image is <repository>:<tag>@sha256:<digest> from our registry"
+helm template ci "${chart}" -f "${pins}" --set trogon-sandbox-docker-worker.enabled=true \
+  --set trogon-sandbox-kubevirt-worker.enabled=true \
+  --set trogon-sandbox-kubevirt-worker.persistence.existingClaim=ci \
+  --set trogon-sandbox-daytona-worker.enabled=true \
+  --set trogon-sandbox-aca-worker.enabled=true --set trogon-sandbox-modal-worker.enabled=true \
+  --set trogon-sandbox-subprocess-worker.enabled=true > "${work}/all-workers.yaml"
+refs="$(grep -hE '^[[:space:]-]*(image|SANDBOX_IMAGE):' "${work}/all-workers.yaml" | sed -E 's/^[[:space:]-]*(image|SANDBOX_IMAGE):[[:space:]]*//; s/"//g')"
+if [ -z "${refs}" ]; then
+  echo "no image rendered; the image checks have nothing to check" >&2
+  exit 1
+fi
+while IFS= read -r ref; do
+  if ! [[ "${ref}" =~ ^ghcr\.io/trogonstack/(images/trogonai|mirrors/[a-z-]+)/[^:@]+:[^@]+@sha256:[0-9a-f]{64}$ ]]; then
+    echo "image ${ref} is not pinned by tag and digest in our registry" >&2
+    exit 1
+  fi
+  # A mirrored image must be in the set the mirror workflow copies.
+  if [[ "${ref}" =~ ^ghcr\.io/trogonstack/mirrors/([a-z-]+)/([^:@]+):([^@]+@sha256:[0-9a-f]{64})$ ]]; then
+    grep -Fxq "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}:${BASH_REMATCH[3]}" devops/oras/mirrors.txt || {
+      echo "image ${ref} is not listed in devops/oras/mirrors.txt" >&2
+      exit 1
+    }
+  fi
+done <<< "${refs}"
 
 echo "== helm template (authz enforced by default)"
 grep -q 'SANDBOX_INSECURE_DEV: "false"' "${work}/default.yaml"
@@ -48,25 +92,26 @@ if grep -q 'insecureDev: true' "${chart}/values.yaml" "${charts_dir}"/trogon-san
   exit 1
 fi
 
-if helm template ci "${chart}" --set global.spicedb.tenantResourceType=unknown \
+if helm template ci "${chart}" -f "${pins}" --set global.spicedb.tenantResourceType=unknown \
   > "${work}/invalid.yaml" 2> "${work}/invalid.log"; then
   echo "the bundled SpiceDB must reject a tenant resource type its schema does not define" >&2
   exit 1
 fi
-if helm template ci "${chart}" --set trogon-sandbox-k8s-worker.resourceNaming=unknown \
+if helm template ci "${chart}" -f "${pins}" --set trogon-sandbox-k8s-worker.resourceNaming=unknown \
   > "${work}/invalid-worker.yaml" 2> "${work}/invalid-worker.log"; then
   echo "the chart must reject an unknown worker resource naming mode" >&2
   exit 1
 fi
 
 echo "== helm template (dev values)"
-helm template ci "${chart}" -f "${chart}/values.dev.yaml" | grep -q 'SANDBOX_INSECURE_DEV: "true"'
+helm template ci "${chart}" -f "${pins}" -f "${chart}/values.dev.yaml" | grep -q 'SANDBOX_INSECURE_DEV: "true"'
 
 # Each ci/<case>-values.yaml is a chart-testing case; render every one.
 echo "== helm template (ci cases)"
+# The pins file is the case that pins every image; layer it under the others.
 for case_values in "${chart}"/ci/*-values.yaml; do
   case_name="$(basename "${case_values}" -values.yaml)"
-  helm template ci "${chart}" -f "${case_values}" > "${work}/case-${case_name}.yaml"
+  helm template ci "${chart}" -f "${pins}" -f "${case_values}" > "${work}/case-${case_name}.yaml"
 done
 grep -q 'SPICEDB_ENDPOINT: "authz.example:50051"' "${work}/case-external-spicedb.yaml"
 grep -q 'SANDBOX_SPICEDB_TENANT_RESOURCE_TYPE: "custom_tenant"' "${work}/case-custom-tenant.yaml"
