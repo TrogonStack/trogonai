@@ -22,22 +22,23 @@ impl AuthResolver {
         })
     }
 
-    pub(crate) fn auth_for(&self, artifact: &OciArtifactRef) -> RegistryAuth {
+    pub(crate) fn auth_for(&self, artifact: &OciArtifactRef) -> Result<RegistryAuth, OciError> {
         self.auth_for_registry(&artifact.registry)
     }
 
-    pub(crate) fn auth_for_registry(&self, registry: &str) -> RegistryAuth {
+    pub(crate) fn auth_for_registry(&self, registry: &str) -> Result<RegistryAuth, OciError> {
         let normalized = normalize_registry(registry);
-        self.overrides
-            .get(normalized)
-            .or_else(|| self.overrides.get(registry))
-            .or_else(|| self.docker.lookup(normalized))
-            .map_or(RegistryAuth::Anonymous, |credentials| {
-                RegistryAuth::Basic(
-                    credentials.username.clone(),
-                    credentials.password.expose_secret().to_owned(),
-                )
-            })
+        let explicit = self.overrides.get(normalized).or_else(|| self.overrides.get(registry));
+        let credentials = match explicit {
+            Some(credentials) => Some(credentials),
+            None => self.docker.lookup(normalized)?,
+        };
+        Ok(credentials.map_or(RegistryAuth::Anonymous, |credentials| {
+            RegistryAuth::Basic(
+                credentials.username.clone(),
+                credentials.password.expose_secret().to_owned(),
+            )
+        }))
     }
 }
 

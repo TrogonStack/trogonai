@@ -147,7 +147,7 @@ impl OciClient {
     ) -> Result<ResolvedContainerImage, OciError> {
         RegistryHost::new(&image.registry)?;
         let reference = image_reference(image)?;
-        let auth = self.auth().auth_for_registry(reference.resolve_registry());
+        let auth = self.auth().auth_for_registry(reference.resolve_registry())?;
         let mut transport = self.transport(&reference, auth, Instant::now() + CONTAINER_DEADLINE)?;
         let selector = image
             .digest
@@ -225,7 +225,7 @@ impl OciClient {
     ) -> Result<(), OciError> {
         RegistryHost::new(&image.reference().registry)?;
         let reference = image_reference(image.reference())?;
-        let auth = self.auth().auth_for_registry(reference.resolve_registry());
+        let auth = self.auth().auth_for_registry(reference.resolve_registry())?;
         let mut transport = self.transport(&reference, auth, Instant::now() + CONTAINER_DEADLINE)?;
         let (_, digest, mut manifest) = image_manifest(&mut transport, image.digest().as_str()).await?;
         if &digest != image.digest() {

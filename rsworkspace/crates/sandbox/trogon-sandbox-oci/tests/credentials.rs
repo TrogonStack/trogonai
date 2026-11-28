@@ -157,3 +157,18 @@ async fn unreadable_docker_configs_fail_strictly_and_fall_back_leniently() -> Te
     assert!(matches!(error, Some(OciError::Io(_))), "{error:?}");
     Ok(())
 }
+
+#[tokio::test]
+async fn a_credential_store_without_an_inline_entry_fails_the_request_instead_of_going_anonymous() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    std::fs::write(directory.path().join("config.json"), r#"{"credsStore":"desktop"}"#)?;
+    let registry = support::FakeRegistry::start().await?;
+    let artifact = push_artifact(&registry, "repo", trogon_sandbox_contract::ArtifactType::SbomV1, b"x").await?;
+    let client = OciClient::try_new(OciClientConfig {
+        docker_config: DockerConfigSource::Directory(directory.path().to_path_buf()),
+        ..Default::default()
+    })?;
+    let error = client.delete_artifact(&artifact).await.err();
+    assert!(matches!(error, Some(OciError::Config(_))), "{error:?}");
+    Ok(())
+}

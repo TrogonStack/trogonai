@@ -52,6 +52,7 @@ async fn push_and_pull_record_metrics() -> TestResult {
     let client = trogon_sandbox_oci::OciClient::with_metrics(
         trogon_sandbox_oci::OciClientConfig {
             insecure_registries: vec![registry.host()?],
+            docker_config: trogon_sandbox_oci::DockerConfigSource::Disabled,
             ..Default::default()
         },
         Some(metrics.clone()),

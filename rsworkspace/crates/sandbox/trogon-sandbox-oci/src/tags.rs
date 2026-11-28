@@ -13,7 +13,7 @@ impl OciClient {
         let reference: Reference = format!("{registry}/{repository}:latest")
             .parse()
             .map_err(|error| OciError::InvalidReference(format!("{error}")))?;
-        let auth = self.auth().auth_for_registry(reference.resolve_registry());
+        let auth = self.auth().auth_for_registry(reference.resolve_registry())?;
         let mut transport = self.transport(&reference, auth, metadata_deadline())?;
         match transport.tags().await {
             Ok(tags) => Ok(tags),

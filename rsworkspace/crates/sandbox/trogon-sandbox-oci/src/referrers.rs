@@ -47,7 +47,7 @@ impl OciClient {
     pub async fn attach_referrer(&self, subject: &OciArtifactRef, referrer: &OciArtifactRef) -> Result<(), OciError> {
         let referrer_ref = digest_reference(referrer)?;
         let deadline = metadata_deadline();
-        let mut transport = self.transport(&referrer_ref, self.auth().auth_for(referrer), deadline)?;
+        let mut transport = self.transport(&referrer_ref, self.auth().auth_for(referrer)?, deadline)?;
         let (referrer_raw, _) = transport.manifest(referrer.digest.as_str()).await?;
         let referrer_manifest: OciImageManifest =
             serde_json::from_slice(&referrer_raw).map_err(|_| OciError::Layout("invalid referrer manifest".into()))?;
@@ -93,7 +93,7 @@ impl OciClient {
         deadline: Instant,
     ) -> Result<(), OciError> {
         let mut index = self.referrers_index(subject, deadline).await?;
-        let auth = self.auth().auth_for(subject);
+        let auth = self.auth().auth_for(subject)?;
 
         if !index.manifests.iter().any(|existing| existing.digest == entry.digest) {
             index.manifests.push(entry);
@@ -117,7 +117,7 @@ impl OciClient {
 
     async fn referrers_index(&self, subject: &OciArtifactRef, deadline: Instant) -> Result<OciImageIndex, OciError> {
         let reference = digest_reference(subject)?;
-        let mut transport = self.transport(&reference, self.auth().auth_for(subject), deadline)?;
+        let mut transport = self.transport(&reference, self.auth().auth_for(subject)?, deadline)?;
         let index = match transport.referrers(subject.digest.as_str()).await {
             Ok(raw) => parse_referrers_index(&raw)?,
             Err(OciError::NotFound(_)) => empty_referrers_index(),

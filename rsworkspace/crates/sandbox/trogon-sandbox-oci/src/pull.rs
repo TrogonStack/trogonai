@@ -52,7 +52,7 @@ impl OciClient {
 
     async fn pull_artifact_inner(&self, target: &OciArtifactRef) -> Result<PulledArtifact, OciError> {
         let reference = digest_reference(target)?;
-        let auth = self.auth().auth_for(target);
+        let auth = self.auth().auth_for(target)?;
         self.inner()
             .store_auth_if_needed(reference.resolve_registry(), &auth)
             .await;
@@ -109,7 +109,7 @@ impl OciClient {
         limits: ArtifactPullLimits,
     ) -> Result<PulledArtifact, OciError> {
         let reference = digest_reference(target)?;
-        let auth = self.auth().auth_for(target);
+        let auth = self.auth().auth_for(target)?;
         let mut transport = self.transport(&reference, auth, tokio::time::Instant::now() + limits.timeout)?;
         let (raw, _) = transport.manifest(target.digest.as_str()).await?;
         let manifest: OciImageManifest =
@@ -144,7 +144,7 @@ impl OciClient {
         let reference = digest_reference(target)?;
         let mut transport = self.transport(
             &reference,
-            self.auth().auth_for(target),
+            self.auth().auth_for(target)?,
             crate::client::metadata_deadline(),
         )?;
         let (raw, digest) = transport.manifest(target.digest.as_str()).await?;
