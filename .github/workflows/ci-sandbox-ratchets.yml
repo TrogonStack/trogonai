@@ -43,7 +43,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Python
-        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           install_args: python
           cache_save: ${{ github.ref == 'refs/heads/main' }}
@@ -64,7 +64,7 @@ jobs:
           persist-credentials: false
 
       - name: Install buf and the prost plugins
-        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           install_args: buf rust cargo:protoc-gen-prost cargo:protoc-gen-tonic
           cache_save: ${{ github.ref == 'refs/heads/main' }}
