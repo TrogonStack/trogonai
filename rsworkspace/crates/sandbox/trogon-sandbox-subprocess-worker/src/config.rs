@@ -13,23 +13,47 @@ pub struct FuseConfig {
     pub allow_other: bool,
 }
 
+/// A `SANDBOX_FUSE_*` variable the worker refuses to start with.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum FuseConfigError {
+    #[error("{name} must be one of 1, true, 0 or false")]
+    NotAFlag { name: &'static str },
+    #[error("{name} is not valid unicode")]
+    NotUnicode { name: &'static str },
+}
+
+fn optional(env: &impl ReadEnv, name: &'static str) -> Result<Option<String>, FuseConfigError> {
+    match env.var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(FuseConfigError::NotUnicode { name }),
+    }
+}
+
+fn flag(env: &impl ReadEnv, name: &'static str) -> Result<bool, FuseConfigError> {
+    match optional(env, name)? {
+        None => Ok(false),
+        Some(value) if value == "1" || value.eq_ignore_ascii_case("true") => Ok(true),
+        Some(value) if value == "0" || value.eq_ignore_ascii_case("false") => Ok(false),
+        Some(_) => Err(FuseConfigError::NotAFlag { name }),
+    }
+}
+
 impl FuseConfig {
-    pub fn from_env(env: &impl ReadEnv) -> Self {
-        let flag = |key: &str| env.var(key).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
-        let enabled = flag("SANDBOX_FUSE_ENABLED");
-        let mount_s3_binary = env
-            .var("SANDBOX_FUSE_MOUNT_S3_BINARY")
-            .map_or_else(|_| PathBuf::from("mount-s3"), PathBuf::from);
-        let region = env.var("SANDBOX_FUSE_REGION").unwrap_or_default();
-        let endpoint = env.var("SANDBOX_FUSE_ENDPOINT_URL").ok();
-        let allow_other = flag("SANDBOX_FUSE_ALLOW_OTHER");
-        Self {
+    pub fn from_env(env: &impl ReadEnv) -> Result<Self, FuseConfigError> {
+        let enabled = flag(env, "SANDBOX_FUSE_ENABLED")?;
+        let mount_s3_binary =
+            optional(env, "SANDBOX_FUSE_MOUNT_S3_BINARY")?.map_or_else(|| PathBuf::from("mount-s3"), PathBuf::from);
+        let region = optional(env, "SANDBOX_FUSE_REGION")?.unwrap_or_default();
+        let endpoint = optional(env, "SANDBOX_FUSE_ENDPOINT_URL")?;
+        let allow_other = flag(env, "SANDBOX_FUSE_ALLOW_OTHER")?;
+        Ok(Self {
             enabled,
             mount_s3_binary,
             region,
             endpoint,
             allow_other,
-        }
+        })
     }
 }
 
@@ -66,5 +90,45 @@ impl WorkerConfig {
                 "`trogon-sandbox-egress-proxyd` not found on PATH; install it or set --egress-proxy-binary-path"
             )
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use trogon_std::env::InMemoryEnv;
+
+    use super::*;
+
+    type TestResult = Result<(), FuseConfigError>;
+
+    #[test]
+    fn unset_variables_keep_fuse_disabled() -> TestResult {
+        let config = FuseConfig::from_env(&InMemoryEnv::new())?;
+        assert!(!config.enabled);
+        assert!(!config.allow_other);
+        Ok(())
+    }
+
+    #[test]
+    fn recognised_flags_parse() -> TestResult {
+        let env = InMemoryEnv::new();
+        env.set("SANDBOX_FUSE_ENABLED", "TRUE");
+        env.set("SANDBOX_FUSE_ALLOW_OTHER", "0");
+        let config = FuseConfig::from_env(&env)?;
+        assert!(config.enabled);
+        assert!(!config.allow_other);
+        Ok(())
+    }
+
+    #[test]
+    fn an_unrecognised_flag_is_refused() {
+        for name in ["SANDBOX_FUSE_ENABLED", "SANDBOX_FUSE_ALLOW_OTHER"] {
+            let env = InMemoryEnv::new();
+            env.set(name, "yes");
+            assert!(matches!(
+                FuseConfig::from_env(&env),
+                Err(FuseConfigError::NotAFlag { name: refused }) if refused == name
+            ));
+        }
     }
 }

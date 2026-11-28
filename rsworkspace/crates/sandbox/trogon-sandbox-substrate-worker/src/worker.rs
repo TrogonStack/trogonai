@@ -502,9 +502,14 @@ async fn launch_with_lifecycle<P: Provider + ?Sized>(
     result
 }
 
-/// What a cancel body asks for. An empty or unreadable body is a plain release.
-fn cancel_intent(body: &[u8]) -> CancelIntent {
-    serde_json::from_slice(body).unwrap_or_default()
+/// What a cancel body asks for. An empty body is a plain release; a body that is present but
+/// unreadable is refused, because guessing a release would silently keep what a purge was
+/// meant to discard.
+fn cancel_intent(body: &[u8]) -> Result<CancelIntent, serde_json::Error> {
+    if body.is_empty() {
+        return Ok(CancelIntent::Release);
+    }
+    serde_json::from_slice(body)
 }
 
 async fn handle_cancel_msg(msg: &async_nats::Message, provider: &SubstrateProvider, grants: &RedispatchGuard) {
@@ -516,7 +521,14 @@ async fn handle_cancel_msg(msg: &async_nats::Message, provider: &SubstrateProvid
 
     // `cancel` is a no-op for a lease this worker does not hold, so the broadcast needs no
     // guard here: the provider is the one that knows.
-    let outcome = match cancel_intent(&msg.payload) {
+    let intent = match cancel_intent(&msg.payload) {
+        Ok(intent) => intent,
+        Err(error) => {
+            warn!(lease_id = %lease_id, %error, "cancel body is unreadable; refusing to guess its intent");
+            return;
+        }
+    };
+    let outcome = match intent {
         CancelIntent::Release => provider.cancel(&lease_id).await,
         CancelIntent::Purge => provider.purge(&lease_id).await,
     };

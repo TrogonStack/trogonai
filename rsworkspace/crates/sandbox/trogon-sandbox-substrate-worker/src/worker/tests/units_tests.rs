@@ -99,14 +99,19 @@ fn the_cancel_subject_matches_what_the_broker_publishes() {
 }
 
 #[test]
-fn a_cancel_body_names_its_intent_and_defaults_to_release() -> TestResult {
+fn a_cancel_body_names_its_intent_and_an_empty_one_is_a_release() -> TestResult {
     assert_eq!(
-        cancel_intent(&serde_json::to_vec(&CancelIntent::Purge)?),
+        cancel_intent(&serde_json::to_vec(&CancelIntent::Purge)?)?,
         CancelIntent::Purge
     );
-    assert_eq!(cancel_intent(b""), CancelIntent::Release);
-    assert_eq!(cancel_intent(b"not json"), CancelIntent::Release);
+    assert_eq!(cancel_intent(b"")?, CancelIntent::Release);
     Ok(())
+}
+
+#[test]
+fn an_unreadable_cancel_body_is_refused_instead_of_read_as_a_release() {
+    assert!(cancel_intent(b"not json").is_err());
+    assert!(cancel_intent(br#"{"purge":true}"#).is_err());
 }
 
 #[test]

@@ -190,7 +190,7 @@ async fn serve() -> anyhow::Result<()> {
         bwrap_binary_path,
         egress_proxy_binary_path: args.egress_proxy_binary_path,
         relay_binary_path: None,
-        fuse: trogon_sandbox_subprocess_worker::FuseConfig::from_env(&SystemEnv),
+        fuse: trogon_sandbox_subprocess_worker::FuseConfig::from_env(&SystemEnv)?,
     };
     let workspaces = trogon_sandbox_subprocess_worker::WorkspaceRegistry::new();
     let terminals =

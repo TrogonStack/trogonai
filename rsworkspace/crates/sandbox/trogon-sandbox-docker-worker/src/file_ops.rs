@@ -631,7 +631,10 @@ async fn stat<C: ContainerAccess>(container: &C, path: &str) -> Reply {
     } else {
         FileKind::Other
     };
-    let size = fields.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let size_text = fields.next().unwrap_or_default();
+    let size = size_text
+        .parse()
+        .map_err(|_| failed(FileOpErrorKind::Io, format!("{path}: unreadable size {size_text:?}")))?;
     let mode = fields.next().and_then(|s| u32::from_str_radix(s, 8).ok());
     let modified = fields
         .next()
@@ -812,7 +815,7 @@ wc -c < "$1"
     let size = String::from_utf8_lossy(&out.stdout)
         .trim()
         .parse()
-        .unwrap_or(offset + data.len() as u64);
+        .map_err(|_| failed(FileOpErrorKind::Io, format!("{path}: unreadable size after write")))?;
     Ok(FileOpResponse::Written {
         bytes: data.len() as u64,
         size,

@@ -33,7 +33,14 @@ pub async fn login_for_pull_secret(
     let ttl_seconds = NonZeroU32::new(ttl_seconds).context("a registry login needs a non-zero ttl")?;
     let nats = nats_connect::connect(nats_url).await?;
     let client = CredentialClient::new(nats, CredentialProvider::Registry, tenant.clone());
-    login_with_client(&client, reference, pull_secret_id, ttl_seconds, &docker_config_dir(env)).await
+    login_with_client(
+        &client,
+        reference,
+        pull_secret_id,
+        ttl_seconds,
+        &docker_config_dir(env)?,
+    )
+    .await
 }
 
 async fn login_with_client<C: RequestClient>(
@@ -64,7 +71,7 @@ fn write_docker_config_auth(config_dir: &Path, registry: &str, auth: &RegistryAu
 
     let mut root: Map<String, Value> = if config_path.is_file() {
         let raw = std::fs::read_to_string(&config_path).context("read docker config")?;
-        serde_json::from_str(&raw).unwrap_or_default()
+        serde_json::from_str(&raw).context("docker config is not a JSON object")?
     } else {
         Map::new()
     };
@@ -88,13 +95,15 @@ fn write_docker_config_auth(config_dir: &Path, registry: &str, auth: &RegistryAu
     Ok(())
 }
 
-fn docker_config_dir(env: &impl ReadEnv) -> PathBuf {
+fn docker_config_dir(env: &impl ReadEnv) -> anyhow::Result<PathBuf> {
     match env.var("DOCKER_CONFIG") {
-        Ok(dir) => PathBuf::from(dir),
-        Err(_) => env
-            .var("HOME")
-            .map_or_else(|_| PathBuf::from("/tmp"), PathBuf::from)
-            .join(".docker"),
+        Ok(dir) => Ok(PathBuf::from(dir)),
+        Err(_) => {
+            let home = env
+                .var("HOME")
+                .context("a registry login needs DOCKER_CONFIG or HOME to locate the Docker configuration")?;
+            Ok(PathBuf::from(home).join(".docker"))
+        }
     }
 }
 

@@ -145,9 +145,9 @@ impl FlyProvider {
                     .find(|entry| entry.id == id);
                 if let Some(entry) = found {
                     match entry.status.as_deref() {
-                        None | Some("created" | "complete" | "completed") => return Ok(entry),
+                        Some("created" | "complete" | "completed") => return Ok(entry),
                         Some("failed" | "error") => return Err(FlyProviderError::SnapshotFailed(id.clone())),
-                        Some(_) => {}
+                        None | Some(_) => {}
                     }
                 }
                 tokio::time::sleep(settings.snapshot_poll_interval()).await;
