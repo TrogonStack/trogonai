@@ -182,6 +182,8 @@ const pythonTasks = new Set([
   '.config/mise/tasks/github/workflows/ci-bazel-fork-coverage/compare',
   '.config/mise/tasks/github/workflows/ci-bazel-fork-coverage/publish',
   '.config/mise/tasks/github/workflows/ci-cargo/bazel-manual-tests',
+  '.config/mise/tasks/github/workflows/ci-sandbox-ratchets/file-sizes',
+  '.config/mise/tasks/github/workflows/ci-sandbox-ratchets/ignored-tests',
 ]);
 
 function assertOwnedTask(run, kind, owner, where) {

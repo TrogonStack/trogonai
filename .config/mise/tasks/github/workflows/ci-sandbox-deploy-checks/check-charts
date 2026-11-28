@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #MISE description="Lint and render the sandbox Helm charts, then check and unit-test their alert rules"
+set -euo pipefail
+
 # Lints and renders the sandbox Helm charts, then checks and unit-tests the
 # Prometheus alert rules the charts ship.
 #
 # Needs helm, yq (mikefarah) and promtool on PATH.
-set -euo pipefail
 
 cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
 helm version --short
