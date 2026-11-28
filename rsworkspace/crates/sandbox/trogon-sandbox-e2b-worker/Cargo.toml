@@ -50,5 +50,6 @@ axum = { workspace = true }
 rusqlite = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-conformance = { workspace = true }
 trogon-std = { workspace = true, features = ["test-support"] }
 wiremock = { workspace = true }

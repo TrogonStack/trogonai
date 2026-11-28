@@ -54,7 +54,7 @@ pub use launch_error::LaunchError;
 pub use lease_cleanup::LeaseCleanupError;
 pub use lease_sandbox::LeaseSandbox;
 pub use native_sandbox_id_error::NativeSandboxIdError;
-pub use network::{E2bNetwork, translate_network_policy};
+pub use network::{E2bNetwork, InternetAccess, NetworkRules, translate_network_policy};
 pub use profile::PROFILE;
 pub use snapshot_custody::{SnapshotClockError, SnapshotCustodyError};
 pub use snapshot_lifecycle_error::SnapshotLifecycleError;
