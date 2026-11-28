@@ -1,4 +1,4 @@
-use std::path::StripPrefixError;
+use std::path::{PathBuf, StripPrefixError};
 
 /// Modal, or the bridge that talks to it, refused or failed a call.
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +23,8 @@ pub enum ModalApiError {
     Io(#[from] std::io::Error),
     #[error("the bridge spoke invalid json: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("a symlink cannot be uploaded to the sandbox: {}", .0.display())]
+    SymlinkInUpload(PathBuf),
     #[error("a workspace path escaped its root: {0}")]
     StripPrefix(#[from] StripPrefixError),
 }

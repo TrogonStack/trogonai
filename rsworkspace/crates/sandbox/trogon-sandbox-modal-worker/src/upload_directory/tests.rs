@@ -38,3 +38,18 @@ fn an_unreadable_directory_fails_the_walk_instead_of_being_skipped() -> TestResu
     assert!(matches!(outcome, Err(ModalApiError::Io(_))));
     Ok(())
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_fails_the_walk_and_names_its_path() -> TestResult {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("a.txt"), "a")?;
+    let link = root.path().join("link.txt");
+    std::os::unix::fs::symlink(root.path().join("a.txt"), &link)?;
+    let outcome = files_under(root.path());
+    assert!(
+        matches!(&outcome, Err(ModalApiError::SymlinkInUpload(path)) if *path == link),
+        "{outcome:?}"
+    );
+    Ok(())
+}

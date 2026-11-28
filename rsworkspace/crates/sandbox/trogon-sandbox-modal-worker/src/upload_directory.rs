@@ -5,13 +5,18 @@ use walkdir::WalkDir;
 
 use crate::{ModalApiError, ModalSandboxApi};
 
-/// Every regular file under `root`. A directory or entry that cannot be read fails the walk, because staging a
+/// Every regular file under `root`. A symlink is refused with its path, because uploading it as a file or
+/// leaving it out would stage a different tree than the caller supplied. A directory or entry that cannot be read fails the walk, because staging a
 /// workspace that silently lacks files would run the sandbox against a different tree than the caller supplied.
 fn files_under(root: &Path) -> Result<Vec<PathBuf>, ModalApiError> {
     let mut files = Vec::new();
     for entry in WalkDir::new(root) {
         let entry = entry.map_err(std::io::Error::from)?;
-        if entry.file_type().is_file() {
+        let file_type = entry.file_type();
+        if file_type.is_symlink() {
+            return Err(ModalApiError::SymlinkInUpload(entry.into_path()));
+        }
+        if file_type.is_file() {
             files.push(entry.into_path());
         }
     }
