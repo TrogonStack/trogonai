@@ -10,7 +10,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 use tracing::{info, warn};
 use trogon_sandbox_actor_agent::{
     BindLeaseRequest, MIN_AGENT_PROTOCOL_VERSION_ENV, MIN_SUPPORTED_AGENT_PROTOCOL_VERSION,
-    min_protocol_version_from_env,
+    try_min_protocol_version_from_env,
 };
 use trogon_sandbox_contract::{
     CancelIntent, GetSandboxDomainResponse, IsolationTier, LeaseId, LeaseRequest, Port, ProviderKind, ProviderLease,
@@ -75,16 +75,6 @@ pub struct SubstrateProvider {
     lifecycle: Option<EmitterFactory>,
     poll_interval: Duration,
     min_agent_protocol_version: u32,
-}
-
-/// An environment with no variables, so an agent built from it keeps its default settings
-/// until the provider applies the ones it resolved once at construction.
-struct EmptyEnv;
-
-impl ReadEnv for EmptyEnv {
-    fn var(&self, _key: &str) -> Result<String, std::env::VarError> {
-        Err(std::env::VarError::NotPresent)
-    }
 }
 
 #[derive(Clone)]
@@ -164,11 +154,11 @@ impl SubstrateProvider {
             actor_locks: Arc::new(Mutex::new(HashMap::new())),
             lifecycle: None,
             poll_interval: RESUME_POLL_INTERVAL,
-            min_agent_protocol_version: min_protocol_version_from_env(
+            min_agent_protocol_version: try_min_protocol_version_from_env(
                 env,
                 MIN_AGENT_PROTOCOL_VERSION_ENV,
                 MIN_SUPPORTED_AGENT_PROTOCOL_VERSION,
-            ),
+            )?,
         })
     }
 
@@ -280,8 +270,11 @@ impl SubstrateProvider {
     /// broadcast routing rule: the broker sends `run_command` to every worker on the
     /// provider, and only the one holding the lease answers.
     fn actor_agent(&self, target: ActorTarget) -> ActorAgent {
-        let agent = ActorAgent::new(self.config.router_endpoint.clone(), target, &EmptyEnv)
-            .with_min_agent_protocol_version(self.min_agent_protocol_version);
+        let agent = ActorAgent::with_minimum(
+            self.config.router_endpoint.clone(),
+            target,
+            self.min_agent_protocol_version,
+        );
         match &self.config.router_tls {
             Some(tls) => agent.with_router_tls(tls.clone()),
             None => agent,

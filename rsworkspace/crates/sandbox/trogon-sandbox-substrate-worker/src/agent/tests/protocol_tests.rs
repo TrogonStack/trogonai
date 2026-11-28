@@ -141,7 +141,7 @@ async fn the_environment_lowers_the_minimum_for_a_rollout() -> TestResult {
     let agent = serve_unversioned(target()?, identity_router()?).await?;
     let env = InMemoryEnv::new();
     env.set(MIN_AGENT_PROTOCOL_VERSION_ENV, "0");
-    let lenient = ActorAgent::new(agent_router(&agent), target()?, &env);
+    let lenient = ActorAgent::new(agent_router(&agent), target()?, &env)?;
 
     assert_eq!(lenient.identity().await?.actor_id.as_str(), "actor-1");
     Ok(())
@@ -249,5 +249,16 @@ async fn an_unreadable_identity_is_a_malformed_body() -> TestResult {
 
     let error = agent.identity().await.err().ok_or("the body should not parse")?;
     assert!(matches!(error, AgentError::Malformed { .. }), "{error:?}");
+    Ok(())
+}
+
+#[test]
+fn an_unparseable_minimum_override_is_refused() -> TestResult {
+    let env = InMemoryEnv::new();
+    env.set(MIN_AGENT_PROTOCOL_VERSION_ENV, "not-a-number");
+    let error = ActorAgent::new("127.0.0.1:1".parse()?, target()?, &env)
+        .err()
+        .ok_or("an unreadable override must be refused")?;
+    assert_eq!(error.name, MIN_AGENT_PROTOCOL_VERSION_ENV);
     Ok(())
 }

@@ -16,8 +16,8 @@ use trogon_sandbox_actor_agent::{
     AGENT_PROTOCOL_VERSION_HEADER, ActorIdentity, BIND_PATH, BindLeaseRequest, EXEC_KILL_PATH, EXEC_PATH,
     EXEC_POLL_PATH, EXEC_WRITE_STDIN_PATH, ExecFrame, FILES_READ_PATH, FILES_WRITE_PATH, GROUP_MEMBERSHIP_PATH,
     GROUPS_CREATE_PATH, GUEST_PROTOCOL_VERSION, GuestProtocolError, IDENTITY_PATH, MIN_AGENT_PROTOCOL_VERSION_ENV,
-    MIN_SUPPORTED_AGENT_PROTOCOL_VERSION, PROTOCOL_REFUSED_STATUS, READYZ_PATH, USERS_CREATE_PATH,
-    WORKER_PROTOCOL_VERSION_HEADER, admit_agent_version, min_protocol_version_from_env,
+    MIN_SUPPORTED_AGENT_PROTOCOL_VERSION, MinProtocolVersionError, PROTOCOL_REFUSED_STATUS, READYZ_PATH,
+    USERS_CREATE_PATH, WORKER_PROTOCOL_VERSION_HEADER, admit_agent_version, try_min_protocol_version_from_env,
 };
 use trogon_sandbox_contract::{
     CreateSandboxGroupRequest, CreateSandboxGroupResponse, CreateSandboxUserRequest, CreateSandboxUserResponse,
@@ -54,17 +54,28 @@ pub struct ActorAgent {
 
 impl ActorAgent {
     /// The oldest agent protocol this client drives comes from
-    /// [`MIN_AGENT_PROTOCOL_VERSION_ENV`] in `env`, defaulting to the current version.
-    pub fn new(router: RouterEndpoint, target: ActorTarget, env: &impl ReadEnv) -> Self {
+    /// [`MIN_AGENT_PROTOCOL_VERSION_ENV`] in `env`, defaulting to the current version. An
+    /// override that is set but is not an unsigned integer is refused.
+    pub fn new(
+        router: RouterEndpoint,
+        target: ActorTarget,
+        env: &impl ReadEnv,
+    ) -> Result<Self, MinProtocolVersionError> {
+        let minimum = try_min_protocol_version_from_env(
+            env,
+            MIN_AGENT_PROTOCOL_VERSION_ENV,
+            MIN_SUPPORTED_AGENT_PROTOCOL_VERSION,
+        )?;
+        Ok(Self::with_minimum(router, target, minimum))
+    }
+
+    /// A client that drives agents at protocol `min_agent_protocol_version` or newer.
+    pub fn with_minimum(router: RouterEndpoint, target: ActorTarget, min_agent_protocol_version: u32) -> Self {
         Self {
             router,
             target,
             router_tls: None,
-            min_agent_protocol_version: min_protocol_version_from_env(
-                env,
-                MIN_AGENT_PROTOCOL_VERSION_ENV,
-                MIN_SUPPORTED_AGENT_PROTOCOL_VERSION,
-            ),
+            min_agent_protocol_version,
             control_timeout: CONTROL_TIMEOUT,
             exec_transport_margin: EXEC_TRANSPORT_MARGIN,
         }
