@@ -1,5 +1,8 @@
 use std::time::Duration;
 
+/// Every variable the daemon reads starts with this.
+pub(super) const ENV_VAR_PREFIX: &str = "EGRESS_PROXY_";
+
 pub(super) const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:3128";
 
 /// `TRANSPARENT_LISTENER_OFF` here runs the explicit proxy alone, for a

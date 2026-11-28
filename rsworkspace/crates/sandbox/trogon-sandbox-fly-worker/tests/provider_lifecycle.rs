@@ -1172,5 +1172,5 @@ async fn recovery_stops_when_a_second_machine_claims_a_recorded_attempt() -> Tes
     Ok(())
 }
 
-#[path = "provider_lifecycle/snapshots.rs"]
-mod snapshots;
+#[path = "provider_lifecycle/snapshots_tests.rs"]
+mod snapshots_tests;

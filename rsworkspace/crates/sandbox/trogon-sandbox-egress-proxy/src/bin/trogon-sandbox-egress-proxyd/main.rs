@@ -41,7 +41,7 @@ use trogon_sandbox_egress_proxy::violation::{NatsViolationSink, ViolationRateLim
 #[cfg(unix)]
 use trogon_sandbox_protocol::RegistryHandoff;
 use trogon_sandbox_protocol::SentinelRegistry;
-use trogon_std::env::{ReadEnv as _, SystemEnv};
+use trogon_std::env::{EnumerateEnv as _, ReadEnv as _, SystemEnv};
 
 mod constants;
 mod env_encoding;
@@ -739,7 +739,7 @@ async fn serve(
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    if let Err(err) = env_encoding::reject_non_unicode(std::env::vars_os()) {
+    if let Err(err) = env_encoding::reject_non_unicode(SystemEnv.vars_os()) {
         tracing::error!(error = %err, "invalid configuration");
         std::process::exit(1);
     }
