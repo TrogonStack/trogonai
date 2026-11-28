@@ -57,6 +57,13 @@ The examples under `rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker
 
 For the full worker with a broker and NATS, follow the steps in [Run the Firecracker worker](./firecracker-worker.md). The worker's state directory is `SANDBOX_FIRECRACKER_STATE_DIR` and its checkpoint directory is `SANDBOX_FIRECRACKER_SNAPSHOT_DIR`, which must be outside the state directory.
 
+## Run the Firecracker stack lanes
+
+Two mise tasks run the live `trogon-sandbox-client` lanes against a real worker on the host. Both start NATS and the broker from the compose stack in `devops/docker/compose/sandbox`, supervise a `trogon-sandbox-firecracker-worker`, run the `--ignored` tests and then check that no VM, lease directory or network namespace was left behind. They need docker with compose, `curl`, `jq`, `openssl`, `cargo` and a `firecracker` binary.
+
+- `mise run sandbox:smoke-firecracker` runs the stack, failure, snapshot and timing lanes. Set `FC_KERNEL` to the guest `vmlinux` and `FC_ROOTFS` to the root filesystem from `build-guest-rootfs.sh`. Set `SANDBOX_SMOKE_FIRECRACKER_NETWORK=1` to start the worker with lease network devices and also run the network lane, which needs the `fc-netns` helper installed with a sudo rule. The header of the task lists every variable.
+- `mise run sandbox:demo-dagger-firecracker` runs a Dagger pipeline inside one lease whose network policy allows only the registry the pipeline pulls from, then checks that a pipeline container reaches that registry through the lease proxy and nothing else. It needs a root filesystem built with `build-guest-rootfs.sh --with-dagger`, the same `fc-netns` helper, and takes the variables of the smoke task. `FC_IMAGE` defaults to `guest:dagger`.
+
 ## Sync changes from a development machine
 
 Do not let `rsync` copy modification times, which `-a` does. A file edited on the development machine before the host's last build arrives older than that build, so cargo keeps the stale binary and the run tests old code. Compare by content and let changed files take the host's clock:

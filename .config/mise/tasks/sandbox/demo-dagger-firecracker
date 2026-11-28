@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Run a Dagger pipeline inside one Firecracker lease against the local sandbox stack on a KVM host"
+# Required: FC_KERNEL, and FC_ROOTFS built with
+# rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker/scripts/build-guest-rootfs.sh --with-dagger.
+# The netns helper must be installed as for SANDBOX_SMOKE_FIRECRACKER_NETWORK=1 in
+# `mise run sandbox:smoke-firecracker`, whose other variables (ports, FC_STATE_DIR,
+# FC_NETNS_*) apply here too. FC_IMAGE defaults to guest:dagger.
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+export FC_IMAGE="${FC_IMAGE:-guest:dagger}"
+export SANDBOX_SMOKE_FIRECRACKER_NETWORK=1
+export SANDBOX_SMOKE_FIRECRACKER_TESTS=firecracker_dagger_demo
+exec "${ROOT}/.config/mise/tasks/sandbox/smoke-firecracker" "$@"
