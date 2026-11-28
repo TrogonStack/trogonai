@@ -18,6 +18,12 @@ pub struct WorkerArgs {
     #[arg(long, env = "SANDBOX_DISPATCH_FENCE_FILE")]
     pub dispatch_fence_file: Option<PathBuf>,
 
+    /// Keeps each targeted dispatch attempt and its receipt, so a repeat gets the first sandbox and a cleanup is
+    /// confirmed only once the sandbox is gone. Setting it makes the worker announce targeted dispatch and take its
+    /// worker id from the ledger. Unset, the worker serves only the shared lease subject.
+    #[arg(long, env = "SANDBOX_VERCEL_DISPATCH_LEDGER_FILE")]
+    pub dispatch_ledger_file: Option<PathBuf>,
+
     #[arg(long, env = "SANDBOX_NATS_URL", default_value = "nats://127.0.0.1:4222")]
     pub nats_url: String,
 

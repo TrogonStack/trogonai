@@ -1,3 +1,6 @@
+// Shared by several test binaries, and each one uses only part of it.
+#![allow(dead_code, reason = "shared test support; every binary uses a different subset")]
+
 //! A worker served over a throwaway NATS server, against a loopback fake of the Vercel API.
 
 use std::sync::atomic::{AtomicU16, AtomicU64, AtomicUsize, Ordering};
@@ -226,11 +229,23 @@ pub fn dispatch_json(lease: &str) -> Value {
 
 impl Running {
     pub async fn start() -> Result<Self, Boxed> {
+        Self::start_with_ledger(None).await
+    }
+
+    /// A worker that keeps its targeted dispatches in the ledger at `ledger`, when one is given.
+    pub async fn start_with_ledger(ledger: Option<&std::path::Path>) -> Result<Self, Boxed> {
         let nats = Nats::start().await;
         let client = nats.client().await;
         let fake = Fake::start().await?;
         let provider = fake.provider()?;
         let worker_id = WorkerId::new("worker-1")?;
+        if let Some(path) = ledger {
+            provider.configure_dispatch_ledger(Arc::new(trogon_sandbox_protocol::AttemptLedger::open(
+                path,
+                trogon_sandbox_contract::ProviderKind::Vercel,
+                Some(worker_id.clone()),
+            )?))?;
+        }
         let cancel = CancellationToken::new();
         let task = tokio::spawn({
             let (client, provider, worker_id, cancel) =

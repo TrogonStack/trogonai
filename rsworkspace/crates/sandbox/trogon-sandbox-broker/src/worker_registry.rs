@@ -40,6 +40,7 @@ pub trait WorkerRegistry: Send + Sync {
 mod heartbeat_selection;
 mod in_memory_worker_registry;
 mod nats_worker_registry;
+mod prefers_targeted_dispatch;
 mod provider_selection;
 mod provider_selection_error;
 mod requires_targeted_dispatch;
@@ -48,6 +49,7 @@ mod worker_selection_constraints;
 
 pub use in_memory_worker_registry::InMemoryWorkerRegistry;
 pub use nats_worker_registry::NatsWorkerRegistry;
+pub use prefers_targeted_dispatch::prefers_targeted_dispatch;
 pub use provider_selection::ProviderSelection;
 pub use provider_selection_error::ProviderSelectionError;
 pub use requires_targeted_dispatch::requires_targeted_dispatch;

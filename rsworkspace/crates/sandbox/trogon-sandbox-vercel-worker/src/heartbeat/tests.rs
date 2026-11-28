@@ -11,6 +11,7 @@ fn heartbeat(plan: VercelPlan, max_vcpus: u32) -> Result<WorkerHeartbeat, Box<dy
         &regions,
         max_vcpus,
         plan,
+        WorkerDispatchProtocol::Legacy,
     ))
 }
 
@@ -31,5 +32,21 @@ fn the_plan_caps_the_session_lifetime() -> TestResult {
     assert_eq!(hobby.profile.lifecycle.max_lease_lifetime_seconds, Some(2700));
     let pro = heartbeat(VercelPlan::Pro, 8)?;
     assert_eq!(pro.profile.lifecycle.max_lease_lifetime_seconds, Some(86400));
+    Ok(())
+}
+
+#[test]
+fn the_heartbeat_announces_the_dispatch_protocol_it_is_given() -> TestResult {
+    let beat = build_heartbeat(
+        &WorkerId::new("worker-1")?,
+        4,
+        0,
+        &[],
+        8,
+        VercelPlan::Pro,
+        WorkerDispatchProtocol::TargetedV1,
+    );
+    assert_eq!(beat.dispatch_protocol, WorkerDispatchProtocol::TargetedV1);
+    assert!(beat.supports_lease_epoch.is_supported());
     Ok(())
 }

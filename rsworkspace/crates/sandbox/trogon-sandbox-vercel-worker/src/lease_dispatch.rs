@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
 use async_nats::Client;
@@ -32,14 +33,14 @@ async fn publish_lifecycle(js: &jetstream::Context, subject: &str, event: &Lifec
     }
 }
 
+/// Runs `allocate` for `lease_id` between its lifecycle events: Started and the allocation phase before, Completed or
+/// Failed after.
 #[tracing::instrument(skip_all, fields(lease_id = %lease_id))]
-async fn launch(
-    request: &LeaseRequest,
+pub(crate) async fn with_lifecycle<E: std::fmt::Display>(
     lease_id: &LeaseId,
     js: &jetstream::Context,
-    provider: &Arc<dyn Provider>,
-    active: &ActiveLeases,
-) -> Result<ProviderLease, ProviderError> {
+    allocate: impl Future<Output = Result<ProviderLease, E>>,
+) -> Result<ProviderLease, E> {
     let subject = lifecycle_subject(lease_id);
     // A lease id the protocol would not accept as a sandbox id has no lifecycle events to name it in.
     let named = SandboxId::new(lease_id.as_str()).ok();
@@ -53,11 +54,9 @@ async fn launch(
         )
         .await;
     }
-    let task_cancel = CancellationToken::new();
-    active.lock().await.insert(lease_id.clone(), task_cancel);
     let provision = PhaseTimer::start(SandboxPhase::Allocate);
     publish_lifecycle(js, &subject, &provision.phase_started()).await;
-    let result = provider.lease(request, lease_id).await;
+    let result = allocate.await;
     match &result {
         Ok(lease) => {
             publish_lifecycle(js, &subject, &provision.complete()).await;
@@ -87,6 +86,18 @@ async fn launch(
             }
         }
     }
+    result
+}
+
+async fn launch(
+    request: &LeaseRequest,
+    lease_id: &LeaseId,
+    js: &jetstream::Context,
+    provider: &Arc<dyn Provider>,
+    active: &ActiveLeases,
+) -> Result<ProviderLease, ProviderError> {
+    active.lock().await.insert(lease_id.clone(), CancellationToken::new());
+    let result = with_lifecycle(lease_id, js, provider.lease(request, lease_id)).await;
     active.lock().await.remove(lease_id);
     result
 }
