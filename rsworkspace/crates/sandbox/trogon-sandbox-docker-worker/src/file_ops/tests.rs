@@ -296,6 +296,27 @@ async fn stat_parses_the_container_stat_line() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_stat_line_with_an_unreadable_size_is_refused() {
+    let fake = Fake::new().replying(0, "regular file|??|644|1700000000\n", "");
+    let reply = run_op(
+        &fake,
+        &FileOp::Stat {
+            path: "/a/b.txt".into(),
+        },
+    )
+    .await;
+    assert!(is_failed(&reply, FileOpErrorKind::Io));
+}
+
+#[tokio::test]
+async fn a_write_whose_resulting_size_is_unreadable_is_refused() -> TestResult {
+    let fake = Fake::new().replying(0, "oops\n", "");
+    let reply = run_op(&fake, &write_op(b"hello", 0, FileWriteTruncation::Truncate)?).await;
+    assert!(is_failed(&reply, FileOpErrorKind::Io));
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_ranged_read_reports_total_size_and_truncation() -> TestResult {
     let fake = Fake::new().replying(0, "10\n", "").replying(0, "cde", "");
     let reply = run_op(&fake, &read_op("/f", 2, Some(3), None)).await;
