@@ -55,12 +55,13 @@ The TLS flags use the environment names shown in the command above. Explicit wor
 
 The worker rounds requested memory up to the smallest fitting configured class and uses that class's declared MiB as the template memory limit. A 3 GiB request with the default ladder gets 8 GiB. A request above the ladder is refused. MicroVM classes require at least 128 MiB. CPU capacity must be positive and below 1,000,000 millicores. The worker does not advertise per-lease CPU sizing. A lease that explicitly sets `vcpu_millis` is refused; configure actor capacity with the worker flag.
 
-Prebuild per tenant, image, class and concrete resources:
+Prebuild per tenant, image, class and concrete resources. Set `SANDBOX_WORKLOAD_IMAGE` to the digest-pinned workload image reference, for example `<registry>/<repository>@sha256:<digest>`. The admin command reaches NATS through its global `--nats-url` flag (`NATS_URL`).
 
 ```sh
 cargo run -p trogon-sandbox-admin -- substrate prebuild \
   --tenant acme \
-  --image "<registry>/<repository>@sha256:<digest>" \
+  --image "$SANDBOX_WORKLOAD_IMAGE" \
+  --nats-url "$SANDBOX_NATS_URL" \
   --ate-api-endpoint "$SANDBOX_SUBSTRATE_API_ENDPOINT" \
   --tls-ca-file "$SANDBOX_SUBSTRATE_TLS_CA_FILE" \
   --bearer-token-file "$SANDBOX_SUBSTRATE_BEARER_TOKEN_FILE" \
