@@ -479,6 +479,7 @@ fn for_each_tagged_filter(
                 break;
             }
             let slice = unsafe { std::slice::from_raw_parts(entries, n as usize) };
+            let mut bad_tag: Option<String> = None;
             for &fp in slice {
                 if fp.is_null() {
                     continue;
@@ -492,18 +493,22 @@ fn for_each_tagged_filter(
                 }
                 let bytes =
                     unsafe { std::slice::from_raw_parts(flt.providerData.data, flt.providerData.size as usize) };
-                if let Ok(tag) = serde_json::from_slice::<FilterTag>(bytes)
-                    && tag.tool == "fence-helper"
-                {
-                    // `tag` is owned (parsed from bytes); the
-                    // `flt`/`bytes` borrows are released before
-                    // FwpmFreeMemory0 below, so no FFI lifetime
-                    // hazard for the closure.
-                    f(layer_name, flt.filterKey, &tag);
+                match parse_filter_tag(bytes) {
+                    Ok(Some(tag)) => f(layer_name, flt.filterKey, &tag),
+                    Ok(None) => {}
+                    Err(e) => {
+                        bad_tag.get_or_insert_with(|| format!("{layer_name}: {e}"));
+                    }
                 }
             }
             unsafe {
                 FwpmFreeMemory0(&mut (entries as *mut c_void));
+            }
+            if let Some(why) = bad_tag {
+                unsafe {
+                    let _ = FwpmFilterDestroyEnumHandle0(engine.h(), h);
+                }
+                return Err(FenceHelperError::msg(why));
             }
             if (n as usize) < 256 {
                 break;
@@ -514,6 +519,16 @@ fn for_each_tagged_filter(
         }
     }
     Ok(())
+}
+
+/// The tag in a filter's provider data. A filter in our sublayer
+/// whose data does not parse is an error: skipping it would leave a
+/// filter this tool cannot account for. `None` is a well-formed tag
+/// another tool wrote.
+fn parse_filter_tag(bytes: &[u8]) -> Result<Option<FilterTag>> {
+    let tag = serde_json::from_slice::<FilterTag>(bytes)
+        .map_err(|e| FenceHelperError::msg(format!("unparseable FilterTag in our sublayer: {e}")))?;
+    Ok((tag.tool == "fence-helper").then_some(tag))
 }
 
 /// Delete every fence-helper-tagged filter under `sublayer`. Returns the

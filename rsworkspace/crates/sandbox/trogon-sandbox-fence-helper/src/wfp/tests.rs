@@ -240,3 +240,19 @@ fn parse_guid_accepts_both_forms() -> Result<(), Box<dyn std::error::Error>> {
 fn parse_guid_rejects_garbage() {
     assert!(parse_guid("not-a-guid").is_err());
 }
+
+#[test]
+fn an_unparseable_filter_tag_is_an_error() {
+    assert!(parse_filter_tag(b"not json").is_err());
+    assert!(parse_filter_tag(b"{}").is_err());
+}
+
+#[test]
+fn a_well_formed_tag_is_kept_only_for_this_tool() -> Result<(), Box<dyn std::error::Error>> {
+    let ours = tag(KIND_BLOCK_USER).to_blob_bytes()?;
+    assert!(parse_filter_tag(&ours)?.is_some());
+    let mut foreign = tag(KIND_BLOCK_USER);
+    foreign.tool = "other".to_owned();
+    assert!(parse_filter_tag(&foreign.to_blob_bytes()?)?.is_none());
+    Ok(())
+}

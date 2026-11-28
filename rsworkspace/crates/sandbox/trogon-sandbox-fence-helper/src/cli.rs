@@ -970,7 +970,7 @@ fn merge_ace_targets(targets: Vec<(String, crate::acl::SbAce)>) -> Vec<(String, 
 /// state + credential/marker/CA rows from `state.db`). Shared by
 /// `user status` and the top-level combined `status`.
 fn user_status_json() -> Result<serde_json::Value> {
-    let setup = install::read_setup().ok().flatten();
+    let setup = install::read_setup()?;
     let name = setup
         .as_ref()
         .map(|s| s.sandbox_user.as_str())
@@ -1053,9 +1053,7 @@ fn exit_if_seclogon_disabled(e: FenceHelperError) -> FenceHelperError {
 /// deny ACE is on disk (an admin `icacls /reset` clears it;
 /// re-running `fence-helper install` repairs). Empty when no install.
 fn ambient_status_json() -> Result<serde_json::Value> {
-    // Degrade like user_status_json: a registry read error (beyond
-    // not-found) must not abort the whole status document.
-    let sid = install::read_setup().ok().flatten().map(|s| s.sandbox_user_sid);
+    let sid = install::read_setup()?.map(|s| s.sandbox_user_sid);
     let mut paths = Vec::new();
     for p in install::ambient_recorded_paths()? {
         let present = match &sid {
@@ -1332,7 +1330,7 @@ fn run(cli: Cli, args: &[OsString]) -> Result<()> {
             // (idempotent) steps below complete it. A pre-existing
             // install whose tags lack a port_range (legacy) is
             // treated as "different" and requires --force.
-            let existing = install::read_setup().ok().flatten();
+            let existing = install::read_setup()?;
             // Shared by the early-out completeness check and the
             // stamping step below (env reads + a stat per entry).
             let ambient_targets = crate::ambient::ambient_deny_targets().context("resolve the ambient deny targets")?;
@@ -1618,7 +1616,7 @@ fn run(cli: Cli, args: &[OsString]) -> Result<()> {
             // Read setup up front: the ambient cleanup and the
             // deprovision fallback both need the recorded name/SID
             // before clear_setup wipes them.
-            let recorded = crate::install::read_setup().ok().flatten();
+            let recorded = crate::install::read_setup()?;
             let user_note = if keep_user {
                 // Ambient write-deny stamps key on the ACCOUNT, not
                 // the sublayer, and this uninstall may be tearing
