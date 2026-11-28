@@ -82,6 +82,23 @@ async fn a_bad_policy_stops_the_server_before_it_serves() -> TestResult {
     Ok(())
 }
 
+#[tokio::test]
+async fn an_insecure_key_file_stops_the_server_before_it_serves() -> TestResult {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir()?;
+    let dir = home.path().join(".config").join("trogon-sandbox-mcp");
+    std::fs::create_dir_all(&dir)?;
+    let file = dir.join("api-key");
+    std::fs::write(&file, "secret")?;
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644))?;
+    let env = InMemoryEnv::new();
+    env.set("HOME", home.path().to_string_lossy().to_string());
+    let (server_io, _client_io) = tokio::io::duplex(1024);
+    let result = run(config(&[])?, &env, server_io).await;
+    assert!(matches!(result, Err(RunError::ApiKey(_))));
+    Ok(())
+}
+
 /// A minimal NATS server: it greets, answers the client's ping, and then keeps the connection open.
 async fn fake_nats() -> Result<String, Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;

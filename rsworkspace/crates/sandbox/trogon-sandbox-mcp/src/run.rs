@@ -46,7 +46,7 @@ where
     T: IntoTransport<RoleServer, E, A>,
     E: std::error::Error + Send + Sync + 'static,
 {
-    let api_key = resolve_api_key(config.api_key.clone(), env);
+    let api_key = resolve_api_key(config.api_key.clone(), env).map_err(RunError::ApiKey)?;
     if api_key.is_none() {
         tracing::warn!("no API key configured; tool calls will return Unauthenticated until one is set");
     }
