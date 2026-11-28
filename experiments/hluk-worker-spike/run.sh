@@ -71,6 +71,12 @@ cmd_probe() {
   probe "bash: exec sh -c 'exit 42'" hluk run --runtime bash --exec "exec sh -c 'exit 42'"
   probe "bash: exec unknown command" hluk run --runtime bash --exec 'exec definitely-not-a-command-xyz'
   probe "bash: command -v unknown" hluk run --runtime bash --exec 'command -v definitely-not-a-command-xyz; echo $?'
+  probe "bash: unknown, then exit \$?" hluk run --runtime bash --exec 'definitely-not-a-command-xyz
+exit $?'
+  probe "bash: sh -c 'exit 42', then exit \$?" hluk run --runtime bash --exec "sh -c 'exit 42'
+exit \$?"
+  probe "bash: printf binary bytes" hluk run --runtime bash --exec "printf '\\377\\376x' | od -An -tx1"
+  probe "bash: binary stdout via od on host" sh -c "hluk run --runtime bash --exec \"printf '\\377\\376x'\" | od -An -tx1"
   probe "bash: wait status" hluk run --runtime bash --exec "sh -c 'exit 42' & wait \$!; echo \$?"
   probe "bash: applets" hluk run --runtime bash --exec 'busybox --list | tr "\n" " "'
   probe "bash: --env" hluk run --runtime bash --env 'FOO=per call value' --exec 'printenv FOO'
@@ -107,9 +113,17 @@ echo ran"
   echo "| command | n | p50 | p99 | mean |"
   echo "|---|---|---|---|---|"
   series "hluk run --runtime bash --exec true" hluk run --runtime bash --exec true
-  series "… with both mounts and exec (what the worker runs)" hluk run --runtime bash \
-    --mount "$work/ws:/workspace" --mount "$work/tmp:/tmp" --exec "cd '/workspace' || exit 1
+  series "… one mount" hluk run --runtime bash --mount "$work/ws:/workspace" --exec "cd '/workspace' || exit 1
+'true'"
+  series "… one mount, exec" hluk run --runtime bash --mount "$work/ws:/workspace" --exec "cd '/workspace' || exit 1
 exec 'true'"
+  series "… both mounts" hluk run --runtime bash --mount "$work/ws:/workspace" --mount "$work/tmp:/tmp" \
+    --exec "cd '/workspace' || exit 1
+'true'"
+  series "… both mounts, exit \$? (what the worker runs)" hluk run --runtime bash \
+    --mount "$work/ws:/workspace" --mount "$work/tmp:/tmp" --exec "cd '/workspace' || exit 1
+'true'
+exit \$?"
   series "hluk run --runtime python --exec pass" hluk run --runtime python --exec pass
 }
 
