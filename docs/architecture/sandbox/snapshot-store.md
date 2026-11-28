@@ -122,7 +122,7 @@ The snapshot registry is a trust root. Any identity that can push arbitrary arti
 - **Scan gate.** With `SANDBOX_REQUIRE_SCAN_PASS` enabled (the default), the builder scans the artifact before publish. A snapshot that fails the scan is not published.
 - **Pull secrets for base images.** `SandboxImage::Registry { pull_secret: Option<PullSecretId> }` references credentials held by the credential broker, never inlined on the wire. See [Add a pull secret](../../how-to/sandbox/add-a-pull-secret.md).
 - **Per-tenant isolation.** Registry access control limits tenants to pull-only against their own repository. Pushes use a single platform identity. See [Tenant-scoped snapshot registry RBAC](./registry-rbac.md).
-- **Garbage collection coordination.** The broker maintains the live digest set in KV so registry-side retention consults a known live set.
+- **Garbage collection coordination.** The broker maintains the live digest set in KV so registry-side retention consults a known live set. The Zot chart in `devops/helm/charts/zot` reaps unreferenced manifests: every retention policy it renders sets `deleteUntagged` to true, and `gc.delay` and `gc.interval` control how old an untagged manifest must be and how often the sweep runs. A registry other than Zot needs the equivalent setting, such as a Harbor project retention policy.
 
 ## Execution environment identity (`env_digest`)
 

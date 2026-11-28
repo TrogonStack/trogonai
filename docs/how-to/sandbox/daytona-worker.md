@@ -20,6 +20,8 @@ Broker clients request this provider with `daytona` in `provider_pref`.
 | `SANDBOX_DAYTONA_SNAPSHOT` / `--snapshot` | Snapshot a sandbox starts from when a lease names no image. Default `sandbox-agent:dev`. |
 | `SANDBOX_DAYTONA_HTTP_TIMEOUT_SECS` / `--http-timeout-secs` | Timeout for every Daytona request, in seconds. Default 300, minimum 1. A foreground command holds one request open, so this also bounds how long a command can run. Use a detached command for longer work. |
 | `SANDBOX_DAYTONA_START_TIMEOUT_SECS` / `--start-timeout-secs` | Seconds a sandbox may take to start or stop before the lease fails. Default 300, range 1 to 3600. |
+| `SANDBOX_DAYTONA_COMMAND_SUPERVISOR` / `--command-supervisor` | Worker-host path to the static Linux command supervisor that ordinary detached commands run through. Give it together with its SHA-256 pin. See [Control detached commands](#control-detached-commands). |
+| `SANDBOX_DAYTONA_COMMAND_SUPERVISOR_SHA256` / `--command-supervisor-sha256` | Lowercase hex SHA-256 of that exact artifact. Each flag requires the other, and a missing or invalid artifact or a pin that does not match refuses worker startup. |
 | `SANDBOX_MAX_CONCURRENT_LEASES` / `--max-concurrent-leases` | Capacity announced in the heartbeat. Default 4. |
 
 Observability flags such as `--metrics-addr` and `--otlp-endpoint` are shared
@@ -110,6 +112,22 @@ request gets a typed unsupported reply, because Daytona owns its snapshots.
   Each returns a typed unsupported or denied outcome.
 - Ports are previewable, including after create (`supports_port_preview` and
   `supports_expose_after_create`).
+
+## Control detached commands
+
+Signalling an unfinished detached command needs the command supervisor.
+Without `--command-supervisor` and `--command-supervisor-sha256`, a signal
+request for such a command is denied.
+
+1. Build a static Linux ELF supervisor for the guest architecture: x86-64 for a
+   Node `x64` guest, AArch64 for `arm64`. The target is the guest, even when the
+   worker runs on another operating system.
+2. Compute its SHA-256 as 64 lowercase hex digits and start the worker with the
+   artifact path and the digest.
+3. Use a snapshot that runs Linux with Node.js 22.7 or newer. Before releasing
+   a detached command, the worker probes the guest platform and architecture,
+   uploads the supervisor, and refuses the command when the guest does not
+   qualify.
 
 ## Test the worker
 
