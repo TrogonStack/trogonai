@@ -22,7 +22,8 @@ pub async fn mint(
     console.err("store this token securely; it cannot be retrieved later")
 }
 
-/// Lists stored keys by hash, optionally for one tenant. Records that no longer parse are skipped.
+/// Lists stored keys by hash, optionally for one tenant. A record that does not parse is an error naming its key, so a
+/// damaged store is never listed as if it were complete.
 pub async fn list(
     store: &NatsKvApiKeyStore,
     filter_tenant: Option<&TenantId>,
@@ -34,9 +35,11 @@ pub async fn list(
         let Some(bytes) = store.kv().get(&key).await.map_err(AdminError::step("read key"))? else {
             continue;
         };
-        let Ok(record) = serde_json::from_slice::<ApiKeyRecord>(&bytes) else {
-            continue;
-        };
+        let record =
+            serde_json::from_slice::<ApiKeyRecord>(&bytes).map_err(|source| AdminError::UndecodableApiKey {
+                key: key.clone(),
+                source,
+            })?;
         if filter_tenant.is_some_and(|tenant| record.tenant() != tenant) {
             continue;
         }

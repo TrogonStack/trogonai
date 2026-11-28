@@ -21,6 +21,12 @@ pub enum AdminError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("api key record {key} does not parse: {source}")]
+    UndecodableApiKey {
+        key: String,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("pattern must not be empty")]
     EmptyPattern,
     #[error("pattern '{pattern}' is invalid: wildcards are only allowed as a trailing suffix")]

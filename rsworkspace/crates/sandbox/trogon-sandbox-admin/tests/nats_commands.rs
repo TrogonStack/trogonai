@@ -196,6 +196,24 @@ async fn host_mount_native_passthrough_and_limits_round_trip() -> TestResult {
 }
 
 #[tokio::test]
+async fn listing_api_keys_fails_on_a_record_that_does_not_parse() -> TestResult {
+    let (_server, js) = server().await;
+    let bucket = ApiKeyBucket::new("admin-test-damaged-keys")?;
+    let store = NatsKvApiKeyStore::new_with_bucket(js, &bucket).await?;
+    store.kv().put("damaged-key", "not json".into()).await?;
+
+    let mut listed = Buffers::default();
+    let mut console = Console::new(&mut listed.out, &mut listed.err);
+    let outcome = api_key::list(&store, None, &mut console).await;
+
+    assert!(
+        matches!(&outcome, Err(AdminError::UndecodableApiKey { key, .. }) if key == "damaged-key"),
+        "{outcome:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn api_keys_mint_list_and_revoke_by_token() -> TestResult {
     let (_server, js) = server().await;
     let bucket = ApiKeyBucket::new("admin-test-keys")?;
