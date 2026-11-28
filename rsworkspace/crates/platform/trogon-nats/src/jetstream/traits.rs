@@ -194,7 +194,7 @@ pub trait JetStreamPublishMessage: Send + Sync + Clone + 'static {
 
 pub trait JetStreamGetStream: Send + Sync + Clone + 'static {
     type Error: Error + Send + Sync;
-    type Stream: JetStreamCreateConsumer + Send;
+    type Stream: JetStreamCreateConsumer + JetStreamDeleteConsumer + Send;
 
     fn get_stream<T: AsRef<str> + Send>(
         &self,

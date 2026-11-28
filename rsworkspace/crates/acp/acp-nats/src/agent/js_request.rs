@@ -8,10 +8,10 @@ use serde::de::DeserializeOwned;
 use std::fmt;
 use std::time::{Duration, SystemTime};
 use tokio::time::{Instant, sleep, timeout_at};
-use tracing::warn;
+use tracing::{debug, warn};
 use trogon_nats::jetstream::{
-    JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JetStreamPublisher, JsAck as _, JsAckWith as _,
-    JsMessageOf, JsMessageRef as _, JsRequestMessage,
+    JetStreamConsumer, JetStreamCreateConsumer, JetStreamDeleteConsumer, JetStreamGetStream, JetStreamPublisher,
+    JsAck as _, JsAckWith as _, JsMessageOf, JsMessageRef as _, JsRequestMessage,
 };
 
 use crate::acp_prefix::AcpPrefix;
@@ -165,7 +165,7 @@ struct ResponseConsumer<'a, J: JetStreamGetStream> {
     stream_name: String,
     /// Config for recreated consumers: the original filter, rewound in time.
     resume_config: pull::Config,
-    messages: MessagesOf<J>,
+    subscription: Subscription<J>,
     last_failure: Option<ResponseConsumerError<J>>,
 }
 
@@ -186,12 +186,12 @@ where
             },
             ..config.clone()
         };
-        let messages = subscribe(js, &stream_name, config).await?;
+        let subscription = subscribe(js, &stream_name, config).await?;
         Ok(Self {
             js,
             stream_name,
             resume_config,
-            messages,
+            subscription,
             last_failure: None,
         })
     }
@@ -204,7 +204,7 @@ where
     /// delivered twice after the consumer was recreated.
     async fn await_response<Res: DeserializeOwned>(&mut self, req_id: &ReqId) -> Result<Res, JsRequestError<J>> {
         loop {
-            let failure = match self.messages.next().await {
+            let failure = match self.subscription.messages.next().await {
                 Some(Ok(js_msg)) => {
                     let message = js_msg.message();
                     let response_headers = message.headers.clone().unwrap_or_default();
@@ -240,8 +240,9 @@ where
         loop {
             sleep(backoff).await;
             match subscribe(self.js, &self.stream_name, self.resume_config.clone()).await {
-                Ok(messages) => {
-                    self.messages = messages;
+                Ok(subscription) => {
+                    // Dropping the failed subscription deletes its consumer.
+                    self.subscription = subscription;
                     return;
                 }
                 Err(failure) => {
@@ -254,20 +255,58 @@ where
     }
 }
 
+/// A response consumer's messages. Fields drop in order, so the messages stop
+/// pulling before the consumer is deleted.
+struct Subscription<J: JetStreamGetStream> {
+    messages: MessagesOf<J>,
+    _consumer: DeleteOnDrop<StreamOf<J>>,
+}
+
+/// Creates an ephemeral consumer under a name we choose, so it can be deleted
+/// later, and starts pulling from it.
 async fn subscribe<J: JetStreamGetStream>(
     js: &J,
     stream_name: &str,
     config: pull::Config,
-) -> Result<MessagesOf<J>, ResponseConsumerError<J>> {
+) -> Result<Subscription<J>, ResponseConsumerError<J>> {
+    let name = format!("acp_response_{}", uuid::Uuid::new_v4().simple());
     let stream = js
         .get_stream(stream_name)
         .await
         .map_err(ResponseConsumerError::GetStream)?;
     let consumer = stream
-        .create_consumer(config)
+        .create_consumer(pull::Config {
+            name: Some(name.clone()),
+            ..config
+        })
         .await
         .map_err(ResponseConsumerError::Create)?;
-    consumer.messages().await.map_err(ResponseConsumerError::Messages)
+    // Guard before `messages()`, so a consumer that fails to start is deleted too.
+    let consumer_guard = DeleteOnDrop(Some((stream, name)));
+    let messages = consumer.messages().await.map_err(ResponseConsumerError::Messages)?;
+    Ok(Subscription {
+        messages,
+        _consumer: consumer_guard,
+    })
+}
+
+/// Deletes the consumer however its request ends: answered, rejected, timed
+/// out, or dropped by the caller. Otherwise the server keeps it for its
+/// inactivity threshold (5 s for ephemerals), which stays the backstop for a
+/// failed delete or a crashed process.
+struct DeleteOnDrop<S: JetStreamDeleteConsumer>(Option<(S, String)>);
+
+impl<S: JetStreamDeleteConsumer> Drop for DeleteOnDrop<S> {
+    fn drop(&mut self) {
+        let (Some((stream, name)), Ok(runtime)) = (self.0.take(), tokio::runtime::Handle::try_current()) else {
+            return;
+        };
+        runtime.spawn(async move {
+            if let Err(error) = stream.delete_consumer(&name).await {
+                debug!(%error, consumer = %name, "Deleting the response consumer failed; the server will expire it");
+            }
+        });
+    }
 }
 
 #[cfg(test)]
