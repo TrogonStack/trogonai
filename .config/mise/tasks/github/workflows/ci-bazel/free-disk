@@ -52,6 +52,17 @@ if [[ -d /mnt && -n ${GITHUB_ENV:-} ]]; then
   sudo mkdir -p /mnt/bazel
   sudo chown "$(id -u):$(id -g)" /mnt/bazel
   echo "BAZEL_OUTPUT_USER_ROOT=/mnt/bazel" >>"$GITHUB_ENV"
+
+  # The disk and repository caches still sat under RUNNER_TEMP on the root
+  # disk, and a cold build writes every output into the disk cache a second
+  # time, so root filled up anyway. Bind mounts keep the RUNNER_TEMP paths the
+  # cache restore and save steps use while the bytes land on /mnt; a symlink
+  # would not survive the restore, since tar replaces it with a directory.
+  for cache in bazel-disk-cache bazel-repository-cache; do
+    sudo mkdir -p "/mnt/$cache" "${RUNNER_TEMP:?}/$cache"
+    sudo chown "$(id -u):$(id -g)" "/mnt/$cache" "$RUNNER_TEMP/$cache"
+    sudo mount --bind "/mnt/$cache" "$RUNNER_TEMP/$cache"
+  done
 fi
 
 df -h / /mnt 2>/dev/null || df -h /
