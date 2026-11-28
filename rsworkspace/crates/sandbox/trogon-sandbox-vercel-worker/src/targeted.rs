@@ -6,10 +6,14 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 use trogon_sandbox_contract::{
-    ProviderCleanupRequest, ProviderDispatchPayload, ProviderDispatchReply, ProviderKind, WorkerId,
+    ProviderCleanupRequest, ProviderCleanupResponse, ProviderDispatchPayload, ProviderDispatchReply, ProviderKind,
+    WorkerId,
 };
-use trogon_sandbox_protocol::{decode_verified, subjects, subscribe_verified};
+use trogon_sandbox_protocol::{
+    VerifiedRequest, decode_verified, nats_transfer, subjects, subscribe_verified, subscribe_verified_context,
+};
 
+use crate::cleanup_scope::{INVALID_CLEANUP_SCOPE, names_assignment};
 use crate::{VercelWorkerError, VercelWorkerProvider};
 
 /// Serves the assignments addressed to this worker alone: dispatches on its intake subject and cleanups on its cleanup
@@ -26,7 +30,8 @@ pub(crate) async fn serve_targeted(
     let worker_id = ledger.worker_id().clone();
     let mut dispatches =
         subscribe_verified(client, subjects::worker_dispatch(ProviderKind::Vercel, &worker_id)).await?;
-    let mut cleanups = subscribe_verified(client, subjects::worker_cleanup(ProviderKind::Vercel, &worker_id)).await?;
+    let mut cleanups =
+        subscribe_verified_context(client, subjects::worker_cleanup(ProviderKind::Vercel, &worker_id)).await?;
     let (client, js, vercel, cancel) = (client.clone(), js.clone(), Arc::clone(vercel), cancel.clone());
     tokio::spawn(async move {
         loop {
@@ -42,10 +47,10 @@ pub(crate) async fn serve_targeted(
                     });
                 }
                 next = cleanups.next() => {
-                    let Some(message) = next else { break };
+                    let Some(verified) = next else { break };
                     let (client, vercel) = (client.clone(), Arc::clone(&vercel));
                     tokio::spawn(async move {
-                        let _ = answer_cleanup(&client, &vercel, message)
+                        let _ = answer_cleanup(&client, &vercel, verified)
                             .await
                             .inspect_err(|error| warn!(%error, "failed to answer a targeted cleanup"));
                     });
@@ -80,15 +85,31 @@ async fn answer_dispatch(
     Ok(())
 }
 
+/// Answers one cleanup for an assignment of this worker. A cleanup deletes the sandbox its receipt names, even after a
+/// restart lost the worker's own record of it, so it runs only for a request signed for exactly the lease, worker,
+/// attempt and epoch it names; any other gets a failure.
 async fn answer_cleanup(
     client: &Client,
     vercel: &VercelWorkerProvider,
-    message: async_nats::Message,
+    verified: VerifiedRequest,
 ) -> Result<(), VercelWorkerError> {
-    let request: ProviderCleanupRequest = serde_json::from_slice(&message.payload)?;
-    let response = vercel.cleanup_dispatch(&request).await;
-    if let Some(subject) = message.reply {
-        client.publish(subject, serde_json::to_vec(&response)?.into()).await?;
-    }
+    let VerifiedRequest { message, scope } = verified;
+    let Some(reply) = message.reply.clone() else {
+        return Ok(());
+    };
+    let bytes = nats_transfer::receive(client, &message).await?;
+    let request: ProviderCleanupRequest = serde_json::from_slice(&bytes)?;
+    let exact = scope.is_some_and(|scope| {
+        scope.matches(message.subject.as_str(), &bytes) && names_assignment(scope.scope(), &request)
+    });
+    let response = if exact {
+        vercel.cleanup_dispatch(&request).await
+    } else {
+        ProviderCleanupResponse::Failed {
+            identity: request.identity.clone(),
+            message: INVALID_CLEANUP_SCOPE.to_owned(),
+        }
+    };
+    client.publish(reply, serde_json::to_vec(&response)?.into()).await?;
     Ok(())
 }

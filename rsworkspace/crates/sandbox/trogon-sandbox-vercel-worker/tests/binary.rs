@@ -17,7 +17,7 @@ const BINARY: &str = env!("CARGO_BIN_EXE_trogon-sandbox-vercel-worker");
 const UNUSED_ENDPOINT: &str = "http://127.0.0.1:9";
 const UNUSED_NATS: &str = "nats://127.0.0.1:9";
 /// Settings the binary reads that a test must not inherit from the machine running it.
-const KNOBS: [&str; 15] = [
+const KNOBS: [&str; 18] = [
     "SANDBOX_NATS_URL",
     "SANDBOX_VERCEL_API_URL",
     "SANDBOX_VERCEL_RUNTIME",
@@ -27,6 +27,9 @@ const KNOBS: [&str; 15] = [
     "SANDBOX_VERCEL_REGIONS",
     "SANDBOX_MAX_CONCURRENT_LEASES",
     "SANDBOX_DISPATCH_FENCE_FILE",
+    "SANDBOX_VERCEL_DISPATCH_LEDGER_FILE",
+    "SANDBOX_DISPATCH_VERIFY",
+    "SANDBOX_DISPATCH_PUBLIC_KEYS",
     "SANDBOX_WORKER_AUTHORITY",
     "SANDBOX_OTLP_ENDPOINT",
     "SANDBOX_METRICS_ADDR",
