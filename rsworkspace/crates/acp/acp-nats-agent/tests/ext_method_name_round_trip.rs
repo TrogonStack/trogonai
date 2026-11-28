@@ -28,10 +28,10 @@ use trogon_std::time::SystemClock;
 const EXT_METHOD: &str = "_vendor/method";
 const WAIT: Duration = Duration::from_secs(10);
 
-/// Notification names the agent saw. Requests echo their name in the reply instead.
+/// Notifications the agent saw, as name and params. Requests echo theirs in the reply instead.
 #[derive(Default)]
 struct Notifications {
-    names: Mutex<Vec<String>>,
+    received: Mutex<Vec<(String, Value)>>,
     arrived: Notify,
 }
 
@@ -68,7 +68,8 @@ impl AgentHandler for RecordingAgent {
     }
 
     async fn ext_notification(&self, args: ExtNotification) -> Result<()> {
-        self.0.names.lock().unwrap().push(args.method.to_string());
+        let params: Value = serde_json::from_str(args.params.get()).unwrap();
+        self.0.received.lock().unwrap().push((args.method.to_string(), params));
         self.0.arrived.notify_one();
         Ok(())
     }
@@ -160,7 +161,7 @@ async fn extension_names_reach_the_agent_unchanged_through_nats() {
                 )
                 .await;
                 timeout(WAIT, async {
-                    while observed.names.lock().unwrap().is_empty() {
+                    while observed.received.lock().unwrap().is_empty() {
                         observed.arrived.notified().await;
                     }
                 })
@@ -187,5 +188,9 @@ async fn extension_names_reach_the_agent_unchanged_through_nats() {
         })
         .await;
 
-    assert_eq!(*notifications.names.lock().unwrap(), vec![EXT_METHOD.to_string()]);
+    assert_eq!(
+        *notifications.received.lock().unwrap(),
+        vec![(EXT_METHOD.to_string(), json!({ "note": true }))],
+        "the agent gets the notification's params, not a JSON-RPC envelope"
+    );
 }
