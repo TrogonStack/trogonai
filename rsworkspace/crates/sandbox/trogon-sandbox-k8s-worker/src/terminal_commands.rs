@@ -35,3 +35,6 @@ pub(crate) fn wrapped_command(
         .or_insert_with(|| DEFAULT_TERM.to_string());
     shell_wrap(&inner, cwd, &env, None)
 }
+
+#[cfg(test)]
+mod tests;

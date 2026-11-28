@@ -9,6 +9,7 @@ workspace_crate(
         "provider_accounts": {"tags": ["requires-network"]},
         "provider_allocation": {"tags": ["requires-network"]},
         "provider_commands": {"tags": ["requires-network"]},
+        "provider_create_race": {"tags": ["requires-network"]},
         "provider_lifecycle": {"tags": ["requires-network"]},
         "provider_ops": {"tags": ["requires-network"]},
         "provider_recovery": {"tags": ["requires-network"]},
