@@ -2,7 +2,8 @@ use trogon_sandbox_contract::{CapabilityRequirements, Digest, ProviderCapability
 
 use super::heartbeat_selection::heartbeat_has_cached_digest;
 use super::{
-    ProviderSelection, ProviderSelectionError, WorkerRegistry, WorkerSelectionConstraints, requires_targeted_dispatch,
+    ProviderSelection, ProviderSelectionError, WorkerRegistry, WorkerSelectionConstraints, prefers_targeted_dispatch,
+    requires_targeted_dispatch,
 };
 
 fn supports_snapshot_formats(profile: &ProviderCapabilityProfile, constraints: WorkerSelectionConstraints<'_>) -> bool {
@@ -58,7 +59,7 @@ async fn candidate(
     cached_only: bool,
     constraints: WorkerSelectionConstraints<'_>,
 ) -> Option<ProviderSelection> {
-    let optional_targeted = matches!(provider, ProviderKind::E2b | ProviderKind::LocalDocker);
+    let optional_targeted = prefers_targeted_dispatch(provider);
     if requires_targeted_dispatch(provider) || optional_targeted {
         let mut workers = registry.eligible_for(provider, requirements).await;
         workers.retain(|worker| {
