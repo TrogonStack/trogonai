@@ -24,9 +24,10 @@ fn env_with_home(home: &Path) -> InMemoryEnv {
 }
 
 #[test]
-fn the_command_line_key_wins() {
+fn the_command_line_key_wins() -> Result<(), Box<dyn Error>> {
     let env = InMemoryEnv::new();
-    assert_eq!(resolve_api_key(Some("cli".to_string()), &env), Some("cli".to_string()));
+    assert_eq!(resolve_api_key(Some("cli".to_string()), &env)?, Some("cli".to_string()));
+    Ok(())
 }
 
 #[test]
@@ -35,7 +36,7 @@ fn an_empty_command_line_key_falls_back_to_the_file() -> Result<(), Box<dyn Erro
     key_file(home.path(), 0o600, "  from-file \n")?;
     let env = env_with_home(home.path());
     assert_eq!(
-        resolve_api_key(Some(String::new()), &env),
+        resolve_api_key(Some(String::new()), &env)?,
         Some("from-file".to_string())
     );
     Ok(())
@@ -45,22 +46,19 @@ fn an_empty_command_line_key_falls_back_to_the_file() -> Result<(), Box<dyn Erro
 fn no_key_anywhere_is_none() -> Result<(), Box<dyn Error>> {
     let home = tempfile::tempdir()?;
     let env = env_with_home(home.path());
-    assert_eq!(resolve_api_key(None, &env), None);
+    assert_eq!(resolve_api_key(None, &env)?, None);
     Ok(())
 }
 
 #[test]
-fn the_path_falls_back_to_userprofile_then_the_working_directory() {
+fn the_path_falls_back_to_userprofile_and_is_none_without_a_home() {
     let env = InMemoryEnv::new();
     env.set("USERPROFILE", "/profile");
     assert_eq!(
-        default_api_key_path(&env),
-        Path::new("/profile/.config/trogon-sandbox-mcp/api-key")
+        default_api_key_path(&env).as_deref(),
+        Some(Path::new("/profile/.config/trogon-sandbox-mcp/api-key"))
     );
-    assert_eq!(
-        default_api_key_path(&InMemoryEnv::new()),
-        Path::new("./.config/trogon-sandbox-mcp/api-key")
-    );
+    assert_eq!(default_api_key_path(&InMemoryEnv::new()), None);
 }
 
 #[test]
@@ -77,7 +75,7 @@ fn a_missing_file_is_not_a_file() -> Result<(), Box<dyn Error>> {
 fn a_file_others_can_read_is_refused() -> Result<(), Box<dyn Error>> {
     let home = tempfile::tempdir()?;
     key_file(home.path(), 0o644, "secret")?;
-    let path = default_api_key_path(&env_with_home(home.path()));
+    let path = default_api_key_path(&env_with_home(home.path())).ok_or("no home")?;
     let error = read_api_key_file(&path).err().ok_or("expected an error")?;
     assert!(matches!(error, AuthError::InsecureFileMode { mode: 0o644, .. }));
     Ok(())
@@ -87,7 +85,7 @@ fn a_file_others_can_read_is_refused() -> Result<(), Box<dyn Error>> {
 fn an_empty_file_is_refused() -> Result<(), Box<dyn Error>> {
     let home = tempfile::tempdir()?;
     key_file(home.path(), 0o600, " \n")?;
-    let path = default_api_key_path(&env_with_home(home.path()));
+    let path = default_api_key_path(&env_with_home(home.path())).ok_or("no home")?;
     let error = read_api_key_file(&path).err().ok_or("expected an error")?;
     assert!(matches!(error, AuthError::Empty { .. }));
     Ok(())
@@ -97,9 +95,37 @@ fn an_empty_file_is_refused() -> Result<(), Box<dyn Error>> {
 fn a_file_that_cannot_be_read_names_the_path() -> Result<(), Box<dyn Error>> {
     let home = tempfile::tempdir()?;
     key_file(home.path(), 0o600, "secret")?;
-    let path = default_api_key_path(&env_with_home(home.path()));
+    let path = default_api_key_path(&env_with_home(home.path())).ok_or("no home")?;
     fs::write(&path, [0xff, 0xfe])?;
     let error = read_api_key_file(&path).err().ok_or("expected an error")?;
     assert!(matches!(error, AuthError::ReadFile { .. }));
+    Ok(())
+}
+
+#[test]
+fn a_key_file_others_can_read_stops_the_resolution() -> Result<(), Box<dyn Error>> {
+    let home = tempfile::tempdir()?;
+    key_file(home.path(), 0o644, "secret")?;
+    let error = resolve_api_key(None, &env_with_home(home.path()))
+        .err()
+        .ok_or("expected an error")?;
+    assert!(matches!(error, AuthError::InsecureFileMode { mode: 0o644, .. }));
+    Ok(())
+}
+
+#[test]
+fn an_empty_key_file_stops_the_resolution() -> Result<(), Box<dyn Error>> {
+    let home = tempfile::tempdir()?;
+    key_file(home.path(), 0o600, "\n")?;
+    let error = resolve_api_key(None, &env_with_home(home.path()))
+        .err()
+        .ok_or("expected an error")?;
+    assert!(matches!(error, AuthError::Empty { .. }));
+    Ok(())
+}
+
+#[test]
+fn without_a_home_directory_there_is_no_key_and_no_lookup_in_the_working_directory() -> Result<(), Box<dyn Error>> {
+    assert_eq!(resolve_api_key(None, &InMemoryEnv::new())?, None);
     Ok(())
 }
