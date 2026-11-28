@@ -18,6 +18,7 @@ use trogonai_proto::peers::v1alpha1 as v1;
 
 use crate::backend::{DetachPeer, HeartbeatPeer};
 use crate::connector_config::ConnectorConfig;
+use crate::constants::{DIRECTORY_BUDGET, DIRECTORY_MARGIN};
 use crate::detach_hook_input::DetachHookInput;
 use crate::detach_tool::detach_tool;
 use crate::model_operation::ModelOperation;
@@ -39,8 +40,6 @@ use crate::{
 
 #[cfg(test)]
 mod tests;
-
-const DIRECTORY_MARGIN: Duration = Duration::from_millis(100);
 
 pub struct PeerMcp<B> {
     backend: B,
@@ -385,7 +384,7 @@ impl<B: ReadPeerRoster> PeerMcp<B> {
         };
         if unnamed {
             // Names are a courtesy: a slow roster must not cost the delivery its hook budget.
-            let budget = (tokio::time::Instant::now() + model_tools::DIRECTORY_BUDGET).min(deadline - DIRECTORY_MARGIN);
+            let budget = (tokio::time::Instant::now() + DIRECTORY_BUDGET).min(deadline - DIRECTORY_MARGIN);
             let _named = tokio::time::timeout_at(
                 budget,
                 model_tools::refresh_directory(&self.backend, attachment, &self.directory),

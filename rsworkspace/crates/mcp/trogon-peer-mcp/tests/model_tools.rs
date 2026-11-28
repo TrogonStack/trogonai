@@ -29,7 +29,7 @@ struct UnknownBatchError;
 
 #[derive(Debug, thiserror::Error)]
 #[error("send was not accepted by this test backend")]
-struct SendRejected;
+struct SendRejectedError;
 
 #[derive(Clone)]
 struct Backend {
@@ -151,12 +151,12 @@ impl ReadPeerRoster for Backend {
 }
 
 impl SendPeerMessage for Backend {
-    type Error = SendRejected;
+    type Error = SendRejectedError;
 
     async fn send(&self, request: v1::SendRequest) -> Result<v1::SendResponse, Self::Error> {
         self.calls.lock().expect("recorder").push(ObservedCall::Send(request));
         if self.reject_sends.load(Ordering::SeqCst) {
-            return Err(SendRejected);
+            return Err(SendRejectedError);
         }
         Ok(self.send_response.clone())
     }
@@ -554,19 +554,25 @@ async fn send_text_limit_counts_utf8_bytes_before_any_backend_effect() {
     assert_eq!(accepted.text.as_deref().map(str::len), Some(2048));
     let before = calls.lock().expect("calls").len();
     for text in [String::new(), "é".repeat(1025), "x".repeat(2049)] {
+        let error = adapter
+            .invoke(request(
+                "peer_send",
+                json!({
+                    "recipient_peer_id":remote_peer(), "idempotency_key":"invalid_byte_limit", "text":text,
+                }),
+            ))
+            .await
+            .expect_err("text outside the UTF-8 byte limit rejected");
         assert!(matches!(
-            adapter
-                .invoke(request(
-                    "peer_send",
-                    json!({
-                        "recipient_peer_id":remote_peer(), "idempotency_key":"invalid_byte_limit", "text":text,
-                    })
-                ))
-                .await,
-            Err(PeerMcpError::InvalidModelInput(problem)) if problem.to_string().contains("`text` is the message body (content must contain 1 to 2048 UTF-8 bytes).")
-                && std::error::Error::source(&problem)
-                    .is_some_and(|source| source.downcast_ref() == Some(&trogon_peer::PeerValueError::InvalidContent))
+            &error,
+            PeerMcpError::InvalidModelInput(problem) if std::error::Error::source(problem)
+                .is_some_and(|source| source.downcast_ref() == Some(&trogon_peer::PeerValueError::InvalidContent))
         ));
+        let (text, _) = error_text(error);
+        assert!(
+            text.contains("`text` is the message body (content must contain 1 to 2048 UTF-8 bytes)."),
+            "{text}"
+        );
         assert_eq!(
             calls.lock().expect("calls").len(),
             before,
@@ -949,7 +955,7 @@ async fn a_rejected_send_to_a_peer_outside_the_whole_roster_names_the_valid_reci
         ))
         .await
         .expect_err("unknown recipient");
-    assert!(std::error::Error::source(&error).is_some_and(|source| source.is::<SendRejected>()));
+    assert!(std::error::Error::source(&error).is_some_and(|source| source.is::<SendRejectedError>()));
     let (text, code) = error_text(error);
     assert_eq!(code, "unknown_recipient");
     assert!(text.contains(&mistyped) && text.contains(&remote_peer()), "{text}");

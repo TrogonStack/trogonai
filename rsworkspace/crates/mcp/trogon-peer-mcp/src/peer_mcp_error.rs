@@ -27,9 +27,9 @@ pub enum PeerMcpError {
     #[error("Peer tool arguments are invalid.")]
     InvalidHostIdentity(#[source] trogon_peer::PeerValueError),
     #[error("{0}")]
-    InvalidToolArguments(crate::ToolArgumentProblem),
+    InvalidToolArguments(crate::ToolArgumentError),
     #[error("{0}")]
-    InvalidModelInput(crate::ToolArgumentProblem),
+    InvalidModelInput(crate::ToolArgumentError),
     #[error(
         "recipient_peer_id {} is your own peerId; a message to yourself never reaches another peer. To answer a \
          delivered message, use its sender_peer_id. {recipients}",

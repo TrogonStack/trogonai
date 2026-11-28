@@ -1,10 +1,9 @@
 use trogon_peer::{PeerDisplayName, PeerId};
 use trogonai_proto::peers::v1alpha1 as v1;
 
+use crate::constants::MAX_LISTED_PEERS;
 use crate::recipient_list::RecipientList;
 use crate::roster_page::RosterPage;
-
-const MAX_LISTED_PEERS: usize = 8;
 
 /// Display names last observed in the roster.
 ///

@@ -4,6 +4,7 @@ mod argument_issue;
 mod backend;
 mod connector_config;
 mod connector_config_input;
+mod constants;
 mod message_metadata_projection;
 mod model_inputs;
 mod model_operation;
@@ -28,7 +29,7 @@ mod prompt_tool;
 mod recipient_list;
 mod roster_page;
 mod status_metadata_projection;
-mod tool_argument_problem;
+mod tool_argument_error;
 mod waiting_batch;
 
 pub use backend::{
@@ -40,7 +41,7 @@ pub use peer_mcp::PeerMcp;
 pub use peer_mcp_error::PeerMcpError;
 pub use peer_mcp_error_code::PeerMcpErrorCode;
 pub use recipient_list::RecipientList;
-pub use tool_argument_problem::ToolArgumentProblem;
+pub use tool_argument_error::ToolArgumentError;
 
 mod availability_observation;
 pub use availability_observation::AvailabilityObservation;

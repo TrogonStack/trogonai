@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use super::{ACKNOWLEDGE, ModelToolSpec, ROSTER, SEND, STATUS};
+use super::ModelToolSpec;
+use super::constants::{ACKNOWLEDGE, ROSTER, SEND, STATUS};
 use crate::model_tool_definitions::model_tool;
 
 #[test]

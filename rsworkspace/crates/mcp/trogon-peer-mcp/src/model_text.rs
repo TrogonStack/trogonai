@@ -1,6 +1,6 @@
 use trogon_peer_context::escape_context_json;
 
-const MAX_QUOTED_CHARS: usize = 80;
+use crate::constants::MAX_QUOTED_CHARS;
 
 /// A caller- or peer-chosen string as a bounded JSON string literal that cannot open markup.
 pub(crate) fn quoted(value: &str) -> String {

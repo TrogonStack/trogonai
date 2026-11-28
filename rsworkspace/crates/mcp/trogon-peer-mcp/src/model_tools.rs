@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -9,21 +7,18 @@ use trogonai_proto::peers::v1alpha1 as v1;
 
 use crate::argument_issue::ArgumentIssue;
 use crate::connector_config::ConnectorConfig;
+use crate::constants::{DIRECTORY_BUDGET, DIRECTORY_PAGE_SIZE};
 use crate::model_inputs::{AcknowledgeInput, RosterInput, SendInput, StatusInput};
-use crate::model_tool_spec::{ACKNOWLEDGE, ModelToolSpec, ROSTER, SEND, STATUS};
+use crate::model_tool_spec::ModelToolSpec;
+use crate::model_tool_spec::constants::{ACKNOWLEDGE, ROSTER, SEND, STATUS};
 use crate::operation_metadata::{acknowledgment_metadata, message_metadata, roster_metadata, timestamp_metadata};
 use crate::peer_directory::PeerDirectory;
 use crate::peer_message_text::PeerMessageText;
 use crate::roster_page::RosterPage;
 use crate::status_metadata_projection::StatusMetadataProjection;
 use crate::{
-    AcknowledgePeerBatch, PeerMcpError, ReadPeerMessageStatus, ReadPeerRoster, SendPeerMessage, ToolArgumentProblem,
+    AcknowledgePeerBatch, PeerMcpError, ReadPeerMessageStatus, ReadPeerRoster, SendPeerMessage, ToolArgumentError,
 };
-
-/// Largest roster page the connector reads on its own to word guidance.
-const DIRECTORY_PAGE_SIZE: u32 = 64;
-/// Longest the connector waits on a roster read it makes only to word guidance.
-pub(crate) const DIRECTORY_BUDGET: Duration = Duration::from_millis(500);
 
 pub(crate) async fn roster<B: ReadPeerRoster>(
     backend: &B,
@@ -85,7 +80,7 @@ pub(crate) async fn send<B: SendPeerMessage + ReadPeerRoster>(
             };
             let recipients = directory.lock().await.recipients(own);
             return Err(PeerMcpError::InvalidModelInput(
-                ToolArgumentProblem::new(&SEND, issue).with_recipients(recipients),
+                ToolArgumentError::new(&SEND, issue).with_recipients(recipients),
             ));
         }
     };
@@ -239,7 +234,7 @@ fn invalid_value(
     rule: &'static str,
 ) -> impl FnOnce(PeerValueError) -> PeerMcpError {
     move |source| {
-        PeerMcpError::InvalidModelInput(ToolArgumentProblem::new(
+        PeerMcpError::InvalidModelInput(ToolArgumentError::new(
             spec,
             ArgumentIssue::InvalidValue { field, rule, source },
         ))
@@ -260,7 +255,7 @@ fn parse_input<T: DeserializeOwned>(
 ) -> Result<T, PeerMcpError> {
     let arguments = request.arguments.unwrap_or_default();
     spec.check(&arguments)
-        .map_err(|issue| PeerMcpError::InvalidToolArguments(ToolArgumentProblem::new(spec, issue)))?;
+        .map_err(|issue| PeerMcpError::InvalidToolArguments(ToolArgumentError::new(spec, issue)))?;
     serde_json::from_value(Value::Object(arguments)).map_err(PeerMcpError::InvalidArguments)
 }
 
