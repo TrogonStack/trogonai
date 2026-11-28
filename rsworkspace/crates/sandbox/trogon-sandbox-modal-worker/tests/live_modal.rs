@@ -11,9 +11,10 @@ use support::*;
 use trogon_sandbox_contract::SandboxId;
 use trogon_sandbox_modal_worker::{ModalAppName, ModalProvider, PythonBridgeModalClient};
 use trogon_sandbox_protocol::Provider;
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 fn variable(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|value| !value.is_empty())
+    SystemEnv.var(name).ok().filter(|value| !value.is_empty())
 }
 
 #[tokio::test]

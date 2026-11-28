@@ -16,6 +16,7 @@ use support::{TestResult, provider::CapturingEmitter};
 use trogon_sandbox_aca_worker::{AcaError, AcaWorkerProvider, CredentialIssuer, WorkerArgs};
 use trogon_sandbox_contract::{CredentialProvider, CredentialScope, LeaseId, PullSecretId, ShortLivedToken, TenantId};
 use trogon_sandbox_protocol::Provider;
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 const GATE: &str = "SANDBOX_ACA_LIVE_TEST";
 const PRINCIPAL: &str = "SANDBOX_ACA_LIVE_SERVICE_PRINCIPAL";
@@ -42,13 +43,13 @@ impl CredentialIssuer for EnvIssuer {
 #[tokio::test]
 #[ignore = "requires an Azure Dynamic Sessions pool and a service principal; set SANDBOX_ACA_LIVE_TEST=1 and use --ignored"]
 async fn a_lease_creates_a_session_in_a_real_pool_and_cancel_deletes_it() -> TestResult {
-    if std::env::var(GATE).as_deref() != Ok("1") {
+    if SystemEnv.var(GATE).as_deref() != Ok("1") {
         eprintln!("skipped: set {GATE}=1 to run against a real pool");
         return Ok(());
     }
     let args = WorkerArgs::try_parse_from(["live"])?;
     let issuer = Arc::new(EnvIssuer {
-        principal: ShortLivedToken::new(std::env::var(PRINCIPAL)?),
+        principal: ShortLivedToken::new(SystemEnv.var(PRINCIPAL)?),
     });
     let provider =
         AcaWorkerProvider::with_emitter(Arc::new(CapturingEmitter::default()), args.provider_config(), issuer);

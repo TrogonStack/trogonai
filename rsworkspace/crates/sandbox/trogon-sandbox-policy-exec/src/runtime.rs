@@ -18,7 +18,7 @@ use trogon_sandbox_egress_proxy::{
 use trogon_sandbox_protocol::CappedOutput;
 use trogon_sandbox_subprocess_worker::attribution::CommandAttribution;
 #[cfg(target_os = "linux")]
-use trogon_sandbox_subprocess_worker::fs_violation::{FsDenial, FsDenialSink};
+use trogon_sandbox_subprocess_worker::fs_violation::FsDenialSink;
 #[cfg(target_os = "linux")]
 use trogon_sandbox_subprocess_worker::isolation::BubblewrapBackend;
 #[cfg(target_os = "macos")]

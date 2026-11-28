@@ -22,7 +22,7 @@ use trogon_sandbox_kubevirt_worker::{
 };
 use trogon_sandbox_oci::OciClient;
 use trogon_sandbox_protocol::Provider;
-use trogon_std::env::SystemEnv;
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -40,7 +40,7 @@ struct Live {
 }
 
 fn enabled() -> bool {
-    let on = std::env::var(GATE).is_ok_and(|value| value == "1");
+    let on = SystemEnv.var(GATE).is_ok_and(|value| value == "1");
     if !on {
         eprintln!("skipped: set {GATE}=1 to run against a real cluster");
     }

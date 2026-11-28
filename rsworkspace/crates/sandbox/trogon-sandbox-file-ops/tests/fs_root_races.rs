@@ -1,5 +1,7 @@
 use std::error::Error;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use std::thread;
 
@@ -59,7 +61,6 @@ fn content_of(response: FileOpResponse) -> Result<Vec<u8>, Box<dyn Error>> {
 #[cfg(unix)]
 #[test]
 fn an_edit_preserves_the_file_mode() -> TestResult {
-    use std::os::unix::fs::PermissionsExt;
     let (dir, fs_root) = root()?;
     fs_root.execute(&write_op("s.sh", b"one", Some(0o700))?);
     let reply = fs_root.execute(&edit_op("s.sh", "one", "two"));
