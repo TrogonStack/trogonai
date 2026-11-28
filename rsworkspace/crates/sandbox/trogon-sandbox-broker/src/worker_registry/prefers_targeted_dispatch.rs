@@ -6,6 +6,6 @@ use trogon_sandbox_contract::ProviderKind;
 pub fn prefers_targeted_dispatch(provider: ProviderKind) -> bool {
     matches!(
         provider,
-        ProviderKind::E2b | ProviderKind::LocalDocker | ProviderKind::Vercel
+        ProviderKind::E2b | ProviderKind::LocalDocker | ProviderKind::Vercel | ProviderKind::Daytona
     )
 }

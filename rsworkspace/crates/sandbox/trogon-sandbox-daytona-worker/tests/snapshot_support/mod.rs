@@ -11,9 +11,12 @@ use async_nats::jetstream;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
-use trogon_sandbox_contract::{SnapshotExportOutcome, WorkerId};
+use trogon_sandbox_contract::{
+    CancelIntent, DispatchAttemptId, DispatchTarget, LeaseAttemptIdentity, LeaseEpoch, ProviderCleanupRequest,
+    ProviderDispatchPayload, ProviderKind, SnapshotExportOutcome, WorkerId,
+};
 use trogon_sandbox_daytona_worker::{DaytonaWorkerError, DaytonaWorkerProvider, SnapshotCustody, SnapshotWait, Wait};
-use trogon_sandbox_protocol::nats_transfer;
+use trogon_sandbox_protocol::{AttemptLedger, nats_transfer};
 
 use crate::nats_support::Nats;
 use crate::support::{Boxed, Fake, SANDBOX, lease_id, request};
@@ -22,6 +25,8 @@ pub const LEASE: &str = "lease-1";
 pub const ORGANIZATION: &str = "org-1";
 pub const SNAPSHOT_ID: &str = "snap-1";
 pub const NAME: &str = "trogon-abc";
+pub const WORKER: &str = "worker-1";
+pub const ATTEMPT: &str = "attempt-a";
 
 /// What Daytona returns for `SANDBOX`, owned by `ORGANIZATION`.
 pub fn sandbox() -> Value {
@@ -69,6 +74,21 @@ pub struct Served {
 impl Served {
     /// A worker whose snapshots wait `wait`, with custody unless `custody` is false, and `LEASE` already leased.
     pub async fn start(fake: Fake, wait: SnapshotWait, custody: bool) -> Result<Self, Boxed> {
+        Self::start_with(fake, wait, custody, None).await
+    }
+
+    /// A worker with custody that keeps targeted dispatches in the ledger at `ledger`, with `LEASE` already leased
+    /// through a targeted dispatch for `ATTEMPT`.
+    pub async fn start_targeted(fake: Fake, wait: SnapshotWait, ledger: &std::path::Path) -> Result<Self, Boxed> {
+        Self::start_with(fake, wait, true, Some(ledger)).await
+    }
+
+    async fn start_with(
+        fake: Fake,
+        wait: SnapshotWait,
+        custody: bool,
+        ledger: Option<&std::path::Path>,
+    ) -> Result<Self, Boxed> {
         let nats = Nats::start().await;
         let client = nats.client().await;
         let js = jetstream::new(client.clone());
@@ -81,8 +101,11 @@ impl Served {
         if custody {
             provider = provider.with_snapshot_custody(SnapshotCustody::new(js.clone(), &fake.api()?));
         }
+        if let Some(path) = ledger {
+            provider.configure_dispatch_ledger(open_ledger(path)?)?;
+        }
         let provider = Arc::new(provider);
-        let worker_id = WorkerId::new("worker-1")?;
+        let worker_id = WorkerId::new(WORKER)?;
         let cancel = CancellationToken::new();
         let task = tokio::spawn({
             let (client, provider, cancel) = (client.clone(), provider.clone(), cancel.clone());
@@ -97,7 +120,12 @@ impl Served {
             task: Some(task),
         };
         served.wait_until_serving().await?;
-        use_lease(&served.provider).await?;
+        match ledger {
+            Some(_) => {
+                served.provider.lease_dispatch(&targeted_dispatch()?).await?;
+            }
+            None => use_lease(&served.provider).await?,
+        }
         Ok(served)
     }
 
@@ -169,6 +197,46 @@ impl Served {
         }
         Ok(())
     }
+}
+
+/// The dispatch ledger at `path`, for the worker `WORKER`.
+fn open_ledger(path: &std::path::Path) -> Result<Arc<AttemptLedger>, Boxed> {
+    Ok(Arc::new(AttemptLedger::open(
+        path,
+        ProviderKind::Daytona,
+        Some(WorkerId::new(WORKER)?),
+    )?))
+}
+
+fn target() -> Result<DispatchTarget, Boxed> {
+    Ok(DispatchTarget {
+        worker_id: WorkerId::new(WORKER)?,
+        attempt_id: DispatchAttemptId::new(ATTEMPT)?,
+        epoch: Some(LeaseEpoch::new(1)?),
+    })
+}
+
+/// The targeted dispatch of `LEASE` for `ATTEMPT`.
+pub fn targeted_dispatch() -> Result<ProviderDispatchPayload, Boxed> {
+    Ok(ProviderDispatchPayload {
+        lease_id: lease_id(LEASE),
+        request: request()?,
+        correlation_id: None,
+        resolved_drives: Vec::new(),
+        target: Some(target()?),
+    })
+}
+
+/// The cleanup of `LEASE` for `ATTEMPT`.
+pub fn targeted_cleanup() -> Result<ProviderCleanupRequest, Boxed> {
+    Ok(ProviderCleanupRequest {
+        identity: LeaseAttemptIdentity {
+            lease_id: lease_id(LEASE),
+            provider: ProviderKind::Daytona,
+            target: target()?,
+        },
+        intent: CancelIntent::Release,
+    })
 }
 
 async fn use_lease(provider: &DaytonaWorkerProvider) -> Result<(), Boxed> {

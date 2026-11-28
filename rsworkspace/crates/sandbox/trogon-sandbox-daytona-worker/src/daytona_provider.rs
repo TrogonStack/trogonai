@@ -109,7 +109,11 @@ impl DaytonaWorkerProvider {
         Ok(())
     }
 
-    async fn launch(&self, req: &LeaseRequest, lease_id: &LeaseId) -> Result<ProviderLease, DaytonaProviderError> {
+    pub(crate) async fn launch(
+        &self,
+        req: &LeaseRequest,
+        lease_id: &LeaseId,
+    ) -> Result<ProviderLease, DaytonaProviderError> {
         let gate = self.lease_gate(lease_id);
         let _held = gate.lock().await;
         if self.active.lock().await.contains_key(lease_id.as_str()) {
@@ -144,7 +148,7 @@ impl DaytonaWorkerProvider {
 
     /// Deletes every native snapshot still owned by `sandbox`, before the sandbox itself goes. Returns the API to
     /// delete the sandbox with. A worker without snapshot custody has taken no snapshots.
-    async fn clean_native_snapshots(&self, sandbox: &str) -> Result<DaytonaApi, DaytonaProviderError> {
+    pub(crate) async fn clean_native_snapshots(&self, sandbox: &str) -> Result<DaytonaApi, DaytonaProviderError> {
         let Some(custody) = &self.snapshot_custody else {
             return Ok(self.api.clone());
         };

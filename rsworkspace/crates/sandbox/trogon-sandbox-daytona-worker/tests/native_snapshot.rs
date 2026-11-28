@@ -8,9 +8,10 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 use snapshot_support::{
     LEASE, NAME, SNAPSHOT_ID, Served, capture_route, fake, quick, snapshot, snapshot_of, snapshot_route,
+    targeted_cleanup,
 };
 use support::{Reply, SANDBOX, TestResult, lease_id};
-use trogon_sandbox_contract::{ProviderKind, SnapshotExportError, SnapshotExportOutcome};
+use trogon_sandbox_contract::{ProviderCleanupResponse, ProviderKind, SnapshotExportError, SnapshotExportOutcome};
 use trogon_sandbox_daytona_worker::SnapshotWait;
 use trogon_sandbox_protocol::{AuthorityHost, AuthorityResourceId, HeldLease, Provider, PurgeOutcome};
 
@@ -231,6 +232,92 @@ async fn cancel_deletes_unkept_snapshots_before_the_sandbox() -> TestResult {
     assert_eq!(served.fake.count("DELETE", &sandbox_route()), 0);
     served.provider.cancel(&lease_id(LEASE)).await?;
     assert_eq!(served.fake.count("DELETE", &id_route()), 2);
+    assert_eq!(served.fake.count("DELETE", &sandbox_route()), 1);
+    served.stop().await
+}
+
+/// A capture Daytona built badly, taken from a lease the worker holds through a targeted dispatch.
+async fn failed_targeted_capture(ledger: &std::path::Path) -> Result<Served, support::Boxed> {
+    let fake = fake().await?;
+    script_snapshot(&fake, NAME, "error");
+    let served = Served::start_targeted(fake, quick(5_000), ledger).await?;
+    served.capture(NAME).await?;
+    Ok(served)
+}
+
+/// Daytona reports the bad capture through a failed delete and the retry's look, then no longer.
+fn script_capture_until_deleted(fake: &support::Fake) {
+    fake.script(
+        "GET",
+        &id_route(),
+        vec![
+            Reply::json(200, snapshot(NAME, "error")),
+            Reply::json(200, snapshot(NAME, "error")),
+            Reply::json(404, json!({"message": "gone"})),
+        ],
+    );
+}
+
+/// A targeted cleanup deletes the sandbox the way a cancel does: the snapshots it still owns first, so a snapshot
+/// that cannot be deleted yet fails the cleanup, keeps the sandbox, and the broker's retry finishes the job.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_targeted_cleanup_deletes_unkept_snapshots_before_the_sandbox() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut served = failed_targeted_capture(&directory.path().join("ledger.sqlite3")).await?;
+    script_capture_until_deleted(&served.fake);
+    served.fake.script(
+        "DELETE",
+        &id_route(),
+        vec![
+            Reply::json(500, json!({"message": "busy"})),
+            Reply::json(200, json!({})),
+        ],
+    );
+
+    let failed = served.provider.cleanup_dispatch(&targeted_cleanup()?).await;
+    assert!(matches!(failed, ProviderCleanupResponse::Failed { .. }), "{failed:?}");
+    assert_eq!(served.fake.count("DELETE", &sandbox_route()), 0);
+    assert_eq!(served.provider.active_lease_count().await, 1);
+
+    let cleaned = served.provider.cleanup_dispatch(&targeted_cleanup()?).await;
+    assert!(
+        matches!(cleaned, ProviderCleanupResponse::Cleaned { .. }),
+        "{cleaned:?}"
+    );
+    assert_eq!(served.fake.count("DELETE", &id_route()), 2);
+    assert_eq!(served.fake.count("DELETE", &sandbox_route()), 1);
+    assert_eq!(served.provider.active_lease_count().await, 0);
+    served.stop().await
+}
+
+/// After a restart the worker has neither the lease nor the snapshot in memory; the ledger's receipt names the
+/// sandbox and custody names its snapshots, so the cleanup still deletes both. The restarted provider shares the
+/// ledger the first one kept, as a restarted worker reopens its file.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_targeted_cleanup_after_a_restart_still_deletes_the_snapshots_and_the_sandbox() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut served = failed_targeted_capture(&directory.path().join("ledger.sqlite3")).await?;
+    served.fake.script(
+        "GET",
+        &id_route(),
+        vec![
+            Reply::json(200, snapshot(NAME, "error")),
+            Reply::json(404, json!({"message": "gone"})),
+        ],
+    );
+    served.fake.json("DELETE", &id_route(), 200, json!({}));
+    let ledger = served.provider.dispatch_ledger().cloned().ok_or("no ledger")?;
+    let restarted = served.restarted_provider()?;
+    restarted.configure_dispatch_ledger(ledger)?;
+    assert_eq!(restarted.active_lease_count().await, 0);
+
+    let cleaned = restarted.cleanup_dispatch(&targeted_cleanup()?).await;
+
+    assert!(
+        matches!(cleaned, ProviderCleanupResponse::Cleaned { .. }),
+        "{cleaned:?}"
+    );
+    assert_eq!(served.fake.count("DELETE", &id_route()), 1);
     assert_eq!(served.fake.count("DELETE", &sandbox_route()), 1);
     served.stop().await
 }

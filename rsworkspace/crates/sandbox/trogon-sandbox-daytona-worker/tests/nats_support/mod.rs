@@ -75,11 +75,24 @@ pub fn dispatch_json(lease: &str) -> Value {
 
 impl Running {
     pub async fn start() -> Result<Self, Boxed> {
+        Self::start_with_ledger(None).await
+    }
+
+    /// A worker that keeps its targeted dispatches in the ledger at `ledger`, when one is given.
+    pub async fn start_with_ledger(ledger: Option<&std::path::Path>) -> Result<Self, Boxed> {
         let nats = Nats::start().await;
         let client = nats.client().await;
         let fake = Fake::with_sandbox().await?;
-        let provider = Arc::new(fake.provider()?);
+        let provider = fake.provider()?;
         let worker_id = WorkerId::new("worker-1")?;
+        if let Some(path) = ledger {
+            provider.configure_dispatch_ledger(Arc::new(trogon_sandbox_protocol::AttemptLedger::open(
+                path,
+                trogon_sandbox_contract::ProviderKind::Daytona,
+                Some(worker_id.clone()),
+            )?))?;
+        }
+        let provider = Arc::new(provider);
         let cancel = CancellationToken::new();
         let task = tokio::spawn({
             let (client, provider, worker_id, cancel) =

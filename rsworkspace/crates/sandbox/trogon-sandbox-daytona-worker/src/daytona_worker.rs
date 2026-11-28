@@ -20,13 +20,15 @@ use crate::constants as subjects;
 use crate::lease_dispatch::handle_lease_msg;
 use crate::lease_verbs::serve_lease_verbs;
 use crate::snapshot_export::serve_snapshot_export;
+use crate::targeted::serve_targeted;
 use crate::{
     DaytonaGatewayAccess, DaytonaSshHost, DaytonaTerminals, DaytonaWorkerError, DaytonaWorkerProvider,
     RusshGatewayShell, run_terminal_handler,
 };
 
 /// Serves `daytona` over NATS as `worker_id` until `cancel` fires: lease dispatch, cancel, the per-lease verbs and the
-/// authority check that keeps the worker honest about what it holds.
+/// authority check that keeps the worker honest about what it holds. A provider with a dispatch ledger also serves
+/// the dispatches and cleanups addressed to this worker alone.
 pub async fn run(
     client: Client,
     js: jetstream::Context,
@@ -39,6 +41,7 @@ pub async fn run(
     let provider: Arc<dyn Provider> = daytona.clone();
     serve_lease_verbs(&client, &daytona, &cancel).await?;
     serve_snapshot_export(&client, worker_id, &cancel).await?;
+    serve_targeted(&client, &daytona, &cancel).await?;
     let shell = Arc::new(RusshGatewayShell::new(Arc::new(DaytonaGatewayAccess::new(Arc::clone(
         &daytona,
     )))));
@@ -52,9 +55,10 @@ pub async fn run(
         authority_config,
         worker_id.clone(),
         Arc::new(NatsAuthorityOracle::new(client.clone(), worker_id.clone())),
-        daytona,
+        daytona.clone(),
     );
     tokio::spawn(authority.run(cancel.clone()));
+    daytona.mark_ready();
     info!("worker ready");
     loop {
         tokio::select! {

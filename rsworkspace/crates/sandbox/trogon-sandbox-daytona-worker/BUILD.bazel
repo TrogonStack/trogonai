@@ -14,9 +14,11 @@ workspace_crate(
         "launch": {"tags": ["requires-network"]},
         "native_options_rejection": {"tags": ["requires-network"]},
         "native_snapshot": {"tags": ["requires-network"]},
+        "targeted_process": {"tags": ["requires-network"]},
         "terminal_ssh": {"tags": ["requires-network"]},
         "worker": {"tags": ["requires-network"]},
         "worker_ssh": {"tags": ["requires-network"]},
+        "worker_targeted": {"tags": ["requires-network"]},
         # These reach a real Daytona account and skip unless opted in.
         "hosted_conformance": {"tags": ["requires-network"]},
         "hosted_contract": {"tags": ["requires-network"]},

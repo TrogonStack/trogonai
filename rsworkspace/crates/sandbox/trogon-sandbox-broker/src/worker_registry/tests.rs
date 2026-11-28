@@ -753,7 +753,12 @@ fn restore_capable_profile(provider: ProviderKind) -> ProviderCapabilityProfile 
 #[tokio::test]
 async fn providers_moving_to_targeted_dispatch_prefer_a_target_and_keep_legacy_workers()
 -> Result<(), Box<dyn std::error::Error>> {
-    for provider in [ProviderKind::E2b, ProviderKind::LocalDocker, ProviderKind::Vercel] {
+    for provider in [
+        ProviderKind::E2b,
+        ProviderKind::LocalDocker,
+        ProviderKind::Vercel,
+        ProviderKind::Daytona,
+    ] {
         assert!(prefers_targeted_dispatch(provider), "{provider:?}");
         let registry = InMemoryWorkerRegistry::new(Duration::from_secs(30));
         let mut legacy = hb("legacy", provider, 0, 4, Duration::ZERO)?;

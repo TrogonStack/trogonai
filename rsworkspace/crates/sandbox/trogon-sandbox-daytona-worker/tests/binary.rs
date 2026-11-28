@@ -18,7 +18,7 @@ const BINARY: &str = env!("CARGO_BIN_EXE_trogon-sandbox-daytona-worker");
 const UNUSED_ENDPOINT: &str = "http://127.0.0.1:9";
 const UNUSED_NATS: &str = "nats://127.0.0.1:9";
 /// Settings the binary reads that a test must not inherit from the machine running it.
-const KNOBS: [&str; 13] = [
+const KNOBS: [&str; 16] = [
     "SANDBOX_NATS_URL",
     "DAYTONA_API_KEY",
     "DAYTONA_ORGANIZATION_ID",
@@ -28,6 +28,9 @@ const KNOBS: [&str; 13] = [
     "SANDBOX_DAYTONA_START_TIMEOUT_SECS",
     "SANDBOX_MAX_CONCURRENT_LEASES",
     "SANDBOX_DISPATCH_FENCE_FILE",
+    "SANDBOX_DAYTONA_DISPATCH_LEDGER_FILE",
+    "SANDBOX_DISPATCH_VERIFY",
+    "SANDBOX_DISPATCH_PUBLIC_KEYS",
     "SANDBOX_WORKER_AUTHORITY",
     "SANDBOX_OTLP_ENDPOINT",
     "SANDBOX_METRICS_ADDR",

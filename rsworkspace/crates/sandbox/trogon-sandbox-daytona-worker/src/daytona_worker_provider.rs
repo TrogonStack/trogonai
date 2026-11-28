@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
 use async_nats::jetstream;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use trogon_sandbox_contract::{
     LeaseError, LeaseId, NativeHandle, NativeHandleResponse, ProviderKind, SandboxFreezeResponse, WorkerId,
 };
 
-use trogon_sandbox_protocol::lifecycle_subject;
+use trogon_sandbox_protocol::{AttemptLedger, lifecycle_subject};
 
 use crate::active_lease::ActiveLease;
 use crate::constants::{DEFAULT_START_TIMEOUT, STATE_POLL_INTERVAL};
@@ -29,6 +29,8 @@ pub struct DaytonaWorkerProvider {
     pub(crate) snapshot_custody: Option<Arc<SnapshotCustody>>,
     snapshot_wait: std::sync::Mutex<SnapshotWait>,
     pub(crate) lifecycle: Option<jetstream::Context>,
+    pub(crate) ledger: std::sync::OnceLock<Arc<AttemptLedger>>,
+    ready: watch::Sender<bool>,
 }
 
 impl DaytonaWorkerProvider {
@@ -47,6 +49,8 @@ impl DaytonaWorkerProvider {
             snapshot_custody: None,
             snapshot_wait: std::sync::Mutex::new(SnapshotWait::default()),
             lifecycle: None,
+            ledger: std::sync::OnceLock::new(),
+            ready: watch::channel(false).0,
         }
     }
 
@@ -109,6 +113,17 @@ impl DaytonaWorkerProvider {
             return Err(DaytonaProviderError::BoundToAnotherWorker);
         }
         Ok(())
+    }
+
+    /// Marks the worker as serving every subject it announces, so heartbeats may start.
+    pub(crate) fn mark_ready(&self) {
+        self.ready.send_replace(true);
+    }
+
+    /// Waits until the worker serves every subject it announces.
+    pub async fn wait_ready(&self) {
+        let mut ready = self.ready.subscribe();
+        let _ = ready.wait_for(|ready| *ready).await;
     }
 
     pub fn exec(&self) -> &Arc<DaytonaExec> {

@@ -13,6 +13,7 @@ workspace_crate(
         "authz_e2e": {"tags": ["requires-network"]},
         "binary": {"tags": ["requires-network"]},
         "docker_targeted_quota": {"tags": ["requires-network"]},
+        "daytona_targeted_quota": {"tags": ["requires-network"]},
         "e2b_targeted_quota": {"tags": ["requires-network"]},
         "vercel_targeted_quota": {"tags": ["requires-network"]},
     },

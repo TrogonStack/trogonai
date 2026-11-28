@@ -67,6 +67,15 @@ created when a lease ends. The `trogon-sandbox-daytona-worker` binary runs it.
 - Cancel removes the lease's native snapshots that were not kept before it deletes
   the sandbox. Purge also removes the kept ones. A snapshot is treated as gone only
   when Daytona answers that it does not exist.
+- With `SANDBOX_DAYTONA_DISPATCH_LEDGER_FILE` set, the worker takes its id from that
+  dispatch ledger, announces the `TargetedV1` dispatch protocol and serves the
+  dispatches and cleanups addressed to it alone. Each attempt is kept in the
+  ledger: a repeat gets its first receipt, an attempt that was cleaned up is
+  refused, and a cleanup is confirmed only once the unkept snapshots and the
+  sandbox are deleted, so the broker keeps retrying a cleanup that failed. A
+  cleanup finds the sandbox by the attempt's receipt, so it still works after a
+  restart. The worker keeps serving the shared lease subject, so legacy
+  dispatches still reach it during a rollout.
 - The `ssh_access` verb returns an SSH token for the lease's sandbox, and the SSH
   stream bridge and terminals use the same access.
 - Only an open network policy, or none, is admitted. A policy that blocks or

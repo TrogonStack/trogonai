@@ -23,6 +23,7 @@ fn defaults_apply_when_only_the_key_is_given() -> Result<(), clap::Error> {
     assert_eq!(args.snapshot_timeout_secs, 300);
     assert_eq!(args.nats_url, "nats://127.0.0.1:4222");
     assert!(args.dispatch_fence_file.is_none());
+    assert!(args.dispatch_ledger_file.is_none());
     assert!(args.regions.is_empty());
     assert!(args.command_supervisor.is_none() && args.command_supervisor_sha256.is_none());
     Ok(())
@@ -47,6 +48,8 @@ fn flags_override_the_defaults() -> Result<(), clap::Error> {
         "http://127.0.0.1:9",
         "--dispatch-fence-file",
         "/tmp/fence",
+        "--dispatch-ledger-file",
+        "/tmp/ledger.sqlite3",
         "--regions",
         "eu,us",
     ])?;
@@ -61,6 +64,7 @@ fn flags_override_the_defaults() -> Result<(), clap::Error> {
     assert_eq!(args.snapshot_timeout_secs, 90);
     assert_eq!(args.api_url.as_str(), "http://127.0.0.1:9/");
     assert_eq!(args.dispatch_fence_file, Some(PathBuf::from("/tmp/fence")));
+    assert_eq!(args.dispatch_ledger_file, Some(PathBuf::from("/tmp/ledger.sqlite3")));
     assert_eq!(args.regions, vec!["eu", "us"]);
     Ok(())
 }

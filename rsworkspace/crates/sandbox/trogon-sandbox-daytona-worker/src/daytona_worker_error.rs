@@ -3,7 +3,7 @@ use trogon_sandbox_contract::TokenError;
 use trogon_sandbox_observability::ObservabilityError;
 use trogon_sandbox_protocol::{AuthorityModeError, NatsConnectError, NatsTransferError};
 
-use crate::{DaytonaApiError, DaytonaProviderError, OrdinaryCommandRuntimeError};
+use crate::{DaytonaApiError, DaytonaDispatchError, DaytonaProviderError, OrdinaryCommandRuntimeError};
 
 /// The worker could not start, or one request it served failed.
 #[derive(Debug, thiserror::Error)]
@@ -30,4 +30,8 @@ pub enum DaytonaWorkerError {
     Runtime(#[from] OrdinaryCommandRuntimeError),
     #[error(transparent)]
     Observability(#[from] ObservabilityError),
+    #[error(transparent)]
+    Dispatch(#[from] DaytonaDispatchError),
+    #[error("the dispatch ledger could not be opened: {0}")]
+    Ledger(#[from] trogon_sandbox_protocol::AttemptLedgerError),
 }

@@ -23,9 +23,34 @@ Broker clients request this provider with `daytona` in `provider_pref`.
 | `SANDBOX_DAYTONA_COMMAND_SUPERVISOR` / `--command-supervisor` | Worker-host path to the static Linux command supervisor that ordinary detached commands run through. Give it together with its SHA-256 pin. See [Control detached commands](#control-detached-commands). |
 | `SANDBOX_DAYTONA_COMMAND_SUPERVISOR_SHA256` / `--command-supervisor-sha256` | Lowercase hex SHA-256 of that exact artifact. Each flag requires the other, and a missing or invalid artifact or a pin that does not match refuses worker startup. |
 | `SANDBOX_MAX_CONCURRENT_LEASES` / `--max-concurrent-leases` | Capacity announced in the heartbeat. Default 4. |
+| `SANDBOX_DAYTONA_DISPATCH_LEDGER_FILE` / `--dispatch-ledger-file` | Dispatch ledger. Set it to have the worker take dispatches and cleanups addressed to it alone. See [Targeted dispatch](#targeted-dispatch). |
 
 Observability flags such as `--metrics-addr` and `--otlp-endpoint` are shared
 by all workers. See [Observe the sandbox stack](./observability.md).
+
+## Targeted dispatch
+
+With `SANDBOX_DAYTONA_DISPATCH_LEDGER_FILE` set, the worker takes its id from the
+ledger and announces the `TargetedV1` dispatch protocol. The broker then sends a
+Daytona lease to a worker that announces it when one has capacity, and to legacy
+workers otherwise, so a fleet can move over one worker at a time.
+
+- Each dispatch attempt is recorded in the ledger. A repeat of an attempt gets
+  its first receipt, and an attempt that was cleaned up is refused.
+- A cancel becomes a cleanup the worker must confirm. The broker keeps the lease
+  as cancelling and retries the cleanup until the worker reports the sandbox
+  deleted, so a delete that fails is retried instead of leaking the sandbox.
+- A cleanup removes the lease's native snapshots that were not kept before it
+  deletes the sandbox, the same as a cancel.
+- A cleanup finds the sandbox by the attempt's receipt and its snapshots through
+  snapshot custody, so it still works after the worker restarts.
+- A cleanup runs only when it is signed for exactly the lease, worker, attempt
+  and epoch it names.
+- The worker keeps serving the shared lease subject, so legacy dispatches still
+  reach it during a rollout.
+
+Keep the ledger file on storage that survives a restart, and give each worker
+its own file.
 
 ## Choose an image
 
