@@ -104,7 +104,7 @@ impl FirecrackerConfig {
             snapshots: None,
             cpu_template: None,
             environment: Default::default(),
-            restore_signature: Default::default(),
+            restore_signature: crate::restore_signature::RestoreSignature::required(),
         }
     }
 }

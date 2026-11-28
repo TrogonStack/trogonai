@@ -147,9 +147,9 @@ A Firecracker memory snapshot only resumes correctly under the same VMM, kernel,
 **Signature verification on restore.** The Firecracker worker verifies the Cosign signature of a snapshot it pulls from the registry against a configured public key, and requires the signed payload to carry the same environment digest the snapshot records. A registry that relabels a snapshot, or serves one whose signature does not cover the digest, fails the check.
 
 - `--cosign-public-key` (`SANDBOX_COSIGN_PUBLIC_KEY`): path to a PEM public key.
-- `--cosign-verify` (`SANDBOX_COSIGN_VERIFY`): `off`, `warn` (default) or `require`. `warn` logs a failed or impossible verification and restores anyway. `require` refuses the restore (a signature error is reported as `SnapshotSignatureInvalid`), and the worker refuses to start without a key.
+- `--cosign-verify` (`SANDBOX_COSIGN_VERIFY`): `require` (default), `warn` or `off`. `warn` and `off` apply only when set explicitly. `warn` logs a failed or impossible verification and restores anyway. `require` refuses the restore (a signature error is reported as `SnapshotSignatureInvalid`), and the worker refuses to start without a key.
 
-Rollout: deploy with the default `warn`, configure the public key on every worker, watch the logs until no restore warns, then set `require`. Snapshots signed before the digest annotation existed verify on signature alone and are still governed by `--strict-snapshot-env`. Local (held) snapshots are not pulled from the registry and are not signature checked.
+Rollout: the worker refuses to start with the default `require` until a public key is configured. To roll the key out gradually, set `warn` explicitly, configure the public key on every worker, watch the logs until no restore warns, then remove the override so `require` applies. Snapshots signed before the digest annotation existed verify on signature alone and are still governed by `--strict-snapshot-env`. Local (held) snapshots are not pulled from the registry and are not signature checked.
 
 ## Three storage layers
 

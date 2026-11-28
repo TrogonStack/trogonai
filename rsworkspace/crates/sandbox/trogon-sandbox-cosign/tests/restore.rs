@@ -3,13 +3,13 @@ mod support;
 use support::{FakeRegistry, TestResult, digest, unreachable_ref};
 use trogon_sandbox_contract::{EnvDigest, LeaseError};
 use trogon_sandbox_cosign::{
-    CosignError, CosignSigner, CosignVerifier, SnapshotPullError, VerifyMode, apply_mode, attach_cosign_signature,
-    attach_cosign_signature_with_annotations, enforce_restore_signature, generate_test_key_pair, into_pull_error,
-    snapshot_signature_lease_error,
+    CosignError, CosignSigner, CosignVerifier, EnvDigestBinding, SnapshotPullError, VerifyMode, apply_mode,
+    attach_cosign_signature, attach_cosign_signature_with_annotations, enforce_restore_signature,
+    generate_test_key_pair, into_pull_error, snapshot_signature_lease_error,
 };
 
 #[test]
-fn modes_parse_display_and_default_to_warn() -> TestResult {
+fn modes_parse_and_display() -> TestResult {
     for (text, mode) in [
         ("off", VerifyMode::Off),
         ("warn", VerifyMode::Warn),
@@ -23,7 +23,6 @@ fn modes_parse_display_and_default_to_warn() -> TestResult {
         error.to_string(),
         "unknown cosign verify mode 'strict' (expected off, warn or require)"
     );
-    assert_eq!(VerifyMode::default(), VerifyMode::Warn);
     Ok(())
 }
 
@@ -44,17 +43,17 @@ fn only_require_refuses_a_failure() -> TestResult {
 async fn a_missing_key_refuses_only_under_require() -> TestResult {
     let reference = unreachable_ref("registry.test")?;
     assert!(
-        enforce_restore_signature(VerifyMode::Off, None, &reference, None)
+        enforce_restore_signature(VerifyMode::Off, None, &reference, EnvDigestBinding::Unbound)
             .await
             .is_ok()
     );
     assert!(
-        enforce_restore_signature(VerifyMode::Warn, None, &reference, None)
+        enforce_restore_signature(VerifyMode::Warn, None, &reference, EnvDigestBinding::Unbound)
             .await
             .is_ok()
     );
     assert!(matches!(
-        enforce_restore_signature(VerifyMode::Require, None, &reference, None).await,
+        enforce_restore_signature(VerifyMode::Require, None, &reference, EnvDigestBinding::Unbound).await,
         Err(CosignError::PublicKey(_))
     ));
     Ok(())
@@ -79,16 +78,40 @@ async fn restores_bind_the_environment_digest_to_the_signature() -> TestResult {
     .await?;
     let verifier = CosignVerifier::from_pem(public).with_insecure_registries(registry.insecure());
 
-    enforce_restore_signature(VerifyMode::Require, Some(&verifier), &subject, Some(&signed)).await?;
-    enforce_restore_signature(VerifyMode::Require, Some(&verifier), &subject, None).await?;
+    enforce_restore_signature(
+        VerifyMode::Require,
+        Some(&verifier),
+        &subject,
+        EnvDigestBinding::Bound(&signed),
+    )
+    .await?;
+    enforce_restore_signature(
+        VerifyMode::Require,
+        Some(&verifier),
+        &subject,
+        EnvDigestBinding::Unbound,
+    )
+    .await?;
 
     let other = EnvDigest::from(digest('c')?);
-    let outcome = enforce_restore_signature(VerifyMode::Require, Some(&verifier), &subject, Some(&other)).await;
+    let outcome = enforce_restore_signature(
+        VerifyMode::Require,
+        Some(&verifier),
+        &subject,
+        EnvDigestBinding::Bound(&other),
+    )
+    .await;
     assert!(
         matches!(outcome, Err(CosignError::AnnotationMismatch { .. })),
         "{outcome:?}"
     );
-    enforce_restore_signature(VerifyMode::Warn, Some(&verifier), &subject, Some(&other)).await?;
+    enforce_restore_signature(
+        VerifyMode::Warn,
+        Some(&verifier),
+        &subject,
+        EnvDigestBinding::Bound(&other),
+    )
+    .await?;
     Ok(())
 }
 
@@ -102,7 +125,13 @@ async fn an_unannotated_snapshot_fails_a_required_environment_digest() -> TestRe
     let verifier = CosignVerifier::from_pem(public).with_insecure_registries(registry.insecure());
 
     let expected = EnvDigest::from(digest('b')?);
-    let outcome = enforce_restore_signature(VerifyMode::Require, Some(&verifier), &subject, Some(&expected)).await;
+    let outcome = enforce_restore_signature(
+        VerifyMode::Require,
+        Some(&verifier),
+        &subject,
+        EnvDigestBinding::Bound(&expected),
+    )
+    .await;
     assert!(
         matches!(outcome, Err(CosignError::AnnotationMismatch { .. })),
         "{outcome:?}"

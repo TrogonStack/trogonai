@@ -5,14 +5,13 @@ use crate::VerifyModeError;
 
 /// What a restore does when the signature, or the signed annotations, do not verify.
 ///
-/// `Warn` is the default so existing unsigned snapshots keep restoring while operators roll the
-/// public key out; move to `Require` once every snapshot in use is signed.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
+/// There is no default: the caller states the mode. `Warn` and `Off` loosen the check and exist
+/// only for an operator who writes them explicitly; `Require` is what a deployment should run.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum VerifyMode {
     /// Do not verify.
     Off,
     /// Verify, log a failure, and restore anyway.
-    #[default]
     Warn,
     /// Verify and refuse the restore on any failure, including a missing public key.
     Require,
