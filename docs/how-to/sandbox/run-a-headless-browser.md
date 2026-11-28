@@ -90,6 +90,18 @@ Chromium uses `--no-sandbox` because the container runtime supplies the isolatio
 
 Run Playwright or Puppeteer inside the lease using the image's Chromium binary, without downloading another browser. Remote DevTools requires a separately secured WebSocket route: the signed [HTTP preview](./expose-sandbox-ports.md) returns `501` for WebSocket upgrades.
 
+## Verify the local flow
+
+With a local gateway, broker and the configured Docker worker running, export the gateway and tenant variables from the screenshot example and describe the same image for the test:
+
+```bash
+export SANDBOX_BROWSER_IMAGE_JSON='{"registry":"registry.example.com","repository":"sandbox/browser","tag":"node22"}'
+pnpm --dir tsworkspace/packages/sandbox-ws-client build
+node --test tsworkspace/packages/sandbox-ws-client/tests/gateway/browser.gateway.ts
+```
+
+The test requires the real lease to report the browser feature, captures an offline PNG, checks its dimensions and hash, refuses an incompatible image and removes every remaining observed lease. Missing configuration fails the test. It is opt-in and never runs in CI.
+
 ## Related
 
 - [Provider option matrix](../../reference/sandbox/provider-option-matrix.md) for provider image and ingress boundaries.
