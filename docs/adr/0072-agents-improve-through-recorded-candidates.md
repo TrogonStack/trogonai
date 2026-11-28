@@ -175,6 +175,20 @@ session streams and are never readable through their queries
 `EvaluationResultRef { evaluation_result_id, content_digest }`; the score
 itself never leaves the evaluation stream.
 
+#### Judging is triggered by a session ending
+
+No existing workflow or scheduler message starts a judge, so this ADR fixes
+the trigger. A judge runs as an ordinary agent session of the bound `judge`
+`AgentId`. It starts after the evaluated session reaches `SessionClosed` or
+`SessionFailed`, and never after `SessionCancelled`, because a cancelled run is
+an operator's decision to stop and not an outcome to score. The starter is a
+workflow node that reads the terminal event and the active bindings for the
+session's agent chain; a binding added after the run does not retroactively
+trigger it. The judge reads the run through the label-keyed run-history query,
+so it is blind to the same things an improver is, and records its result with
+`judge_session_ref` set. The evaluated session is never reopened: judging adds
+nothing to its stream.
+
 ### 6. Pointers are typed, and references are value objects
 
 Under [ADR#0068](./0068-reference-fields-say-they-are-references.md), every
