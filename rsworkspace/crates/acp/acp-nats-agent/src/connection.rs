@@ -1,11 +1,11 @@
-use acp_nats::jetstream::consumers::commands_observer;
+use acp_nats::jetstream::consumers::{COMMANDS_ACK_WAIT, agent_commands_consumer};
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
 use acp_nats::wire::{
     encode_agent_error, encode_success, req_id_from_request_headers, response_id_from_request_headers,
 };
-use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ResponseSubject};
+use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ReqId, ResponseSubject};
 use agent_client_protocol::v1::schema::{
     ArchiveSessionRequest, AuthStatusRequest, AuthenticateRequest, CancelNotification, CloseSessionRequest,
     DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
@@ -15,14 +15,21 @@ use agent_client_protocol::v1::schema::{
 };
 use async_nats::Message;
 use async_nats::jetstream::AckKind;
+use async_nats::jetstream::context::GetStreamError;
 #[cfg(test)]
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::future::LocalBoxFuture;
 use serde::de::Error;
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 use tracing::{info, warn};
+use trogon_nats::jetstream::{
+    ConsumerLoss, JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JsAckWith, JsDispatchMessage,
+    JsMessageRef, is_get_stream_not_found,
+};
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 
 #[derive(Debug, thiserror::Error)]
@@ -31,6 +38,8 @@ pub enum ConnectionError {
     Subscribe(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("jetstream error: {0}")]
     JetStream(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("stream {stream} no longer exists; restart the host to provision it again")]
+    CommandsStreamMissing { stream: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,8 +97,9 @@ where
         spawn: impl Fn(LocalBoxFuture<'static, ()>) + Copy + 'static,
     ) -> (Self, impl std::future::Future<Output = Result<(), ConnectionError>>)
     where
-        J: JetStreamGetStream + 'static,
+        J: JetStreamGetStream<Error = GetStreamError> + 'static,
         trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
+        CommandsMessagesError<J>: ConsumerLoss,
     {
         let nats_for_serve = nats.clone();
         let nats_for_js = nats.clone();
@@ -518,10 +528,6 @@ where
     handler(request).await.map_err(DispatchError::NotificationHandler)
 }
 
-use trogon_nats::jetstream::{
-    JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JsAckWith, JsDispatchMessage,
-};
-
 async fn handle_jsonrpc_request_with_keepalive<N, Resp, ReqT, F, M>(
     msg: &Message,
     method: &str,
@@ -593,43 +599,47 @@ async fn serve_js<N, J, A>(
 ) -> Result<(), ConnectionError>
 where
     N: PublishClient + FlushClient + Clone + 'static,
-    J: JetStreamGetStream + 'static,
+    J: JetStreamGetStream<Error = GetStreamError> + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
+    CommandsMessagesError<J>: ConsumerLoss,
     A: AgentHandler + Sync + 'static,
 {
     let stream_name = commands_stream_name(prefix);
-    let config = commands_observer();
 
     info!(stream = %stream_name, "Starting JetStream consumer for COMMANDS stream");
 
-    let stream = js
-        .get_stream(&stream_name)
-        .await
-        .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
-
-    let consumer = stream
-        .create_consumer(config)
-        .await
-        .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
-
-    let mut messages = consumer
-        .messages()
-        .await
-        .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
+    let mut messages = subscribe_commands(&js, &stream_name).await?;
 
     let nats = Rc::new(nats);
-
     let prefix = Rc::new(prefix.clone());
+    let in_flight = InFlightCommands::default();
 
     while let Some(msg_result) = messages.next().await {
         match msg_result {
             Ok(js_msg) => {
+                let Ok(claim) = in_flight.claim(js_msg.message()) else {
+                    // JetStream redelivered a command this host is still running
+                    // (its acks were lost, e.g. in a partition). Running it again
+                    // would answer the same request id twice; restarting its
+                    // ack_wait leaves the original to settle it.
+                    info!(subject = %js_msg.message().subject, "Command redelivered while still in flight; not dispatching it again");
+                    let _ = js_msg
+                        .ack_with(AckKind::Progress)
+                        .await
+                        .inspect_err(|e| warn!(error = %e, "Failed to mark redelivered command in progress"));
+                    continue;
+                };
                 let agent = agent.clone();
                 let nats = nats.clone();
                 let prefix = prefix.clone();
                 spawn(Box::pin(async move {
                     dispatch_js_message(js_msg, agent.as_ref(), nats.as_ref(), &prefix).await;
+                    drop(claim);
                 }));
+            }
+            Err(e) if e.consumer_lost() => {
+                warn!(error = %e, "COMMANDS consumer is gone; recreating it");
+                messages = resubscribe_commands(&js, &stream_name).await?;
             }
             Err(e) => {
                 warn!(error = %e, "JetStream consumer error");
@@ -639,6 +649,125 @@ where
 
     info!("JetStream COMMANDS consumer ended");
     Ok(())
+}
+
+type CommandsConsumer<J> = <<J as JetStreamGetStream>::Stream as JetStreamCreateConsumer>::Consumer;
+type CommandsMessages<J> = <CommandsConsumer<J> as JetStreamConsumer>::Messages;
+/// The error the COMMANDS consumer's message stream yields for a JetStream
+/// client `J`. The JetStream constructors bound it by `ConsumerLoss`, so
+/// generic callers name it in their own bounds.
+pub type CommandsMessagesError<J> = <CommandsConsumer<J> as JetStreamConsumer>::MessagesError;
+
+/// Opens the stream, creates (or resumes) the durable consumer and starts
+/// pulling from it.
+async fn subscribe_commands<J>(js: &J, stream_name: &str) -> Result<CommandsMessages<J>, ConnectionError>
+where
+    J: JetStreamGetStream<Error = GetStreamError>,
+{
+    let stream = js.get_stream(stream_name).await.map_err(|e| {
+        if is_get_stream_not_found(&e) {
+            ConnectionError::CommandsStreamMissing {
+                stream: stream_name.to_owned(),
+            }
+        } else {
+            ConnectionError::JetStream(Box::new(e))
+        }
+    })?;
+
+    let consumer = stream
+        .create_consumer(agent_commands_consumer())
+        .await
+        .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
+
+    consumer
+        .messages()
+        .await
+        .map_err(|e| ConnectionError::JetStream(Box::new(e)))
+}
+
+/// Recreates the consumer after it was lost.
+///
+/// The durable is recreated in place, since its config lives here. The stream
+/// is not: its subjects, retention and limits are provisioned by the host at
+/// startup, together with the other ACP streams, which were most likely lost
+/// with it. So a missing stream ends serving with
+/// [`ConnectionError::CommandsStreamMissing`], and the supervisor's restart
+/// provisions everything again.
+///
+/// Other failures (NATS unreachable) are retried with backoff for up to
+/// [`RESUBSCRIBE_DEADLINE`], then serving ends so the supervisor restarts the
+/// host.
+async fn resubscribe_commands<J>(js: &J, stream_name: &str) -> Result<CommandsMessages<J>, ConnectionError>
+where
+    J: JetStreamGetStream<Error = GetStreamError>,
+{
+    let deadline = tokio::time::Instant::now() + RESUBSCRIBE_DEADLINE;
+    let mut delay = RESUBSCRIBE_MIN_DELAY;
+    loop {
+        match subscribe_commands(js, stream_name).await {
+            Ok(messages) => {
+                info!(stream = stream_name, "Recreated the COMMANDS consumer");
+                return Ok(messages);
+            }
+            Err(e @ ConnectionError::JetStream(_)) if tokio::time::Instant::now() + delay < deadline => {
+                warn!(error = %e, retry_in = ?delay, "Failed to recreate the COMMANDS consumer");
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(RESUBSCRIBE_MAX_DELAY);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// How long to keep retrying to recreate a lost consumer. Tied to
+/// [`COMMANDS_ACK_WAIT`]: past it, JetStream has redelivered every command this
+/// host held, so staying up buys nothing over a restart.
+const RESUBSCRIBE_DEADLINE: Duration = COMMANDS_ACK_WAIT;
+const RESUBSCRIBE_MIN_DELAY: Duration = Duration::from_millis(250);
+const RESUBSCRIBE_MAX_DELAY: Duration = Duration::from_secs(10);
+
+/// Requests this host is running from COMMANDS, keyed by subject and
+/// `Jsonrpc-Id`, so a redelivery of one is not run a second time.
+///
+/// Per host on purpose: a command nacked at shutdown or abandoned by a crashed
+/// host must run on the next host, whose set starts empty. Notifications carry
+/// no id and are never tracked.
+#[derive(Default)]
+struct InFlightCommands(InFlightSet);
+
+type InFlightKey = (String, ReqId);
+type InFlightSet = Rc<RefCell<HashSet<InFlightKey>>>;
+
+/// The same request is already running on this host.
+struct AlreadyRunning;
+
+impl InFlightCommands {
+    /// `Ok(None)` for a notification, which is never tracked.
+    fn claim(&self, msg: &Message) -> Result<Option<InFlightClaim>, AlreadyRunning> {
+        let Some(req_id) = msg.headers.as_ref().and_then(req_id_from_request_headers) else {
+            return Ok(None);
+        };
+        let key = (msg.subject.to_string(), req_id);
+        if !self.0.borrow_mut().insert(key.clone()) {
+            return Err(AlreadyRunning);
+        }
+        Ok(Some(InFlightClaim {
+            set: self.0.clone(),
+            key,
+        }))
+    }
+}
+
+/// Releases its request from [`InFlightCommands`] when dropped.
+struct InFlightClaim {
+    set: InFlightSet,
+    key: InFlightKey,
+}
+
+impl Drop for InFlightClaim {
+    fn drop(&mut self) {
+        self.set.borrow_mut().remove(&self.key);
+    }
 }
 
 async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + Sync, M: JsDispatchMessage>(

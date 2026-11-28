@@ -3,6 +3,7 @@ pub mod claim_check;
 pub mod claim_retention;
 pub mod client;
 pub mod conditional_kv;
+pub mod consumer_loss;
 pub mod create_conflicts;
 pub mod message;
 mod native_kv_cas_error;
@@ -33,6 +34,7 @@ pub use client::{
     PublishError, StreamError,
 };
 pub use conditional_kv::conditional_native_kv_update;
+pub use consumer_loss::ConsumerLoss;
 pub use create_conflicts::{
     is_create_key_already_exists, is_create_key_value_already_exists, is_create_stream_already_exists,
 };
