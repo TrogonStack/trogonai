@@ -100,10 +100,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Build Bazel targets
-        run: mise run --skip-tools github:workflows:ci-bazel:build
-
-      # Lint even when tests or the build fail, so their findings are not
+      # The test step builds every target in //..., tests or not, so there is no
+      # separate build step. Lint even when it fails, so lint findings are not
       # hidden behind an unrelated failure.
       - name: Lint Bazel targets
         if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || steps.cache-config.outputs.remote == 'true') }}

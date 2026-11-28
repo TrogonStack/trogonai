@@ -35,8 +35,8 @@ build:lint --@rules_rust//rust/settings:clippy.toml=//rsworkspace:clippy.toml
 # Crate lint levels replace the aspect's default of denying warnings.
 build:lint --@rules_rust//rust/settings:clippy_flag=-Dwarnings
 
-# CI runs the tests through `bazel coverage` and builds with this config too,
-# so both commands share one configuration and its cached actions. Only the
+# CI runs the tests through `bazel coverage`, which also builds every target
+# that is not a test, so one command and one configuration cover both. Only the
 # repository's own Rust crates are instrumented, as `cargo cov` measures only
 # the rsworkspace members.
 build:coverage --collect_code_coverage
