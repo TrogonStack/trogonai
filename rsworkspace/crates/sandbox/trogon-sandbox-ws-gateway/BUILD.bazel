@@ -8,7 +8,9 @@ workspace_crate(
         "binary": {"tags": ["requires-network"]},
         "gateway_run": {"tags": ["requires-network"]},
         "nats_kv_session_store": {"tags": ["requires-network"]},
+        "nats_lease_rows": {"tags": ["requires-network"]},
         "nats_observability": {"tags": ["requires-network"]},
         "nats_sandbox_backend": {"tags": ["requires-network"]},
+        "ws_nats_operation_control": {"tags": ["requires-network"]},
     },
 )
