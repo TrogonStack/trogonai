@@ -3,7 +3,9 @@ use std::sync::Arc;
 use object_store::ObjectStore;
 use object_store::local::LocalFileSystem;
 
-use crate::{KmsKeyId, VolumeBackend, VolumeClientConfig, VolumeError};
+use object_store::aws::AmazonS3Builder;
+
+use crate::{KmsKeyId, VolumeBackend, VolumeClientConfig, VolumeEndpoint, VolumeError, VolumeRegion};
 
 pub(crate) struct StoreHandle {
     pub(crate) store: Arc<dyn ObjectStore>,
@@ -24,14 +26,12 @@ impl StoreHandle {
                 region,
                 endpoint,
             } => {
-                let mut builder = object_store::aws::AmazonS3Builder::from_env()
-                    .with_bucket_name(bucket.as_str())
-                    .with_region(region.as_str());
-                if let Some(endpoint) = endpoint {
-                    builder = builder
-                        .with_endpoint(endpoint.as_str())
-                        .with_allow_http(endpoint.is_plain_http());
-                }
+                let builder = s3_builder(
+                    object_store::aws::AmazonS3Builder::from_env(),
+                    bucket.as_str(),
+                    region,
+                    endpoint.as_ref(),
+                );
                 Arc::new(builder.build().map_err(build_error)?)
             }
             VolumeBackend::Gcs { bucket } => Arc::new(
@@ -59,3 +59,24 @@ impl StoreHandle {
         })
     }
 }
+
+/// Points `base`, which may carry settings from the environment, at the volume's bucket. Plain `http` is allowed
+/// only for an endpoint that is configured and written with the `http` scheme; the environment cannot switch it on.
+fn s3_builder(
+    base: AmazonS3Builder,
+    bucket: &str,
+    region: &VolumeRegion,
+    endpoint: Option<&VolumeEndpoint>,
+) -> AmazonS3Builder {
+    let builder = base
+        .with_bucket_name(bucket)
+        .with_region(region.as_str())
+        .with_allow_http(endpoint.is_some_and(VolumeEndpoint::is_plain_http));
+    match endpoint {
+        Some(endpoint) => builder.with_endpoint(endpoint.as_str()),
+        None => builder,
+    }
+}
+
+#[cfg(test)]
+mod tests;
