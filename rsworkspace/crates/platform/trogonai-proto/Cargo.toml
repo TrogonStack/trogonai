@@ -43,6 +43,11 @@ audit = ["policy"]
 # destination by `EgressHost` and its correlation by `AuditCorrelationId`, so it enables
 # `policy` for a caller to name those types.
 secrets-exchange = ["policy"]
+# Generated types for the evaluation bindings stream (ADR 0072). Types only, like `policy`.
+# A binding names its subject by `PolicySubject` and its judge by `AgentId`, and a result
+# points at a `SessionPositionRef` and a `CandidateRef`, so the generated tree carries the
+# policy subjects, agents, hierarchy and session packages those imports reach.
+evaluation = ["dep:buffa", "dep:buffa-types", "dep:buffa-descriptor", "dep:serde"]
 
 [dependencies]
 thiserror = { workspace = true }

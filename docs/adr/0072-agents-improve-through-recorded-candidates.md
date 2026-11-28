@@ -145,8 +145,14 @@ verdict field names its own author.
   run-history read the judge received, so a score is read against what the
   judge did not see. Findings stay in the evaluation stream like scores: they
   reach a proposal only as cited `EvaluationResultRef`s, never as content.
+  A judge that runs as an agent session records its own `SessionPositionRef`
+  as `judge_session_ref`; its model spend is read from that session's usage
+  events, so the result links to spend without copying it, and the judge's
+  budget and model ceiling apply through the ordinary agent policies.
   Recurrence across runs, by category and target, is a projection over these
   results, not stored state.
+  `GetFindingRecurrence` (`evaluation/queries`) reads that projection for one
+  rubric version, ranked by distinct runs.
 - `evaluation/comparisons`: `OpenComparison` fixes a base revision and a task by
   `ClaimCheck task_ref`; `EnrollComparisonRun` assigns a `CandidateLabel` to a
   session and optionally a `CandidateRef`; `CloseComparison` ends enrollment. A
@@ -168,6 +174,20 @@ session streams and are never readable through their queries
 [ADR#0025](./0025-agent-definition-data-ownership.md)). A verdict cites
 `EvaluationResultRef { evaluation_result_id, content_digest }`; the score
 itself never leaves the evaluation stream.
+
+#### Judging is triggered by a session ending
+
+No existing workflow or scheduler message starts a judge, so this ADR fixes
+the trigger. A judge runs as an ordinary agent session of the bound `judge`
+`AgentId`. It starts after the evaluated session reaches `SessionClosed` or
+`SessionFailed`, and never after `SessionCancelled`, because a cancelled run is
+an operator's decision to stop and not an outcome to score. The starter is a
+workflow node that reads the terminal event and the active bindings for the
+session's agent chain; a binding added after the run does not retroactively
+trigger it. The judge reads the run through the label-keyed run-history query,
+so it is blind to the same things an improver is, and records its result with
+`judge_session_ref` set. The evaluated session is never reopened: judging adds
+nothing to its stream.
 
 ### 6. Pointers are typed, and references are value objects
 
@@ -269,6 +289,9 @@ charter.
   `settings_path` falls inside the `EditableSurface` of the evaluated
   revision, and must screen each finding against the comparison's withheld
   vocabulary before it can be cited anywhere an improver can read.
+  The refusals are `EvaluationFindingOutsideEditableSurfaceError` and
+  `EvaluationFindingMatchesWithheldVocabularyError`; neither names the term or
+  rubric that matched.
 - Dispatch of `BindRubric` verifies the rubric version exists on a rubric that
   is not retired and that the judge differs from the subject.
 - Rendering a run history must resolve the comparison's screening rubric
