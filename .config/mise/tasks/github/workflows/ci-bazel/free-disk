@@ -37,4 +37,14 @@ done
 
 sudo docker image prune --all --force >/dev/null
 
-df -h /
+# Freeing the root disk was not enough: coverage still filled it partway
+# through the tests. Hosted Linux runners also carry a separate temporary disk
+# at /mnt with several times the room, so Bazel's output tree goes there.
+# cache-config turns BAZEL_OUTPUT_USER_ROOT into a startup flag.
+if [[ -d /mnt && -n ${GITHUB_ENV:-} ]]; then
+  sudo mkdir -p /mnt/bazel
+  sudo chown "$(id -u):$(id -g)" /mnt/bazel
+  echo "BAZEL_OUTPUT_USER_ROOT=/mnt/bazel" >>"$GITHUB_ENV"
+fi
+
+df -h / /mnt 2>/dev/null || df -h /
