@@ -70,7 +70,7 @@ fn skipped_grant_and_open_loopback() -> TestResult {
 fn a_missing_user_and_absent_filters_are_reported() -> TestResult {
     let json = r#"{"user":{"user":{"exists":false,"group_exists":false,"in_builtin_users":false,
         "in_sandbox_group":false,"hidden_from_logon":false},"cred_present":false,"real_user_sid":"S-1"},
-        "wfp":{"state":"absent","filters":0}}"#;
+        "wfp":{"state":"absent","filters":0,"allow_loopback":false}}"#;
     let s = parse_sandbox_status(json, &[])?;
     let out = render_install_report(&s, &applied());
     assert!(out.starts_with("Installed.\n  sandbox user: MISSING\n  WFP:   absent, 0 filters\n"));

@@ -4,7 +4,7 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 const USER: &str = r#""user":{"user":{"exists":true,"group_exists":true,"in_builtin_users":false,
   "in_sandbox_group":true,"hidden_from_logon":true},"cred_present":true,"real_user_sid":"S-1"#;
-const WFP: &str = r#""wfp":{"state":"installed","filters":6}"#;
+const WFP: &str = r#""wfp":{"state":"installed","filters":6,"allow_loopback":false}"#;
 
 fn status(extra: &str) -> String {
     format!(r#"{{{USER}"{extra}}},{WFP}}}"#)

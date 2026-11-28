@@ -59,7 +59,7 @@ fn none_states_and_missing_fields() -> TestResult {
       "in_sandbox_group":false,"hidden_from_logon":false},"cred_present":false,
       "real_user_sid":"S-1","persistent_grants":{"state":"none"},
       "profile_grant":{"state":"none"}},
-      "wfp":{"state":"cannot-read","filters":0,"hint":"run elevated"}}"#;
+      "wfp":{"state":"cannot-read","filters":0,"allow_loopback":false,"hint":"run elevated"}}"#;
     let s = parse_sandbox_status(json, &args())?;
     assert!(!s.user.provisioned);
     assert_eq!(s.user.seclogon, None);
@@ -142,5 +142,16 @@ fn leases_are_refused_when_loopback_is_open() -> TestResult {
 fn leases_are_refused_when_no_port_range_is_reported() -> TestResult {
     let status = with(|s| s.wfp.port_range = None)?;
     assert_eq!(status.lease_proxy_ports(), Err(LeaseProxyPortsError::NoPortRange));
+    Ok(())
+}
+
+#[test]
+fn a_status_without_allow_loopback_is_refused() -> TestResult {
+    let json = FULL.replace("\"allow_loopback\": true, ", "");
+    let Err(e) = parse_sandbox_status(&json, &args()) else {
+        return Err("expected an error".into());
+    };
+    assert_eq!(e.code(), Code::FenceHelperBadJson);
+    assert!(e.message().contains("does not say `allow_loopback`"));
     Ok(())
 }

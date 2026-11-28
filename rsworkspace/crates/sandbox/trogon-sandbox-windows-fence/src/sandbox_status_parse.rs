@@ -24,15 +24,22 @@ fn grant_state(s: &str) -> GrantState {
     }
 }
 
-fn map_wfp(raw: WfpStatusWire) -> WfpStatus {
-    WfpStatus {
+fn map_wfp(raw: WfpStatusWire) -> Result<WfpStatus, WindowsSandboxError> {
+    let Some(allow_loopback) = raw.allow_loopback else {
+        return Err(WindowsSandboxError::for_subcommand(
+            Code::FenceHelperBadJson,
+            "fence-helper status: `wfp` does not say `allow_loopback`",
+            "status",
+        ));
+    };
+    Ok(WfpStatus {
         state: raw.state,
         filters: raw.filters,
         port_range: raw.port_range.map(|(l, h)| ProxyPortRange::reported(l, h)),
-        allow_loopback: raw.allow_loopback == Some(true),
+        allow_loopback,
         user_sid: non_empty(raw.user_sid),
         hint: non_empty(raw.hint),
-    }
+    })
 }
 
 fn map_user(raw: UserStatusWire) -> Result<SandboxUserStatus, WindowsSandboxError> {
@@ -117,6 +124,6 @@ pub fn parse_sandbox_status(stdout: &str, args: &[String]) -> Result<SandboxStat
     })?;
     Ok(SandboxStatus {
         user: map_user(raw.user)?,
-        wfp: map_wfp(raw.wfp),
+        wfp: map_wfp(raw.wfp)?,
     })
 }

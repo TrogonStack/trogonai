@@ -62,7 +62,9 @@ fn wait_until_executable(exe: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Err(format!("{} stayed busy", exe.display()).into())
 }
 
-const STATUS_JSON: &str = r#"{"user":{"user":{"exists":true,"sid":"S-1-5-21-9","group_exists":true,"in_builtin_users":false,"in_sandbox_group":true,"hidden_from_logon":true},"cred_present":true,"real_user_sid":"S-1-5-21-1","session_user_sid":"S-1-5-21-1"},"wfp":{"state":"installed","filters":6,"port_range":[60080,60089]}}"#;
+const VERIFY_JSON: &str = r#"{"egress_probe":"blocked","target":"t","anonymous_probe":"skipped","anonymous_loopback_probe":"skipped","deny_only_probe":"blocked","low_integrity_probe":"blocked","low_integrity_loopback_probe":"blocked","untrusted_integrity_probe":"blocked","untrusted_integrity_loopback_probe":"blocked","allow_loopback":false}"#;
+
+const STATUS_JSON: &str = r#"{"user":{"user":{"exists":true,"sid":"S-1-5-21-9","group_exists":true,"in_builtin_users":false,"in_sandbox_group":true,"hidden_from_logon":true},"cred_present":true,"real_user_sid":"S-1-5-21-1","session_user_sid":"S-1-5-21-1"},"wfp":{"state":"installed","filters":6,"port_range":[60080,60089],"allow_loopback":false}}"#;
 const GRANT_JSON: &str = r#"{"profile":"P","containers":1,"granted":2,"files":3,"denied":4,"placeholders":0,"writes":0,"unchanged":0,"removed":0,"elapsed_ms":5}"#;
 
 fn script_for_install(exit: i32) -> String {
@@ -261,9 +263,7 @@ fn refusals_beside_others_surface_from_any_subcommand() -> TestResult {
 
 #[test]
 fn verify_binds_outside_the_range_and_passes_flags() -> TestResult {
-    let fake = Fake::new(
-        r#"echo '{"egress_probe":"blocked","target":"t","low_integrity_probe":"blocked","untrusted_integrity_probe":"blocked"}'"#,
-    )?;
+    let fake = Fake::new(&format!("echo '{VERIFY_JSON}'"))?;
     let opts = VerifyOptions {
         allow_loopback: true,
         write_roots: vec!["C:\\w".to_string()],
@@ -321,7 +321,7 @@ fn trust_ca_reports_a_disabled_seclogon() -> TestResult {
 
 #[test]
 fn verify_explicit_target_skips_the_listener() -> TestResult {
-    let fake = Fake::new(r#"echo '{"egress_probe":"connected","target":"1.2.3.4:5"}'; exit 3"#)?;
+    let fake = Fake::new(&format!("echo '{VERIFY_JSON}'; exit 3"))?;
     let opts = VerifyOptions {
         target: Some("1.2.3.4:5".to_string()),
         ..VerifyOptions::default()
@@ -489,9 +489,7 @@ fn trust_ca_failing_quietly_reports_stdout() -> TestResult {
 
 #[test]
 fn verify_can_ask_for_the_anonymous_egress_attempt() -> TestResult {
-    let fake = Fake::new(
-        r#"echo '{"egress_probe":"blocked","target":"t","low_integrity_probe":"blocked","untrusted_integrity_probe":"blocked"}'"#,
-    )?;
+    let fake = Fake::new(&format!("echo '{VERIFY_JSON}'"))?;
     let opts = VerifyOptions {
         anonymous_egress: true,
         ..VerifyOptions::default()
