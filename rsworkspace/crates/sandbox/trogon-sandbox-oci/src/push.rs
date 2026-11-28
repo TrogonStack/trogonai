@@ -74,7 +74,7 @@ impl OciClient {
         }
 
         let reference = tag_reference(target)?;
-        let auth = self.auth().auth_for(target);
+        let auth = self.auth().auth_for(target)?;
         self.inner()
             .store_auth_if_needed(reference.resolve_registry(), &auth)
             .await;
@@ -107,7 +107,7 @@ impl OciClient {
         let digest = compute_manifest_digest(manifest)?;
         let staging_reference = crate::references::subject_tag_reference(target, &artifact_staging_tag(&digest))?;
 
-        let auth = self.auth().auth_for(target);
+        let auth = self.auth().auth_for(target)?;
         self.inner()
             .store_auth_if_needed(staging_reference.resolve_registry(), &auth)
             .await;

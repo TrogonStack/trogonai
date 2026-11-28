@@ -12,7 +12,7 @@ impl OciClient {
     #[instrument(skip(self), fields(registry = %image.registry, repository = %image.repository))]
     pub async fn resolve_image_readiness(&self, image: &OciImageRef) -> Result<ImageReadiness, OciError> {
         let reference = image_reference(image)?;
-        let auth = self.auth().auth_for_registry(reference.resolve_registry());
+        let auth = self.auth().auth_for_registry(reference.resolve_registry())?;
 
         self.inner().auth(&reference, &auth, RegistryOperation::Pull).await?;
 

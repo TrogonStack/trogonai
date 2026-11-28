@@ -138,7 +138,7 @@ async fn store_pulled_artifact(
     dir: &Path,
 ) -> Result<usize, OciError> {
     let reference = digest_reference(target)?;
-    let (auth, deadline) = (client.auth().auth_for(target), Instant::now() + EXPORT_DEADLINE);
+    let (auth, deadline) = (client.auth().auth_for(target)?, Instant::now() + EXPORT_DEADLINE);
     let mut transport = client.transport(&reference, auth, deadline)?;
     let (raw, _) = transport.manifest(target.digest.as_str()).await?;
     verify_sha256(&raw, target.digest.as_str())?;

@@ -12,6 +12,10 @@ use crate::{DockerConfigSource, OciError, RegistryCredentials};
 #[derive(Deserialize)]
 struct DockerConfigFile {
     auths: Option<BTreeMap<String, DockerAuthEntry>>,
+    #[serde(rename = "credsStore")]
+    creds_store: Option<String>,
+    #[serde(rename = "credHelpers")]
+    cred_helpers: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +50,9 @@ impl DockerAuthEntry {
 #[derive(Debug, Default)]
 pub(crate) struct DockerCredentials {
     by_registry: BTreeMap<String, RegistryCredentials>,
+    /// The helper for every registry that has no `credHelpers` entry of its own.
+    store: Option<String>,
+    helpers: BTreeMap<String, String>,
 }
 
 impl DockerCredentials {
@@ -71,15 +78,34 @@ impl DockerCredentials {
                 by_registry.insert(registry, credentials);
             }
         }
-        Ok(Self { by_registry })
+        Ok(Self {
+            by_registry,
+            store: parsed.creds_store.filter(|store| !store.is_empty()),
+            helpers: parsed.cred_helpers.unwrap_or_default(),
+        })
     }
 
     /// Looks up a registry by its bare name, its `https://` URL, or its legacy `/v1/` URL.
-    pub(crate) fn lookup(&self, registry: &str) -> Option<&RegistryCredentials> {
-        self.by_registry
+    ///
+    /// Credential helpers are not supported. When the config names a helper or store that serves
+    /// `registry` and has no inline `auths` entry for it, the lookup fails: answering `None`
+    /// would send the request anonymously although the config says credentials exist.
+    pub(crate) fn lookup(&self, registry: &str) -> Result<Option<&RegistryCredentials>, OciError> {
+        let inline = self
+            .by_registry
             .get(registry)
             .or_else(|| self.by_registry.get(&format!("https://{registry}/")))
-            .or_else(|| self.by_registry.get(&format!("https://{registry}/v1/")))
+            .or_else(|| self.by_registry.get(&format!("https://{registry}/v1/")));
+        if inline.is_some() {
+            return Ok(inline);
+        }
+        match self.helpers.get(registry).or(self.store.as_ref()) {
+            Some(helper) => Err(OciError::Config(format!(
+                "docker config.json delegates credentials for {registry} to the credential helper \
+                 {helper:?}, which is not supported: add an inline auths entry for {registry}"
+            ))),
+            None => Ok(None),
+        }
     }
 }
 

@@ -18,7 +18,7 @@ impl OciClient {
             reference.repository(),
             target.digest
         );
-        let request = apply_registry_auth(self.http.delete(&url), &self.auth().auth_for(target));
+        let request = apply_registry_auth(self.http.delete(&url), &self.auth().auth_for(target)?);
 
         let response = request.send().await.map_err(|error| {
             if error.is_timeout() || error.is_connect() {
