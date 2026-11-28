@@ -153,6 +153,8 @@ jobs:
       fail-fast: false
       matrix:
         service:
+          - sandbox-agent
+          - sandbox-browser
           - trogon-gateway
           - trogon-sandbox-aca-worker
           - trogon-sandbox-actor-agent
@@ -171,6 +173,13 @@ jobs:
           - trogon-sandbox-subprocess-worker
           - trogon-sandbox-substrate-worker
           - trogon-sandbox-ws-gateway
+        include:
+          # Images with no Rust binary: built from their Dockerfile alone and
+          # checked for their tooling before they are pushed.
+          - service: sandbox-agent
+            tooling: true
+          - service: sandbox-browser
+            tooling: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -223,15 +232,52 @@ jobs:
             type=sha,format=long,prefix=
 
       - name: Download release binaries
-        if: steps.published.outputs.published == 'false'
+        if: steps.published.outputs.published == 'false' && !matrix.tooling
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: image-binary-${{ matrix.service }}-*
           path: ${{ runner.temp }}/image-binaries
           merge-multiple: true
 
+      # Build for the runner's platform first and check the tooling the image
+      # promises.
+      - name: Build image for the tooling check
+        if: steps.published.outputs.published == 'false' && matrix.tooling
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: devops/docker/images/${{ matrix.service }}/Dockerfile
+          load: true
+          tags: ${{ matrix.service }}:check
+          cache-from: type=gha,scope=${{ matrix.service }}-canary
+          cache-to: type=gha,scope=${{ matrix.service }}-canary,mode=max
+
+      - name: Check the image tooling
+        if: steps.published.outputs.published == 'false' && matrix.tooling
+        env:
+          SERVICE: ${{ matrix.service }}
+          IMAGE_REF: ${{ matrix.service }}:check
+        run: mise run --skip-tools github:workflows:canary-container-images:check-image-tooling
+
+      - name: Build and push tooling image
+        if: steps.published.outputs.published == 'false' && matrix.tooling
+        id: build_tooling_image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: devops/docker/images/${{ matrix.service }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha,scope=${{ matrix.service }}-canary
+          cache-to: type=gha,scope=${{ matrix.service }}-canary,mode=max
+          sbom: true
+          provenance: mode=max
+
       - name: Build and push canary image
-        if: steps.published.outputs.published == 'false'
+        if: steps.published.outputs.published == 'false' && !matrix.tooling
         id: build_image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -254,7 +300,7 @@ jobs:
         id: image
         env:
           SERVICE: ${{ matrix.service }}
-          DIGEST: ${{ steps.published.outputs.digest || steps.build_image.outputs.digest }}
+          DIGEST: ${{ steps.published.outputs.digest || steps.build_image.outputs.digest || steps.build_tooling_image.outputs.digest }}
           DIGEST_DIR: ${{ runner.temp }}/image-digests
         run: mise run --skip-tools github:workflows:canary-container-images:image-digest
 

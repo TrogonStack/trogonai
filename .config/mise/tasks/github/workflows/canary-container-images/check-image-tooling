@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#MISE description="Run an image and assert the tools it promises are on its PATH, so a broken recipe never reaches the registry"
+set -euo pipefail
+# Checks the sandbox-agent and sandbox-browser images. IMAGE_REF is a locally
+# loaded image, for example one built with `docker build -t sandbox-agent:check`.
+#
+#   IMAGE_REF=sandbox-agent:check SERVICE=sandbox-agent mise run --skip-tools \
+#     github:workflows:canary-container-images:check-image-tooling
+
+: "${IMAGE_REF:?IMAGE_REF is required}"
+: "${SERVICE:?SERVICE is required}"
+
+case "$SERVICE" in
+sandbox-agent)
+    script='
+        for tool in git gcc make python3 pip3 node npm pnpm rg jq curl ssh patch unzip xz; do
+            command -v "$tool" >/dev/null || { echo "missing $tool"; exit 1; }
+        done
+        test "$(git config --system --get init.defaultBranch)" = main
+        test "$(id -u)" = 65532
+        test "$(pwd)" = /workspace
+    '
+    ;;
+sandbox-browser)
+    script='
+        for tool in node pnpm jq curl chromium; do
+            command -v "$tool" >/dev/null || { echo "missing $tool"; exit 1; }
+        done
+        test "$CHROME_BIN" = /usr/bin/chromium
+        test -x "$CHROME_BIN"
+        test "$(id -u)" = 65532
+        chromium --headless --no-sandbox --disable-gpu --version >/dev/null
+    '
+    ;;
+*)
+    echo "::error title=No tooling check::${SERVICE} has no tooling check" >&2
+    exit 1
+    ;;
+esac
+
+docker run --rm "$IMAGE_REF" bash -euc "$script"
+echo "${SERVICE} tooling check passed"

@@ -5,6 +5,8 @@ Images follow the
 
 | Image | Platforms | Dockerfile |
 |---|---|---|
+| `ghcr.io/trogonstack/images/trogonai/sandbox-agent` | `linux/amd64`, `linux/arm64` | `devops/docker/images/sandbox-agent/Dockerfile` |
+| `ghcr.io/trogonstack/images/trogonai/sandbox-browser` | `linux/amd64`, `linux/arm64` | `devops/docker/images/sandbox-browser/Dockerfile` |
 | `ghcr.io/trogonstack/images/trogonai/trogon-gateway` | `linux/amd64`, `linux/arm64` | `devops/docker/images/trogon-gateway/Dockerfile` |
 | `ghcr.io/trogonstack/images/trogonai/trogon-sandbox-aca-worker` | `linux/amd64`, `linux/arm64` | `devops/docker/images/trogon-sandbox-aca-worker/Dockerfile` |
 | `ghcr.io/trogonstack/images/trogonai/trogon-sandbox-actor-agent` | `linux/amd64`, `linux/arm64` | `devops/docker/images/trogon-sandbox-actor-agent/Dockerfile` |

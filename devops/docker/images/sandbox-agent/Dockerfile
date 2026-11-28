@@ -6,7 +6,7 @@
 # lease image. The docker worker's default image is `sandbox-agent:dev`:
 #
 #   docker build -f devops/docker/images/sandbox-agent/Dockerfile -t sandbox-agent:dev .
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim@sha256:be979e5523c76fa4d5ca4ebd3099078f220aa47ec39c48ad5b5df9314debd6eb
 
 ARG OCI_REVISION
 LABEL org.opencontainers.image.source="https://github.com/TrogonStack/trogonai" \
