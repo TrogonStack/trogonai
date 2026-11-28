@@ -85,7 +85,7 @@ async fn agent_answering(response: RunCommandResponse) -> Result<(ActorAgent, Re
 }
 
 fn unroutable_agent() -> Result<ActorAgent, Box<dyn std::error::Error>> {
-    Ok(ActorAgent::new("127.0.0.1:1".parse()?, target()?, &InMemoryEnv::new()))
+    Ok(ActorAgent::new("127.0.0.1:1".parse()?, target()?, &InMemoryEnv::new())?)
 }
 
 fn completed(exit_code: i32, stderr: &str) -> RunCommandResponse {

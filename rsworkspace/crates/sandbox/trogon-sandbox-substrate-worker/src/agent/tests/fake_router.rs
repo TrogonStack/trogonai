@@ -88,7 +88,7 @@ pub(crate) async fn serve_unversioned(target: ActorTarget, router: Router) -> Re
     });
 
     let router_endpoint: RouterEndpoint = format!("127.0.0.1:{tunnel_port}").parse()?;
-    Ok(ActorAgent::new(router_endpoint, target, &InMemoryEnv::new()))
+    Ok(ActorAgent::new(router_endpoint, target, &InMemoryEnv::new())?)
 }
 
 /// A router that answers every CONNECT with exactly `reply` and then hangs up.
