@@ -1,3 +1,6 @@
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use clap::Parser;
 use rmcp::ServiceExt;
 use trogon_std::env::InMemoryEnv;
@@ -84,7 +87,6 @@ async fn a_bad_policy_stops_the_server_before_it_serves() -> TestResult {
 
 #[tokio::test]
 async fn an_insecure_key_file_stops_the_server_before_it_serves() -> TestResult {
-    use std::os::unix::fs::PermissionsExt;
     let home = tempfile::tempdir()?;
     let dir = home.path().join(".config").join("trogon-sandbox-mcp");
     std::fs::create_dir_all(&dir)?;

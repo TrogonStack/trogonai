@@ -1,5 +1,14 @@
+#[cfg(unix)]
+use std::ffi::OsString;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
+
 use trogon_sandbox_providers::VolumeCacheEnv;
+#[cfg(unix)]
+use trogon_sandbox_providers::VolumeCacheError;
 use trogon_std::env::InMemoryEnv;
+#[cfg(unix)]
+use trogon_std::env::ReadEnv;
 
 #[test]
 fn no_bucket_means_no_cache() {
@@ -42,12 +51,6 @@ fn every_setting_is_read() {
 #[cfg(unix)]
 #[test]
 fn a_setting_that_is_not_unicode_is_refused() {
-    use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt;
-
-    use trogon_sandbox_providers::VolumeCacheError;
-    use trogon_std::env::ReadEnv;
-
     struct RawEnv(&'static str);
 
     impl ReadEnv for RawEnv {
