@@ -121,11 +121,11 @@ async fn shell_with_pty_relays_input_and_resizes() -> TestResult {
 }
 
 #[tokio::test]
-async fn pty_sides_default_and_cap() -> TestResult {
+async fn pty_sides_default_and_accept_the_maximum() -> TestResult {
     let gateway = start_gateway(4).await?;
     let session = login(gateway.addr, "lease-1").await?;
     let mut channel = session.channel_open_session().await?;
-    channel.request_pty(true, "vt100", 0, 5000, 0, 0, &[]).await?;
+    channel.request_pty(true, "vt100", 0, 1000, 0, 0, &[]).await?;
     channel.exec(true, "go").await?;
     drain(&mut channel).await;
     let frames = gateway.tunnel.published();
@@ -173,7 +173,7 @@ async fn failed_detach_does_not_break_the_session() -> TestResult {
 }
 
 #[tokio::test]
-async fn failed_input_publish_is_tolerated() -> TestResult {
+async fn failed_input_publish_ends_the_connection() -> TestResult {
     let gateway = start_gateway(4).await?;
     let session = login(gateway.addr, "lease-1").await?;
     let channel = session.channel_open_session().await?;
@@ -182,8 +182,21 @@ async fn failed_input_publish_is_tolerated() -> TestResult {
     gateway.tunnel.refuse_publish.store(true, Ordering::SeqCst);
     channel.window_change(90, 30, 0, 0).await?;
     channel.data(&b"lost"[..]).await?;
-    channel.eof().await?;
-    session.disconnect(Disconnect::ByApplication, "bye", "en").await?;
+    let mut channel = channel;
+    while channel.wait().await.is_some() {}
+    eventually(|| gateway.tunnel.detach_count() == 1).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_oversized_terminal_is_refused() -> TestResult {
+    let gateway = start_gateway(4).await?;
+    let session = login(gateway.addr, "lease-1").await?;
+    let channel = session.channel_open_session().await?;
+    let mut channel = channel;
+    channel.request_pty(true, "xterm", 70_000, 24, 0, 0, &[]).await?;
+    let outcome = drain(&mut channel).await;
+    assert_eq!(outcome.status, None);
     eventually(|| gateway.tunnel.detach_count() == 1).await?;
     Ok(())
 }
