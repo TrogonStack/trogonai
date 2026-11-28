@@ -10,7 +10,9 @@ use async_nats::Client;
 use base64::Engine as _;
 use serde_json::{Value, json};
 use trogon_nats::test_support::CoreTestServer;
-use trogon_sandbox_contract::{DriveId, DriveName, LeaseRequest, MountPath, TenantId};
+use trogon_sandbox_contract::{
+    DriveId, DriveName, LeaseRequest, MountPath, ProviderCleanupRequest, ProviderDispatchPayload, TenantId,
+};
 use trogon_sandbox_fly_worker::{
     FlyApi, FlyApiToken, FlyAppName, FlyConfig, FlyConfigParts, FlyEndpoint, FlyPreviewNetwork, FlyProvider, FlyRegion,
     FlyVolumeBinding, FlyVolumeId, FlyWorker, FlyWorkerError,
@@ -581,4 +583,29 @@ impl Running {
         payload["lease_id"] = json!(lease);
         self.ask(format!("sandbox.provider.fly.{verb}.{lease}"), &payload).await
     }
+}
+
+pub fn target_json(env: &Env, attempt: &str) -> Value {
+    json!({"worker_id": env.provider.dispatch_ledger().worker_id().as_str(), "attempt_id": attempt})
+}
+
+pub fn dispatch_payload(
+    env: &Env,
+    lease: &str,
+    attempt: Option<&str>,
+    request: Value,
+    drives: Vec<Value>,
+) -> Boxed<ProviderDispatchPayload> {
+    let mut wire = json!({"lease_id": lease, "request": request, "resolved_drives": drives});
+    if let Some(attempt) = attempt {
+        wire["target"] = target_json(env, attempt);
+    }
+    Ok(serde_json::from_value(wire)?)
+}
+
+pub fn cleanup_request(env: &Env, lease: &str, attempt: &str, intent: &str) -> Boxed<ProviderCleanupRequest> {
+    Ok(serde_json::from_value(json!({
+        "identity": {"lease_id": lease, "provider": "fly", "target": target_json(env, attempt)},
+        "intent": intent,
+    }))?)
 }
