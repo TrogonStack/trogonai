@@ -34,8 +34,8 @@
     "rsworkspace/crates/sandbox/trogon-sandbox-fly-worker/tests/provider_lifecycle.rs": 1201,
     "rsworkspace/crates/sandbox/trogon-sandbox-k8s-worker/tests/support/mod.rs": 1193,
     "rsworkspace/crates/sandbox/trogon-sandbox-kubevirt-worker/tests/fake_cluster/mod.rs": 1593,
-    "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/runtime.rs": 1440,
-    "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/settings/mod.rs": 1581,
+    "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/runtime.rs": 1436,
+    "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/settings/mod.rs": 1556,
     "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/settings/tests.rs": 3342,
     "rsworkspace/crates/sandbox/trogon-sandbox-protocol/tests/attempt_ledger.rs": 1392,
     "rsworkspace/crates/sandbox/trogon-sandbox-protocol/tests/dispatch_auth.rs": 1204,
@@ -43,7 +43,7 @@
     "rsworkspace/crates/sandbox/trogon-sandbox-providers/src/k8s_ownership_provider/tests.rs": 1122,
     "rsworkspace/crates/sandbox/trogon-sandbox-subprocess-worker/src/isolation/mount_plan.rs": 2013,
     "rsworkspace/crates/sandbox/trogon-sandbox-subprocess-worker/tests/seatbelt_read_bypass.rs": 1250,
-    "rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/adapter.rs": 1256,
+    "rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/adapter.rs": 1249,
     "rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/proto/substrate.ateapi.v1.rs": 1228,
     "rsworkspace/crates/sandbox/trogon-sandbox-substrate-worker/src/proto/substrate.ateapi.v1.tonic.rs": 1094
   }
