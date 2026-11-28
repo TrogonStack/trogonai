@@ -18,12 +18,9 @@ use std::time::{Duration, Instant};
 
 pub use dependency::{Dependency, DependencyState, NatsDependency};
 use phase::Phase;
-pub use status::{Liveness, NotReady, Readiness};
 
-/// How long a required dependency may report down before readiness fails.
-///
-/// A shared dependency that blips would otherwise take every pod out of rotation together.
-pub const DEPENDENCY_GRACE: Duration = Duration::from_secs(15);
+use crate::constants::DEPENDENCY_GRACE;
+pub use status::{Liveness, NotReady, Readiness};
 
 struct Tracked {
     dependency: Box<dyn Dependency>,
