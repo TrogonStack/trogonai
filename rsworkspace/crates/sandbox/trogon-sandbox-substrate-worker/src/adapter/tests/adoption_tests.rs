@@ -1,5 +1,4 @@
 use trogon_sandbox_contract::WorkerId;
-use trogon_std::env::ReadEnv;
 
 use super::super::tests_support::{BrokenIndex, FakeControl, TestResult, provider_with};
 use super::*;
@@ -405,9 +404,4 @@ async fn the_reaper_rejects_an_identity_it_cannot_name() -> TestResult {
     let error = provider.reap_owned(&elsewhere).await.err().ok_or("reaped")?;
     assert!(matches!(error, SubstrateError::Naming(_)), "{error:?}");
     Ok(())
-}
-
-#[test]
-fn the_agent_environment_is_empty() {
-    assert!(EmptyEnv.var("ANYTHING").is_err());
 }

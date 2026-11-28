@@ -2,8 +2,8 @@ use std::error::Error;
 
 use trogon_sandbox_actor_agent::{
     ActorId, ActorIdError, GUEST_PROTOCOL_VERSION, GuestCallFailure, GuestEntropySeed, GuestProtocolError,
-    PROTOCOL_REFUSED_STATUS, UNIMPLEMENTED_STATUS, admit_agent_version, admit_protocol_version,
-    min_protocol_version_from_env, parse_min_protocol_version, parse_protocol_version,
+    MinProtocolVersionError, PROTOCOL_REFUSED_STATUS, UNIMPLEMENTED_STATUS, admit_agent_version,
+    admit_protocol_version, parse_protocol_version, try_min_protocol_version_from_env,
 };
 use trogon_std::env::InMemoryEnv;
 
@@ -78,15 +78,20 @@ fn any_other_reply_never_allows_a_fallback() -> TestResult {
 }
 
 #[test]
-fn a_minimum_override_falls_back_to_the_default_unless_it_parses() {
-    assert_eq!(parse_min_protocol_version(None, 1), 1);
-    assert_eq!(parse_min_protocol_version(Some(""), 1), 1);
-    assert_eq!(parse_min_protocol_version(Some("x"), 1), 1);
-    assert_eq!(parse_min_protocol_version(Some(" 0 "), 1), 0);
+fn a_minimum_override_that_does_not_parse_is_refused() {
     let env = InMemoryEnv::new();
-    assert_eq!(min_protocol_version_from_env(&env, "TEST_MINIMUM", 3), 3);
+    assert_eq!(try_min_protocol_version_from_env(&env, "TEST_MINIMUM", 3), Ok(3));
     env.set("TEST_MINIMUM", " 0 ");
-    assert_eq!(min_protocol_version_from_env(&env, "TEST_MINIMUM", 3), 0);
+    assert_eq!(try_min_protocol_version_from_env(&env, "TEST_MINIMUM", 3), Ok(0));
+    for bad in ["", "x", "-1", "1.5"] {
+        env.set("TEST_MINIMUM", bad);
+        assert_eq!(
+            try_min_protocol_version_from_env(&env, "TEST_MINIMUM", 3),
+            Err(MinProtocolVersionError {
+                name: "TEST_MINIMUM".to_string()
+            })
+        );
+    }
 }
 
 #[test]

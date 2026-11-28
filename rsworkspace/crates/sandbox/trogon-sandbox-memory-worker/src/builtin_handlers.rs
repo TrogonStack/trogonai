@@ -19,18 +19,21 @@ where
     }
 }
 
-/// Sleeps for its first argument in seconds, or until cancelled.
+/// Sleeps for its first argument in seconds, or until cancelled. No argument sleeps zero seconds; an argument that is
+/// not a non-negative number is refused.
 pub(crate) struct SleepHandler;
 
 #[async_trait]
 impl CommandHandler for SleepHandler {
     async fn run(&self, ctx: CommandCtx) -> CommandOutput {
-        let requested: f64 = ctx.args.first().and_then(|arg| arg.parse().ok()).unwrap_or(0.0);
-        let secs = if requested.is_nan() {
-            0.0
-        } else {
-            requested.clamp(0.0, MAX_SLEEP_SECONDS)
+        let requested: f64 = match ctx.args.first() {
+            None => 0.0,
+            Some(arg) => match arg.parse::<f64>() {
+                Ok(value) if value >= 0.0 => value,
+                _ => return out(1, "", &format!("sleep: invalid time interval '{arg}'\n")),
+            },
         };
+        let secs = requested.min(MAX_SLEEP_SECONDS);
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_secs_f64(secs)) => out(0, "", ""),
             _ = ctx.cancel.cancelled() => out(143, "", ""),
@@ -46,7 +49,13 @@ pub(crate) struct ServeHandler;
 #[async_trait]
 impl CommandHandler for ServeHandler {
     async fn run(&self, ctx: CommandCtx) -> CommandOutput {
-        let port = ctx.args.first().and_then(|arg| arg.parse::<u16>().ok());
+        let port = match ctx.args.first() {
+            None => None,
+            Some(arg) => match arg.parse::<u16>() {
+                Ok(port) => Some(port),
+                Err(_) => return out(2, "", &format!("serve: invalid port '{arg}'\n")),
+            },
+        };
         if let Some(port) = port {
             ctx.live.listen(port);
         }

@@ -52,7 +52,7 @@ async fn matches_responses_to_requests_with_counter_ids_from_one() -> TestResult
 }
 
 #[tokio::test]
-async fn a_missing_result_resolves_to_null_and_unknown_ids_are_ignored() -> TestResult {
+async fn a_response_without_result_or_error_is_a_protocol_error_and_unknown_ids_are_ignored() -> TestResult {
     let transport = FakeTransport::new();
     let conn = connection(&transport);
     let request = spawn_request(&conn, "a", None);
@@ -60,7 +60,8 @@ async fn a_missing_result_resolves_to_null_and_unknown_ids_are_ignored() -> Test
     feed(&conn, &json!({ "jsonrpc": "2.0", "id": 99, "result": 1 }))?;
     feed(&conn, &json!({ "jsonrpc": "2.0", "id": "text", "result": 1 }))?;
     feed(&conn, &json!({ "jsonrpc": "2.0", "id": 1 }))?;
-    assert_eq!(request.await??, Value::Null);
+    let err = request.await?.err().ok_or("request succeeded")?;
+    assert!(matches!(err, LspError::Protocol(_)));
     Ok(())
 }
 
@@ -187,11 +188,7 @@ async fn answers_server_requests_with_fixed_replies() -> TestResult {
         &conn,
         &json!({ "jsonrpc": "2.0", "id": 10, "method": "workspace/applyEdit", "params": {} }),
     )?;
-    feed(
-        &conn,
-        &json!({ "jsonrpc": "2.0", "id": 11, "method": "workspace/configuration" }),
-    )?;
-    eventually(|| transport.written().len() == 5).await?;
+    eventually(|| transport.written().len() == 4).await?;
 
     let replies = transport.written();
     let by_id = |id: Value| {
@@ -204,10 +201,30 @@ async fn answers_server_requests_with_fixed_replies() -> TestResult {
     assert_eq!(by_id(json!(7))?["result"], json!([null, null]));
     assert_eq!(by_id(json!("r"))?["result"], Value::Null);
     assert_eq!(by_id(json!(9))?["result"], Value::Null);
-    assert_eq!(by_id(json!(11))?["result"], json!([]));
     let unknown = by_id(json!(10))?;
     assert_eq!(unknown["error"]["code"], -32601);
     assert_eq!(unknown["error"]["message"], "method not found: workspace/applyEdit");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_malformed_configuration_request_is_refused_as_invalid_params() -> TestResult {
+    let transport = FakeTransport::new();
+    let conn = connection(&transport);
+    let bad = [
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "workspace/configuration" }),
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "workspace/configuration", "params": { "items": "x" } }),
+        json!({ "jsonrpc": "2.0", "id": 3, "method": "workspace/configuration",
+                 "params": { "items": [{ "section": 5 }] } }),
+    ];
+    for message in &bad {
+        feed(&conn, message)?;
+    }
+    eventually(|| transport.written().len() == 3).await?;
+    for reply in transport.written() {
+        assert_eq!(reply["error"]["code"], -32602);
+        assert!(reply.get("result").is_none());
+    }
     Ok(())
 }
 

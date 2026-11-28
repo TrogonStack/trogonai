@@ -1,3 +1,4 @@
+use crate::auth_error::AuthError;
 use crate::policy::RootPolicyError;
 
 /// Why the server stopped or could not start.
@@ -5,6 +6,9 @@ use crate::policy::RootPolicyError;
 pub enum RunError {
     #[error("invalid --deny-command or --allow-command pattern: {0}")]
     Commands(#[source] regex::Error),
+
+    #[error("the API key file is unusable: {0}")]
+    ApiKey(#[source] AuthError),
 
     #[error("invalid --root: {0}")]
     Roots(#[source] RootPolicyError),

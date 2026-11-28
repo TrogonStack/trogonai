@@ -476,12 +476,22 @@ pub(crate) fn provider_over(
     control: Arc<dyn Control>,
     index: Arc<dyn ActorIndex>,
 ) -> Result<SubstrateProvider, super::SubstrateError> {
+    provider_in(config, control, index, &InMemoryEnv::new())
+}
+
+/// Like [`provider_over`], reading its settings from `env`.
+pub(crate) fn provider_in(
+    config: SubstrateConfig,
+    control: Arc<dyn Control>,
+    index: Arc<dyn ActorIndex>,
+    env: &InMemoryEnv,
+) -> Result<SubstrateProvider, super::SubstrateError> {
     SubstrateProvider::new(
         config,
         control,
         TemplateRegistry::new(Arc::new(WarmTemplates)).with_poll_interval(Duration::from_millis(1)),
         index,
-        &InMemoryEnv::new(),
+        env,
     )
     .map(|provider| provider.with_poll_interval(Duration::from_millis(1)))
 }

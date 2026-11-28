@@ -9,7 +9,7 @@ use trogon_sandbox_contract::StdinEof;
 
 use crate::configuration_item::ConfigurationItem;
 use crate::configuration_provider::ConfigurationProvider;
-use crate::constants::METHOD_NOT_FOUND;
+use crate::constants::{INVALID_PARAMS, METHOD_NOT_FOUND};
 use crate::encode_message::encode_message;
 use crate::lock_ext::LockExt;
 use crate::lsp_error::LspError;
@@ -143,14 +143,23 @@ impl JsonRpcConnection {
                     .to_owned(),
                 data: error.get("data").cloned(),
             }),
-            None => Ok(message.get("result").cloned().unwrap_or(Value::Null)),
+            None => message
+                .get("result")
+                .cloned()
+                .ok_or_else(|| LspError::Protocol("LSP response has neither a result nor an error".into())),
         };
         let _ = tx.send(outcome);
     }
 
     fn reply_to_server_request(&self, id: Value, method: &str, params: Option<&Value>) {
         let outcome = match method {
-            "workspace/configuration" => ResponseOutcome::Result(Value::Array(self.configuration_answers(params))),
+            "workspace/configuration" => match self.configuration_answers(params) {
+                Ok(answers) => ResponseOutcome::Result(Value::Array(answers)),
+                Err(message) => ResponseOutcome::Error {
+                    code: INVALID_PARAMS,
+                    message,
+                },
+            },
             "client/registerCapability" | "window/workDoneProgress/create" => ResponseOutcome::Result(Value::Null),
             _ => ResponseOutcome::Error {
                 code: METHOD_NOT_FOUND,
@@ -164,19 +173,20 @@ impl JsonRpcConnection {
         });
     }
 
-    fn configuration_answers(&self, params: Option<&Value>) -> Vec<Value> {
+    fn configuration_answers(&self, params: Option<&Value>) -> Result<Vec<Value>, String> {
         let items = params
             .and_then(|p| p.get("items"))
             .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+            .ok_or_else(|| "workspace/configuration needs an items array".to_string())?;
         items
-            .into_iter()
+            .iter()
             .map(|item| {
-                let item: ConfigurationItem = serde_json::from_value(item).unwrap_or_default();
-                self.configuration
+                let item: ConfigurationItem = serde_json::from_value(item.clone())
+                    .map_err(|error| format!("invalid workspace/configuration item: {error}"))?;
+                Ok(self
+                    .configuration
                     .as_ref()
-                    .map_or(Value::Null, |provide| provide(&item))
+                    .map_or(Value::Null, |provide| provide(&item)))
             })
             .collect()
     }

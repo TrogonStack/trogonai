@@ -2,17 +2,26 @@
 
 use trogon_std::env::ReadEnv;
 
-use crate::GuestProtocolError;
 use crate::constants::GUEST_PROTOCOL_VERSION;
+use crate::{GuestProtocolError, MinProtocolVersionError};
 
-/// Reads a minimum version override from the environment variable `name`, falling back to `default`.
-pub fn min_protocol_version_from_env(env: &impl ReadEnv, name: &str, default: u32) -> u32 {
-    parse_min_protocol_version(env.var(name).ok().as_deref(), default)
-}
-
-/// The pure half of [`min_protocol_version_from_env`].
-pub fn parse_min_protocol_version(raw: Option<&str>, default: u32) -> u32 {
-    raw.and_then(|value| value.trim().parse().ok()).unwrap_or(default)
+/// Reads a minimum version override from the environment variable `name`.
+///
+/// An unset variable is `default`. A variable that is set but is not an unsigned integer is an error, so a mistyped
+/// override can never silently leave the minimum at a different value than the operator asked for.
+pub fn try_min_protocol_version_from_env(
+    env: &impl ReadEnv,
+    name: &str,
+    default: u32,
+) -> Result<u32, MinProtocolVersionError> {
+    match env.var(name) {
+        Err(std::env::VarError::NotPresent) => Ok(default),
+        Err(std::env::VarError::NotUnicode(_)) => Err(MinProtocolVersionError { name: name.to_string() }),
+        Ok(raw) => raw
+            .trim()
+            .parse()
+            .map_err(|_| MinProtocolVersionError { name: name.to_string() }),
+    }
 }
 
 /// Worker-side check of the agent's answer.

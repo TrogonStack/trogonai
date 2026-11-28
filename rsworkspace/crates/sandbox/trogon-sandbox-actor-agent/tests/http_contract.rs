@@ -449,6 +449,25 @@ async fn a_malformed_version_header_is_refused() -> TestResult {
 }
 
 #[tokio::test]
+async fn a_version_header_that_is_not_text_is_refused_even_when_nothing_is_required() -> TestResult {
+    let (agent, _dir) = agent_requiring(0).await?;
+    let url = format!("{}{IDENTITY_PATH}", agent.base);
+    let response = agent
+        .client
+        .get(&url)
+        .header(
+            WORKER_PROTOCOL_VERSION_HEADER,
+            reqwest::header::HeaderValue::from_bytes(&[0xff, 0xfe])?,
+        )
+        .send()
+        .await?;
+    assert_eq!(response.status(), 426);
+    let failure = GuestCallFailure::from_http(426, &response.bytes().await?);
+    assert_eq!(failure, GuestCallFailure::Refused(GuestProtocolError::VersionMalformed));
+    Ok(())
+}
+
+#[tokio::test]
 async fn the_agent_announces_its_versions_and_readiness_is_never_gated() -> TestResult {
     let (agent, _dir) = agent_requiring(2).await?;
     let ready = agent.client.get(format!("{}{READYZ_PATH}", agent.base)).send().await?;

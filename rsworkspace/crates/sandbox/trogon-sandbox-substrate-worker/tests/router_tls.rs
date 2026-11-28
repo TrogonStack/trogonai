@@ -236,7 +236,7 @@ impl RouterFixture {
     }
 
     fn agent(&self, config: RouterTlsConfig) -> Result<ActorAgent, Box<dyn std::error::Error>> {
-        Ok(ActorAgent::new(self.endpoint.clone(), target()?, &InMemoryEnv::new()).with_router_tls(config))
+        Ok(ActorAgent::new(self.endpoint.clone(), target()?, &InMemoryEnv::new())?.with_router_tls(config))
     }
 
     fn peer_certificates(&self) -> Vec<Vec<u8>> {
