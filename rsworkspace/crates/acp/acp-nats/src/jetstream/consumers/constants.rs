@@ -19,9 +19,9 @@ pub const COMMANDS_CONSUMER_DURABLE: &str = "AGENT_COMMANDS";
 /// twice. Five minutes rides out partitions and NATS failovers well beyond
 /// that.
 ///
-/// The price is a slower redelivery after a host crashes without nacking: the
-/// command waits up to five minutes before another host runs it. Clients wait
-/// up to two hours for a prompt, so that delay stays inside their window. A
-/// host that shuts down cleanly nacks what it holds, and those commands are
-/// redelivered at once.
+/// The price is a slower redelivery when a host stops while holding a
+/// command: the command waits up to five minutes before another host runs it.
+/// Clients wait up to two hours for a prompt, so that delay stays inside their
+/// window. Nothing nacks held commands on shutdown yet, so this applies to a
+/// clean stop as well as a crash.
 pub const COMMANDS_ACK_WAIT: Duration = Duration::from_secs(5 * 60);
