@@ -17,3 +17,6 @@ pub fn claim(atespace: &Atespace, actor: &ActorName, lease_id: &LeaseId) -> Acto
         owner: None,
     }
 }
+
+#[cfg(test)]
+mod tests;
