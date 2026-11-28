@@ -10,10 +10,6 @@ pub const KNOWN_RUNTIMES: &[&str] = &["node26", "node24", "node22", "python3.13"
 /// The most bytes one NDJSON record may take before the stream is refused.
 pub const LINE_LIMIT: usize = CAPTURE_FRAME_LIMIT * 6 + 4096;
 
-/// Encoding room reserved for both streams' truncation markers: a marker is under 64 bytes, and the number-array
-/// encoding costs up to four bytes per byte.
-pub const MARKER_ROOM: usize = 2 * 64 * 4;
-
 /// Native options this worker accepts under `native.vercel`.
 pub const NATIVE_OPTION_KEYS: &[&str] = &["persistent"];
 

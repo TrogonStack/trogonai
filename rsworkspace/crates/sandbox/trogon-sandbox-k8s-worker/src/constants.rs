@@ -78,9 +78,5 @@ pub(crate) const EXIT_CODE_WAIT: std::time::Duration = std::time::Duration::from
 /// The queue group that spreads lease dispatches across the workers of this provider kind.
 pub(crate) const LEASE_QUEUE_GROUP: &str = "sandbox-provider-k8s_micro_vm";
 
-/// Encoding room reserved for both streams' truncation markers: a marker is under 64 bytes, and the number-array
-/// encoding costs up to four bytes per byte.
-pub(crate) const MARKER_ROOM: usize = 2 * 64 * 4;
-
 /// The mode a written file gets when the request names none.
 pub(crate) const DEFAULT_FILE_MODE: u32 = 0o644;

@@ -102,10 +102,6 @@ pub const CLONE_TOKEN_USER: &str = "oauth2";
 /// The mode a created workspace directory gets.
 pub const WORKSPACE_MODE: u32 = 0o755;
 
-/// Encoding room reserved for both streams' truncation markers: a marker is under 64 bytes, and the number-array
-/// encoding costs up to four bytes per byte.
-pub const MARKER_ROOM: usize = 2 * 64 * 4;
-
 /// How long SSH access lasts when the caller does not say, matching Daytona's own default.
 pub const DEFAULT_SSH_ACCESS_MINUTES: u32 = 60;
 

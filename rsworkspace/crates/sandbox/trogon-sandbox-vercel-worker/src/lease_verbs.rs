@@ -11,10 +11,12 @@ use trogon_sandbox_contract::{
     SandboxFreezeResponse, SandboxSuspendRequest, SandboxSuspendResponse, SandboxWakeRequest, SandboxWakeResponse,
     SnapshotExportError, SnapshotExportOutcome, SuspendLevel, WriteFilesRequest, WriteStdinRequest,
 };
-use trogon_sandbox_protocol::{nats_transfer, unsupported_file_op_response};
+use trogon_sandbox_protocol::{
+    encode_read_file_response_within, fit_poll_command_response, fit_run_command_response, nats_transfer,
+    unsupported_file_op_response,
+};
 
 use crate::constants as subjects;
-use crate::fit_output::{fit_poll, fit_run, read_file_body};
 use crate::respond_if_held::serve;
 use crate::{LeaseSandbox, VercelWorkerError, VercelWorkerProvider};
 
@@ -32,7 +34,7 @@ fn unsupported(what: &str) -> LeaseError {
 }
 
 async fn run_command(vercel: Provider, sandbox: LeaseSandbox, request: RunCommandRequest, max: usize) -> Reply {
-    encode(&fit_run(
+    encode(&fit_run_command_response(
         vercel.exec().handle_run_command(&sandbox, &request).await,
         max,
     ))
@@ -43,7 +45,7 @@ async fn poll_command(vercel: Provider, sandbox: LeaseSandbox, request: PollComm
         .exec()
         .handle_poll_command(&sandbox, request.lease_id.as_str(), request.execution_id.as_str())
         .await;
-    encode(&fit_poll(reply, max))
+    encode(&fit_poll_command_response(reply, max))
 }
 
 async fn kill_command(vercel: Provider, sandbox: LeaseSandbox, request: KillCommandRequest, _max: usize) -> Reply {
@@ -66,7 +68,7 @@ async fn write_files(vercel: Provider, sandbox: LeaseSandbox, request: WriteFile
 async fn read_file(vercel: Provider, sandbox: LeaseSandbox, request: ReadFileRequest, _max: usize) -> Reply {
     let response = vercel.exec().handle_read_file(&sandbox, &request).await;
     let limit = nats_transfer::MAX_TRANSFER_BYTES;
-    Ok(read_file_body(&response, &request.path, limit)?)
+    Ok(encode_read_file_response_within(&response, &request.path, limit)?)
 }
 
 async fn file_op(_vercel: Provider, _sandbox: LeaseSandbox, request: FileOpRequest, _max: usize) -> Reply {

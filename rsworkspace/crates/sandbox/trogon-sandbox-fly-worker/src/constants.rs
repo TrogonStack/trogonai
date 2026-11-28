@@ -24,10 +24,6 @@ pub(crate) const LEDGER_FILE: &str = "dispatch.db";
 
 pub(crate) const MAKE_TEMP: &str = "mkdir -p -- \"$(dirname -- \"$1\")\" && mktemp -- \"$1.trogon.XXXXXX\"";
 
-/// Encoding room reserved for both streams' truncation markers: a marker is under 64 bytes, and the number-array
-/// encoding costs up to four bytes per byte.
-pub(crate) const MARKER_ROOM: usize = 2 * 64 * 4;
-
 pub(crate) const MAX_FILES: usize = 256;
 
 pub(crate) const MAX_FILE_BYTES: usize = 16 * 1024 * 1024;

@@ -41,7 +41,6 @@ mod daytona_worker_provider_ssh;
 mod execute_reply;
 mod execute_request;
 mod execution;
-mod fit_output;
 mod gateway_access;
 mod gateway_access_error;
 mod gateway_access_source;

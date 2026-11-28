@@ -2,10 +2,9 @@ use async_nats::Message;
 use trogon_sandbox_contract::{
     FileOpRequest, FileOpResponse, LeaseError, ReadFileRequest, ReadFileResponse, WriteFilesRequest, WriteFilesResponse,
 };
-use trogon_sandbox_protocol::{nats_transfer, unsupported_file_op_response};
+use trogon_sandbox_protocol::{encode_read_file_response_within, nats_transfer, unsupported_file_op_response};
 
 use crate::constants::DEFAULT_FILE_MODE;
-use crate::fit_output::read_file_body;
 use crate::inbound::Inbound;
 use crate::shell_wrap::runuser;
 use crate::verb_context::VerbContext;
@@ -93,7 +92,7 @@ pub(crate) async fn read_file(ctx: &VerbContext, msg: Message) {
         ))),
         Err(error) => ReadFileResponse::Denied(backend(error.to_string())),
     };
-    let body = read_file_body(&response, &request.path, nats_transfer::MAX_TRANSFER_BYTES);
+    let body = encode_read_file_response_within(&response, &request.path, nats_transfer::MAX_TRANSFER_BYTES);
     ctx.reply_transfer(&inbound.reply, body).await;
 }
 
