@@ -121,20 +121,22 @@ jobs:
           retention-days: 7
 
       - name: Trim Bazel disk cache
-        if: ${{ !cancelled() && steps.bazel-cache.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || steps.cache-config.outputs.seed-actions-cache == 'true') && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: mise run --skip-tools github:workflows:ci-bazel:trim-disk-cache
 
       # Bazel's disk cache is keyed by action inputs, so what a failing run
       # cached is still valid; saving only on success left main without a
       # cache because its runs were either cancelled by newer merges or red.
+      # On self-hosted runners the restore step is skipped, so the key is
+      # spelled out here; it must stay the restore step's key.
       - name: Save Bazel cache
-        if: ${{ !cancelled() && steps.bazel-cache.outcome == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ !cancelled() && (steps.bazel-cache.outcome == 'success' || steps.cache-config.outputs.seed-actions-cache == 'true') && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ runner.temp }}/bazel-disk-cache
             ${{ runner.temp }}/bazel-repository-cache
-          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
+          key: bazel-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       # Self-hosted workspaces outlive the job, and the file holds the write credential on
       # pushes to main. It is deleted even when the job fails or is cancelled.
