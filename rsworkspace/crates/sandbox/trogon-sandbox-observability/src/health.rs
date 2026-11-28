@@ -18,9 +18,9 @@ use std::time::{Duration, Instant};
 
 pub use dependency::{Dependency, DependencyState, NatsDependency};
 use phase::Phase;
-pub use status::{Liveness, NotReady, Readiness};
 
 use crate::constants::DEPENDENCY_GRACE;
+pub use status::{Liveness, NotReady, Readiness};
 
 struct Tracked {
     dependency: Box<dyn Dependency>,

@@ -24,7 +24,7 @@ use trogon_sandbox_contract::{
     StdinChunk, StdinEof, StdinSeq, TerminalArgument, TerminalDimension, TerminalError, TerminalId, TerminalInput,
     TerminalOp, TerminalOutput, TerminalRequest, TerminalResponse, UnixSignal, WriteStdinRequest,
 };
-use trogon_std::env::{ReadEnv, SystemEnv};
+use trogon_std::env::{ReadEnv as _, SystemEnv};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 

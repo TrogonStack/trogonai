@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fs;
 #[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Arc;
 use std::thread;
 

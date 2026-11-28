@@ -4,7 +4,7 @@
 
 use std::ffi::OsString;
 
-use super::constants::ENV_VAR_PREFIX;
+use crate::constants::ENV_VAR_PREFIX;
 
 /// Refuses the first `EGRESS_PROXY_` variable whose value is not valid Unicode.
 pub(super) fn reject_non_unicode(vars: impl IntoIterator<Item = (OsString, OsString)>) -> Result<(), String> {

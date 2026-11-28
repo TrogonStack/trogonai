@@ -7,8 +7,8 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use support::*;
 use trogon_sandbox_contract::{
-    CapabilitySupport, GetSandboxDomainResponse, LeaseError, LeaseId, LeaseRequest, ProviderCleanupResponse,
-    SnapshotExportError, SnapshotExportOutcome, WorkerId,
+    CapabilitySupport, GetSandboxDomainResponse, LeaseError, LeaseId, LeaseRequest, ProviderCleanupRequest,
+    ProviderCleanupResponse, ProviderDispatchPayload, SnapshotExportError, SnapshotExportOutcome, WorkerId,
 };
 use trogon_sandbox_fly_worker::{
     FlyApiError, FlyConfig, FlyConfigError, FlyPreviewNetwork, FlyProvider, FlyProviderError, FlyRegion,
@@ -63,6 +63,31 @@ fn set_owner(fly: &Fly, owner: &str) {
             machine["config"]["metadata"]["fly_worker_owner"] = json!(owner);
         }
     });
+}
+
+fn target_json(env: &Env, attempt: &str) -> Value {
+    json!({"worker_id": env.provider.dispatch_ledger().worker_id().as_str(), "attempt_id": attempt})
+}
+
+fn dispatch_payload(
+    env: &Env,
+    lease: &str,
+    attempt: Option<&str>,
+    request: Value,
+    drives: Vec<Value>,
+) -> Boxed<ProviderDispatchPayload> {
+    let mut wire = json!({"lease_id": lease, "request": request, "resolved_drives": drives});
+    if let Some(attempt) = attempt {
+        wire["target"] = target_json(env, attempt);
+    }
+    Ok(serde_json::from_value(wire)?)
+}
+
+fn cleanup_request(env: &Env, lease: &str, attempt: &str, intent: &str) -> Boxed<ProviderCleanupRequest> {
+    Ok(serde_json::from_value(json!({
+        "identity": {"lease_id": lease, "provider": "fly", "target": target_json(env, attempt)},
+        "intent": intent,
+    }))?)
 }
 
 fn drive_record(tenant: &str, name: &str, storage: Value) -> Value {
@@ -1172,5 +1197,5 @@ async fn recovery_stops_when_a_second_machine_claims_a_recorded_attempt() -> Tes
     Ok(())
 }
 
-#[path = "provider_lifecycle/snapshots_tests.rs"]
+#[path = "provider_lifecycle/snapshots.rs"]
 mod snapshots_tests;

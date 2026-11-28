@@ -118,7 +118,7 @@ fn policy() -> TestResult<NetworkPolicy> {
         allow_ranges: vec![AllowRange::new("127.0.0.0/8")?],
         deny_ranges: vec![IpRange::new("10.0.0.0/8")?],
         denied_domains: vec!["blocked.test".parse()?],
-        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
+        opaque_tunnels: Default::default(),
         request_rules: vec![],
     })
 }
@@ -1555,7 +1555,7 @@ async fn a_bracketed_ipv6_denied_domain_blocks_a_connect_to_that_literal_in_any_
         allow_ranges: vec![AllowRange::new("::/0")?],
         deny_ranges: vec![],
         denied_domains: vec!["[2001:db8::1]:443".parse()?, "[fd00:ec2::254]".parse()?],
-        opaque_tunnels: trogon_sandbox_contract::OpaqueTunnelPolicy::Allow,
+        opaque_tunnels: Default::default(),
         request_rules: vec![],
     };
     let h = start_with(IngressLimits::default(), "2001:db8::1".parse()?, network).await?;
@@ -2858,8 +2858,8 @@ async fn a_parent_connection_close_is_read_before_the_response_strip_drops_it() 
     Ok(())
 }
 
-#[path = "ingress_mux/reference_server_refusals_tests.rs"]
+#[path = "ingress_mux/reference_server_refusals.rs"]
 mod reference_server_refusals_tests;
 
-#[path = "ingress_mux/host_headers_tests.rs"]
+#[path = "ingress_mux/host_headers.rs"]
 mod host_headers_tests;

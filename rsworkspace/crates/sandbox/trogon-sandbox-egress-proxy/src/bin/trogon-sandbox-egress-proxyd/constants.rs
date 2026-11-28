@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-/// Every variable the daemon reads starts with this.
+/// Prefix shared by every variable the daemon reads, checked for valid Unicode at startup.
 pub(super) const ENV_VAR_PREFIX: &str = "EGRESS_PROXY_";
 
 pub(super) const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:3128";
