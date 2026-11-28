@@ -99,6 +99,7 @@ rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.r
 rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.rs	a_lease_snapshot_restores_through_the_registry	needs a hypervisor and HYPERLIGHT_TEST_MODULE
 rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.rs	a_loaded_module_runs_and_hands_its_runtime_back	needs a hypervisor and HYPERLIGHT_TEST_MODULE
 rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.rs	a_saved_layout_restores_on_a_new_runtime	needs a hypervisor and HYPERLIGHT_TEST_MODULE
+rsworkspace/crates/sandbox/trogon-sandbox-oci/tests/public_registry.rs	docker_hub_authentication_and_blob_redirects_produce_a_pinned_layout	downloads a small public linux/amd64 image from Docker Hub
 rsworkspace/crates/sandbox/trogon-sandbox-proxmox-worker/tests/binary.rs	the_spike_passes_against_a_live_host	requires a live Proxmox VE host and template; set the TROGON_SANDBOX_PROXMOX_* variables the worker reads
 rsworkspace/crates/sandbox/trogon-sandbox-snapshot-builder/tests/cosign_sign.rs	the_pipeline_refuses_to_sign_a_malformed_environment_digest	requires docker to run a registry container, the cosign program on the path and COSIGN_PASSWORD
 rsworkspace/crates/sandbox/trogon-sandbox-snapshot-builder/tests/cosign_sign.rs	the_pipeline_signs_a_snapshot_so_it_verifies_with_the_matching_key	requires docker to run a registry container, the cosign program on the path and COSIGN_PASSWORD
