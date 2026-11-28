@@ -1634,6 +1634,89 @@ async fn serve_js_recreates_a_lost_consumer() {
         .await;
 }
 
+/// Runs `serve_js` over a consumer that yields `before_loss` and is then
+/// deleted, and returns the configs it bound the durable with.
+async fn durable_configs_around_a_loss(
+    before_loss: Vec<MockJsMessage>,
+) -> Vec<async_nats::jetstream::consumer::pull::Config> {
+    let nats = MockNatsClient::new();
+    let factory = MockJetStreamConsumerFactory::new();
+    let (lost, lost_tx) = MockJetStreamConsumer::new();
+    let (recreated, recreated_tx) = MockJetStreamConsumer::new();
+    factory.add_consumer(lost);
+    factory.add_consumer(recreated);
+    for msg in before_loss {
+        lost_tx.unbounded_send(Ok(msg)).unwrap();
+    }
+    lost_tx
+        .unbounded_send(Err(trogon_nats::mocks::MockError::consumer_deleted()))
+        .unwrap();
+    drop(recreated_tx);
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            serve_js(
+                Rc::new(MockAgent::new()),
+                nats,
+                factory.clone(),
+                &test_prefix(),
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+            )
+            .await
+            .unwrap();
+        })
+        .await;
+    factory.consumer_configs()
+}
+
+fn cancel_delivered_at(stream_sequence: u64) -> MockJsMessage {
+    let reply = format!("$JS.ACK.ACP_COMMANDS.AGENT_COMMANDS.1.{stream_sequence}.1.0.0");
+    make_js_msg(
+        "acp.v1.session.s1.agent.cancel",
+        &CancelNotification::new("s1"),
+        Some(&reply),
+    )
+}
+
+#[tokio::test]
+async fn recreated_consumer_starts_after_the_highest_command_seen() {
+    // The second delivery is a redelivery of an older command.
+    let configs = durable_configs_around_a_loss(vec![cancel_delivered_at(41), cancel_delivered_at(40)]).await;
+
+    let policies: Vec<_> = configs.iter().map(|config| config.deliver_policy).collect();
+    assert_eq!(
+        policies,
+        [
+            DeliverPolicy::New,
+            DeliverPolicy::ByStartSequence { start_sequence: 42 }
+        ]
+    );
+    assert!(
+        configs
+            .iter()
+            .all(|config| config.durable_name.as_deref() == Some(COMMANDS_CONSUMER_DURABLE))
+    );
+}
+
+#[tokio::test]
+async fn recreated_consumer_starts_before_subscribing_when_nothing_arrived() {
+    let before = SystemTime::now();
+    let configs = durable_configs_around_a_loss(Vec::new()).await;
+
+    let DeliverPolicy::ByStartTime { start_time } = configs[1].deliver_policy else {
+        panic!("expected a start time, got {:?}", configs[1].deliver_policy);
+    };
+    let start_time = SystemTime::from(start_time);
+    let earliest = before - RESUME_REWIND;
+    assert!(
+        (earliest..earliest + Duration::from_secs(5)).contains(&start_time),
+        "{start_time:?} is not {RESUME_REWIND:?} before subscribing"
+    );
+}
+
 /// One request of every session-scoped kind, each naming session `s2` in its body.
 fn requests_naming_another_session() -> Vec<(&'static str, serde_json::Value)> {
     fn body<T: serde::Serialize>(request: T) -> serde_json::Value {

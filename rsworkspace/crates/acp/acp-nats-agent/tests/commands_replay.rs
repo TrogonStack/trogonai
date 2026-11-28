@@ -380,24 +380,44 @@ async fn deleted_consumer_is_recreated_under_a_running_agent_side() -> TestResul
     provision_streams(&NatsJetStreamClient::new(js.clone()), &prefix).await?;
 
     let agent = RecordingAgent::default();
-    run_agent_side(client, js.clone(), prefix.clone(), agent.clone(), || {
+    run_agent_side(client.clone(), js.clone(), prefix.clone(), agent.clone(), || {
         let js = js.clone();
         let prefix = prefix.clone();
         let agent = agent.clone();
         async move {
             wait_for_consumer(&js, &prefix).await?;
+            let sequence = publish_cancel(&js, &prefix, "before-loss").await?;
+            wait_for_ack_floor(&js, &prefix, sequence).await?;
+
             let stream = js.get_stream(commands_stream_name(&prefix)).await?;
             stream.delete_consumer(COMMANDS_CONSUMER_DURABLE).await?;
-
-            // The recreated durable starts at new commands, so wait for it first.
+            // Published without waiting for the recreate: the recreated durable
+            // starts after the last command this host saw, not at new ones.
+            publish_cancel(&js, &prefix, "while-lost").await?;
             wait_until(|| async { Ok(stream.consumer_info(COMMANDS_CONSUMER_DURABLE).await.is_ok()) }).await?;
             let sequence = publish_cancel(&js, &prefix, "after-recreate").await?;
-            wait_for_cancels(&agent, 1).await?;
+            wait_for_cancels(&agent, 3).await?;
             wait_for_ack_floor(&js, &prefix, sequence).await
         }
     })
     .await?;
-    assert_eq!(agent.cancelled(), ["after-recreate"]);
+    assert_eq!(agent.cancelled(), ["before-loss", "while-lost", "after-recreate"]);
+
+    // The recreated durable starts at a sequence, which NATS will not update to
+    // `New`, so the next host must bind to it rather than recreate it.
+    let next = RecordingAgent::default();
+    run_agent_side(client, js.clone(), prefix.clone(), next.clone(), || {
+        let js = js.clone();
+        let prefix = prefix.clone();
+        let next = next.clone();
+        async move {
+            let sequence = publish_cancel(&js, &prefix, "next-host").await?;
+            wait_for_cancels(&next, 1).await?;
+            wait_for_ack_floor(&js, &prefix, sequence).await
+        }
+    })
+    .await?;
+    assert_eq!(next.cancelled(), ["next-host"]);
     Ok(())
 }
 

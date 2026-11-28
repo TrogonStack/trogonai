@@ -1,4 +1,7 @@
-use acp_nats::jetstream::consumers::agent_commands_consumer;
+use acp_nats::constants::RESUME_REWIND;
+use acp_nats::jetstream::consumers::{
+    COMMANDS_CONSUMER_DURABLE, agent_commands_consumer, resumed_agent_commands_consumer,
+};
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
@@ -15,6 +18,7 @@ use agent_client_protocol::v1::schema::{
 };
 use async_nats::Message;
 use async_nats::jetstream::AckKind;
+use async_nats::jetstream::consumer::{DeliverPolicy, pull};
 use async_nats::jetstream::context::GetStreamError;
 #[cfg(test)]
 use bytes::Bytes;
@@ -26,11 +30,11 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tracing::{debug, info, warn};
 use trogon_nats::jetstream::{
-    ConsumerLoss, JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JsAckWith, JsDispatchMessage,
-    JsMessageRef, is_get_stream_not_found,
+    ConsumerLoss, JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetOrCreateConsumer, JetStreamGetStream,
+    JsAckWith, JsDispatchMessage, JsMessageRef, is_get_stream_not_found, stream_sequence,
 };
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
 
@@ -102,6 +106,7 @@ where
     ) -> (Self, impl std::future::Future<Output = Result<(), ConnectionError>>)
     where
         J: JetStreamGetStream<Error = GetStreamError> + 'static,
+        J::Stream: JetStreamGetOrCreateConsumer,
         trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
         CommandsMessagesError<J>: ConsumerLoss,
     {
@@ -691,6 +696,7 @@ async fn serve_js<N, J, A>(
 where
     N: PublishClient + FlushClient + Clone + 'static,
     J: JetStreamGetStream<Error = GetStreamError> + 'static,
+    J::Stream: JetStreamGetOrCreateConsumer,
     trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
     CommandsMessagesError<J>: ConsumerLoss,
     A: AgentHandler + Sync + 'static,
@@ -699,7 +705,8 @@ where
 
     info!(stream = %stream_name, "Starting JetStream consumer for COMMANDS stream");
 
-    let mut messages = subscribe_commands(&js, &stream_name).await?;
+    let mut resume = CommandsResume::starting_now();
+    let mut messages = subscribe_commands(&js, &stream_name, agent_commands_consumer()).await?;
 
     let nats = Rc::new(nats);
     let prefix = Rc::new(prefix.clone());
@@ -708,6 +715,7 @@ where
     while let Some(msg_result) = messages.next().await {
         match msg_result {
             Ok(js_msg) => {
+                resume.saw(js_msg.message());
                 let Ok(claim) = in_flight.claim(js_msg.message()) else {
                     // JetStream redelivered a command this host is still running
                     // (its acks were lost, e.g. in a partition). Running it again
@@ -730,7 +738,8 @@ where
             }
             Err(e) if e.consumer_lost() => {
                 warn!(error = %e, "COMMANDS consumer is gone; recreating it");
-                messages = resubscribe_commands(&js, &stream_name).await?;
+                let config = resumed_agent_commands_consumer(resume.deliver_policy());
+                messages = resubscribe_commands(&js, &stream_name, config).await?;
             }
             Err(e) => {
                 warn!(error = %e, "JetStream consumer error");
@@ -749,11 +758,22 @@ type CommandsMessages<J> = <CommandsConsumer<J> as JetStreamConsumer>::Messages;
 /// generic callers name it in their own bounds.
 pub type CommandsMessagesError<J> = <CommandsConsumer<J> as JetStreamConsumer>::MessagesError;
 
-/// Opens the stream, creates (or resumes) the durable consumer and starts
-/// pulling from it.
-async fn subscribe_commands<J>(js: &J, stream_name: &str) -> Result<CommandsMessages<J>, ConnectionError>
+/// Opens the stream, creates or updates the durable consumer from `config`,
+/// and starts pulling from it.
+///
+/// An update that NATS refuses binds to the existing durable as it is. NATS
+/// will not move a durable's start position, and the start positions here
+/// differ: `New` at startup, the [`CommandsResume`] point on a recreate, and
+/// whatever another host recreated it with. Updating when NATS allows it still
+/// rolls out changes such as a new `ack_wait` to a durable that already exists.
+async fn subscribe_commands<J>(
+    js: &J,
+    stream_name: &str,
+    config: pull::Config,
+) -> Result<CommandsMessages<J>, ConnectionError>
 where
     J: JetStreamGetStream<Error = GetStreamError>,
+    J::Stream: JetStreamGetOrCreateConsumer,
 {
     let stream = js.get_stream(stream_name).await.map_err(|e| {
         if is_get_stream_not_found(&e) {
@@ -765,10 +785,16 @@ where
         }
     })?;
 
-    let consumer = stream
-        .create_consumer(agent_commands_consumer())
-        .await
-        .map_err(|e| ConnectionError::JetStream(Box::new(e)))?;
+    let consumer = match stream.create_consumer(config.clone()).await {
+        Ok(consumer) => consumer,
+        Err(error) => {
+            debug!(%error, "COMMANDS consumer update refused; binding to the existing one");
+            stream
+                .get_or_create_consumer(COMMANDS_CONSUMER_DURABLE, config)
+                .await
+                .map_err(|e| ConnectionError::JetStream(Box::new(e)))?
+        }
+    };
 
     consumer
         .messages()
@@ -776,11 +802,13 @@ where
         .map_err(|e| ConnectionError::JetStream(Box::new(e)))
 }
 
-/// Recreates the consumer after it was lost.
+/// Recreates the consumer after it was lost, starting from `config`'s deliver
+/// policy (see [`CommandsResume`]).
 ///
-/// The durable is recreated in place, since its config lives here. The stream
-/// is not: its subjects, retention and limits are provisioned by the host at
-/// startup, together with the other ACP streams, which were most likely lost
+/// The durable is recreated in place, since its config lives here; one that
+/// another host recreated first, or that was never really gone, is bound to
+/// as it is (see [`subscribe_commands`]). The stream is not: its subjects,
+/// retention and limits are provisioned by the host at startup, together with the other ACP streams, which were most likely lost
 /// with it. So a missing stream ends serving with
 /// [`ConnectionError::CommandsStreamMissing`], and the supervisor's restart
 /// provisions everything again.
@@ -788,14 +816,19 @@ where
 /// Other failures (NATS unreachable) are retried with backoff for up to
 /// [`RESUBSCRIBE_DEADLINE`], then serving ends so the supervisor restarts the
 /// host.
-async fn resubscribe_commands<J>(js: &J, stream_name: &str) -> Result<CommandsMessages<J>, ConnectionError>
+async fn resubscribe_commands<J>(
+    js: &J,
+    stream_name: &str,
+    config: pull::Config,
+) -> Result<CommandsMessages<J>, ConnectionError>
 where
     J: JetStreamGetStream<Error = GetStreamError>,
+    J::Stream: JetStreamGetOrCreateConsumer,
 {
     let deadline = tokio::time::Instant::now() + RESUBSCRIBE_DEADLINE;
     let mut delay = RESUBSCRIBE_MIN_DELAY;
     loop {
-        match subscribe_commands(js, stream_name).await {
+        match subscribe_commands(js, stream_name, config.clone()).await {
             Ok(messages) => {
                 info!(stream = stream_name, "Recreated the COMMANDS consumer");
                 return Ok(messages);
@@ -810,11 +843,60 @@ where
     }
 }
 
+/// Where a recreated COMMANDS durable starts, so the commands published while
+/// the old one was gone are still delivered.
+///
+/// Once this host has received a command, the recreated durable starts right
+/// after the highest stream sequence it saw: everything up to it already
+/// reached this host, and starting there runs nothing twice on one host.
+/// Commands after it that another host held unsettled are delivered again,
+/// as they would be after that host's `ack_wait`.
+///
+/// Before any command arrived, it starts at the time this host subscribed,
+/// less [`RESUME_REWIND`] for clock skew between host and server, which may
+/// run a command acked just before then a second time.
+struct CommandsResume {
+    subscribed_at: SystemTime,
+    last_sequence: Option<u64>,
+}
+
+impl CommandsResume {
+    fn starting_now() -> Self {
+        Self {
+            subscribed_at: SystemTime::now(),
+            last_sequence: None,
+        }
+    }
+
+    /// Records a delivered command. A redelivery carries an older sequence,
+    /// so only the highest one is kept.
+    fn saw(&mut self, msg: &Message) {
+        if let Some(sequence) = stream_sequence(msg) {
+            self.last_sequence = self.last_sequence.max(Some(sequence));
+        }
+    }
+
+    fn deliver_policy(&self) -> DeliverPolicy {
+        match self.last_sequence {
+            Some(sequence) => DeliverPolicy::ByStartSequence {
+                start_sequence: sequence.saturating_add(1),
+            },
+            None => DeliverPolicy::ByStartTime {
+                start_time: self
+                    .subscribed_at
+                    .checked_sub(RESUME_REWIND)
+                    .unwrap_or(SystemTime::UNIX_EPOCH)
+                    .into(),
+            },
+        }
+    }
+}
+
 /// Requests this host is running from COMMANDS, keyed by subject and
 /// `Jsonrpc-Id`, so a redelivery of one is not run a second time.
 ///
-/// Per host on purpose: a command nacked at shutdown or abandoned by a crashed
-/// host must run on the next host, whose set starts empty. Notifications carry
+/// Per host on purpose: a command left unsettled by a host that stopped or
+/// crashed must run on the next host, whose set starts empty. Notifications carry
 /// no id and are never tracked.
 #[derive(Default)]
 struct InFlightCommands(InFlightSet);

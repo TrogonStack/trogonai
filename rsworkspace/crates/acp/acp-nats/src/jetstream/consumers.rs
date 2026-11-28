@@ -50,5 +50,17 @@ pub fn agent_commands_consumer() -> Config {
     }
 }
 
+/// [`agent_commands_consumer`] for recreating the durable after it was lost,
+/// starting at `deliver_policy` instead of at new commands.
+///
+/// `DeliverPolicy::New` would skip every command published between the loss
+/// and the recreate.
+pub fn resumed_agent_commands_consumer(deliver_policy: DeliverPolicy) -> Config {
+    Config {
+        deliver_policy,
+        ..agent_commands_consumer()
+    }
+}
+
 #[cfg(test)]
 mod tests;

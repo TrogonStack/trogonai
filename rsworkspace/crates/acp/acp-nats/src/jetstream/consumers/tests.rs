@@ -18,6 +18,20 @@ fn agent_commands_consumer_is_durable_and_starts_at_new_commands() {
 }
 
 #[test]
+fn resumed_agent_commands_consumer_only_changes_where_it_starts() {
+    let policy = DeliverPolicy::ByStartSequence { start_sequence: 43 };
+    let config = resumed_agent_commands_consumer(policy);
+    assert_eq!(config.deliver_policy, policy);
+    assert_eq!(
+        Config {
+            deliver_policy: DeliverPolicy::New,
+            ..config
+        },
+        agent_commands_consumer()
+    );
+}
+
+#[test]
 fn agent_commands_consumer_no_filter() {
     let config = agent_commands_consumer();
     assert_eq!(config.filter_subject, String::new());

@@ -29,8 +29,8 @@ use super::message::{JsAck, JsAckWith, JsDoubleAck, JsDoubleAckWith, JsMessageRe
 use super::object_store::{ObjectStoreGet, ObjectStorePut};
 use super::traits::{
     JetStreamConsumer, JetStreamContext, JetStreamCreateConsumer, JetStreamCreateKeyValue, JetStreamDeleteConsumer,
-    JetStreamFirstRawMessageBySubject, JetStreamGetKeyValue, JetStreamGetRawMessage, JetStreamGetStream,
-    JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision,
+    JetStreamFirstRawMessageBySubject, JetStreamGetKeyValue, JetStreamGetOrCreateConsumer, JetStreamGetRawMessage,
+    JetStreamGetStream, JetStreamGetStreamInfo, JetStreamKeyValueCreateWithTtl, JetStreamKeyValueDeleteExpectRevision,
     JetStreamKeyValueStatus, JetStreamKeyValueUpdate, JetStreamKvCreate, JetStreamKvEntry, JetStreamKvGet,
     JetStreamKvKeys, JetStreamLastRawMessageBySubject, JetStreamPublishMessage, JetStreamPublisher,
     JetStreamSubjectPurger, ProvisionedStreamField, reconciled_stream_config,
@@ -1332,6 +1332,7 @@ pub struct MockJetStreamConsumerFactory {
     raw_messages_by_sequence: Arc<Mutex<HashMap<u64, Result<StreamMessage, LastRawMessageErrorKind>>>>,
     raw_message_calls: Arc<Mutex<Vec<u64>>>,
     deleted_consumers: Arc<Mutex<Vec<String>>>,
+    consumer_configs: Arc<Mutex<Vec<pull::Config>>>,
 }
 
 impl Clone for MockJetStreamConsumerFactory {
@@ -1347,6 +1348,7 @@ impl Clone for MockJetStreamConsumerFactory {
             raw_messages_by_sequence: self.raw_messages_by_sequence.clone(),
             raw_message_calls: self.raw_message_calls.clone(),
             deleted_consumers: self.deleted_consumers.clone(),
+            consumer_configs: self.consumer_configs.clone(),
         }
     }
 }
@@ -1364,12 +1366,19 @@ impl MockJetStreamConsumerFactory {
             raw_messages_by_sequence: Arc::new(Mutex::new(HashMap::new())),
             raw_message_calls: Arc::new(Mutex::new(Vec::new())),
             deleted_consumers: Arc::new(Mutex::new(Vec::new())),
+            consumer_configs: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     /// Names passed to `delete_consumer` on any stream this factory opened.
     pub fn deleted_consumers(&self) -> Vec<String> {
         self.deleted_consumers.lock().unwrap().clone()
+    }
+
+    /// Configs passed to `create_consumer` or `get_or_create_consumer` on any
+    /// stream this factory opened, one per call.
+    pub fn consumer_configs(&self) -> Vec<pull::Config> {
+        self.consumer_configs.lock().unwrap().clone()
     }
 
     pub fn add_consumer(&self, consumer: MockJetStreamConsumer) {
@@ -1434,6 +1443,7 @@ pub struct MockJetStreamStream {
     raw_messages_by_sequence: Arc<Mutex<HashMap<u64, Result<StreamMessage, LastRawMessageErrorKind>>>>,
     raw_message_calls: Arc<Mutex<Vec<u64>>>,
     deleted_consumers: Arc<Mutex<Vec<String>>>,
+    consumer_configs: Arc<Mutex<Vec<pull::Config>>>,
 }
 
 impl MockJetStreamStream {
@@ -1491,6 +1501,7 @@ impl JetStreamGetStream for MockJetStreamConsumerFactory {
             raw_messages_by_sequence: self.raw_messages_by_sequence.clone(),
             raw_message_calls: self.raw_message_calls.clone(),
             deleted_consumers: self.deleted_consumers.clone(),
+            consumer_configs: self.consumer_configs.clone(),
         })
     }
 }
@@ -1538,12 +1549,23 @@ impl JetStreamCreateConsumer for MockJetStreamStream {
     type Error = MockError;
     type Consumer = MockJetStreamConsumer;
 
-    async fn create_consumer(&self, _config: pull::Config) -> Result<MockJetStreamConsumer, MockError> {
+    async fn create_consumer(&self, config: pull::Config) -> Result<MockJetStreamConsumer, MockError> {
+        self.consumer_configs.lock().unwrap().push(config);
         self.consumers
             .lock()
             .unwrap()
             .pop_front()
             .ok_or_else(|| MockError("no mock consumer available".to_string()))
+    }
+}
+
+impl JetStreamGetOrCreateConsumer for MockJetStreamStream {
+    async fn get_or_create_consumer(
+        &self,
+        _name: &str,
+        config: pull::Config,
+    ) -> Result<MockJetStreamConsumer, MockError> {
+        self.create_consumer(config).await
     }
 }
 
