@@ -315,3 +315,59 @@ async fn repeated_and_concurrent_grants_keep_one_lease() -> TestResult {
     h.worker.shutdown().await;
     Ok(())
 }
+
+async fn write_marker(h: &common::Harness, lease: &str) -> TestResult {
+    let write = h
+        .call_raw(
+            "write_files",
+            lease,
+            json!({"lease_id": lease, "files": [{"path": "marker.txt", "content": [1, 2, 3]}]}),
+        )
+        .await?;
+    assert!(write.to_string().contains("written"), "{write}");
+    Ok(())
+}
+
+async fn read_marker(h: &common::Harness, lease: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    h.call_raw("read_file", lease, json!({"lease_id": lease, "path": "/marker.txt"}))
+        .await
+}
+
+#[tokio::test]
+async fn a_repeated_dispatch_keeps_the_lease_and_what_it_holds() -> TestResult {
+    let h = start().await?;
+    let first = h.dispatch_with("kept", common::lease_request()).await?;
+    write_marker(&h, "kept").await?;
+
+    let second = h.dispatch_with("kept", common::lease_request()).await?;
+
+    assert_eq!(first, second);
+    let read = read_marker(&h, "kept").await?;
+    assert!(read.to_string().contains("content"), "{read}");
+    h.worker.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_cancelled_lease_id_comes_back_as_an_empty_lease() -> TestResult {
+    let h = start().await?;
+    h.grant("reused").await?;
+    write_marker(&h, "reused").await?;
+    h.client
+        .publish("sandbox.provider.mock.cancel.reused", Bytes::new())
+        .await?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while h.worker.lease_count() != 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await?;
+
+    h.grant("reused").await?;
+
+    assert_eq!(h.worker.lease_count(), 1);
+    let read = read_marker(&h, "reused").await?;
+    assert!(read.to_string().contains("not_found"), "{read}");
+    h.worker.shutdown().await;
+    Ok(())
+}

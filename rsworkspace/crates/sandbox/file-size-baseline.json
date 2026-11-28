@@ -31,7 +31,7 @@
     "rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker/src/adapter.rs": 1360,
     "rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker/src/host_network/tls_tests.rs": 1035,
     "rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker/src/worker.rs": 1152,
-    "rsworkspace/crates/sandbox/trogon-sandbox-fly-worker/tests/provider_lifecycle.rs": 1247,
+    "rsworkspace/crates/sandbox/trogon-sandbox-fly-worker/tests/provider_lifecycle.rs": 1222,
     "rsworkspace/crates/sandbox/trogon-sandbox-k8s-worker/tests/support/mod.rs": 1193,
     "rsworkspace/crates/sandbox/trogon-sandbox-kubevirt-worker/tests/fake_cluster/mod.rs": 1593,
     "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/runtime.rs": 1361,
