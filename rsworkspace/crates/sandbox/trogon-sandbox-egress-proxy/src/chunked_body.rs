@@ -14,11 +14,7 @@ pub(crate) fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>, RefusalError> 
             .position(|w| w == b"\r\n")
             .map(|offset| pos + offset)
             .ok_or_else(malformed)?;
-        let size_text = body[pos..line_end].split(|b| *b == b';').next().unwrap_or_default();
-        let size = std::str::from_utf8(size_text)
-            .ok()
-            .and_then(|text| usize::from_str_radix(text, 16).ok())
-            .ok_or_else(malformed)?;
+        let size = parse_chunk_size(&body[pos..line_end]).map_err(|_| malformed())?;
         pos = line_end + 2;
         if size == 0 {
             return Ok(out);
