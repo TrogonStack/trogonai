@@ -308,7 +308,19 @@ fn a_listener_is_required() -> TestResult {
 fn the_listen_fd_wins_over_listen() -> TestResult {
     let chosen = choice(&["--listen-fd", "9", "--listen", "127.0.0.1:1"])??;
     assert_eq!(chosen.listen, ProxyOnlyListen::Fd(9));
-    assert!(choice(&["--listen-fd", "-1"])?.is_err());
+    Ok(())
+}
+
+#[test]
+fn a_listen_fd_that_is_not_a_descriptor_is_refused_not_replaced() -> TestResult {
+    for bad in ["-1", "4294967296", "99999999999999999999", "abc"] {
+        let refused = choice(&["--listen-fd", bad])?;
+        assert!(
+            matches!(&refused, Err(message) if message.contains("fd must be an integer from 0 to 2147483647")),
+            "{bad}: {refused:?}"
+        );
+        assert!(choice(&["--listen-fd", bad, "--listen", "127.0.0.1:1"])?.is_err(), "{bad}");
+    }
     Ok(())
 }
 
