@@ -1,24 +1,15 @@
 use agent_client_protocol::v1::schema::{PromptRequest, PromptResponse};
 use agent_client_protocol::{Error, ErrorCode};
-use async_nats::jetstream::AckKind;
-use futures::StreamExt;
-use jsonrpc_nats::RequestId;
-use tokio::time::timeout;
 use tracing::instrument;
-use trogon_nats::jetstream::{
-    JetStreamConsumer as _, JetStreamCreateConsumer as _, JetStreamGetStream, JetStreamPublisher, JsAck as _,
-    JsAckWith as _, JsMessageRef as _, JsRequestMessage,
-};
+use trogon_nats::jetstream::{JetStreamGetStream, JetStreamPublisher, JsRequestMessage};
 use trogon_semconv::span::ACP_SESSION_PROMPT;
 
 use crate::agent::Bridge;
-use crate::constants::SESSION_ID_HEADER;
-use crate::jetstream::{consumers, streams};
+use crate::agent::js_request::{JsRequestError, publish_and_await};
 use crate::nats::parsing::SessionAgentMethod;
 use crate::nats::{FlushClient, PublishClient, RequestClient, commands};
 use crate::req_id::ReqId;
 use crate::session_id::AcpSessionId;
-use crate::wire::{decode_response, encode_request, req_id_from_request_headers};
 
 #[instrument(
     name = ACP_SESSION_PROMPT,
@@ -67,97 +58,28 @@ where
     J: JetStreamPublisher + JetStreamGetStream,
     trogon_nats::jetstream::JsMessageOf<J>: JsRequestMessage,
 {
-    // Create the consumer BEFORE publishing — same principle as subscribe-before-publish.
-    // It is session-scoped and delivers only new messages, so creating it first is what
-    // guarantees the response is seen even if the runner answers before we start consuming.
-    //
     // Mid-prompt `session/update` progress is not consumed here: it is a client-directed
     // notification and reaches the local client through the client-op proxy
     // (`...client.session.update`), which covers every operation rather than just prompts.
-    let responses_stream = streams::responses_stream_name(prefix);
-    let resp_config = consumers::response_consumer(prefix, session_id);
-    let resp_stream = js
-        .get_stream(&responses_stream)
-        .await
-        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("get responses stream: {e}")))?;
-    let resp_consumer = resp_stream
-        .create_consumer(resp_config)
-        .await
-        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("create response consumer: {e}")))?;
-    let mut resp_messages = resp_consumer
-        .messages()
-        .await
-        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("response messages: {e}")))?;
-
-    // Now publish — consumers are ready, no race condition.
-    let encoded = encode_request(
+    publish_and_await(
+        js,
+        commands::PromptSubject::new(prefix, session_id),
         SessionAgentMethod::Prompt.protocol_method(),
-        RequestId::String(req_id.as_str().to_string()),
         args,
+        prefix,
+        session_id,
+        req_id,
+        bridge.config.prompt_timeout(),
     )
-    .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("encode request: {e}")))?;
-
-    let mut headers = encoded.headers;
-    headers.insert(SESSION_ID_HEADER, session_id.as_str());
-
-    let prompt_subject = commands::PromptSubject::new(prefix, session_id);
-    js.publish_with_headers(prompt_subject, headers, encoded.body)
-        .await
-        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("js publish: {e}")))?
-        .await
-        .map_err(|e| Error::new(ErrorCode::INTERNAL_ERROR, format!("js ack: {e}")))?;
-
-    let op_timeout = bridge.config.prompt_timeout();
-
-    loop {
-        match timeout(op_timeout, resp_messages.next()).await {
-            Ok(Some(Ok(js_msg))) => {
-                let message = js_msg.message();
-                let response_headers = message.headers.clone().unwrap_or_default();
-
-                // The consumer is session-scoped, so it also sees the replies of
-                // other requests in flight on this session.
-                if req_id_from_request_headers(&response_headers).as_ref() != Some(req_id) {
-                    let _ = js_msg.ack().await;
-                    continue;
-                }
-
-                match decode_response::<PromptResponse>(&response_headers, message.payload.as_ref()) {
-                    Ok(Ok(response)) => {
-                        let _ = js_msg.ack().await;
-                        break Ok(response);
-                    }
-                    Ok(Err(agent_err)) => {
-                        let _ = js_msg.ack().await;
-                        break Err(agent_err);
-                    }
-                    Err(_) => {
-                        let _ = js_msg.ack_with(AckKind::Term).await;
-                        bridge.metrics.record_error("prompt", "bad_response_payload");
-                        break Err(Error::new(ErrorCode::INTERNAL_ERROR, "bad response payload"));
-                    }
-                }
-            }
-            Ok(Some(Err(e))) => {
-                bridge.metrics.record_error("prompt", "response_consumer_error");
-                break Err(Error::new(ErrorCode::INTERNAL_ERROR, format!("response consumer: {e}")));
-            }
-            Ok(None) => {
-                bridge.metrics.record_error("prompt", "response_stream_closed");
-                break Err(Error::new(
-                    ErrorCode::INTERNAL_ERROR,
-                    "response stream closed unexpectedly",
-                ));
-            }
-            Err(_elapsed) => {
-                bridge.metrics.record_error("prompt", "prompt_timeout");
-                break Err(Error::new(
-                    ErrorCode::INTERNAL_ERROR,
-                    "prompt timed out waiting for runner",
-                ));
-            }
+    .await
+    .map_err(|e| {
+        match &e {
+            JsRequestError::BadPayload => bridge.metrics.record_error("prompt", "bad_response_payload"),
+            JsRequestError::TimedOut { .. } => bridge.metrics.record_error("prompt", "prompt_timeout"),
+            JsRequestError::Rejected(_) => {}
         }
-    }
+        e.into_error("prompt timed out waiting for runner")
+    })
 }
 
 #[cfg(test)]

@@ -295,7 +295,9 @@ async fn js_request_agent_error_response() {
     assert!(err.message.contains("agent failed"));
 }
 
-#[tokio::test]
+/// A closed stream is a consumer failure, not an answer: the request keeps
+/// trying to resume until its deadline and then reports why it could not.
+#[tokio::test(start_paused = true)]
 async fn js_request_stream_closed() {
     let js = MockJs::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -315,11 +317,12 @@ async fn js_request_stream_closed() {
     )
     .await;
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().message.contains("response stream closed"));
+    let message = result.unwrap_err().message;
+    assert!(message.contains("timed out"), "{message}");
+    assert!(message.contains("create response consumer"), "{message}");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn js_request_consumer_stream_error() {
     let js = MockJs::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -340,8 +343,52 @@ async fn js_request_consumer_stream_error() {
     )
     .await;
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().message.contains("response consumer"));
+    let message = result.unwrap_err().message;
+    assert!(message.contains("timed out"), "{message}");
+    assert!(message.contains("last response consumer error"), "{message}");
+}
+
+/// Regression: a missed heartbeat during a network stall used to fail the
+/// request even though the runner went on to answer it.
+#[tokio::test(start_paused = true)]
+async fn js_request_recreates_a_failed_consumer_and_returns_the_answer_once() {
+    let js = MockJs::new();
+    let (stalled, stalled_tx) = MockJetStreamConsumer::new();
+    let (recreated, recreated_tx) = MockJetStreamConsumer::new();
+    js.consumer_factory.add_consumer(stalled);
+    js.consumer_factory.add_consumer(recreated);
+
+    stalled_tx
+        .unbounded_send(Err(trogon_nats::mocks::MockError("missed idle heartbeat".to_string())))
+        .unwrap();
+    // The recreated consumer rereads from before the request, so it sees an
+    // older reply for another request and this request's answer twice.
+    let other = PromptResponse::new(agent_client_protocol::v1::schema::StopReason::Cancelled);
+    let mine = PromptResponse::new(agent_client_protocol::v1::schema::StopReason::EndTurn);
+    for message in [
+        make_wire_success_msg("req-other", &other),
+        make_wire_success_msg("req-1", &mine),
+        make_wire_success_msg("req-1", &mine),
+    ] {
+        recreated_tx.unbounded_send(Ok(MockJsMessage::new(message))).unwrap();
+    }
+
+    let result: agent_client_protocol::Result<PromptResponse> = js_request(
+        &js,
+        "acp.v1.session.s1.agent.prompt",
+        "prompt",
+        &prompt_request(),
+        &test_prefix(),
+        &test_sid("s1"),
+        &ReqId::from_test("req-1"),
+        Duration::from_secs(5),
+    )
+    .await;
+
+    assert_eq!(
+        result.expect("the answer survives the consumer failure").stop_reason,
+        agent_client_protocol::v1::schema::StopReason::EndTurn
+    );
 }
 
 /// The response consumer is session-scoped, so it sees replies belonging to the
@@ -380,7 +427,7 @@ async fn js_request_skips_a_response_addressed_to_another_request() {
 
 /// A reply that carries no `Jsonrpc-Id` cannot be attributed to a request, so it
 /// is skipped rather than mistaken for this one's.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn js_request_skips_a_response_without_an_id() {
     let js = MockJs::new();
     let (consumer, tx) = MockJetStreamConsumer::new();
@@ -402,5 +449,6 @@ async fn js_request_skips_a_response_without_an_id() {
     )
     .await;
 
-    assert!(result.unwrap_err().message.contains("response stream closed"));
+    let message = result.unwrap_err().message;
+    assert!(message.contains("timed out"), "{message}");
 }

@@ -465,3 +465,13 @@ fn client_ext_method_maps_protocol_to_subject_terminal() {
 fn parse_client_subject_rejects_agent_subjects() {
     assert!(parse_client_subject("acp.v1.session.s1.agent.prompt").is_none());
 }
+
+#[test]
+fn client_notifications_are_the_methods_that_expect_no_answer() {
+    assert!(ClientMethod::SessionUpdate.is_notification(false));
+    assert!(ClientMethod::ElicitationComplete.is_notification(false));
+    assert!(ClientMethod::Ext("my_tool".to_string()).is_notification(false));
+    assert!(!ClientMethod::Ext("my_tool".to_string()).is_notification(true));
+    assert!(!ClientMethod::SessionRequestPermission.is_notification(false));
+    assert!(!ClientMethod::FsReadTextFile.is_notification(true));
+}
