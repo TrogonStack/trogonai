@@ -33,7 +33,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: worker
-          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-kubevirt-worker:{{ .Values.global.imageTag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.serviceImage "name" "trogon-sandbox-kubevirt-worker" "global" .Values.global "path" "trogon-sandbox-kubevirt-worker.serviceImage") | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}

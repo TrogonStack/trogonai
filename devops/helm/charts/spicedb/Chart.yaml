@@ -4,3 +4,7 @@ description: Helm subchart for the SpiceDB instance the sandbox broker checks au
 type: application
 version: 0.1.0
 appVersion: "1.35.0"
+dependencies:
+  - name: trogon-sandbox-library
+    repository: file://../trogon-sandbox-library
+    version: 0.1.0

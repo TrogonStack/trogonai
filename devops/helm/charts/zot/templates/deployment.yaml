@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: zot
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.image "global" .Values.global "path" "zot.image") | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - serve

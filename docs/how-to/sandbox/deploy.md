@@ -6,23 +6,44 @@ This guide installs the sandbox control plane from the umbrella chart at `devops
 
 - A Kubernetes cluster with a default `StorageClass` for the JetStream and backup volumes.
 - Helm 3.
-- Container images for every enabled `trogon-sandbox-*` binary. The chart names each image after the binary it runs, for example `<imageRegistry>/trogon-sandbox-broker`, and pulls it from `global.imageRegistry` at `global.imageTag`. Build and push the images to the registry that value points at.
+- Container images for every enabled `trogon-sandbox-*` binary. The chart names each image after the binary it runs, for example `<imageRegistry>/trogon-sandbox-broker`, and pulls it from `global.imageRegistry`. Every image renders as `<repository>:<tag>@sha256:<digest>`, and a render without a tag and digest for an enabled image fails. Third-party images come from `ghcr.io/trogonstack/mirrors`, pinned by digest. See [Container Images](../../reference/container-images.md).
 - Optional: a KMS key id for the credential broker (`global.kmsKeyId`).
 
 ## Install
 
-From the repository root:
+### From the published chart
+
+Every push to `main` publishes the chart as `0.0.0-sha-<commit>`, and its default images are the ones built from that commit:
 
 ```bash
-helm lint devops/helm/charts/trogon-sandbox
-helm template sandbox ./devops/helm/charts/trogon-sandbox --debug > /tmp/sandbox-render.yaml
+kubectl create namespace sandbox --dry-run=client -o yaml | kubectl apply -f -
+
+helm install sandbox oci://ghcr.io/trogonstack/charts/trogonai/trogon-sandbox \
+  --version 0.0.0-sha-<full commit> \
+  --namespace sandbox
+```
+
+### From a checkout
+
+The chart in a checkout carries no tag or digest for the images of this repository, so a render fails until you pin them. Generate a values file that pins every service image to the images built from one commit, then install with it:
+
+```bash
+COMMIT=<full commit sha> mise run --skip-tools \
+  github:workflows:canary-container-images:chart-image-pins > /tmp/sandbox-pins.yaml
+
+helm dependency update devops/helm/charts/trogon-sandbox
+helm lint devops/helm/charts/trogon-sandbox -f /tmp/sandbox-pins.yaml
+helm template sandbox ./devops/helm/charts/trogon-sandbox -f /tmp/sandbox-pins.yaml --debug > /tmp/sandbox-render.yaml
 
 kubectl create namespace sandbox --dry-run=client -o yaml | kubectl apply -f -
 
 helm install sandbox ./devops/helm/charts/trogon-sandbox \
   --namespace sandbox \
-  --set global.imageTag=<your-tag>
+  -f /tmp/sandbox-pins.yaml
 ```
+
+The task needs `oras` and `yq`. To use your own build, set `<chart>.serviceImage.tag` and `<chart>.serviceImage.digest` for each enabled service, and `<chart>.serviceImage.repository` when the image is not under `global.imageRegistry`.
+CI renders the charts with `ci/pinned-images-values.yaml`, which pins every service image to a placeholder digest.
 
 The chart runs the broker with authorization enforced (`trogon-sandbox-broker.insecureDev: false`): bearer authentication, the image allow-list and the worker registry are on, and the broker reads `SPICEDB_ENDPOINT` and `SPICEDB_TOKEN`. The `spicedb` subchart deploys SpiceDB and writes the schema at every start.
 

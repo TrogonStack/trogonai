@@ -33,3 +33,12 @@ k8sNamespace: sandbox-vms
 # Restrict guest VMs to DNS and NATS with the stack NetworkPolicy. Off by default:
 # the worker advertises no egress enforcement, so its leases expect open egress.
 guestEgressBackstop: false
+
+# The image this chart deploys, as <repository>:<tag>@<digest>. An empty
+# repository means <global.imageRegistry>/<chart name>. Tag and digest have no
+# default: the chart published for a commit carries that commit's image, and a
+# checkout must set both (see docs/how-to/sandbox/deploy.md).
+serviceImage:
+  repository: ""
+  tag: ""
+  digest: ""

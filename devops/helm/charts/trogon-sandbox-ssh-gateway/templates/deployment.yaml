@@ -18,7 +18,7 @@ spec:
       serviceAccountName: {{ include "trogon-sandbox-ssh-gateway.fullname" . }}
       containers:
         - name: sandbox-ssh-gateway
-          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-ssh-gateway:{{ .Values.global.imageTag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.serviceImage "name" "trogon-sandbox-ssh-gateway" "global" .Values.global "path" "trogon-sandbox-ssh-gateway.serviceImage") | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           args:
             - --listen=0.0.0.0:{{ .Values.service.port }}

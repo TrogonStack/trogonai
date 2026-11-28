@@ -1,14 +1,15 @@
 # Default values for trogon-sandbox.
 # Release name `sandbox` yields services like sandbox-nats and sandbox-zot.
 # Service images are named after the binary they run, for example
-# <imageRegistry>/trogon-sandbox-broker. Each push to main publishes them under
-# the `canary` tag and its commit SHA, and never as `latest`, so set imageTag to
-# one of those or push your own builds to the registry imageRegistry points at.
+# <imageRegistry>/trogon-sandbox-broker. Every image renders as
+# <repository>:<tag>@<digest>. The charts published for a commit carry that
+# commit's tag and digest; from a checkout set <chart>.serviceImage.tag and
+# <chart>.serviceImage.digest for each enabled service, as ci/pinned-images-values.yaml does.
+# Third-party images come from ghcr.io/trogonstack/mirrors, pinned by digest.
 
 global:
   imageRegistry: ghcr.io/trogonstack/images/trogonai
   imagePullPolicy: IfNotPresent
-  imageTag: latest
   stackLabel: sandbox.trogonai.io/stack
   stackLabelValue: "true"
   componentLabel: sandbox.trogonai.io/component
@@ -54,9 +55,6 @@ spicedb:
 zot:
   enabled: true
   replicaCount: 1
-  image:
-    repository: ghcr.io/project-zot/zot
-    tag: v2.1.2
   service:
     port: 5000
   persistence:
@@ -66,9 +64,6 @@ zot:
 nats:
   enabled: true
   replicaCount: 1
-  image:
-    repository: nats
-    tag: 2.14.2-alpine
   jetstream:
     enabled: true
     storageSize: 5Gi
@@ -190,7 +185,8 @@ trogon-sandbox-k8s-worker:
   k8sNamespace: sandbox-leases
   runtimeClass: kata-fc
   serviceAccountName: sandbox-k8s-worker
-  image: busybox:latest
+  # Image a lease boots when it names none, pinned to the mirrored copy.
+  image: ghcr.io/trogonstack/mirrors/docker-hub/library/busybox:1.37.0@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
   resources:
     requests:
       cpu: 100m
@@ -260,8 +256,9 @@ backup:
   enabled: true
   schedule: "0 3 * * *"
   image:
-    repository: ghcr.io/oras-project/oras
+    repository: ghcr.io/trogonstack/mirrors/ghcr/oras-project/oras
     tag: v1.3.0
+    digest: sha256:6ce045ce069a89934d6666b8b49f9c4c0145201bd6de6dbe2aee267814c55468
   # The bundled Zot serves plain HTTP; set false for a registry behind TLS.
   plainHttp: true
   # Snapshot repositories to back up, one per tenant: snapshots/<tenant id>, or

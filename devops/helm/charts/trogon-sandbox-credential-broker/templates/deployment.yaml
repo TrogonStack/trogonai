@@ -18,7 +18,7 @@ spec:
       serviceAccountName: {{ include "trogon-sandbox-credential-broker.fullname" . }}
       containers:
         - name: sandbox-credential-broker
-          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-credential-broker:{{ .Values.global.imageTag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.serviceImage "name" "trogon-sandbox-credential-broker" "global" .Values.global "path" "trogon-sandbox-credential-broker.serviceImage") | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           envFrom:
             - configMapRef:

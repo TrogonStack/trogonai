@@ -20,7 +20,7 @@ spec:
       serviceAccountName: {{ include "trogon-sandbox-docker-worker.fullname" . }}
       containers:
         - name: worker
-          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-docker-worker:{{ .Values.global.imageTag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.serviceImage "name" "trogon-sandbox-docker-worker" "global" .Values.global "path" "trogon-sandbox-docker-worker.serviceImage") | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           envFrom:
             - configMapRef:

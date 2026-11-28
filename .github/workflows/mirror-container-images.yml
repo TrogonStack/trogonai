@@ -1,0 +1,49 @@
+name: cd / mirror container images
+
+# Copies the third-party images the sandbox charts pull, pinned in
+# devops/oras/mirrors.txt, to ghcr.io/trogonstack/mirrors with their signatures
+# and attestations.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'devops/oras/mirrors.txt'
+      - '.config/mise/tasks/github/workflows/mirror-container-images/**'
+      - '.github/workflows/mirror-container-images.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-container-images
+  cancel-in-progress: false
+
+env:
+  MISE_TASK_RUN_AUTO_INSTALL: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: Copy pinned images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install oras
+        uses: jdx/mise-action@9149ea85001c7435d5a66bb127d6a1b6227cb0a5 # v5.0.0
+        with:
+          install_args: aqua:oras-project/oras@1.3.0
+          cache: false
+
+      - name: Copy the pinned images
+        env:
+          MIRROR_REGISTRY_USERNAME: ${{ github.actor }}
+          MIRROR_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: mise run --skip-tools github:workflows:mirror-container-images:copy-mirrors

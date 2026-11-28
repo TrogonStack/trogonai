@@ -1,7 +1,8 @@
 replicaCount: 1
 image:
-  repository: ghcr.io/project-zot/zot
+  repository: ghcr.io/trogonstack/mirrors/ghcr/project-zot/zot
   tag: v2.1.2
+  digest: sha256:2930f0823199dfb34564dc19ab6c938a4aee9fadc71d9e0e038bacd8c439e63b
   pullPolicy: IfNotPresent
 service:
   port: 5000

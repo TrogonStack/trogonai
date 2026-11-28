@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: nats
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.image "global" .Values.global "path" "nats.image") | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - "-js"

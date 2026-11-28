@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#MISE description="Print the values file that pins every service image of the sandbox charts to one commit"
+set -euo pipefail
+# Prints a values file for the umbrella chart that sets serviceImage.tag and
+# serviceImage.digest for every chart that deploys a service image of ours.
+#
+# Digests come from DIGEST_DIR, one file per image named after it, when set.
+# Otherwise each one is read from the registry, which a developer uses to
+# install a checkout against the images a commit published:
+#
+#   COMMIT=<full commit sha> mise run --skip-tools \
+#     github:workflows:canary-container-images:chart-image-pins > pins.yaml
+#
+# Needs yq (mikefarah) and, without DIGEST_DIR, oras on PATH.
+
+: "${COMMIT:?COMMIT is required}"
+if [[ ! "$COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "COMMIT must be a full 40 character commit SHA" >&2
+    exit 1
+fi
+
+cd "${MISE_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}"
+registry="${IMAGE_REGISTRY:-ghcr.io/trogonstack/images/trogonai}"
+
+for values in devops/helm/charts/*/values.yaml; do
+    [ "$(yq eval 'has("serviceImage")' "$values")" = "true" ] || continue
+    name="$(basename "$(dirname "$values")")"
+    if [ -n "${DIGEST_DIR:-}" ]; then
+        digest="$(cat "${DIGEST_DIR}/${name}")"
+    else
+        digest="$(oras resolve "${registry}/${name}:${COMMIT}")"
+    fi
+    if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        echo "no digest for ${name} at ${COMMIT}: ${digest}" >&2
+        exit 1
+    fi
+    printf '%s:\n  serviceImage:\n    tag: %s\n    digest: %s\n' "$name" "$COMMIT" "$digest"
+done

@@ -29,6 +29,38 @@ Images follow the
 | `canary` | The newest build of `main` |
 | `<commit>` | The first build of that full commit SHA, never moved |
 
+Every deployment references an image by tag and digest, `<repository>:<tag>@sha256:<digest>`.
+Each image is a multi-platform index, and its SBOM and provenance attestations stay attached to that digest in the same repository.
+The image workflow does not publish `latest`.
+
+## Charts
+
+Every push to `main` publishes each chart under `devops/helm/charts/` to `oci://ghcr.io/trogonstack/charts/trogonai`, and Helm appends the chart name.
+
+| Chart | Reference |
+|---|---|
+| Umbrella | `oci://ghcr.io/trogonstack/charts/trogonai/trogon-sandbox` |
+| Each other chart | `oci://ghcr.io/trogonstack/charts/trogonai/<chart>` |
+
+| Tag | Points at |
+|---|---|
+| `0.0.0-sha-<commit>` | The charts of that full commit SHA, never moved |
+
+Charts get no moving tags. The chart of a commit defaults to the images of that same commit, pinned by digest, and carries the `org.opencontainers.image.source` and `org.opencontainers.image.revision` annotations.
+
+## Mirrors
+
+The sandbox charts pull third-party images from `ghcr.io/trogonstack/mirrors/<upstream>/<path>`, with the upstream path and tag unchanged and pinned by digest.
+`devops/oras/mirrors.txt` lists the pinned set, and the `mirror-container-images` workflow copies it with `oras copy -r`, so signatures and attestations move with each image.
+
+| Mirror | Upstream |
+|---|---|
+| `ghcr.io/trogonstack/mirrors/docker-hub/authzed/spicedb` | `docker.io/authzed/spicedb` |
+| `ghcr.io/trogonstack/mirrors/docker-hub/library/busybox` | `docker.io/library/busybox` |
+| `ghcr.io/trogonstack/mirrors/docker-hub/library/nats` | `docker.io/library/nats` |
+| `ghcr.io/trogonstack/mirrors/ghcr/oras-project/oras` | `ghcr.io/oras-project/oras` |
+| `ghcr.io/trogonstack/mirrors/ghcr/project-zot/zot` | `ghcr.io/project-zot/zot` |
+
 ## Migration
 
 | Image | Replaced by |

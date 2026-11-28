@@ -18,7 +18,7 @@ spec:
       serviceAccountName: {{ include "trogon-sandbox-dashboard.fullname" . }}
       containers:
         - name: sandbox-dashboard
-          image: "{{ .Values.global.imageRegistry }}/trogon-sandbox-dashboard:{{ .Values.global.imageTag }}"
+          image: {{ include "trogon-sandbox-library.image" (dict "image" .Values.serviceImage "name" "trogon-sandbox-dashboard" "global" .Values.global "path" "trogon-sandbox-dashboard.serviceImage") | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           args:
             - --listen=0.0.0.0:{{ .Values.service.port }}

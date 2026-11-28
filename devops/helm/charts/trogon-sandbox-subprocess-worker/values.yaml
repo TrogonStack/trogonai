@@ -34,3 +34,12 @@ egressProxy:
 # for it (SANDBOX_REQUIRE_COMMITTED_POLICY). The worker's own default is false, which runs such a
 # lease with unfenced credential requests; set false only while the broker commits no policies.
 requireCommittedPolicy: true
+
+# The image this chart deploys, as <repository>:<tag>@<digest>. An empty
+# repository means <global.imageRegistry>/<chart name>. Tag and digest have no
+# default: the chart published for a commit carries that commit's image, and a
+# checkout must set both (see docs/how-to/sandbox/deploy.md).
+serviceImage:
+  repository: ""
+  tag: ""
+  digest: ""

@@ -18,3 +18,12 @@ resources:
 # `required` needs every client (the broker control plane and every worker) to stamp the
 # committed policy revision on its requests.
 fenceMode: required
+
+# The image this chart deploys, as <repository>:<tag>@<digest>. An empty
+# repository means <global.imageRegistry>/<chart name>. Tag and digest have no
+# default: the chart published for a commit carries that commit's image, and a
+# checkout must set both (see docs/how-to/sandbox/deploy.md).
+serviceImage:
+  repository: ""
+  tag: ""
+  digest: ""
