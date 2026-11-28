@@ -1327,8 +1327,8 @@ async fn handle_request_with_keepalive_completes_fast() {
     let js_msg = make_js_msg("acp.v1.global.agent.initialize", &init, Some("_INBOX.1"));
 
     let agent = MockAgent::new();
-    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, |req: InitializeRequest| {
-        agent.initialize(req)
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req: InitializeRequest| {
+        with_keepalive(&js_msg, agent.initialize(req))
     })
     .await;
     assert!(result.is_ok());
@@ -1346,7 +1346,10 @@ async fn handle_request_with_keepalive_no_reply_subject() {
     let mut msg = msg;
     msg.headers = Some(encoded.headers);
     let js_msg = make_js_msg("acp.v1.global.agent.initialize", &init, None);
-    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req| {
+        with_keepalive(&js_msg, init_handler_error(req))
+    })
+    .await;
     assert!(result.is_err());
 }
 
@@ -1355,7 +1358,10 @@ async fn handle_request_with_keepalive_bad_payload() {
     let nats = MockNatsClient::new();
     let msg = make_nats_message("acp.v1.global.agent.initialize", b"not json", Some("_INBOX.1"));
     let js_msg = make_js_msg_raw("acp.v1.global.agent.initialize", b"not json", Some("_INBOX.1"));
-    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req| {
+        with_keepalive(&js_msg, init_handler_error(req))
+    })
+    .await;
     assert!(result.is_err());
 }
 
@@ -1368,7 +1374,10 @@ async fn handle_request_with_keepalive_handler_returns_error() {
     let mut msg = msg;
     msg.headers = Some(encoded.headers);
     let js_msg = make_js_msg("acp.v1.global.agent.initialize", &init, Some("_INBOX.1"));
-    let result = handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, init_handler_error).await;
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req| {
+        with_keepalive(&js_msg, init_handler_error(req))
+    })
+    .await;
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
     let error = published_wire_error(&nats);
@@ -1398,12 +1407,13 @@ async fn handle_request_with_keepalive_progress_ack_failure() {
     });
 
     let agent = MockAgent::new();
-    let result =
-        handle_jsonrpc_request_with_keepalive(&msg, "initialize", &nats, &js_msg, |req: InitializeRequest| async {
+    let result = handle_jsonrpc_request(&msg, "initialize", &nats, |req: InitializeRequest| {
+        with_keepalive(&js_msg, async {
             tokio::time::sleep(Duration::from_secs(20)).await;
             agent.initialize(req).await
         })
-        .await;
+    })
+    .await;
     assert!(result.is_ok());
 }
 
@@ -1418,11 +1428,10 @@ async fn handle_request_with_keepalive_handler_error() {
     let js_msg = make_js_msg("acp.v1.global.agent.authenticate", &auth, Some("_INBOX.1"));
 
     let agent = MockAgent::new();
-    let result =
-        handle_jsonrpc_request_with_keepalive(&msg, "authenticate", &nats, &js_msg, |req: AuthenticateRequest| {
-            agent.authenticate(req)
-        })
-        .await;
+    let result = handle_jsonrpc_request(&msg, "authenticate", &nats, |req: AuthenticateRequest| {
+        with_keepalive(&js_msg, agent.authenticate(req))
+    })
+    .await;
     assert!(result.is_ok());
     assert_eq!(nats.published_messages(), vec!["_INBOX.1"]);
     let error = published_wire_error(&nats);

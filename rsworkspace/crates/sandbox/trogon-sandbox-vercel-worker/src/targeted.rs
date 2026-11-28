@@ -10,10 +10,10 @@ use trogon_sandbox_contract::{
     WorkerId,
 };
 use trogon_sandbox_protocol::{
-    VerifiedRequest, decode_verified, nats_transfer, subjects, subscribe_verified, subscribe_verified_context,
+    INVALID_CLEANUP_SCOPE, VerifiedRequest, decode_verified, nats_transfer, subjects, subscribe_verified,
+    subscribe_verified_context,
 };
 
-use crate::cleanup_scope::{INVALID_CLEANUP_SCOPE, names_assignment};
 use crate::{VercelWorkerError, VercelWorkerProvider};
 
 /// Serves the assignments addressed to this worker alone: dispatches on its intake subject and cleanups on its cleanup
@@ -100,7 +100,7 @@ async fn answer_cleanup(
     let bytes = nats_transfer::receive(client, &message).await?;
     let request: ProviderCleanupRequest = serde_json::from_slice(&bytes)?;
     let exact = scope.is_some_and(|scope| {
-        scope.matches(message.subject.as_str(), &bytes) && names_assignment(scope.scope(), &request)
+        scope.matches(message.subject.as_str(), &bytes) && scope.scope().names_assignment(&request)
     });
     let response = if exact {
         vercel.cleanup_dispatch(&request).await

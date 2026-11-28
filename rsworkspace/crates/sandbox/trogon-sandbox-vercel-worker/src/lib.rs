@@ -8,7 +8,6 @@ mod base;
 mod cancel_dispatch;
 mod capture_frame;
 mod check_runtime;
-mod cleanup_scope;
 mod collected;
 mod constants;
 mod drain;

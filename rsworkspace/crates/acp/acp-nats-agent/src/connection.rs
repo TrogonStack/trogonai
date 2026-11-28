@@ -663,56 +663,16 @@ where
     handler(request).await.map_err(DispatchError::NotificationHandler)
 }
 
-async fn handle_jsonrpc_request_with_keepalive<N, Resp, ReqT, F, M>(
-    msg: &Message,
-    method: &str,
-    nats: &N,
-    js_msg: &M,
-    handler: impl FnOnce(ReqT) -> F,
-) -> Result<(), DispatchError>
-where
-    N: PublishClient + FlushClient,
-    ReqT: serde::de::DeserializeOwned,
-    F: std::future::Future<Output = agent_client_protocol::Result<Resp>>,
-    Resp: serde::Serialize,
-    M: JsAckWith,
-{
-    let reply_to = msg.reply.as_deref().ok_or(DispatchError::NoReplySubject)?;
-    let headers = msg.headers.clone().unwrap_or_default();
-
-    let request: ReqT = match acp_nats::wire::decode_request_params(method, &headers, &msg.payload) {
-        Ok(req) => req,
-        Err(e) => {
-            let id = response_id_from_request_headers(&headers);
-            let encoded = encode_agent_error(id, &request_decode_error(&e));
-            let _ = reply_wire(nats, reply_to, encoded).await;
-            return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
-                "{e}"
-            ))));
-        }
-    };
-
-    let response_id = response_id_from_request_headers(&headers);
-    let handler_fut = handler(request);
-    tokio::pin!(handler_fut);
-
+/// Runs `fut` while sending JetStream in-progress acks every
+/// [`KEEPALIVE_INTERVAL`], so a long-running handler is not redelivered.
+async fn with_keepalive<M: JsAckWith, F: std::future::Future>(js_msg: &M, fut: F) -> F::Output {
+    tokio::pin!(fut);
     let mut keepalive = tokio::time::interval(KEEPALIVE_INTERVAL);
     keepalive.tick().await;
 
     loop {
         tokio::select! {
-            result = &mut handler_fut => {
-                return match result {
-                    Ok(resp) => {
-                        let encoded = encode_success(response_id, &resp)?;
-                        reply_wire(nats, reply_to, encoded).await
-                    }
-                    Err(err) => {
-                        let encoded = encode_agent_error(response_id, &err);
-                        reply_wire(nats, reply_to, encoded).await
-                    }
-                };
-            }
+            output = &mut fut => return output,
             _ = keepalive.tick() => {
                 let _ = js_msg.ack_with(AckKind::Progress).await
                     .inspect_err(|e| warn!(error = %e, "Failed to send in_progress keepalive"));
@@ -943,125 +903,18 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
     let subject = msg.subject.as_str();
 
     let result = match method {
-        SessionAgentMethod::Load => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: LoadSessionRequest| agent.load_session(req)),
-            )
-            .await
-        }
         SessionAgentMethod::Prompt => {
-            handle_jsonrpc_request_with_keepalive(
-                &msg,
-                method.protocol_method(),
-                nats,
-                &js_msg,
-                in_session(&session_id, |req: PromptRequest| agent.prompt(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::Cancel => {
-            handle_wire_notification(
-                &msg,
-                method.protocol_method(),
-                in_session(&session_id, |req: CancelNotification| agent.cancel(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::SetMode => {
             handle_jsonrpc_request(
                 &msg,
                 method.protocol_method(),
                 nats,
-                in_session(&session_id, |req: SetSessionModeRequest| agent.set_session_mode(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::SetConfigOption => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: SetSessionConfigOptionRequest| {
-                    agent.set_session_config_option(req)
+                in_session(&session_id, |req: PromptRequest| {
+                    with_keepalive(&js_msg, agent.prompt(req))
                 }),
             )
             .await
         }
-        SessionAgentMethod::Fork => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: ForkSessionRequest| agent.fork_session(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::Resume => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: ResumeSessionRequest| agent.resume_session(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::Close => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: CloseSessionRequest| agent.close_session(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::Archive => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: ArchiveSessionRequest| agent.archive_session(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::Unarchive => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: UnarchiveSessionRequest| agent.unarchive_session(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::Status => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: SessionStatusRequest| agent.session_status(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::SetTitle => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: SetSessionTitleRequest| agent.set_session_title(req)),
-            )
-            .await
-        }
-        SessionAgentMethod::Delete => {
-            handle_jsonrpc_request(
-                &msg,
-                method.protocol_method(),
-                nats,
-                in_session(&session_id, |req: DeleteSessionRequest| agent.delete_session(req)),
-            )
-            .await
-        }
+        other => dispatch_session(other, &session_id, &msg, agent, nats).await,
     };
 
     match &result {

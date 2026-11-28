@@ -1,4 +1,4 @@
-use trogon_sandbox_contract::{DispatchAttemptId, LeaseEpoch, LeaseId, TenantId, WorkerId};
+use trogon_sandbox_contract::{DispatchAttemptId, LeaseEpoch, LeaseId, ProviderCleanupRequest, TenantId, WorkerId};
 
 /// What a signed per-lease request is bound to, besides its subject.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -14,3 +14,18 @@ pub struct VerbScope {
     /// The lease epoch, signed only when present.
     pub epoch: Option<LeaseEpoch>,
 }
+
+impl VerbScope {
+    /// Whether this scope was signed for exactly the lease, worker, attempt and epoch `request` names. A targeted
+    /// cleanup destroys state, so it runs only when this holds.
+    pub fn names_assignment(&self, request: &ProviderCleanupRequest) -> bool {
+        let identity = &request.identity;
+        self.lease_id == identity.lease_id
+            && self.worker_id.as_ref() == Some(&identity.target.worker_id)
+            && self.attempt_id.as_ref() == Some(&identity.target.attempt_id)
+            && self.epoch == identity.target.epoch
+    }
+}
+
+#[cfg(test)]
+mod tests;

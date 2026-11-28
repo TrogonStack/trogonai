@@ -439,3 +439,6 @@ pub const CONFIRMATIONS: u32 = 2;
 /// How long one authority request may take.
 pub(crate) const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const MAX_LEGACY_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Why a targeted cleanup was refused: its signed scope does not name exactly the assignment it asks to clean up.
+pub const INVALID_CLEANUP_SCOPE: &str = "targeted cleanup requires exact verified assignment authority";

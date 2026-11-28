@@ -21,15 +21,25 @@ pub fn encode_read_file_response_within(
     path: &str,
     max_payload: usize,
 ) -> serde_json::Result<Vec<u8>> {
+    let too_large = |data: &[u8]| {
+        serde_json::to_vec(&ReadFileResponse::Denied(LeaseError::FileTooLargeForTransport {
+            path: path.to_owned(),
+            bytes: data.len() as u64,
+            max_payload_bytes: max_payload as u64,
+        }))
+    };
+    // The JSON encoding of the bytes is never shorter than the bytes themselves, so content already past the limit
+    // is refused without encoding it.
+    if let ReadFileResponse::Content { data } = response
+        && data.len() > max_payload
+    {
+        return too_large(data);
+    }
     let body = serde_json::to_vec(response)?;
     if let ReadFileResponse::Content { data } = response
         && body.len() > max_payload
     {
-        return serde_json::to_vec(&ReadFileResponse::Denied(LeaseError::FileTooLargeForTransport {
-            path: path.to_owned(),
-            bytes: data.len() as u64,
-            max_payload_bytes: max_payload as u64,
-        }));
+        return too_large(data);
     }
     Ok(body)
 }

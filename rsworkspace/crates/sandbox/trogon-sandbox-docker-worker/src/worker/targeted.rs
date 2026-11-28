@@ -75,10 +75,7 @@ pub(super) async fn serve(
                         let Ok(request) = serde_json::from_slice::<ProviderCleanupRequest>(&bytes) else { return; };
                         let response = match verified.scope {
                             Some(scope) if scope.matches(message.subject.as_str(), &bytes)
-                                && scope.scope().lease_id == request.identity.lease_id
-                                && scope.scope().worker_id.as_ref() == Some(&request.identity.target.worker_id)
-                                && scope.scope().attempt_id.as_ref() == Some(&request.identity.target.attempt_id)
-                                && scope.scope().epoch == request.identity.target.epoch => {
+                                && scope.scope().names_assignment(&request) => {
                                     docker.cleanup_targeted(&request, &scope.scope().tenant.clone()).await
                                 }
                             _ => ProviderCleanupResponse::Failed { identity: request.identity.clone(), message: "Docker cleanup requires exact verified assignment authority".into() },

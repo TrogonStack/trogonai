@@ -177,25 +177,22 @@ impl LocalDockerProvider {
     async fn await_sidecar_firewall(&self, sidecar_id: &str, ready: &SidecarReadyMarker) -> Result<(), DockerError> {
         let deadline = tokio::time::Instant::now() + SIDECAR_READY_TIMEOUT;
         loop {
-            if ready.is_written().await? {
-                return Ok(());
-            }
-            let cause = match self
+            let status = self
                 .engine
                 .inspect(sidecar_id)
                 .await
-                .map_err(|error| error.during("inspect egress sidecar"))?
-            {
+                .map_err(|error| error.during("inspect egress sidecar"))?;
+            // Read the nonce after inspecting: the shell writes it and then execs the proxy, so a sidecar seen
+            // stopping may still have written it just before. Only a stop with no nonce is a failure.
+            if ready.is_written().await? {
+                return Ok(());
+            }
+            let cause = match status {
                 InspectStatus::Running | InspectStatus::Pending => None,
                 InspectStatus::Exited(code) => Some(EgressRulesError::SidecarExited { code }),
                 InspectStatus::Failed(state) => Some(EgressRulesError::SidecarFailed { state }),
             };
-            // The shell writes the nonce and then execs the proxy, so a sidecar seen stopping may still have
-            // written it just before; only a stop with no nonce is a failure.
             if let Some(cause) = cause {
-                if ready.is_written().await? {
-                    return Ok(());
-                }
                 return Err(DockerError::EgressRulesNotInstalled {
                     sidecar_id: sidecar_id.to_string(),
                     cause,

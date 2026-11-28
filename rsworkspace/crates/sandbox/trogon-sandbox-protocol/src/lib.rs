@@ -209,7 +209,7 @@ pub use constants::{
 };
 pub use constants::{
     COMMAND_REPLY_MARKER_ROOM, CONFIRMATIONS, DEFAULT_CHECK_INTERVAL, DEFAULT_GRACE, DEFAULT_PARTITION_AFTER,
-    ENV_WORKER_AUTHORITY, MAX_LEASES_PER_REQUEST, MIN_LEASE_AGE,
+    ENV_WORKER_AUTHORITY, INVALID_CLEANUP_SCOPE, MAX_LEASES_PER_REQUEST, MIN_LEASE_AGE,
 };
 pub use context_verified_subscriber::ContextVerifiedSubscriber;
 pub use conventional_aws_pair::ConventionalAwsPair;
