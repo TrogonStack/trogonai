@@ -186,3 +186,11 @@ fn unc_and_extended_prefix() {
     assert_eq!(strip_extended_prefix(r"\\?\UNC\srv\s"), r"srv\s");
     assert_eq!(strip_extended_prefix(r"C:\y"), r"C:\y");
 }
+
+#[test]
+fn a_stored_file_id_column_is_empty_or_whole() -> Result<(), Box<dyn std::error::Error>> {
+    assert!(FileId::from_column(&[])?.is_none());
+    assert!(FileId::from_column(&[7u8; 24])?.is_some());
+    assert!(FileId::from_column(&[7u8; 5]).is_err());
+    Ok(())
+}

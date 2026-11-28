@@ -211,13 +211,15 @@ pub fn ambient_recorded_paths() -> Result<Vec<String>> {
 }
 
 /// Whether `canon` is a recorded ambient deny target - the
-/// recompose fold-in predicate. Errors read as "not recorded"
-/// (fail-open for the DENY floor is bounded: the next install
-/// re-records and re-applies).
-pub fn ambient_deny_recorded(canon: &str) -> bool {
-    ambient_recorded_paths()
-        .map(|v| v.iter().any(|p| p == canon))
-        .unwrap_or(false)
+/// recompose fold-in predicate. An unreadable record is an error: the
+/// caller must not drop the write-deny floor on a path it cannot rule
+/// out.
+pub fn ambient_deny_recorded(canon: &str) -> Result<bool> {
+    ambient_deny_recorded_in(ambient_recorded_paths(), canon)
+}
+
+fn ambient_deny_recorded_in(recorded: Result<Vec<String>>, canon: &str) -> Result<bool> {
+    Ok(recorded?.iter().any(|p| p == canon))
 }
 
 /// Whether the install-time ambient write-deny step is complete:

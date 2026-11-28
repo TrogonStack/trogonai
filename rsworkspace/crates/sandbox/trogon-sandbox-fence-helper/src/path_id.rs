@@ -478,6 +478,15 @@ impl FileId {
         out[8..].copy_from_slice(&self.id128);
         out
     }
+    /// A stored column: empty is a row recorded without an object, any
+    /// other value must be a whole file id.
+    pub fn from_column(b: &[u8]) -> Result<Option<Self>> {
+        if b.is_empty() {
+            return Ok(None);
+        }
+        Self::from_bytes(b).map(Some)
+    }
+
     pub fn from_bytes(b: &[u8]) -> Result<Self> {
         if b.len() != 24 {
             return Err(FenceHelperError::msg(format!(
