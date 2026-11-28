@@ -5,7 +5,7 @@
 # network policy must allow the hosts it visits.
 #
 #   docker build -f devops/docker/images/sandbox-browser/Dockerfile -t sandbox-browser:dev .
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim@sha256:be979e5523c76fa4d5ca4ebd3099078f220aa47ec39c48ad5b5df9314debd6eb
 
 ARG OCI_REVISION
 LABEL org.opencontainers.image.source="https://github.com/TrogonStack/trogonai" \
