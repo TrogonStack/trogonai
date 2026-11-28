@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use acp_nats::jetstream::consumers::{COMMANDS_CONSUMER_DURABLE, agent_commands_consumer};
+use acp_nats::jetstream::consumers::COMMANDS_CONSUMER_DURABLE;
 use acp_nats::jetstream::provision::provision_streams;
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::{AcpPrefix, AgentHandler};
@@ -117,14 +117,14 @@ async fn publish_prompt(js: &jetstream::Context, prefix: &AcpPrefix, id: &str) -
 /// Shortens the durable's `ack_wait` under the running agent side, so a
 /// prompt outlives it without waiting minutes. Same effect as acks lost in a
 /// partition: the 15 s keepalive cannot reset a 1 s `ack_wait` in time.
+///
+/// Keeps the rest of the durable's config, since NATS refuses to move its
+/// start position.
 async fn shorten_ack_wait(js: &jetstream::Context, prefix: &AcpPrefix) -> TestResult {
     let stream = js.get_stream(commands_stream_name(prefix)).await?;
-    stream
-        .create_consumer(jetstream::consumer::pull::Config {
-            ack_wait: SHORT_ACK_WAIT,
-            ..agent_commands_consumer()
-        })
-        .await?;
+    let mut config = stream.consumer_info(COMMANDS_CONSUMER_DURABLE).await?.config.clone();
+    config.ack_wait = SHORT_ACK_WAIT;
+    stream.create_consumer(config).await?;
     Ok(())
 }
 
@@ -418,6 +418,97 @@ async fn deleted_consumer_is_recreated_under_a_running_agent_side() -> TestResul
     })
     .await?;
     assert_eq!(next.cancelled(), ["next-host"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn command_running_when_the_consumer_is_lost_still_reaches_the_next_host() -> TestResult {
+    let server = JetStreamTestServer::start().await;
+    let client = server.client().await;
+    let js = server.jetstream().await;
+    let prefix = AcpPrefix::new("lostinflight")?;
+    provision_streams(&NatsJetStreamClient::new(js.clone()), &prefix).await?;
+    let mut responses = subscribe_responses(&client, &prefix).await?;
+
+    // The first host loses the durable while the prompt runs, then stops
+    // without settling it.
+    let first = RecordingAgent::holding_prompts(Duration::from_secs(600));
+    run_agent_side(client.clone(), js.clone(), prefix.clone(), first.clone(), || {
+        let js = js.clone();
+        let prefix = prefix.clone();
+        let first = first.clone();
+        async move {
+            wait_for_consumer(&js, &prefix).await?;
+            publish_prompt(&js, &prefix, "prompt-1").await?;
+            wait_for_prompts(&first, 1).await?;
+
+            let stream = js.get_stream(commands_stream_name(&prefix)).await?;
+            stream.delete_consumer(COMMANDS_CONSUMER_DURABLE).await?;
+            publish_cancel(&js, &prefix, "after-loss").await?;
+            wait_for_cancels(&first, 1).await?;
+            shorten_ack_wait(&js, &prefix).await
+        }
+    })
+    .await?;
+    // Let ack_wait run out with no host holding the prompt.
+    tokio::time::sleep(SHORT_ACK_WAIT * 2).await;
+
+    let second = RecordingAgent::default();
+    run_agent_side(client.clone(), js.clone(), prefix.clone(), second.clone(), || {
+        let second = second.clone();
+        let responses = &mut responses;
+        async move {
+            wait_for_prompts(&second, 1).await?;
+            let received = responses_within(responses, Duration::from_secs(2)).await;
+            assert_eq!(received.len(), 1, "the next host answers the prompt once");
+            Ok(())
+        }
+    })
+    .await?;
+    assert_eq!(first.prompts(), 1);
+    assert!(second.cancelled().is_empty(), "the settled cancel must not run again");
+    Ok(())
+}
+
+#[tokio::test]
+async fn recreated_consumer_replays_no_command_this_host_settled() -> TestResult {
+    let server = JetStreamTestServer::start().await;
+    let client = server.client().await;
+    let js = server.jetstream().await;
+    let prefix = AcpPrefix::new("replaysettled")?;
+    provision_streams(&NatsJetStreamClient::new(js.clone()), &prefix).await?;
+    let mut responses = subscribe_responses(&client, &prefix).await?;
+
+    let agent = RecordingAgent::holding_prompts(Duration::from_secs(2));
+    run_agent_side(client.clone(), js.clone(), prefix.clone(), agent.clone(), || {
+        let js = js.clone();
+        let prefix = prefix.clone();
+        let agent = agent.clone();
+        let responses = &mut responses;
+        async move {
+            wait_for_consumer(&js, &prefix).await?;
+            publish_prompt(&js, &prefix, "prompt-1").await?;
+            wait_for_prompts(&agent, 1).await?;
+            // Settled while the prompt still runs, so the recreated durable
+            // starts before it.
+            publish_cancel(&js, &prefix, "settled").await?;
+            wait_for_cancels(&agent, 1).await?;
+
+            let stream = js.get_stream(commands_stream_name(&prefix)).await?;
+            stream.delete_consumer(COMMANDS_CONSUMER_DURABLE).await?;
+            let sequence = publish_cancel(&js, &prefix, "after-loss").await?;
+            wait_for_cancels(&agent, 2).await?;
+
+            // Outlasts the prompt, so its replay on the recreated durable has
+            // settled too.
+            let received = responses_within(responses, Duration::from_secs(3)).await;
+            assert_eq!(received.len(), 1, "exactly one response for the request id");
+            wait_for_ack_floor(&js, &prefix, sequence).await
+        }
+    })
+    .await?;
+    assert_eq!(agent.prompts(), 1);
+    assert_eq!(agent.cancelled(), ["settled", "after-loss"]);
     Ok(())
 }
 

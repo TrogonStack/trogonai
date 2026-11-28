@@ -1550,9 +1550,9 @@ async fn serve_js_does_not_dispatch_a_redelivery_of_an_in_flight_command() {
     let original = make_js_msg(
         "acp.v1.session.s1.agent.prompt",
         &PromptRequest::new("s1", Vec::new()),
-        None,
+        Some("$JS.ACK.ACP_COMMANDS.AGENT_COMMANDS.1.7.1.0.0"),
     );
-    // A redelivery carries the same subject and headers, with its own ack handle.
+    // A redelivery carries the same stream sequence, with its own ack handle.
     let redelivered = MockJsMessage::new(original.message().clone());
     let redelivered_signals = redelivered.clone();
 
@@ -1572,23 +1572,29 @@ async fn serve_js_does_not_dispatch_a_redelivery_of_an_in_flight_command() {
             tx.unbounded_send(Ok(original)).unwrap();
             yield_until(|| agent.prompts.load(Ordering::SeqCst) > 0).await;
             tx.unbounded_send(Ok(redelivered)).unwrap();
-            yield_until(|| !redelivered_signals.signals().is_empty()).await;
+            for _ in 0..100 {
+                tokio::task::yield_now().await;
+            }
 
             assert_eq!(
                 agent.prompts.load(Ordering::SeqCst),
                 1,
                 "the redelivery must not reach the agent"
             );
-            assert_eq!(
-                redelivered_signals.signals(),
-                [AckKindSnapshot::AckWith(AckKindValue::Progress)],
-                "the redelivery is only kept in progress"
+            assert!(
+                redelivered_signals.signals().is_empty(),
+                "the redelivery waits for the original"
             );
             assert!(nats.published_messages().is_empty());
 
             agent.release.notify_one();
-            yield_until(|| !nats.published_messages().is_empty()).await;
+            yield_until(|| !redelivered_signals.signals().is_empty()).await;
             assert_eq!(nats.published_messages(), ["acp.v1.session.s1.agent.response"]);
+            assert_eq!(
+                redelivered_signals.signals(),
+                [AckKindSnapshot::Ack],
+                "the redelivery is settled with the original"
+            );
 
             drop(tx);
             serve.await.unwrap().unwrap();
@@ -1682,8 +1688,9 @@ fn cancel_delivered_at(stream_sequence: u64) -> MockJsMessage {
 }
 
 #[tokio::test]
-async fn recreated_consumer_starts_after_the_highest_command_seen() {
-    // The second delivery is a redelivery of an older command.
+async fn recreated_consumer_starts_at_the_oldest_command_still_running() {
+    // Both are still running when the durable is lost, so the recreated one
+    // must deliver them again for another host to take over if this one dies.
     let configs = durable_configs_around_a_loss(vec![cancel_delivered_at(41), cancel_delivered_at(40)]).await;
 
     let policies: Vec<_> = configs.iter().map(|config| config.deliver_policy).collect();
@@ -1691,7 +1698,7 @@ async fn recreated_consumer_starts_after_the_highest_command_seen() {
         policies,
         [
             DeliverPolicy::New,
-            DeliverPolicy::ByStartSequence { start_sequence: 42 }
+            DeliverPolicy::ByStartSequence { start_sequence: 40 }
         ]
     );
     assert!(

@@ -8,7 +8,7 @@ use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, 
 use acp_nats::wire::{
     encode_agent_error, encode_success, req_id_from_request_headers, response_id_from_request_headers,
 };
-use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ReqId, ResponseSubject};
+use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ResponseSubject};
 use agent_client_protocol::v1::schema::{
     ArchiveSessionRequest, AuthStatusRequest, AuthenticateRequest, CancelNotification, CloseSessionRequest,
     DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
@@ -27,13 +27,13 @@ use futures::future::{Either, LocalBoxFuture, Ready, ready};
 use serde::de::Error;
 use serde_json::value::RawValue;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tracing::{debug, info, warn};
 use trogon_nats::jetstream::{
-    ConsumerLoss, JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetOrCreateConsumer, JetStreamGetStream,
+    ConsumerLoss, JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetOrCreateConsumer, JetStreamGetStream, JsAck,
     JsAckWith, JsDispatchMessage, JsMessageRef, is_get_stream_not_found, stream_sequence,
 };
 use trogon_nats::{FlushClient, PublishClient, RequestClient, SubscribeClient};
@@ -705,40 +705,41 @@ where
 
     info!(stream = %stream_name, "Starting JetStream consumer for COMMANDS stream");
 
-    let mut resume = CommandsResume::starting_now();
+    let resume = CommandsResume::starting_now();
     let mut messages = subscribe_commands(&js, &stream_name, agent_commands_consumer()).await?;
 
     let nats = Rc::new(nats);
     let prefix = Rc::new(prefix.clone());
-    let in_flight = InFlightCommands::default();
 
     while let Some(msg_result) = messages.next().await {
         match msg_result {
             Ok(js_msg) => {
-                resume.saw(js_msg.message());
-                let Ok(claim) = in_flight.claim(js_msg.message()) else {
-                    // JetStream redelivered a command this host is still running
-                    // (its acks were lost, e.g. in a partition). Running it again
-                    // would answer the same request id twice; restarting its
-                    // ack_wait leaves the original to settle it.
-                    info!(subject = %js_msg.message().subject, "Command redelivered while still in flight; not dispatching it again");
-                    let _ = js_msg
-                        .ack_with(AckKind::Progress)
-                        .await
-                        .inspect_err(|e| warn!(error = %e, "Failed to mark redelivered command in progress"));
-                    continue;
+                let (js_msg, settle) = match resume.receive(js_msg) {
+                    Received::New(js_msg, settle) => (js_msg, settle),
+                    // Held and settled with the original (see `CommandsResume`).
+                    Received::Running => {
+                        info!("Command redelivered while still running; not dispatching it again");
+                        continue;
+                    }
+                    Received::Settled(js_msg) => {
+                        info!(subject = %js_msg.message().subject, "Command replayed after this host settled it; acking it");
+                        ack_redelivered(&js_msg).await;
+                        continue;
+                    }
                 };
                 let agent = agent.clone();
                 let nats = nats.clone();
                 let prefix = prefix.clone();
                 spawn(Box::pin(async move {
                     dispatch_js_message(js_msg, agent.as_ref(), nats.as_ref(), &prefix).await;
-                    drop(claim);
+                    if let Some(settle) = settle {
+                        settle.finish().await;
+                    }
                 }));
             }
             Err(e) if e.consumer_lost() => {
                 warn!(error = %e, "COMMANDS consumer is gone; recreating it");
-                let config = resumed_agent_commands_consumer(resume.deliver_policy());
+                let config = resumed_agent_commands_consumer(resume.start_replay());
                 messages = resubscribe_commands(&js, &stream_name, config).await?;
             }
             Err(e) => {
@@ -843,44 +844,110 @@ where
     }
 }
 
-/// Where a recreated COMMANDS durable starts, so the commands published while
-/// the old one was gone are still delivered.
+/// Where a recreated COMMANDS durable starts, and which of the commands it
+/// replays this host already has.
 ///
-/// Once this host has received a command, the recreated durable starts right
-/// after the highest stream sequence it saw: everything up to it already
-/// reached this host, and starting there runs nothing twice on one host.
-/// Commands after it that another host held unsettled are delivered again,
-/// as they would be after that host's `ack_wait`.
+/// It starts at the oldest command this host is still running, or right after
+/// the highest stream sequence it saw when none is running. A running command
+/// must be on the new durable: an ack on the lost one settles nothing, and if
+/// this host dies first, only the new durable's `ack_wait` hands the command
+/// to another host. Before any command arrived, it starts at the time this
+/// host subscribed, less [`RESUME_REWIND`] for clock skew between host and
+/// server, which may run a command acked just before then a second time.
 ///
-/// Before any command arrived, it starts at the time this host subscribed,
-/// less [`RESUME_REWIND`] for clock skew between host and server, which may
-/// run a command acked just before then a second time.
-struct CommandsResume {
+/// A delivery of a command this host is running (a replay, or acks lost in a
+/// partition) is held and acked with the original; one it already settled is
+/// acked without running it again. Commands that another host held unsettled
+/// are delivered again, as they would be after that host's `ack_wait`.
+///
+/// Per host on purpose: a command left unsettled by a host that stopped or
+/// crashed must run on the next host, which starts with nothing tracked.
+struct CommandsResume<M> {
     subscribed_at: SystemTime,
-    last_sequence: Option<u64>,
+    deliveries: Rc<RefCell<Deliveries<M>>>,
 }
 
-impl CommandsResume {
+struct Deliveries<M> {
+    last_sequence: Option<u64>,
+    /// Commands from the oldest running one on. Settled ones are kept while a
+    /// replay may still deliver them.
+    by_sequence: BTreeMap<u64, Delivery<M>>,
+    /// The highest sequence a recreated durable replays, while it does.
+    replaying_through: Option<u64>,
+}
+
+enum Delivery<M> {
+    /// Not settled yet, with the latest redelivery to ack along with it.
+    /// Boxed so settled entries stay small.
+    Running(Option<Box<M>>),
+    Settled,
+}
+
+/// What to do with a command the COMMANDS consumer delivered.
+enum Received<M> {
+    /// Not seen before: dispatch it, then [`Settle::finish`] it.
+    New(M, Option<Settle<M>>),
+    /// Still running here; held to settle with the original.
+    Running,
+    /// Already settled here: ack it without running it again.
+    Settled(M),
+}
+
+impl<M: JsDispatchMessage> CommandsResume<M> {
     fn starting_now() -> Self {
         Self {
             subscribed_at: SystemTime::now(),
-            last_sequence: None,
+            deliveries: Rc::new(RefCell::new(Deliveries {
+                last_sequence: None,
+                by_sequence: BTreeMap::new(),
+                replaying_through: None,
+            })),
         }
     }
 
-    /// Records a delivered command. A redelivery carries an older sequence,
-    /// so only the highest one is kept.
-    fn saw(&mut self, msg: &Message) {
-        if let Some(sequence) = stream_sequence(msg) {
-            self.last_sequence = self.last_sequence.max(Some(sequence));
+    fn receive(&self, js_msg: M) -> Received<M> {
+        let Some(sequence) = stream_sequence(js_msg.message()) else {
+            return Received::New(js_msg, None);
+        };
+        let mut deliveries = self.deliveries.borrow_mut();
+        deliveries.last_sequence = deliveries.last_sequence.max(Some(sequence));
+        let received = match deliveries.by_sequence.get_mut(&sequence) {
+            Some(Delivery::Running(held)) => {
+                *held = Some(Box::new(js_msg));
+                Received::Running
+            }
+            Some(Delivery::Settled) => Received::Settled(js_msg),
+            None => {
+                deliveries.by_sequence.insert(sequence, Delivery::Running(None));
+                Received::New(
+                    js_msg,
+                    Some(Settle {
+                        deliveries: self.deliveries.clone(),
+                        sequence,
+                    }),
+                )
+            }
+        };
+        if deliveries.replaying_through.is_some_and(|through| sequence >= through) {
+            deliveries.replaying_through = None;
+            deliveries.prune();
         }
+        received
     }
 
-    fn deliver_policy(&self) -> DeliverPolicy {
-        match self.last_sequence {
-            Some(sequence) => DeliverPolicy::ByStartSequence {
-                start_sequence: sequence.saturating_add(1),
-            },
+    /// The deliver policy for recreating the lost durable. Starts the replay
+    /// it delivers, so call it once per recreate.
+    fn start_replay(&self) -> DeliverPolicy {
+        let mut deliveries = self.deliveries.borrow_mut();
+        let oldest_running = deliveries
+            .by_sequence
+            .iter()
+            .find_map(|(sequence, delivery)| matches!(delivery, Delivery::Running(_)).then_some(*sequence));
+        if oldest_running.is_some() {
+            deliveries.replaying_through = deliveries.last_sequence;
+        }
+        match oldest_running.or_else(|| deliveries.last_sequence.map(|sequence| sequence.saturating_add(1))) {
+            Some(start_sequence) => DeliverPolicy::ByStartSequence { start_sequence },
             None => DeliverPolicy::ByStartTime {
                 start_time: self
                     .subscribed_at
@@ -892,48 +959,49 @@ impl CommandsResume {
     }
 }
 
-/// Requests this host is running from COMMANDS, keyed by subject and
-/// `Jsonrpc-Id`, so a redelivery of one is not run a second time.
-///
-/// Per host on purpose: a command left unsettled by a host that stopped or
-/// crashed must run on the next host, whose set starts empty. Notifications carry
-/// no id and are never tracked.
-#[derive(Default)]
-struct InFlightCommands(InFlightSet);
-
-type InFlightKey = (String, ReqId);
-type InFlightSet = Rc<RefCell<HashSet<InFlightKey>>>;
-
-/// The same request is already running on this host.
-struct AlreadyRunning;
-
-impl InFlightCommands {
-    /// `Ok(None)` for a notification, which is never tracked.
-    fn claim(&self, msg: &Message) -> Result<Option<InFlightClaim>, AlreadyRunning> {
-        let Some(req_id) = msg.headers.as_ref().and_then(req_id_from_request_headers) else {
-            return Ok(None);
-        };
-        let key = (msg.subject.to_string(), req_id);
-        if !self.0.borrow_mut().insert(key.clone()) {
-            return Err(AlreadyRunning);
+impl<M> Deliveries<M> {
+    /// Drops the settled commands before the oldest running one.
+    fn prune(&mut self) {
+        while let Some(entry) = self.by_sequence.first_entry()
+            && matches!(entry.get(), Delivery::Settled)
+        {
+            entry.remove();
         }
-        Ok(Some(InFlightClaim {
-            set: self.0.clone(),
-            key,
-        }))
     }
 }
 
-/// Releases its request from [`InFlightCommands`] when dropped.
-struct InFlightClaim {
-    set: InFlightSet,
-    key: InFlightKey,
+/// Marks a dispatched command settled.
+struct Settle<M> {
+    deliveries: Rc<RefCell<Deliveries<M>>>,
+    sequence: u64,
 }
 
-impl Drop for InFlightClaim {
-    fn drop(&mut self) {
-        self.set.borrow_mut().remove(&self.key);
+impl<M: JsAck> Settle<M> {
+    /// Call once the command is settled; also acks a redelivery held meanwhile.
+    async fn finish(self) {
+        let held = {
+            let mut deliveries = self.deliveries.borrow_mut();
+            let held = match deliveries.by_sequence.insert(self.sequence, Delivery::Settled) {
+                Some(Delivery::Running(held)) => held,
+                _ => None,
+            };
+            if deliveries.replaying_through.is_none() {
+                deliveries.prune();
+            }
+            held
+        };
+        if let Some(redelivered) = held {
+            ack_redelivered(redelivered.as_ref()).await;
+        }
     }
+}
+
+/// Acks a delivery of a command this host already ran or is running.
+async fn ack_redelivered(js_msg: &impl JsAck) {
+    let _ = js_msg
+        .ack()
+        .await
+        .inspect_err(|e| warn!(error = %e, "Failed to ack redelivered command"));
 }
 
 async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + Sync, M: JsDispatchMessage>(
