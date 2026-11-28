@@ -52,3 +52,17 @@ from `trogon-sandbox-observability`.
 The binary reads its settings from flags or environment variables. The access
 token is read from `VERCEL_TOKEN`, and the team and project from `VERCEL_TEAM_ID` and
 `VERCEL_PROJECT_ID`. It stops on interrupt.
+
+## Hosted tests
+
+The `hosted_conformance`, `hosted_egress_diagnostic` and `hosted_image_contract`
+tests run against a real Vercel team. They are skipped by default and run with
+`SANDBOX_VERCEL_HOSTED_TEST=1` and `--ignored`, for example
+`cargo test -p trogon-sandbox-vercel-worker --test hosted_conformance -- --ignored`.
+They read `VERCEL_TOKEN`, `VERCEL_TEAM_ID` and `VERCEL_PROJECT_ID`, and optionally
+`SANDBOX_VERCEL_API_URL`. The conformance lane also reads
+`SANDBOX_CONFORMANCE_NATS_URL`, needs a worker of the same team already running on
+it, and optionally reads `SANDBOX_CONFORMANCE_WORKER_ID` and
+`SANDBOX_CONFORMANCE_IMAGE`. The `hosted_image_contract` lanes keep a native
+snapshot until they retire it, so they also need `SANDBOX_VERCEL_PAID_TEST=1`, and
+the custom image lane needs `SANDBOX_VERCEL_CUSTOM_IMAGE`.

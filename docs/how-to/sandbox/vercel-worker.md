@@ -112,6 +112,26 @@ its new session and routes. A successful snapshot receipt is returned even if
 resume fails, and the next operation or wake retries resume. If that retry also
 fails, operations can receive a vendor error against the old session.
 
+## Run the hosted tests
+
+Three test binaries run against a real Vercel team. They are ignored by default,
+cost money, and never run in CI. Start them with `--ignored` and the variables below.
+
+| Test binary | Variables it needs |
+|-------------|--------------------|
+| `hosted_conformance` | `SANDBOX_VERCEL_HOSTED_TEST=1`, `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, `SANDBOX_CONFORMANCE_NATS_URL` and a running worker of the same team on that NATS server. Optional: `SANDBOX_CONFORMANCE_WORKER_ID`, `SANDBOX_CONFORMANCE_IMAGE`, `SANDBOX_VERCEL_API_URL`. |
+| `hosted_egress_diagnostic` | `SANDBOX_VERCEL_HOSTED_TEST=1`, `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`. It reports what the allow-all and deny-all policies do and does not judge conformance. |
+| `hosted_image_contract` | The same as the diagnostic, plus `SANDBOX_VERCEL_PAID_TEST=1` because a snapshot is stored until the test retires it. The custom image test also needs `SANDBOX_VERCEL_CUSTOM_IMAGE`, a Ready image in the Vercel registry. |
+
+```sh
+cd rsworkspace
+SANDBOX_VERCEL_HOSTED_TEST=1 cargo test -p trogon-sandbox-vercel-worker --test hosted_conformance -- --ignored
+```
+
+Each lane removes what it created and fails if it cannot prove a sandbox or
+snapshot is gone. `hosted_snapshot_retirement` tests the retirement check itself
+against a loopback server, so it runs with the normal suite.
+
 ## Network policy
 
 | Policy | Vercel |
