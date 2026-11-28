@@ -5,6 +5,7 @@ mod encode_tests;
 mod exit_marker_tests;
 mod heartbeat_tests;
 mod launch_refusal_tests;
+mod redispatch_tests;
 mod serve_paths_tests;
 mod support;
 mod units_tests;

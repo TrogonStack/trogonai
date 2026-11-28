@@ -58,4 +58,5 @@ rcgen = { version = "=0.14.8", default-features = false, features = ["aws_lc_rs"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "io-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-conformance = { workspace = true }
 trogon-std = { workspace = true, features = ["test-support"] }
