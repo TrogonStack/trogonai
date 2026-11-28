@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use trogon_sandbox_contract::{IsolationTier, ProviderKind, ResourceRange, WorkerId};
+use trogon_sandbox_contract::{ArtifactType, CapabilitySupport, IsolationTier, ProviderKind, ResourceRange, WorkerId};
 use trogon_sandbox_kubevirt_worker::{KubeVirtConfig, WarmPoolConfig, profile};
 use trogon_sandbox_oci::OciClientConfig;
 
@@ -42,4 +42,16 @@ fn the_profile_describes_a_full_vm_provider() -> TestResult {
     assert_eq!(profile.resources.vcpu_millis, Some(ResourceRange::new(100, 8000)?));
     assert_eq!(profile.lifecycle.max_warm_pool_size, Some(4));
     Ok(())
+}
+
+#[test]
+fn the_profile_offers_online_snapshots_of_kubevirt_disks() {
+    let profile = profile();
+    let snapshot = &profile.snapshot;
+    assert_eq!(snapshot.can_snapshot, CapabilitySupport::Supported);
+    assert_eq!(snapshot.can_restore, CapabilitySupport::Supported);
+    assert_eq!(snapshot.can_checkpoint_running, CapabilitySupport::Supported);
+    assert_eq!(snapshot.supported_artifact_types, vec![ArtifactType::KubevirtDiskV1]);
+    assert_eq!(profile.volume.supports_s3_backend, CapabilitySupport::Supported);
+    assert_eq!(profile.lifecycle.supports_warm_pool, CapabilitySupport::Supported);
 }
