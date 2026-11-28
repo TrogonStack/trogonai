@@ -2,6 +2,7 @@ use super::*;
 use axum::extract::State;
 use axum::http::Uri;
 use axum::{Json, Router};
+use channel_acp_port::{SendText, SendTyping};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -33,7 +34,7 @@ async fn outbound_adapters_forward_chat_and_text_and_preserve_api_errors() {
     let outbound = TelegramOutbound::new(bot);
     assert!(matches!(outbound.typing(42).await, Err(teloxide::RequestError::Api(_))));
     assert!(matches!(
-        outbound.send_text(-7, "hello".into()).await,
+        outbound.send_text(-7, "hello").await,
         Err(teloxide::RequestError::Api(_))
     ));
     let (typing_path, typing) = requests.recv().await.unwrap();

@@ -152,7 +152,8 @@ impl std::fmt::Display for SessionMethods {
 /// The ACP implementation of [`AgentPort`]: forwards session/prompt calls
 /// through the acp-nats Bridge. Streamed agent output does not come back
 /// through this port; it arrives at the bridge's ACP client half
-/// (`TelegramRenderClient`) as session notifications.
+/// ([`BufferedRenderClient`](crate::BufferedRenderClient)) as session
+/// notifications.
 pub struct AcpPort {
     bridge: Arc<AcpBridge>,
     agent_cwd: PathBuf,
@@ -214,7 +215,12 @@ impl AcpPort {
 /// text reaches the model.
 fn prompt_text(event: &InboundEvent) -> String {
     let body = event.text.as_deref().unwrap_or_default();
-    format!("[telegram message from {}]\n{}", event.sender.display_name, body)
+    format!(
+        "[{} message from {}]\n{}",
+        event.endpoint.channel(),
+        event.sender.display_name,
+        body
+    )
 }
 
 /// The `chat` entry of `_meta`: where the message arrived, who sent it, and

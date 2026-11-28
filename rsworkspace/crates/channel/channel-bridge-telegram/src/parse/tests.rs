@@ -1,4 +1,5 @@
 use super::*;
+use channel_acp_port::sender_endpoint;
 
 fn account() -> ChannelAccount {
     ChannelAccount::new("telegram", "mybot").expect("valid account")

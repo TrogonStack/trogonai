@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests;
 
+use channel_acp_port::DecodeInbound;
 use teloxide::types::{Update, UpdateKind};
-use trogon_channel::{
-    ChannelAccount, CommandTriggers, Endpoint, InboundEvent, MessageRef, PlatformUserId, SafeToken, Sender,
-};
+use tracing::warn;
+use trogon_channel::{ChannelAccount, CommandTriggers, InboundEvent, MessageRef, PlatformUserId, SafeToken, Sender};
 
 /// Normalize a raw Telegram update into the channel-neutral event, or `None` for
 /// what the bridge does not carry: update kinds other than a new message (edits,
@@ -43,10 +43,28 @@ pub fn inbound_event(update: &Update, account: &ChannelAccount, triggers: &Comma
     })
 }
 
-/// The endpoint of whoever sent a message, which is not the conversation's
-/// endpoint: a group chat is one endpoint shared by everyone in it, so
-/// authorizing the chat says nothing about authorizing the speaker. Named rather
-/// than inlined because that distinction is the only thing it exists to keep.
-pub fn sender_endpoint(account: &ChannelAccount, sender: &Sender) -> Endpoint {
-    account.endpoint_for(sender.platform_user_id.token())
+/// The bridge's [`DecodeInbound`]: a raw Telegram update in, the event and the
+/// chat to answer in out.
+pub struct TelegramDecoder<'a> {
+    pub account: &'a ChannelAccount,
+    pub triggers: &'a CommandTriggers,
+}
+
+impl DecodeInbound for TelegramDecoder<'_> {
+    type ReplyTo = i64;
+
+    fn decode(&self, body: &[u8]) -> Option<(InboundEvent, i64)> {
+        let update = match serde_json::from_slice::<Update>(body) {
+            Ok(update) => update,
+            Err(e) => {
+                warn!(error = %e, body_len = body.len(), "Unparseable Telegram update; dropping");
+                return None;
+            }
+        };
+        let event = inbound_event(&update, self.account, self.triggers)?;
+        // `inbound_event` carries only new messages, and every message names
+        // its chat.
+        let chat_id = update.chat()?.id.0;
+        Some((event, chat_id))
+    }
 }

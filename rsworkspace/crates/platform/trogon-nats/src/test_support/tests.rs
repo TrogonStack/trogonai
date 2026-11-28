@@ -19,7 +19,7 @@ fn default_jetstream_request_enables_failure_diagnostics() {
 #[tokio::test]
 async fn stream_create_evidence_survives_container_teardown() {
     let server = JetStreamTestServer::start().await;
-    let id = server.0._container.id().to_owned();
+    let id = server.0.container.id().to_owned();
     let files = tempfile::tempdir().unwrap();
     let directory = files.path().join("tmp/nats/jetstream/$G/streams");
     std::fs::create_dir_all(&directory).unwrap();

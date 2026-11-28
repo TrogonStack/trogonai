@@ -39,6 +39,17 @@ pub trait AgentHandler {
 
     async fn initialize(&self, args: InitializeRequest) -> Result<InitializeResponse>;
 
+    /// `initialize` with the client's params exactly as sent. The typed
+    /// request keeps only the members the schema names, so a member a vendor
+    /// adds (such as `clientCapabilities.libtrogonai`, where fx looks for the
+    /// host tools a client offers) is lost in it. A handler that relays the
+    /// handshake to another agent overrides this to pass the params on whole;
+    /// the default reads them as an [`InitializeRequest`].
+    async fn initialize_raw(&self, params: serde_json::Value) -> Result<InitializeResponse> {
+        let args = serde_json::from_value(params).map_err(|e| Error::invalid_params().data(e.to_string()))?;
+        self.initialize(args).await
+    }
+
     async fn authenticate(&self, args: AuthenticateRequest) -> Result<AuthenticateResponse>;
 
     async fn logout(&self, _args: LogoutRequest) -> Result<LogoutResponse> {

@@ -1,3 +1,5 @@
+use crate::client_gate::{AdmitAll, ClientGate};
+use crate::constants::SESSION_READY_SUFFIX;
 use acp_nats::jetstream::consumers::commands_observer;
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
@@ -5,10 +7,10 @@ use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, 
 use acp_nats::wire::{
     encode_agent_error, encode_success, req_id_from_request_headers, response_id_from_request_headers,
 };
-use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ResponseSubject};
+use acp_nats::{AcpPrefix, AcpSessionId, AgentHandler, NatsClientProxy, ResponseSubject, requesting_client};
 use agent_client_protocol::v1::schema::{
     ArchiveSessionRequest, AuthStatusRequest, AuthenticateRequest, CancelNotification, CloseSessionRequest,
-    DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
+    DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest,
     ListProvidersRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest,
     ResumeSessionRequest, SessionStatusRequest, SetProviderRequest, SetSessionConfigOptionRequest,
     SetSessionModeRequest, SetSessionTitleRequest, UnarchiveSessionRequest,
@@ -17,8 +19,8 @@ use async_nats::Message;
 use async_nats::jetstream::AckKind;
 #[cfg(test)]
 use bytes::Bytes;
-use futures::StreamExt;
 use futures::future::LocalBoxFuture;
+use futures::{FutureExt, StreamExt};
 use serde::de::Error;
 use std::rc::Rc;
 use std::time::Duration;
@@ -70,7 +72,7 @@ where
         let nats_for_serve = nats.clone();
         let prefix = acp_prefix.clone();
 
-        let io_task = async move { serve(agent, nats_for_serve, &prefix, spawn).await };
+        let io_task = async move { serve(agent, AdmitAll, nats_for_serve, &prefix, spawn).await };
 
         let conn = Self {
             nats,
@@ -91,6 +93,53 @@ where
         J: JetStreamGetStream + 'static,
         trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
     {
+        Self::with_jetstream_gated(agent, AdmitAll, nats, js, acp_prefix, spawn)
+    }
+
+    /// [`Self::with_jetstream`], with every request first put to `gate`: one
+    /// it refuses never reaches the agent. For an agent that serves one
+    /// client, such as `acp-host`.
+    pub fn with_jetstream_gated<J>(
+        agent: impl AgentHandler + Sync + 'static,
+        gate: impl ClientGate + 'static,
+        nats: N,
+        js: J,
+        acp_prefix: AcpPrefix,
+        spawn: impl Fn(LocalBoxFuture<'static, ()>) + Copy + 'static,
+    ) -> (Self, impl std::future::Future<Output = Result<(), ConnectionError>>)
+    where
+        J: JetStreamGetStream + 'static,
+        trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
+    {
+        Self::with_jetstream_gated_until(agent, gate, nats, js, acp_prefix, spawn, std::future::pending())
+    }
+
+    /// [`Self::with_jetstream_gated`], serving until `stop` resolves and then
+    /// handing back every COMMANDS message it holds, so none waits out
+    /// `ack_wait` on a host that is going away.
+    ///
+    /// On `stop` it stops pulling first (the pull subscription goes, so no
+    /// command is delivered here again), then nacks every message already
+    /// delivered: the ones not yet dispatched and the ones the agent is still
+    /// working on, whose work is dropped. The future resolves once all of them
+    /// are nacked. Nothing is acked or answered after that, so the caller can
+    /// flush and close the NATS connection. A command the server sends in the
+    /// instant between the last read and the unsubscribe is still only
+    /// redelivered after `ack_wait`.
+    ///
+    pub fn with_jetstream_gated_until<J>(
+        agent: impl AgentHandler + Sync + 'static,
+        gate: impl ClientGate + 'static,
+        nats: N,
+        js: J,
+        acp_prefix: AcpPrefix,
+        spawn: impl Fn(LocalBoxFuture<'static, ()>) + Copy + 'static,
+        stop: impl std::future::Future<Output = ()> + 'static,
+    ) -> (Self, impl std::future::Future<Output = Result<(), ConnectionError>>)
+    where
+        J: JetStreamGetStream + 'static,
+        trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
+    {
         let nats_for_serve = nats.clone();
         let nats_for_js = nats.clone();
         let prefix = acp_prefix.clone();
@@ -98,9 +147,12 @@ where
 
         let io_task = async move {
             let agent = Rc::new(agent);
+            let gate = Rc::new(gate);
 
-            let core = serve_global(agent.clone(), nats_for_serve, &prefix, spawn);
-            let jetstream = serve_js(agent, nats_for_js, js, &prefix_js, spawn);
+            // The JetStream side ends the run once `stop` has fired and its
+            // commands are settled; the core side ends with it.
+            let core = serve_global(agent.clone(), gate.clone(), nats_for_serve, &prefix, spawn);
+            let jetstream = serve_js(agent, gate, nats_for_js, js, &prefix_js, spawn, stop);
 
             tokio::select! {
                 result = core => result,
@@ -126,8 +178,9 @@ where
     }
 }
 
-async fn serve<N, A>(
+async fn serve<N, A, G>(
     agent: A,
+    gate: G,
     nats: N,
     prefix: &AcpPrefix,
     spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
@@ -135,6 +188,7 @@ async fn serve<N, A>(
 where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
     A: AgentHandler + Sync + 'static,
+    G: ClientGate + 'static,
 {
     let global_wildcard = GlobalAllSubject::new(prefix);
     let session_wildcard = AllAgentSubject::new(prefix);
@@ -158,13 +212,15 @@ where
     let mut subscriber = futures::stream::select(global_sub, session_sub);
 
     let agent = Rc::new(agent);
+    let gate = Rc::new(gate);
     let nats = Rc::new(nats);
 
     while let Some(msg) = subscriber.next().await {
         let agent = agent.clone();
+        let gate = gate.clone();
         let nats = nats.clone();
         spawn(Box::pin(async move {
-            dispatch_message(msg, agent.as_ref(), nats.as_ref()).await;
+            dispatch_message(msg, agent.as_ref(), gate.as_ref(), nats.as_ref()).await;
         }));
     }
 
@@ -172,8 +228,9 @@ where
     Ok(())
 }
 
-async fn serve_global<N, A>(
+async fn serve_global<N, A, G>(
     agent: Rc<A>,
+    gate: Rc<G>,
     nats: N,
     prefix: &AcpPrefix,
     spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
@@ -181,6 +238,7 @@ async fn serve_global<N, A>(
 where
     N: SubscribeClient + PublishClient + FlushClient + Clone + 'static,
     A: AgentHandler + Sync + 'static,
+    G: ClientGate + 'static,
 {
     let global_wildcard = GlobalAllSubject::new(prefix);
     let ext_wildcard = AllAgentExtSubject::new(prefix);
@@ -207,9 +265,10 @@ where
 
     while let Some(msg) = subscriber.next().await {
         let agent = agent.clone();
+        let gate = gate.clone();
         let nats = nats.clone();
         spawn(Box::pin(async move {
-            dispatch_message(msg, agent.as_ref(), nats.as_ref()).await;
+            dispatch_message(msg, agent.as_ref(), gate.as_ref(), nats.as_ref()).await;
         }));
     }
 
@@ -217,13 +276,40 @@ where
     Ok(())
 }
 
-async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync>(msg: Message, agent: &A, nats: &N) {
+/// Whether `subject` is the bridge's `session.ready` signal. The bridge
+/// publishes it on `{prefix}.v1.session.{id}.agent.ext.ready` once a session is
+/// set up, for its own clients to wait on. It falls inside the
+/// `session.*.agent.ext.>` space the agent serves, but it is no call to the
+/// agent: forwarding it would hand the agent a `_ready` notification on every
+/// new session and prompt.
+fn is_session_ready_signal(subject: &str) -> bool {
+    subject
+        .strip_suffix(SESSION_READY_SUFFIX)
+        .and_then(|rest| rest.rsplit_once('.'))
+        .is_some_and(|(head, _session_id)| head.ends_with(".session"))
+}
+
+async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync, G: ClientGate>(
+    msg: Message,
+    agent: &A,
+    gate: &G,
+    nats: &N,
+) {
     let subject = msg.subject.as_str();
+
+    if is_session_ready_signal(subject) {
+        return;
+    }
 
     let parsed = match parse_agent_subject(subject) {
         Some(p) => p,
         None => return,
     };
+
+    if let Err(refusal) = gate.admit(requesting_client(msg.headers.as_ref())) {
+        refuse(&msg, &refusal, nats).await;
+        return;
+    }
 
     let (result, session_id) = match parsed {
         ParsedAgentSubject::Global(method) => {
@@ -254,7 +340,9 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
                 msg,
                 method.protocol_method().as_str(),
                 nats,
-                |req: InitializeRequest| agent.initialize(req),
+                // As sent, so members the typed request does not name reach
+                // an agent that relays the handshake.
+                |params: serde_json::Value| agent.initialize_raw(params),
             )
             .await
         }
@@ -431,6 +519,21 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync
     }
 }
 
+/// Answers a request the [`ClientGate`] refused with the refusal, so its
+/// sender sees why; a refused notification has no one to answer.
+async fn refuse<N: PublishClient + FlushClient>(msg: &Message, refusal: &agent_client_protocol::Error, nats: &N) {
+    let subject = msg.subject.as_str();
+    let client = requesting_client(msg.headers.as_ref());
+    warn!(subject, client, error = %refusal, "Refused a request from a client this agent does not serve");
+    let Some(reply_to) = msg.reply.as_deref() else {
+        return;
+    };
+    let id = response_id_from_request_headers(&msg.headers.clone().unwrap_or_default());
+    if let Err(error) = reply_wire(nats, reply_to, encode_agent_error(id, refusal)).await {
+        warn!(subject, error = %error, "Failed to send a refusal");
+    }
+}
+
 async fn reply_wire<N: PublishClient + FlushClient>(
     nats: &N,
     reply_to: &str,
@@ -584,18 +687,21 @@ where
     }
 }
 
-async fn serve_js<N, J, A>(
+async fn serve_js<N, J, A, G>(
     agent: Rc<A>,
+    gate: Rc<G>,
     nats: N,
     js: J,
     prefix: &AcpPrefix,
     spawn: impl Fn(LocalBoxFuture<'static, ()>) + 'static,
+    stop: impl std::future::Future<Output = ()>,
 ) -> Result<(), ConnectionError>
 where
     N: PublishClient + FlushClient + Clone + 'static,
     J: JetStreamGetStream + 'static,
     trogon_nats::jetstream::JsMessageOf<J>: JsDispatchMessage,
     A: AgentHandler + Sync + 'static,
+    G: ClientGate + 'static,
 {
     let stream_name = commands_stream_name(prefix);
     let config = commands_observer();
@@ -621,14 +727,39 @@ where
 
     let prefix = Rc::new(prefix.clone());
 
-    while let Some(msg_result) = messages.next().await {
+    // Every dispatch task holds a `settled` sender until its message is acked
+    // or nacked, and gives its message back once `nack_in_flight` is set.
+    let (settled, mut all_settled) = tokio::sync::mpsc::channel::<()>(1);
+    let (nack_in_flight, nack_signal) = tokio::sync::watch::channel(false);
+
+    tokio::pin!(stop);
+    loop {
+        let msg_result = tokio::select! {
+            biased;
+            () = &mut stop => break,
+            next = messages.next() => match next {
+                Some(msg_result) => msg_result,
+                None => {
+                    info!("JetStream COMMANDS consumer ended");
+                    return Ok(());
+                }
+            },
+        };
         match msg_result {
             Ok(js_msg) => {
                 let agent = agent.clone();
+                let gate = gate.clone();
                 let nats = nats.clone();
                 let prefix = prefix.clone();
+                let settled = settled.clone();
+                let mut nack_signal = nack_signal.clone();
                 spawn(Box::pin(async move {
-                    dispatch_js_message(js_msg, agent.as_ref(), nats.as_ref(), &prefix).await;
+                    tokio::select! {
+                        biased;
+                        () = dispatch_js_message(&js_msg, agent.as_ref(), gate.as_ref(), nats.as_ref(), &prefix) => {}
+                        Ok(_) = nack_signal.wait_for(|nack| *nack) => nack_for_redelivery(&js_msg).await,
+                    }
+                    drop(settled);
                 }));
             }
             Err(e) => {
@@ -637,13 +768,40 @@ where
         }
     }
 
-    info!("JetStream COMMANDS consumer ended");
+    info!("Stopping the JetStream COMMANDS consumer; handing back undelivered commands");
+    // Stop pulling before nacking anything: a nacked command is redelivered
+    // at once, and it must not come back to this subscription.
+    let mut undispatched = Vec::new();
+    while let Some(Some(msg_result)) = messages.next().now_or_never() {
+        undispatched.extend(msg_result.ok());
+    }
+    drop(messages);
+    nack_in_flight.send_replace(true);
+    for js_msg in &undispatched {
+        nack_for_redelivery(js_msg).await;
+    }
+    drop(settled);
+    let _ = all_settled.recv().await;
+    info!(undispatched = undispatched.len(), "JetStream COMMANDS consumer stopped");
     Ok(())
 }
 
-async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + Sync, M: JsDispatchMessage>(
-    js_msg: M,
+/// Gives a delivered command back to the consumer for another host.
+async fn nack_for_redelivery<M: JsAckWith>(js_msg: &M) {
+    if let Err(e) = js_msg.ack_with(AckKind::Nak(None)).await {
+        warn!(error = %e, "Failed to nack a JetStream command on shutdown");
+    }
+}
+
+async fn dispatch_js_message<
+    N: PublishClient + FlushClient,
+    A: AgentHandler + Sync,
+    G: ClientGate,
+    M: JsDispatchMessage,
+>(
+    js_msg: &M,
     agent: &A,
+    gate: &G,
     nats: &N,
     prefix: &AcpPrefix,
 ) {
@@ -689,6 +847,15 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
     };
     let subject = msg.subject.as_str();
 
+    if let Err(refusal) = gate.admit(requesting_client(msg.headers.as_ref())) {
+        refuse(&msg, &refusal, nats).await;
+        // Consumed: redelivering it would only be refused again.
+        if let Err(e) = js_msg.ack().await {
+            warn!(subject, error = %e, "Failed to ack refused JetStream message");
+        }
+        return;
+    }
+
     let result = match method {
         SessionAgentMethod::Load => {
             handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: LoadSessionRequest| {
@@ -697,13 +864,9 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
             .await
         }
         SessionAgentMethod::Prompt => {
-            handle_jsonrpc_request_with_keepalive(
-                &msg,
-                method.protocol_method(),
-                nats,
-                &js_msg,
-                |req: PromptRequest| agent.prompt(req),
-            )
+            handle_jsonrpc_request_with_keepalive(&msg, method.protocol_method(), nats, js_msg, |req: PromptRequest| {
+                agent.prompt(req)
+            })
             .await
         }
         SessionAgentMethod::Cancel => {

@@ -2,9 +2,9 @@ use super::*;
 use acp_nats::nats::{ParsedAgentSubject, parse_agent_subject};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
-    ArchiveSessionResponse, AuthState, AuthStatusResponse, AuthenticateResponse, InitializeResponse, LogoutResponse,
-    NewSessionResponse, PromptResponse, SessionStatus, SessionStatusResponse, SetSessionTitleResponse, StopReason,
-    UnarchiveSessionResponse,
+    ArchiveSessionResponse, AuthState, AuthStatusResponse, AuthenticateResponse, InitializeRequest, InitializeResponse,
+    LogoutResponse, NewSessionResponse, PromptResponse, SessionStatus, SessionStatusResponse, SetSessionTitleResponse,
+    StopReason, UnarchiveSessionResponse,
 };
 use agent_client_protocol::{Error as AcpError, ErrorCode};
 use std::sync::Mutex;
@@ -44,6 +44,14 @@ impl MockAgent {
 
 #[async_trait::async_trait]
 impl AgentHandler for MockAgent {
+    async fn ext_notification(&self, args: ExtNotification) -> agent_client_protocol::Result<()> {
+        self.schema_calls
+            .lock()
+            .unwrap()
+            .push(("ext_notification".into(), serde_json::to_value(args).unwrap()));
+        Ok(())
+    }
+
     async fn auth_status(&self, args: AuthStatusRequest) -> agent_client_protocol::Result<AuthStatusResponse> {
         self.schema_calls
             .lock()
@@ -167,7 +175,7 @@ async fn dispatch<T: serde::Serialize>(subject: &str, args: &T, reply: Option<&s
     };
     let mut msg = make_nats_message(subject, &encoded.body, reply);
     msg.headers = Some(encoded.headers);
-    dispatch_message(msg, &agent, &nats).await;
+    dispatch_message(msg, &agent, &AdmitAll, &nats).await;
     (nats, agent)
 }
 
@@ -175,7 +183,7 @@ async fn dispatch_raw(subject: &str, payload: &[u8], reply: Option<&str>) -> (Mo
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let msg = make_nats_message(subject, payload, reply);
-    dispatch_message(msg, &agent, &nats).await;
+    dispatch_message(msg, &agent, &AdmitAll, &nats).await;
     (nats, agent)
 }
 
@@ -231,7 +239,7 @@ async fn dispatch_authenticate<T: serde::Serialize>(
     let encoded = acp_nats::wire::encode_request("authenticate", jsonrpc_nats::RequestId::Number(1), args).unwrap();
     let mut msg = make_nats_message(subject, &encoded.body, reply);
     msg.headers = Some(encoded.headers);
-    dispatch_message(msg, &agent, &nats).await;
+    dispatch_message(msg, &agent, &AdmitAll, &nats).await;
     (nats, agent)
 }
 
@@ -382,6 +390,30 @@ async fn dispatch_ext_without_reply_calls_ext_notification() {
     )
     .await;
     assert!(nats.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn the_bridges_session_ready_signal_never_reaches_the_agent() {
+    let ready = acp_nats::nats::ExtSessionReady::new(agent_client_protocol::v1::schema::SessionId::from("s1"));
+    let payload = serde_json::to_vec(&ready).unwrap();
+
+    let (nats, agent) = dispatch_raw("acp.v1.session.s1.agent.ext.ready", &payload, None).await;
+
+    assert!(nats.published_messages().is_empty());
+    assert!(agent.schema_calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn other_session_extension_notifications_still_reach_the_agent() {
+    let (_, agent) = dispatch_raw("acp.v1.session.s1.agent.ext.my_tool", b"{}", None).await;
+    assert_eq!(agent.schema_calls.lock().unwrap().len(), 1);
+
+    let (_, agent) = dispatch_raw("acp.v1.global.agent.ext.ready", b"{}", None).await;
+    assert_eq!(
+        agent.schema_calls.lock().unwrap().len(),
+        1,
+        "only the session-scoped signal is the bridge's"
+    );
 }
 
 async fn assert_dispatch_method_not_found<T: serde::Serialize>(subject: &str, args: &T) {
@@ -640,9 +672,15 @@ async fn serve_global_subscribes_to_global_and_ext() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let _ = serve_global(Rc::new(agent), nats.clone(), &test_prefix_custom("myprefix"), |fut| {
-                tokio::task::spawn_local(fut);
-            })
+            let _ = serve_global(
+                Rc::new(agent),
+                Rc::new(AdmitAll),
+                nats.clone(),
+                &test_prefix_custom("myprefix"),
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+            )
             .await;
 
             let subjects = nats.subscribed_to();
@@ -679,7 +717,7 @@ async fn serve_global_dispatches_message() {
             drop(global_tx);
             drop(ext_tx);
 
-            let _ = serve_global(Rc::new(agent), nats.clone(), &test_prefix(), |fut| {
+            let _ = serve_global(Rc::new(agent), Rc::new(AdmitAll), nats.clone(), &test_prefix(), |fut| {
                 tokio::task::spawn_local(fut);
             })
             .await;
@@ -714,9 +752,17 @@ async fn serve_js_dispatches_message() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let _ = serve_js(Rc::new(agent), nats.clone(), factory, &test_prefix(), |fut| {
-                tokio::task::spawn_local(fut);
-            })
+            let _ = serve_js(
+                Rc::new(agent),
+                Rc::new(AdmitAll),
+                nats.clone(),
+                factory,
+                &test_prefix(),
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+                std::future::pending(),
+            )
             .await;
 
             tokio::task::yield_now().await;
@@ -743,9 +789,17 @@ async fn serve_js_handles_consumer_stream_error() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let _ = serve_js(Rc::new(agent), nats.clone(), factory, &test_prefix(), |fut| {
-                tokio::task::spawn_local(fut);
-            })
+            let _ = serve_js(
+                Rc::new(agent),
+                Rc::new(AdmitAll),
+                nats.clone(),
+                factory,
+                &test_prefix(),
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+                std::future::pending(),
+            )
             .await;
         })
         .await;
@@ -760,9 +814,17 @@ async fn serve_js_consumer_creation_failure() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let result = serve_js(Rc::new(agent), nats.clone(), factory, &test_prefix(), |fut| {
-                tokio::task::spawn_local(fut);
-            })
+            let result = serve_js(
+                Rc::new(agent),
+                Rc::new(AdmitAll),
+                nats.clone(),
+                factory,
+                &test_prefix(),
+                |fut| {
+                    tokio::task::spawn_local(fut);
+                },
+                std::future::pending(),
+            )
             .await;
             assert!(result.is_err());
         })
@@ -775,7 +837,7 @@ async fn dispatch_js_message_unknown_subject_terms() {
     let agent = MockAgent::new();
     let js_msg = make_js_msg_raw("acp.unknown.something", b"{}", None);
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -786,7 +848,7 @@ async fn dispatch_js_message_bad_payload_terms() {
     let agent = MockAgent::new();
     let js_msg = make_js_msg_raw("acp.v1.session.s1.agent.load", b"not json", None);
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
     let error = published_wire_error(&nats);
@@ -799,7 +861,7 @@ async fn dispatch_js_message_missing_reply_terms() {
     let agent = MockAgent::new();
     let js_msg = make_js_msg("acp.v1.global.agent.initialize", &init_request(), None);
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert!(nats.published_messages().is_empty());
 }
@@ -819,7 +881,7 @@ async fn dispatch_js_message_missing_id_header() {
         description: None,
         length: payload.len(),
     });
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
     // No reply published because no req_id → no reply subject
     assert!(nats.published_messages().is_empty());
 }
@@ -833,7 +895,7 @@ async fn dispatch_js_message_global_method_returns_early() {
         &InitializeRequest::new(ProtocolVersion::V0),
         Some("_INBOX.1"),
     );
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
     // Global methods return early — no dispatch, no reply
     assert!(nats.published_messages().is_empty());
 }
@@ -846,7 +908,7 @@ async fn dispatch_js_message_global_method_ack_failure() {
         "acp.v1.global.agent.initialize",
         &InitializeRequest::new(ProtocolVersion::V0),
     );
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 fn make_js_msg_no_headers(subject: &str, payload: &[u8]) -> MockJsMessage {
@@ -871,7 +933,7 @@ async fn dispatch_js_message_ext_notification_handler_error() {
     let payload = serialize(&agent_client_protocol::v1::schema::ExtNotification::new("my_tool", raw));
     // No Jsonrpc-Id → ext notification path (reply_subject is None → msg.reply is None)
     let js_msg = make_js_msg_no_headers("acp.v1.session.s1.agent.ext.my_tool", &payload);
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 #[tokio::test]
@@ -891,7 +953,7 @@ async fn dispatch_js_message_ext_notification_handler_error_ack_failure() {
         description: None,
         length: payload.len(),
     });
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 #[tokio::test]
@@ -901,7 +963,7 @@ async fn dispatch_js_message_global_ext_no_session_id() {
     let raw = std::sync::Arc::from(serde_json::value::RawValue::from_string("{}".to_string()).unwrap());
     let payload = serialize(&agent_client_protocol::v1::schema::ExtNotification::new("my_tool", raw));
     let js_msg = make_js_msg_no_headers("acp.v1.global.agent.ext.my_tool", &payload);
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 #[tokio::test]
@@ -914,7 +976,7 @@ async fn dispatch_js_message_prompt_uses_response_subject() {
         None,
     );
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
     let response: PromptResponse = published_response(&nats);
@@ -931,7 +993,7 @@ async fn dispatch_js_message_non_prompt_session_uses_response_subject() {
         None,
     );
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_js_response_method_not_found(&nats, "acp.v1.session.s1.agent.response");
 }
@@ -945,7 +1007,7 @@ async fn dispatch_error_logs_warning_with_subscriber() {
     let payload = serialize(&InitializeRequest::new(ProtocolVersion::V0));
     let msg = make_nats_message("acp.v1.global.agent.initialize", &payload, None);
 
-    dispatch_message(msg, &agent, &nats).await;
+    dispatch_message(msg, &agent, &AdmitAll, &nats).await;
 }
 
 #[tokio::test]
@@ -974,7 +1036,7 @@ async fn serve_subscribes_and_dispatches_messages() {
             drop(global_tx);
             drop(session_tx);
 
-            let result = serve(agent, nats.clone(), &test_prefix(), |fut| {
+            let result = serve(agent, AdmitAll, nats.clone(), &test_prefix(), |fut| {
                 tokio::task::spawn_local(fut);
             })
             .await;
@@ -1005,7 +1067,7 @@ async fn serve_returns_ok_when_subscription_ends() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let result = serve(agent, nats, &test_prefix(), |fut| {
+            let result = serve(agent, AdmitAll, nats, &test_prefix(), |fut| {
                 tokio::task::spawn_local(fut);
             })
             .await;
@@ -1029,7 +1091,7 @@ async fn serve_subscribes_to_correct_subjects() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            let _ = serve(agent, nats.clone(), &test_prefix_custom("myprefix"), |fut| {
+            let _ = serve(agent, AdmitAll, nats.clone(), &test_prefix_custom("myprefix"), |fut| {
                 tokio::task::spawn_local(fut);
             })
             .await;
@@ -1055,7 +1117,7 @@ async fn dispatch_js_message_cancel_notification() {
     let agent = MockAgent::new();
     let js_msg = make_js_msg("acp.v1.session.s1.agent.cancel", &CancelNotification::new("s1"), None);
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_eq!(agent.cancelled.lock().unwrap().as_slice(), ["s1"]);
 }
@@ -1076,7 +1138,7 @@ async fn dispatch_js_message_set_mode() {
         None,
     );
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_js_response_method_not_found(&nats, "acp.v1.session.s1.agent.response");
 }
@@ -1087,7 +1149,7 @@ async fn dispatch_js_message_close_session() {
     let agent = MockAgent::new();
     let js_msg = make_js_msg("acp.v1.session.s1.agent.close", &CloseSessionRequest::new("s1"), None);
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_js_response_method_not_found(&nats, "acp.v1.session.s1.agent.response");
 }
@@ -1098,7 +1160,7 @@ async fn dispatch_js_message_delete_session() {
     let agent = MockAgent::new();
     let js_msg = make_js_msg("acp.v1.session.s1.agent.delete", &DeleteSessionRequest::new("s1"), None);
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_js_response_method_not_found(&nats, "acp.v1.session.s1.agent.response");
 }
@@ -1113,7 +1175,7 @@ async fn dispatch_js_message_fork_session() {
         None,
     );
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_js_response_method_not_found(&nats, "acp.v1.session.s1.agent.response");
 }
@@ -1128,7 +1190,7 @@ async fn dispatch_js_message_set_config_option() {
         None,
     );
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_js_response_method_not_found(&nats, "acp.v1.session.s1.agent.response");
 }
@@ -1143,7 +1205,7 @@ async fn dispatch_js_message_resume_session() {
         None,
     );
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 
     assert_js_response_method_not_found(&nats, "acp.v1.session.s1.agent.response");
 }
@@ -1159,7 +1221,7 @@ async fn dispatch_js_message_reply_failure_acks() {
         Some("_INBOX.r"),
     );
 
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 fn make_failing_js_msg<T: serde::Serialize>(subject: &str, args: &T) -> MockJsMessage {
@@ -1200,7 +1262,7 @@ async fn dispatch_js_message_ack_failure_logs_warning() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let js_msg = make_failing_js_msg("acp.v1.session.s1.agent.load", &LoadSessionRequest::new("s1", "/tmp"));
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 #[tokio::test]
@@ -1208,7 +1270,7 @@ async fn dispatch_js_message_term_failure_logs_warning() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let js_msg = make_failing_js_msg_raw("unknown.subject", b"{}");
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 #[tokio::test]
@@ -1216,7 +1278,7 @@ async fn dispatch_js_message_term_bad_payload_failure_logs_warning() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let js_msg = make_failing_js_msg_raw("acp.v1.session.s1.agent.load", b"not json");
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 #[tokio::test]
@@ -1234,7 +1296,7 @@ async fn dispatch_js_message_no_reply_term_failure() {
         description: None,
         length: payload.len(),
     });
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 #[tokio::test]
@@ -1243,7 +1305,7 @@ async fn dispatch_js_message_reply_failure_ack_failure() {
     nats.fail_next_publish();
     let agent = MockAgent::new();
     let js_msg = make_failing_js_msg("acp.v1.session.s1.agent.load", &LoadSessionRequest::new("s1", "/tmp"));
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 #[tokio::test]
@@ -1251,7 +1313,7 @@ async fn dispatch_js_message_cancel_notification_ack_failure() {
     let nats = MockNatsClient::new();
     let agent = MockAgent::new();
     let js_msg = make_failing_js_msg("acp.v1.session.s1.agent.cancel", &CancelNotification::new("s1"));
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
 }
 
 #[tokio::test]
@@ -1270,7 +1332,7 @@ async fn dispatch_js_message_cancel_notification_handler_error_ack_failure() {
         description: None,
         length: encoded.body.len(),
     });
-    dispatch_js_message(js_msg, &agent, &nats, &test_prefix()).await;
+    dispatch_js_message(&js_msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
     assert!(
         agent.cancelled.lock().unwrap().is_empty(),
         "the failing handler must not have recorded the cancel"
@@ -1445,9 +1507,320 @@ async fn schema_1_15_durable_dispatch_preserves_request_and_response() {
         let nats = MockNatsClient::new();
         let agent = MockAgent::new();
         let msg = make_js_msg(subject, &params, None);
-        dispatch_js_message(msg, &agent, &nats, &test_prefix()).await;
+        dispatch_js_message(&msg, &agent, &AdmitAll, &nats, &test_prefix()).await;
         assert_eq!(*agent.schema_calls.lock().unwrap(), vec![(method.to_owned(), params)]);
         assert_eq!(published_response::<serde_json::Value>(&nats), result);
         assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
     }
+}
+
+/// Serves only `discord`, as `acp-host` does once that client has claimed it.
+struct OnlyDiscord;
+
+impl ClientGate for OnlyDiscord {
+    fn admit(&self, client: Option<&str>) -> agent_client_protocol::Result<()> {
+        match client {
+            None | Some("discord") => Ok(()),
+            Some(other) => Err(AcpError::new(
+                ErrorCode::INVALID_REQUEST,
+                format!("not serving {other}"),
+            )),
+        }
+    }
+}
+
+fn from_client(mut msg: Message, client: Option<&str>) -> Message {
+    if let Some(client) = client {
+        msg.headers
+            .get_or_insert_with(async_nats::HeaderMap::new)
+            .insert(acp_nats::ACP_CLIENT_HEADER, client);
+    }
+    msg
+}
+
+async fn dispatch_from<T: serde::Serialize>(
+    client: Option<&str>,
+    subject: &str,
+    args: &T,
+    reply: Option<&str>,
+) -> (MockNatsClient, MockAgent) {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let method = wire_method_for_subject(subject);
+    let encoded = wire_encode_request(&method, args);
+    let mut msg = make_nats_message(subject, &encoded.body, reply);
+    msg.headers = Some(encoded.headers);
+    dispatch_message(from_client(msg, client), &agent, &OnlyDiscord, &nats).await;
+    (nats, agent)
+}
+
+#[tokio::test]
+async fn a_refused_client_gets_the_gates_error_and_the_agent_never_sees_the_request() {
+    let (nats, agent) = dispatch_from(
+        Some("zed"),
+        "acp.v1.global.agent.session.new",
+        &NewSessionRequest::new("/tmp"),
+        Some("_INBOX.zed"),
+    )
+    .await;
+
+    assert!(agent.received_new_session.lock().unwrap().is_none());
+    assert_eq!(nats.published_messages(), vec!["_INBOX.zed"]);
+    let error = published_wire_error(&nats);
+    assert_eq!(error.code, ErrorCode::INVALID_REQUEST);
+    assert_eq!(error.message, "not serving zed");
+}
+
+#[tokio::test]
+async fn a_refused_initialize_never_reaches_the_agent() {
+    let (nats, agent) = dispatch_from(
+        Some("zed"),
+        "acp.v1.global.agent.initialize",
+        &init_request(),
+        Some("_INBOX.zed"),
+    )
+    .await;
+
+    assert!(!*agent.initialized.lock().unwrap());
+    assert_eq!(published_wire_error(&nats).code, ErrorCode::INVALID_REQUEST);
+}
+
+#[tokio::test]
+async fn the_admitted_client_and_unlabelled_requests_are_served() {
+    for client in [Some("discord"), None] {
+        let (nats, agent) = dispatch_from(
+            client,
+            "acp.v1.global.agent.session.new",
+            &NewSessionRequest::new("/tmp"),
+            Some("_INBOX.1"),
+        )
+        .await;
+
+        assert!(agent.received_new_session.lock().unwrap().is_some(), "{client:?}");
+        let response: NewSessionResponse = published_response(&nats);
+        assert_eq!(response.session_id.to_string(), "sess-1");
+    }
+}
+
+#[tokio::test]
+async fn a_refused_notification_is_dropped_without_a_reply() {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let encoded = wire_encode_notification("_note", &serde_json::json!({}));
+    let mut msg = make_nats_message("acp.v1.global.agent.ext.note", &encoded.body, None);
+    msg.headers = Some(encoded.headers);
+
+    dispatch_message(from_client(msg, Some("zed")), &agent, &OnlyDiscord, &nats).await;
+
+    assert!(agent.schema_calls.lock().unwrap().is_empty());
+    assert!(nats.published_messages().is_empty());
+}
+
+fn js_from<T: serde::Serialize>(client: Option<&str>, subject: &str, args: &T) -> MockJsMessage {
+    let msg = make_js_msg(subject, args, None);
+    use trogon_nats::jetstream::JsMessageRef as _;
+    MockJsMessage::new(from_client(msg.message().clone(), client))
+}
+
+#[tokio::test]
+async fn a_refused_clients_session_command_is_answered_with_the_refusal_and_consumed() {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let js_msg = js_from(
+        Some("zed"),
+        "acp.v1.session.s1.agent.prompt",
+        &PromptRequest::new("s1", vec![]),
+    );
+    let signals = js_msg.clone();
+
+    dispatch_js_message(&js_msg, &agent, &OnlyDiscord, &nats, &test_prefix()).await;
+
+    assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
+    let error = published_wire_error(&nats);
+    assert_eq!(error.code, ErrorCode::INVALID_REQUEST);
+    assert_eq!(signals.signals(), vec![AckKindSnapshot::Ack]);
+}
+
+#[tokio::test]
+async fn a_refused_clients_cancel_never_reaches_the_agent() {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let js_msg = js_from(
+        Some("zed"),
+        "acp.v1.session.s1.agent.cancel",
+        &CancelNotification::new("s1"),
+    );
+
+    dispatch_js_message(&js_msg, &agent, &OnlyDiscord, &nats, &test_prefix()).await;
+
+    assert!(agent.cancelled.lock().unwrap().is_empty());
+    assert!(nats.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn the_admitted_clients_session_command_is_served() {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let js_msg = js_from(
+        Some("discord"),
+        "acp.v1.session.s1.agent.cancel",
+        &CancelNotification::new("s1"),
+    );
+
+    dispatch_js_message(&js_msg, &agent, &OnlyDiscord, &nats, &test_prefix()).await;
+
+    assert_eq!(*agent.cancelled.lock().unwrap(), vec!["s1".to_string()]);
+}
+
+/// An agent whose `session/load` never finishes, like a command the host is
+/// still working on when it is told to stop.
+struct StuckLoadAgent {
+    loads: Mutex<u32>,
+}
+
+#[async_trait::async_trait]
+impl AgentHandler for StuckLoadAgent {
+    async fn initialize(&self, args: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
+        Ok(InitializeResponse::new(args.protocol_version))
+    }
+
+    async fn authenticate(&self, _args: AuthenticateRequest) -> agent_client_protocol::Result<AuthenticateResponse> {
+        Ok(AuthenticateResponse::new())
+    }
+
+    async fn new_session(&self, _args: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
+        Ok(NewSessionResponse::new("s1"))
+    }
+
+    async fn prompt(&self, _args: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
+        Ok(PromptResponse::new(StopReason::EndTurn))
+    }
+
+    async fn cancel(&self, _args: CancelNotification) -> agent_client_protocol::Result<()> {
+        Ok(())
+    }
+
+    async fn load_session(
+        &self,
+        _args: LoadSessionRequest,
+    ) -> agent_client_protocol::Result<agent_client_protocol::v1::schema::LoadSessionResponse> {
+        *self.loads.lock().unwrap() += 1;
+        std::future::pending().await
+    }
+}
+
+#[tokio::test]
+async fn stopping_nacks_in_flight_and_undispatched_commands_and_returns() {
+    let nats = MockNatsClient::new();
+    let factory = MockJetStreamConsumerFactory::new();
+    let (consumer, tx) = MockJetStreamConsumer::new();
+    factory.add_consumer(consumer);
+    let agent = Rc::new(StuckLoadAgent { loads: Mutex::new(0) });
+    let in_flight = make_js_msg(
+        "acp.v1.session.s1.agent.load",
+        &LoadSessionRequest::new("s1", "/tmp"),
+        None,
+    );
+    let undispatched = make_js_msg(
+        "acp.v1.session.s2.agent.load",
+        &LoadSessionRequest::new("s2", "/tmp"),
+        None,
+    );
+    let stop = Rc::new(tokio::sync::Notify::new());
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            tx.unbounded_send(Ok(in_flight.clone())).unwrap();
+            let serving = tokio::task::spawn_local({
+                let stop = stop.clone();
+                let agent = agent.clone();
+                async move {
+                    serve_js(
+                        agent,
+                        Rc::new(AdmitAll),
+                        nats.clone(),
+                        factory,
+                        &test_prefix(),
+                        |fut| {
+                            tokio::task::spawn_local(fut);
+                        },
+                        async move { stop.notified().await },
+                    )
+                    .await
+                }
+            });
+            while *agent.loads.lock().unwrap() == 0 {
+                tokio::task::yield_now().await;
+            }
+
+            // The next command is delivered as the stop arrives: it is read
+            // but never dispatched.
+            tx.unbounded_send(Ok(undispatched.clone())).unwrap();
+            stop.notify_one();
+            let result = tokio::time::timeout(Duration::from_secs(5), serving)
+                .await
+                .expect("serving returns once every command is settled")
+                .unwrap();
+
+            assert!(result.is_ok());
+            let nak = vec![AckKindSnapshot::AckWith(AckKindValue::Nak(None))];
+            assert_eq!(in_flight.signals(), nak);
+            assert_eq!(undispatched.signals(), nak);
+            assert_eq!(*agent.loads.lock().unwrap(), 1);
+        })
+        .await;
+}
+
+/// An agent that relays the handshake: it keeps `initialize` params as sent.
+#[derive(Default)]
+struct RelayingAgent {
+    initialize_params: Mutex<Vec<serde_json::Value>>,
+}
+
+#[async_trait::async_trait]
+impl AgentHandler for RelayingAgent {
+    async fn initialize(&self, _args: InitializeRequest) -> agent_client_protocol::Result<InitializeResponse> {
+        panic!("a relaying agent is initialized with the params as sent")
+    }
+
+    async fn initialize_raw(&self, params: serde_json::Value) -> agent_client_protocol::Result<InitializeResponse> {
+        self.initialize_params.lock().unwrap().push(params);
+        Ok(InitializeResponse::new(ProtocolVersion::V1))
+    }
+
+    async fn authenticate(&self, _args: AuthenticateRequest) -> agent_client_protocol::Result<AuthenticateResponse> {
+        Ok(AuthenticateResponse::new())
+    }
+
+    async fn new_session(&self, _args: NewSessionRequest) -> agent_client_protocol::Result<NewSessionResponse> {
+        Ok(NewSessionResponse::new("s1"))
+    }
+
+    async fn prompt(&self, _args: PromptRequest) -> agent_client_protocol::Result<PromptResponse> {
+        Ok(PromptResponse::new(StopReason::EndTurn))
+    }
+
+    async fn cancel(&self, _args: CancelNotification) -> agent_client_protocol::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn initialize_reaches_the_agent_with_members_the_schema_does_not_name() {
+    let nats = MockNatsClient::new();
+    let agent = RelayingAgent::default();
+    let sent = serde_json::json!({
+        "protocolVersion": 1,
+        "clientCapabilities": {"libtrogonai": {"tools": [{"name": "send_message"}]}},
+    });
+    let encoded = wire_encode_request("initialize", &sent);
+    let mut msg = make_nats_message("acp.v1.global.agent.initialize", &encoded.body, Some("_INBOX.1"));
+    msg.headers = Some(encoded.headers);
+
+    dispatch_message(msg, &agent, &AdmitAll, &nats).await;
+
+    assert_eq!(*agent.initialize_params.lock().unwrap(), vec![sent]);
+    let response: InitializeResponse = published_response(&nats);
+    assert_eq!(response.protocol_version, ProtocolVersion::V1);
 }

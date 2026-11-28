@@ -1,31 +1,76 @@
-#[cfg(test)]
-mod tests;
+//! The platform-neutral half of a bridge: from a redeemed inbound message to
+//! the agent and back. A bridge supplies only what is truly its platform's:
+//! decoding its raw payload ([`DecodeInbound`]) and talking to its API
+//! ([`SendTyping`], [`SendText`]).
 
-use crate::constants::{NEW_SESSION_ACKNOWLEDGEMENT, TEXT_CHUNK_LIMIT};
-use crate::outbound::{SendText, SendTyping};
-use crate::parse;
-use crate::render::{TelegramRenderClient, chunk_text};
 use tracing::{info, warn};
 use trogon_channel::{
     AgentId, AgentPort, AgentPortError as _, AgentSessionId, ChannelAccount, ChannelStore, ChannelStoreError, Command,
-    CommandTriggers, ConversationId, ConversationRecord, InboundEvent, ReleaseReason,
+    ConversationId, ConversationRecord, Endpoint, InboundEvent, ReleaseReason, Sender,
 };
 use trogon_nats::jetstream::{ClaimResolveError, ClaimResolver, ObjectStoreGet};
 use trogon_std::NowV7;
 
-pub struct Pipeline<'a, P, O, G, S> {
+use crate::BufferedRenderClient;
+use crate::constants::NEW_SESSION_ACKNOWLEDGEMENT;
+
+/// Normalize one platform's raw inbound payload into the channel-neutral event
+/// and the place its reply goes.
+pub trait DecodeInbound {
+    /// Where a reply to the decoded message is sent.
+    type ReplyTo: Copy;
+
+    /// `None` for whatever the bridge does not carry, unparseable bytes
+    /// included: the pipeline acks and drops it, and it stays on the raw stream
+    /// with full fidelity.
+    fn decode(&self, body: &[u8]) -> Option<(InboundEvent, Self::ReplyTo)>;
+}
+
+/// Show the typing indicator to a reply target. One trait per outbound
+/// operation; never carries agent concepts.
+#[allow(async_fn_in_trait)]
+pub trait SendTyping<T> {
+    type Error: std::error::Error + 'static;
+    type Output;
+
+    async fn typing(&self, to: T) -> Result<Self::Output, Self::Error>;
+}
+
+/// Send text to a reply target. One trait per outbound operation; never
+/// carries agent concepts.
+#[allow(async_fn_in_trait)]
+pub trait SendText<T> {
+    type Error: std::error::Error + 'static;
+    type Message;
+
+    async fn send_text(&self, to: T, text: &str) -> Result<Self::Message, Self::Error>;
+
+    /// Split a reply into messages the platform accepts. Each platform measures
+    /// its size limit its own way, so the split belongs to the sender.
+    fn chunks<'t>(&self, text: &'t str) -> Vec<&'t str>;
+}
+
+/// The endpoint of whoever sent a message, which is not the conversation's
+/// endpoint: a group chat is one endpoint shared by everyone in it, so
+/// authorizing the chat says nothing about authorizing the speaker. Named rather
+/// than inlined because that distinction is the only thing it exists to keep.
+pub fn sender_endpoint(account: &ChannelAccount, sender: &Sender) -> Endpoint {
+    account.endpoint_for(sender.platform_user_id.token())
+}
+
+pub struct Pipeline<'a, P, D, O, G, S> {
     pub store: &'a ChannelStore,
     pub port: &'a P,
-    pub renderer: &'a TelegramRenderClient,
+    pub renderer: &'a BufferedRenderClient,
+    pub inbound: &'a D,
     pub outbound: &'a O,
     pub claims: &'a ClaimResolver<S>,
     pub account: &'a ChannelAccount,
     pub agent_id: &'a AgentId,
-    pub triggers: &'a CommandTriggers,
     pub ids: &'a G,
 }
 
-/// Failures while processing one inbound update. Source errors stay typed so
+/// Failures while processing one inbound message. Source errors stay typed so
 /// callers can match or log the causal chain without stringifying at the boundary.
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineError<PE, SE, OE>
@@ -36,12 +81,10 @@ where
 {
     #[error("failed to acknowledge message")]
     Ack(#[source] async_nats::Error),
-    #[error("failed to redeem claim-checked update")]
+    #[error("failed to redeem claim-checked message")]
     Claim(#[source] ClaimResolveError<SE>),
     #[error(transparent)]
     Store(#[from] ChannelStoreError),
-    #[error("telegram peer is not an i64 chat id")]
-    PeerNotChatId(#[source] std::num::ParseIntError),
     #[error("failed to create an agent session")]
     CreateSession(#[source] PE),
     #[error("prompt failed on session {session}")]
@@ -58,7 +101,7 @@ where
         first: PE,
         retry: PE,
     },
-    #[error("failed to send telegram text")]
+    #[error("failed to send reply text")]
     SendText(#[source] OE),
 }
 
@@ -77,10 +120,11 @@ where
     msg.ack().await.map_err(PipelineError::Ack)
 }
 
-impl<P, O, G, S> Pipeline<'_, P, O, G, S>
+impl<P, D, O, G, S> Pipeline<'_, P, D, O, G, S>
 where
     P: AgentPort,
-    O: SendTyping + SendText,
+    D: DecodeInbound,
+    O: SendTyping<D::ReplyTo> + SendText<D::ReplyTo>,
     G: NowV7,
     S: ObjectStoreGet,
 {
@@ -88,7 +132,7 @@ where
     /// conversation gate authorizes the chat, which in a group is everyone in
     /// it; destructive commands ask the narrower question.
     async fn sender_is_authorized(&self, event: &InboundEvent) -> Result<bool, ChannelStoreError> {
-        let endpoint = parse::sender_endpoint(self.account, &event.sender);
+        let endpoint = sender_endpoint(self.account, &event.sender);
         Ok(self.store.principal_for(&endpoint).await?.is_some())
     }
 
@@ -127,10 +171,10 @@ where
     pub async fn handle_message(
         &self,
         msg: &async_nats::jetstream::Message,
-    ) -> Result<(), PipelineError<P::Error, S::Error, <O as SendText>::Error>> {
-        // An update over the NATS max payload reaches the stream as an empty
+    ) -> Result<(), PipelineError<P::Error, S::Error, <O as SendText<D::ReplyTo>>::Error>> {
+        // A message over the NATS max payload reaches the stream as an empty
         // body plus claim headers, so the parse below has to run on the redeemed
-        // bytes. A failure here returns Err rather than acking: the update is
+        // bytes. A failure here returns Err rather than acking: the message is
         // real and recoverable, and dropping it would lose it permanently while
         // blaming the parser.
         let body = self
@@ -139,15 +183,7 @@ where
             .await
             .map_err(PipelineError::Claim)?;
 
-        let update = match serde_json::from_slice::<teloxide::types::Update>(&body) {
-            Ok(update) => update,
-            Err(e) => {
-                warn!(error = %e, body_len = body.len(), "Unparseable Telegram update; dropping");
-                return ack(msg).await;
-            }
-        };
-
-        let Some(event) = parse::inbound_event(&update, self.account, self.triggers) else {
+        let Some((event, reply_to)) = self.inbound.decode(&body) else {
             return ack(msg).await;
         };
 
@@ -155,12 +191,6 @@ where
             info!(endpoint = %event.endpoint, "Unknown endpoint; ignoring (no principal linked)");
             return ack(msg).await;
         };
-
-        let chat_id = event
-            .endpoint
-            .peer()
-            .parse::<i64>()
-            .map_err(PipelineError::PeerNotChatId)?;
 
         let now = now_unix();
         let (conversation_id, mut record) = match self.store.conversation_for(&event.endpoint).await? {
@@ -187,7 +217,7 @@ where
                 self.release_current_session(&conversation_id, &mut record).await?;
                 if event.text.is_none() {
                     self.outbound
-                        .send_text(chat_id, NEW_SESSION_ACKNOWLEDGEMENT.to_string())
+                        .send_text(reply_to, NEW_SESSION_ACKNOWLEDGEMENT)
                         .await
                         .map_err(PipelineError::SendText)?;
                     return ack(msg).await;
@@ -236,7 +266,7 @@ where
             }
         };
 
-        let _ = self.outbound.typing(chat_id).await;
+        let _ = self.outbound.typing(reply_to).await;
 
         let outcome = match self.port.prompt(&active_session, &event).await {
             Ok(outcome) => outcome,
@@ -353,9 +383,9 @@ where
 
         match self.renderer.take_buffer(active_session.as_str()) {
             Some(text) => {
-                for chunk in chunk_text(&text, TEXT_CHUNK_LIMIT) {
+                for chunk in self.outbound.chunks(&text) {
                     self.outbound
-                        .send_text(chat_id, chunk)
+                        .send_text(reply_to, chunk)
                         .await
                         .map_err(PipelineError::SendText)?;
                 }

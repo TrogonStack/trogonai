@@ -13,7 +13,9 @@ use rcgen::{
 };
 use tempfile::TempDir;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
-use testcontainers_modules::testcontainers::{ContainerAsync, ContainerRequest, ImageExt, runners::AsyncRunner};
+use testcontainers_modules::testcontainers::{
+    ContainerAsync, ContainerRequest, ImageExt, core::IntoContainerPort, runners::AsyncRunner,
+};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use trogon_std::env::SystemEnv;
@@ -46,7 +48,7 @@ fn image(command: impl IntoIterator<Item = impl Into<String>>) -> ContainerReque
 /// features the test needs. Every public server wraps one of these so the
 /// image tag, the published port, and the connect timeout are decided once.
 struct TestServer {
-    _container: ContainerAsync<Nats>,
+    container: ContainerAsync<Nats>,
     address: String,
     diagnostics: Option<FixtureDiagnostics>,
 }
@@ -67,7 +69,7 @@ impl TestServer {
         wait_until_greeted(&address).await;
 
         Self {
-            _container: container,
+            container,
             address,
             diagnostics,
         }
@@ -155,7 +157,7 @@ impl JetStreamTestServer {
             .diagnostics
             .as_ref()
             .expect("plain JetStream fixture diagnostics")
-            .capture(&self.0._container)
+            .capture(&self.0.container)
             .await
     }
 }
@@ -198,6 +200,46 @@ impl CoreTestServer {
     /// does not speak TLS, so that configuration has to disable it.
     pub fn address(&self) -> &str {
         &self.0.address
+    }
+}
+
+/// A core NATS server that a test can stop and start again, to see what its
+/// clients do while the server is gone and after it is back.
+///
+/// The server is published on a host port chosen once, so it comes back on the
+/// same address and clients reconnect on their own, as they would to a
+/// restarted production server.
+pub struct RestartableTestServer(TestServer);
+
+impl RestartableTestServer {
+    /// Starts the pinned NATS image and waits until it accepts client connections.
+    pub async fn start() -> Self {
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0))
+            .and_then(|listener| listener.local_addr())
+            .expect("pick a free host port")
+            .port();
+        Self(TestServer::start(image(&NatsServerCmd::default()).with_mapped_port(port, NATS_CLIENT_PORT.tcp())).await)
+    }
+
+    /// The `host:port` this server is reachable on, across restarts.
+    pub fn address(&self) -> &str {
+        &self.0.address
+    }
+
+    /// Stops the server at once; its clients see the connection drop.
+    pub async fn stop(&self) {
+        self.0
+            .container
+            .stop_with_timeout(Some(0))
+            .await
+            .expect("stop NATS testcontainer");
+    }
+
+    /// Starts the stopped server again and waits until it accepts client
+    /// connections. Clients still have to reconnect, on their own schedule.
+    pub async fn restart(&self) {
+        self.0.container.start().await.expect("restart NATS testcontainer");
+        wait_until_greeted(&self.0.address).await;
     }
 }
 

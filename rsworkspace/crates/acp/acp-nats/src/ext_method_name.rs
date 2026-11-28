@@ -59,5 +59,18 @@ impl std::ops::Deref for ExtMethodName {
     }
 }
 
+/// The JSON-RPC method for an extension call: ACP extension methods start with
+/// `_`. The SDK hands a handler the name with its `_` already on, so a call
+/// relayed from one peer to another must not add a second one.
+// TODO(#1376): switch to `crate::ext_protocol_method` once
+// https://github.com/TrogonStack/trogonai/pull/1376 lands.
+pub(crate) fn ext_wire_method(method: &str) -> std::borrow::Cow<'_, str> {
+    if method.starts_with('_') {
+        std::borrow::Cow::Borrowed(method)
+    } else {
+        std::borrow::Cow::Owned(format!("_{method}"))
+    }
+}
+
 #[cfg(test)]
 mod tests;

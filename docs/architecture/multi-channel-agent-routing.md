@@ -2,9 +2,11 @@
 
 How a Telegram chat reaches an AI agent and gets a reply, and why the layer
 between them knows nothing about Telegram. "Multi-channel" names the contract of
-that middle layer, not a count of channels: Telegram is the only one
-implemented, and everything between the platform edge and the agent is
-channel-neutral so a second channel is a new edge, never a new brain.
+that middle layer, not a count of channels: Telegram is described here, and
+everything between the platform edge and the agent is channel-neutral so a
+second channel is a new edge, never a new brain. Discord is that second edge
+(`channel-bridge-discord`); the ACP side both bridges use lives in
+`channel-acp-port`. An agent CLI reaches the same subjects through `acp-host`.
 
 ## The shape in one paragraph
 
@@ -469,6 +471,40 @@ them change the topology above.
   symmetric to its sources) would centralize outbound custody. It does not exist,
   and adding one is a gateway decision, not a channel one.
 - **One agent protocol.** `AgentPort` has a single implementation.
+- **One client per `acp-host`.** `acp-nats` sends an agent's `session/update`
+  and `session/request_permission` to every client listening on the prefix,
+  with no session filter, so two clients sharing a host's prefix would see each
+  other's turns and could approve each other's tool calls. The rule is one
+  client per `acp-host`: run a host per client, each on its own `ACP_PREFIX`,
+  and give the client the same prefix. The first client whose `initialize`
+  the child answers claims the host, by the `clientInfo.name` in it; a request
+  that only carries a header never claims. The `acp-nats`
+  bridge then stamps that name as an `X-Acp-Client` header on every request
+  and notification it sends, and the host refuses, before the child sees it,
+  any request that names a different client: `initialize`, `session/new`,
+  `session/prompt` and the rest. This catches a misconfigured prefix but is
+  not access control. The header is whatever a client sets, and requests
+  without it are served so that a lone client with no `clientInfo`, or an older
+  bridge, keeps working. NATS permissions per prefix are what actually keep
+  clients apart. Filtering callbacks by session in `acp-nats` would lift the
+  rule, and nothing does that yet.
+- **The host's child is initialized with the client's `initialize`.** The
+  child receives the claiming client's own request params, exactly as sent:
+  protocol version, capabilities, `clientInfo` and `_meta`, including members
+  the ACP schema does not name. That is how fx learns which host tools a
+  client offers (`clientCapabilities.libtrogonai`). The host keeps the request
+  and re-sends it to every relaunched child. A client that initializes again
+  with different parameters gets a fresh child initialized with them, because
+  ACP has a client initialize once per connection, and that relaunch ends
+  every session the old child had open. The host keeps the request in memory
+  only: after the host restarts, the child runs on a protocol v1 default until
+  the client initializes again, and that `initialize` then relaunches the
+  child, dropping any session the client loaded in between.
+- **Extension calls from the host's child are routed by `sessionId`.** A
+  child's extension requests and notifications reach the client on
+  `{prefix}.v1.session.{id}.client.ext.{method}`, with the exact method name,
+  for the `sessionId` in their params. One without a `sessionId` is refused:
+  the client bridges listen only per session.
 
 ## End-to-end walkthrough
 

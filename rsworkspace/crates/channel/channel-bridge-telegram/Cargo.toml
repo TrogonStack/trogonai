@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 acp-nats = { workspace = true }
+channel-acp-port = { workspace = true }
 trogon-channel = { workspace = true }
 trogon-nats = { workspace = true }
 trogon-std = { workspace = true, features = ["signal", "uuid"] }
@@ -16,10 +17,8 @@ trogon-telemetry = { workspace = true }
 
 agent-client-protocol = { workspace = true }
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 async-nats = { workspace = true, features = ["jetstream", "kv"] }
 futures = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 teloxide = { workspace = true }
 thiserror = { workspace = true }

@@ -10,15 +10,15 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::{debug, warn};
 
-/// The bridge's ACP client half: receives agent session notifications and
-/// accumulates streamed text per session; the message loop flushes the buffer
-/// to Telegram when the prompt turn ends. `ClientHandler` requires `Sync`, so
+/// A chat bridge's ACP client half: receives agent session notifications and
+/// accumulates streamed text per session; the bridge's message loop flushes
+/// the buffer to its platform when the prompt turn ends. `ClientHandler` requires `Sync`, so
 /// the per-session buffers use a `Mutex` (no lock is held across an await).
-pub struct TelegramRenderClient {
+pub struct BufferedRenderClient {
     buffers: Mutex<HashMap<String, String>>,
 }
 
-impl TelegramRenderClient {
+impl BufferedRenderClient {
     pub fn new() -> Self {
         Self {
             buffers: Mutex::new(HashMap::new()),
@@ -45,14 +45,14 @@ impl TelegramRenderClient {
     }
 }
 
-impl Default for TelegramRenderClient {
+impl Default for BufferedRenderClient {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait::async_trait]
-impl ClientHandler for TelegramRenderClient {
+impl ClientHandler for BufferedRenderClient {
     async fn request_permission(
         &self,
         args: RequestPermissionRequest,
@@ -64,45 +64,22 @@ impl ClientHandler for TelegramRenderClient {
     }
 
     async fn session_notification(&self, args: SessionNotification) -> agent_client_protocol::Result<()> {
-        let session_id = args.session_id.to_string();
         match args.update {
             SessionUpdate::AgentMessageChunk(chunk) => {
                 if let ContentBlock::Text(text) = chunk.content {
-                    self.buffers
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .entry(session_id)
-                        .or_default()
-                        .push_str(&text.text);
+                    let mut buffers = self.buffers.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    match buffers.get_mut(&*args.session_id.0) {
+                        Some(buffer) => buffer.push_str(&text.text),
+                        None => {
+                            buffers.insert(args.session_id.to_string(), text.text);
+                        }
+                    }
                 }
             }
             other => {
-                debug!(session_id = %session_id, update = ?std::mem::discriminant(&other), "Ignoring non-message session update");
+                debug!(session_id = %args.session_id, update = ?std::mem::discriminant(&other), "Ignoring non-message session update");
             }
         }
         Ok(())
     }
-}
-
-/// Split text at Telegram's message size limit on char boundaries. Telegram
-/// measures the limit in UTF-16 code units, so characters outside the basic
-/// multilingual plane (most emoji) cost two: counting scalar values instead
-/// would let an emoji-heavy chunk pass here and still be rejected by the API.
-pub fn chunk_text(text: &str, limit: usize) -> Vec<String> {
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-    let mut count = 0usize;
-    for ch in text.chars() {
-        let width = ch.len_utf16();
-        if count + width > limit && !current.is_empty() {
-            chunks.push(std::mem::take(&mut current));
-            count = 0;
-        }
-        current.push(ch);
-        count += width;
-    }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    chunks
 }

@@ -1,16 +1,17 @@
-use super::*;
-use crate::outbound::{SendText, SendTyping};
+use crate::constants::TEXT_CHUNK_LIMIT;
+use crate::parse::TelegramDecoder;
 use acp_nats::ClientHandler;
 use agent_client_protocol::v1::schema::{ContentBlock, ContentChunk, SessionNotification, SessionUpdate, TextContent};
+use channel_acp_port::{BufferedRenderClient, Pipeline, PipelineError, SendText, SendTyping, chunk_utf16};
 use futures::StreamExt;
 use std::cell::RefCell;
 use std::rc::Rc;
 use trogon_channel::store::PrincipalRecord;
 use trogon_channel::{
-    AgentPortError, AgentSessionId, ChannelAccount, Endpoint, InboundEvent, PrincipalId, PromptOutcome, ReleaseReason,
-    ReleaseStep, SessionRelease,
+    AgentId, AgentPortError, AgentSessionId, ChannelAccount, ChannelStore, CommandTriggers, Endpoint, InboundEvent,
+    PrincipalId, PromptOutcome, ReleaseReason, ReleaseStep, SessionRelease,
 };
-use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding, MockObjectStore};
+use trogon_nats::jetstream::{ClaimBucket, ClaimBucketBinding, ClaimResolver, MockObjectStore};
 use trogon_nats::test_support::JetStreamTestServer;
 use trogon_std::UuidV7Generator;
 
@@ -43,7 +44,7 @@ impl AgentPortError for FakeError {
 /// Simulates the agent side: mints sessions, records prompts, and streams a
 /// reply into the renderer the way real session notifications would.
 struct FakePort {
-    renderer: Rc<TelegramRenderClient>,
+    renderer: Rc<BufferedRenderClient>,
     reply: String,
     sessions_created: RefCell<u32>,
     prompted: RefCell<Vec<(String, String)>>,
@@ -94,7 +95,7 @@ fn scripted(counter: &RefCell<u32>) -> bool {
 }
 
 impl FakePort {
-    fn new(renderer: Rc<TelegramRenderClient>, reply: &str) -> Self {
+    fn new(renderer: Rc<BufferedRenderClient>, reply: &str) -> Self {
         Self {
             renderer,
             reply: reply.to_string(),
@@ -207,7 +208,7 @@ struct FakeOutbound {
     sent: RefCell<Vec<(i64, String)>>,
 }
 
-impl SendTyping for FakeOutbound {
+impl SendTyping<i64> for FakeOutbound {
     type Error = std::convert::Infallible;
     type Output = ();
 
@@ -217,13 +218,17 @@ impl SendTyping for FakeOutbound {
     }
 }
 
-impl SendText for FakeOutbound {
+impl SendText<i64> for FakeOutbound {
     type Error = std::convert::Infallible;
     type Message = ();
 
-    async fn send_text(&self, chat_id: i64, text: String) -> Result<Self::Message, Self::Error> {
-        self.sent.borrow_mut().push((chat_id, text));
+    async fn send_text(&self, chat_id: i64, text: &str) -> Result<Self::Message, Self::Error> {
+        self.sent.borrow_mut().push((chat_id, text.to_string()));
         Ok(())
+    }
+
+    fn chunks<'t>(&self, text: &'t str) -> Vec<&'t str> {
+        chunk_utf16(text, TEXT_CHUNK_LIMIT)
     }
 }
 
@@ -382,7 +387,7 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -393,11 +398,14 @@ async fn pipeline_routes_gateway_updates_to_the_agent_and_back() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -524,7 +532,7 @@ async fn pipeline_redeems_a_claim_checked_update() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -534,11 +542,14 @@ async fn pipeline_redeems_a_claim_checked_update() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -618,7 +629,7 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -628,11 +639,14 @@ async fn pipeline_leaves_an_unredeemable_claim_unacked() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -697,7 +711,7 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -708,11 +722,14 @@ async fn pipeline_keeps_the_session_when_a_fresh_one_fails_the_same_way() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -866,7 +883,7 @@ async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -877,11 +894,14 @@ async fn pipeline_hands_back_a_fresh_session_it_could_not_record() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -970,7 +990,7 @@ async fn pipeline_hands_back_a_first_session_it_could_not_record() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -981,11 +1001,14 @@ async fn pipeline_hands_back_a_first_session_it_could_not_record() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -1081,7 +1104,7 @@ async fn pipeline_acks_and_drops_what_no_redelivery_would_fix() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -1092,11 +1115,14 @@ async fn pipeline_acks_and_drops_what_no_redelivery_would_fix() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 
@@ -1183,7 +1209,7 @@ async fn pipeline_leaves_no_partial_reply_behind_when_a_turn_fails() {
         .expect("consumer");
     let mut messages = consumer.messages().await.expect("messages");
 
-    let renderer = Rc::new(TelegramRenderClient::new());
+    let renderer = Rc::new(BufferedRenderClient::new());
     let port = FakePort::new(renderer.clone(), "hi there");
     let outbound = FakeOutbound::default();
     let triggers = CommandTriggers::default();
@@ -1194,11 +1220,14 @@ async fn pipeline_leaves_no_partial_reply_behind_when_a_turn_fails() {
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &TelegramDecoder {
+            account: &account,
+            triggers: &triggers,
+        },
         outbound: &outbound,
         claims: &claims,
         account: &account,
         agent_id: &agent_id,
-        triggers: &triggers,
         ids: &UuidV7Generator,
     };
 

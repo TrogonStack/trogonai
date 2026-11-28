@@ -10,29 +10,26 @@
 //! nothing else.
 #![cfg_attr(test, allow(clippy::expect_used, clippy::panic, clippy::unwrap_used))]
 
-mod acp_port;
 mod config;
 mod constants;
 mod outbound;
 mod parse;
-mod pipeline;
-mod render;
 
 #[cfg(test)]
 mod main_tests;
+#[cfg(test)]
+mod pipeline_tests;
 
 use {
     acp_nats::AgentHandler,
-    acp_port::{AcpBridge, AcpPort, SessionMethods},
     agent_client_protocol::schema::ProtocolVersion,
     agent_client_protocol::v1::schema::InitializeRequest,
     anyhow::Context as _,
     async_nats::jetstream::consumer::DeliverPolicy,
+    channel_acp_port::{AcpBridge, AcpPort, BufferedRenderClient, Pipeline, SessionMethods},
     config::BridgeConfig,
     futures::StreamExt,
     outbound::TelegramOutbound,
-    pipeline::Pipeline,
-    render::TelegramRenderClient,
     std::sync::Arc,
     teloxide::Bot,
     tracing::{error, info, warn},
@@ -152,7 +149,7 @@ where
         > + Unpin,
     S: std::future::Future<Output = ()>,
 {
-    let meter = trogon_telemetry::meter("channel-bridge-telegram");
+    let meter = trogon_telemetry::meter(ServiceName::ChannelBridgeTelegram.as_str());
     let js_client = trogon_nats::jetstream::NatsJetStreamClient::new(async_nats::jetstream::new(nats_client.clone()));
     let bridge: Arc<AcpBridge> = Arc::new(acp_nats::Bridge::new(
         nats_client.clone(),
@@ -161,7 +158,7 @@ where
         &meter,
         config.acp.clone(),
     ));
-    let renderer = Arc::new(TelegramRenderClient::new());
+    let renderer = Arc::new(BufferedRenderClient::new());
 
     let mut client_task = tokio::task::spawn_local(acp_nats::client::run(
         nats_client.clone(),
@@ -185,29 +182,33 @@ where
         store: &store,
         port: &port,
         renderer: renderer.as_ref(),
+        inbound: &parse::TelegramDecoder {
+            account: &config.account,
+            triggers: &config.command_triggers,
+        },
         outbound: &telegram,
         claims: &claims,
         account: &config.account,
         agent_id: &config.agent_id,
-        triggers: &config.command_triggers,
         ids: &UuidV7Generator,
     };
 
     tokio::pin!(shutdown);
-    loop {
+    // Only the shutdown signal is a clean exit. The other ways out leave the
+    // bridge unable to serve, so they fail the process for its supervisor to
+    // restart.
+    let outcome = loop {
         tokio::select! {
             () = &mut shutdown => {
                 info!("Shutting down");
-                break;
+                break Ok(());
             }
             result = &mut client_task => {
-                error!(?result, "ACP client task ended; agent responses can no longer be rendered");
-                break;
+                break Err(anyhow::anyhow!("ACP client task ended; agent responses can no longer be rendered: {result:?}"));
             }
             next = messages.next() => {
                 let Some(next) = next else {
-                    warn!("Inbound consumer stream ended");
-                    break;
+                    break Err(anyhow::anyhow!("inbound consumer stream ended"));
                 };
                 match next {
                     Ok(msg) => {
@@ -221,8 +222,8 @@ where
                 }
             }
         }
-    }
+    };
 
     client_task.abort();
-    Ok(())
+    outcome
 }

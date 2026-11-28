@@ -1,10 +1,9 @@
 use super::*;
-use crate::constants::TEXT_CHUNK_LIMIT;
 use agent_client_protocol::v1::schema::{ContentChunk, TextContent, ToolCallUpdate, ToolCallUpdateFields};
 
 #[test]
 fn a_defaulted_client_has_no_buffered_text_for_any_session() {
-    let client = TelegramRenderClient::default();
+    let client = BufferedRenderClient::default();
     assert_eq!(client.take_buffer("any-session"), None);
 }
 
@@ -12,7 +11,7 @@ fn a_defaulted_client_has_no_buffered_text_for_any_session() {
 /// refuse rather than silently grant, regardless of what the agent asked for.
 #[tokio::test]
 async fn request_permission_is_always_cancelled() {
-    let client = TelegramRenderClient::new();
+    let client = BufferedRenderClient::new();
     let tool_call = ToolCallUpdate::new("call-1", ToolCallUpdateFields::new());
     let request = RequestPermissionRequest::new("session-1", tool_call, Vec::new());
 
@@ -30,7 +29,7 @@ async fn request_permission_is_always_cancelled() {
 /// recovery closure directly) so this fails if the recovery is ever removed.
 #[tokio::test]
 async fn a_poisoned_lock_does_not_stop_text_from_accumulating() {
-    let client = TelegramRenderClient::new();
+    let client = BufferedRenderClient::new();
 
     let panicked = std::thread::scope(|scope| {
         scope
@@ -64,46 +63,4 @@ async fn a_poisoned_lock_does_not_stop_text_from_accumulating() {
         .expect("session_notification recovers from the poisoned lock");
     client.discard(session_id);
     assert_eq!(client.take_buffer(session_id), None);
-}
-
-#[test]
-fn chunk_text_splits_on_char_boundaries() {
-    let text = "ab".repeat(3000);
-    let chunks = chunk_text(&text, TEXT_CHUNK_LIMIT);
-    assert_eq!(chunks.len(), 2);
-    assert_eq!(chunks[0].chars().count(), TEXT_CHUNK_LIMIT);
-    assert_eq!(chunks[1].chars().count(), 6000 - TEXT_CHUNK_LIMIT);
-}
-
-#[test]
-fn chunk_text_handles_multibyte() {
-    let text = "\u{1F980}".repeat(10);
-    let chunks = chunk_text(&text, 4);
-    assert_eq!(chunks.len(), 5);
-    assert!(
-        chunks
-            .iter()
-            .all(|c| c.chars().map(char::len_utf16).sum::<usize>() <= 4)
-    );
-}
-
-#[test]
-fn chunk_text_counts_utf16_code_units() {
-    let text = "\u{1F980}".repeat(TEXT_CHUNK_LIMIT);
-    let chunks = chunk_text(&text, TEXT_CHUNK_LIMIT);
-    assert_eq!(chunks.len(), 2);
-    assert!(
-        chunks
-            .iter()
-            .all(|c| c.chars().map(char::len_utf16).sum::<usize>() <= TEXT_CHUNK_LIMIT)
-    );
-}
-
-#[test]
-fn chunk_text_does_not_split_a_surrogate_pair() {
-    let text = format!("{}\u{1F980}", "a".repeat(TEXT_CHUNK_LIMIT - 1));
-    let chunks = chunk_text(&text, TEXT_CHUNK_LIMIT);
-    assert_eq!(chunks.len(), 2);
-    assert_eq!(chunks[0].chars().count(), TEXT_CHUNK_LIMIT - 1);
-    assert_eq!(chunks[1], "\u{1F980}");
 }

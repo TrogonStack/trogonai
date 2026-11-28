@@ -4,9 +4,8 @@ use trogon_nats::jetstream::{
     JetStreamContext, JetStreamGetStream, JetStreamGetStreamInfo, ProvisionedStreamField, is_get_stream_not_found,
 };
 
-use super::streams;
 use crate::acp_prefix::AcpPrefix;
-use crate::nats::AcpSubjectNamespace;
+use crate::nats::{AcpStream, AcpSubjectNamespace};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProvisionError<Source> {
@@ -40,7 +39,21 @@ where
     J: JetStreamContext + JetStreamGetStream<Error = GetStreamError>,
     <J as JetStreamGetStream>::Stream: JetStreamGetStreamInfo,
 {
-    let configs = streams::all_configs(prefix);
+    provision_selected_streams(js, prefix, AcpStream::ALL).await
+}
+
+/// Creates or reconciles only the given streams, in order. Every existing
+/// stream's ownership is checked before any write, and the first failure stops.
+pub async fn provision_selected_streams<J>(
+    js: &J,
+    prefix: &AcpPrefix,
+    streams: impl IntoIterator<Item = AcpStream>,
+) -> Result<(), ProvisionError<<J as JetStreamContext>::Error>>
+where
+    J: JetStreamContext + JetStreamGetStream<Error = GetStreamError>,
+    <J as JetStreamGetStream>::Stream: JetStreamGetStreamInfo,
+{
+    let configs: Vec<_> = streams.into_iter().map(|stream| stream.config(prefix)).collect();
     let namespace = AcpSubjectNamespace::new(prefix);
     // Stream names normalize distinct prefixes, so check every owner before any write.
     for config in &configs {
