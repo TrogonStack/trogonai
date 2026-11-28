@@ -1,7 +1,7 @@
 use serde_json::json;
 use trogon_sandbox_aca_worker::{
-    AcaError, AcaSessionApi, ReqwestAcaClient, ServicePrincipal, SessionDeleteOutcome, SessionIdentifier,
-    SessionStatus, fetch_dynamic_sessions_token,
+    AcaError, AcaSessionApi, ExecuteResult, ReqwestAcaClient, ServicePrincipal, SessionDeleteOutcome,
+    SessionIdentifier, SessionStatus, fetch_dynamic_sessions_token,
 };
 use trogon_sandbox_contract::ShortLivedToken;
 use url::Url;
@@ -117,26 +117,46 @@ async fn code_executes_synchronously_and_reports_its_output() -> TestResult {
     Ok(())
 }
 
-#[tokio::test]
-async fn an_execution_with_no_properties_has_empty_output() -> TestResult {
+async fn execute_with(body: serde_json::Value) -> Result<ExecuteResult, AcaError> {
     let server = MockServer::start().await;
     answer(
         &server,
         "POST",
         "/management/code/execute",
-        ResponseTemplate::new(200).set_body_json(json!({})),
+        ResponseTemplate::new(200).set_body_json(body),
     )
     .await;
-
-    let result = client(&server)?
+    client(&server)
+        .map_err(|error| AcaError::Auth(error.to_string()))?
         .execute_code(&bearer(), &session(), "pass", "python")
-        .await?;
+        .await
+}
 
+#[tokio::test]
+async fn a_succeeded_status_without_an_exit_code_means_exit_code_zero() -> TestResult {
+    let result = execute_with(json!({"properties": {"status": "Succeeded"}})).await?;
     assert_eq!(
         (result.stdout.as_str(), result.stderr.as_str(), result.exit_code),
         ("", "", 0)
     );
     Ok(())
+}
+
+#[tokio::test]
+async fn an_execution_with_no_properties_is_refused_not_read_as_success() {
+    let error = execute_with(json!({})).await.err();
+    assert!(matches!(error, Some(AcaError::AcaApi { .. })));
+}
+
+#[tokio::test]
+async fn an_execution_with_no_exit_code_and_no_succeeded_status_is_refused() {
+    for body in [
+        json!({"properties": {"stdout": "out"}}),
+        json!({"properties": {"status": "Failed"}}),
+    ] {
+        let error = execute_with(body).await.err();
+        assert!(matches!(error, Some(AcaError::AcaApi { .. })));
+    }
 }
 
 #[tokio::test]

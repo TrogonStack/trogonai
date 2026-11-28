@@ -21,11 +21,13 @@ pub(super) fn frame_length(header: &[u8]) -> usize {
     u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize
 }
 
-pub(super) fn decode_b64(text: &str) -> Vec<u8> {
+/// The bytes a base64 stream chunk carries. A chunk that is not base64 fails the stream: reading it as empty would
+/// drop output the command produced and still report a complete result.
+pub(super) fn decode_b64(text: &str) -> Result<Vec<u8>, ApiError> {
     STANDARD
         .decode(text)
         .or_else(|_| STANDARD_NO_PAD.decode(text))
-        .unwrap_or_default()
+        .map_err(|error| ApiError::Transport(format!("envd sent output that is not base64: {error}")))
 }
 
 /// Splits a Connect response body into `(flags, payload)` frames.

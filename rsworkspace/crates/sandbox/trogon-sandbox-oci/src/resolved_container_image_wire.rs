@@ -11,8 +11,6 @@ pub(crate) struct ResolvedContainerImageWire {
     pub(crate) digest: Digest,
     pub(crate) env: BTreeMap<String, String>,
     pub(crate) working_dir: Option<String>,
-    #[serde(default)]
     pub(crate) user: Option<String>,
-    #[serde(default)]
     pub(crate) compressed_bytes: u64,
 }

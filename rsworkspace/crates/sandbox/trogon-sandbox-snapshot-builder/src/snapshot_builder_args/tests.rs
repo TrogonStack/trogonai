@@ -8,9 +8,14 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 fn parses_the_defaults() -> TestResult {
     let args = SnapshotBuilderArgs::try_parse_from(["builder", "--nats-url", "nats://127.0.0.1:4222"])?;
     assert_eq!(args.nats_url, "nats://127.0.0.1:4222");
-    assert_eq!(args.max_concurrent, 4);
+    assert_eq!(args.max_concurrent.get(), 4);
     assert!(args.require_scan_pass);
     Ok(())
+}
+
+#[test]
+fn refuses_zero_concurrency_instead_of_raising_it() {
+    assert!(SnapshotBuilderArgs::try_parse_from(["builder", "--max-concurrent", "0"]).is_err());
 }
 
 #[test]

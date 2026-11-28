@@ -2,7 +2,7 @@ use trogon_sandbox_auth::ApiKeyStoreError;
 use trogon_sandbox_observability::ObservabilityError;
 use trogon_sandbox_protocol::NatsConnectError;
 
-use crate::{PreviewConfigError, SessionStoreError};
+use crate::{CorsOriginError, PreviewConfigError, SessionStoreError};
 
 /// Failures while running the gateway.
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +23,8 @@ pub enum GatewayError {
     ApiKeyStore(#[from] ApiKeyStoreError),
     #[error("session store unavailable: {0}")]
     SessionStore(#[from] SessionStoreError),
+    #[error("invalid CORS origin: {0}")]
+    CorsOrigin(#[from] CorsOriginError),
     #[error("invalid preview configuration: {0}")]
     Preview(#[from] PreviewConfigError),
 }

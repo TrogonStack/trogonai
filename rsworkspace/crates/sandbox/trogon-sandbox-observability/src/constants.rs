@@ -64,3 +64,6 @@ pub const FIRECRACKER_WORKER: u16 = 8111;
 pub const E2B_WORKER: u16 = 8112;
 pub const VERCEL_WORKER: u16 = 8113;
 pub const SPACE_WORKER: u16 = 8114;
+
+/// Environment variable holding the log filter directives.
+pub(crate) const LOG_FILTER_ENV: &str = "RUST_LOG";

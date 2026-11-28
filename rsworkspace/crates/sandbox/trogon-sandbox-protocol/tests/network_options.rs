@@ -20,7 +20,7 @@ fn host(input: &str) -> Result<Host, Box<dyn std::error::Error>> {
 }
 
 fn proxy(no_proxy: &str) -> Result<ParentProxy, Box<dyn std::error::Error>> {
-    resolve_parent_proxy(Some("http://p:1"), None, Some(no_proxy), |_| None).ok_or_else(|| "no proxy".into())
+    resolve_parent_proxy(Some("http://p:1"), None, Some(no_proxy), |_| None)?.ok_or_else(|| "no proxy".into())
 }
 
 fn bypasses(no_proxy: &str, target: &str) -> Result<bool, Box<dyn std::error::Error>> {
@@ -38,8 +38,8 @@ fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> +
 
 #[test]
 fn nothing_set_means_no_parent_proxy() {
-    assert!(resolve_parent_proxy(None, None, None, |_| None).is_none());
-    assert!(resolve_parent_proxy(Some(""), None, None, |_| None).is_none());
+    assert!(matches!(resolve_parent_proxy(None, None, None, |_| None), Ok(None)));
+    assert!(matches!(resolve_parent_proxy(Some(""), None, None, |_| None), Ok(None)));
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn explicit_settings_win_over_the_environment() -> TestResult {
         None,
         None,
         env(&[("HTTP_PROXY", "http://env-proxy:8080")]),
-    )
+    )?
     .ok_or("resolved")?;
     let selected = select_parent_proxy(&resolved, ProxyScheme::Http).ok_or("http")?;
     assert_eq!(selected.host(), &host("cfg-proxy")?);
@@ -60,7 +60,7 @@ fn explicit_settings_win_over_the_environment() -> TestResult {
 #[test]
 fn the_environment_is_the_fallback_and_https_follows_http() -> TestResult {
     let resolved =
-        resolve_parent_proxy(None, None, None, env(&[("HTTP_PROXY", "http://env-proxy:8080")])).ok_or("resolved")?;
+        resolve_parent_proxy(None, None, None, env(&[("HTTP_PROXY", "http://env-proxy:8080")]))?.ok_or("resolved")?;
     for scheme in [ProxyScheme::Http, ProxyScheme::Https] {
         let selected = select_parent_proxy(&resolved, scheme).ok_or("selected")?;
         assert_eq!(selected.host(), &host("env-proxy")?);
@@ -71,7 +71,7 @@ fn the_environment_is_the_fallback_and_https_follows_http() -> TestResult {
 #[test]
 fn lowercase_environment_variables_are_honoured() -> TestResult {
     let resolved =
-        resolve_parent_proxy(None, None, None, env(&[("http_proxy", "http://lower:8080")])).ok_or("resolved")?;
+        resolve_parent_proxy(None, None, None, env(&[("http_proxy", "http://lower:8080")]))?.ok_or("resolved")?;
     let selected = select_parent_proxy(&resolved, ProxyScheme::Http).ok_or("http")?;
     assert_eq!(selected.host(), &host("lower")?);
     Ok(())
@@ -87,7 +87,7 @@ fn https_proxy_can_differ_from_http_proxy() -> TestResult {
             ("HTTP_PROXY", "http://plain:8080"),
             ("HTTPS_PROXY", "http://secure:8443"),
         ]),
-    )
+    )?
     .ok_or("resolved")?;
     let plain = select_parent_proxy(&resolved, ProxyScheme::Http).ok_or("http")?;
     let secure = select_parent_proxy(&resolved, ProxyScheme::Https).ok_or("https")?;
@@ -98,7 +98,7 @@ fn https_proxy_can_differ_from_http_proxy() -> TestResult {
 
 #[test]
 fn plain_http_ignores_a_lone_https_proxy() -> TestResult {
-    let resolved = resolve_parent_proxy(None, Some("http://secure:1"), None, |_| None).ok_or("resolved")?;
+    let resolved = resolve_parent_proxy(None, Some("http://secure:1"), None, |_| None)?.ok_or("resolved")?;
     assert!(select_parent_proxy(&resolved, ProxyScheme::Http).is_none());
     let secure = select_parent_proxy(&resolved, ProxyScheme::Https).ok_or("https")?;
     assert_eq!(secure.host(), &host("secure")?);
@@ -108,7 +108,7 @@ fn plain_http_ignores_a_lone_https_proxy() -> TestResult {
 #[test]
 fn only_http_and_https_proxies_are_accepted() {
     assert!(ParentProxyUrl::new("socks5://proxy:1080").is_err());
-    assert!(resolve_parent_proxy(Some("socks5://proxy:1080"), None, None, |_| None).is_none());
+    assert!(resolve_parent_proxy(Some("socks5://proxy:1080"), None, None, |_| None).is_err());
 }
 
 #[test]
@@ -408,4 +408,11 @@ fn the_response_strip_is_present_only_when_it_strips_something() -> TestResult {
     assert!(!strip.is_empty());
     assert!(Arc::strong_count(&strip) == 1);
     Ok(())
+}
+
+#[test]
+fn an_unparseable_proxy_url_is_refused_not_ignored() {
+    assert!(resolve_parent_proxy(Some("not a url"), None, None, |_| None).is_err());
+    assert!(resolve_parent_proxy(None, None, None, env(&[("HTTPS_PROXY", "ftp://p:1")])).is_err());
+    assert!(resolve_parent_proxy(None, None, None, env(&[("http_proxy", "::bad::")])).is_err());
 }

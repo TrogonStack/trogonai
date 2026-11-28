@@ -8,13 +8,26 @@ use crate::VolumeSyncError;
 use crate::constants::{DEFAULT_S3_REGION, S3_ENDPOINT_ENV, S3_KMS_KEY_ID_ENV, S3_REGION_ENV};
 use crate::snapshot::tar_directory;
 
+/// The value of `name`, or `None` when it is unset. A value that is not valid
+/// Unicode is refused rather than treated as unset, so a malformed endpoint or
+/// KMS key never silently reverts to the unencrypted or default target.
+fn optional_var(env: &impl ReadEnv, name: &'static str) -> Result<Option<String>, VolumeSyncError> {
+    match env.var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(VolumeSyncError::EnvNotUnicode { name }),
+    }
+}
+
 pub fn volume_client_config_for_bucket(
     env: &impl ReadEnv,
     bucket: &str,
 ) -> Result<VolumeClientConfig, VolumeSyncError> {
-    let region = env.var(S3_REGION_ENV).unwrap_or_else(|_| DEFAULT_S3_REGION.to_string());
-    let endpoint = env.var(S3_ENDPOINT_ENV).ok().map(VolumeEndpoint::new).transpose()?;
-    let kms_key_id = env.var(S3_KMS_KEY_ID_ENV).ok().map(KmsKeyId::new).transpose()?;
+    let region = optional_var(env, S3_REGION_ENV)?.unwrap_or_else(|| DEFAULT_S3_REGION.to_string());
+    let endpoint = optional_var(env, S3_ENDPOINT_ENV)?
+        .map(VolumeEndpoint::new)
+        .transpose()?;
+    let kms_key_id = optional_var(env, S3_KMS_KEY_ID_ENV)?.map(KmsKeyId::new).transpose()?;
     Ok(VolumeClientConfig {
         backend: VolumeBackend::S3 {
             bucket: S3BucketName::new(bucket)?,
@@ -40,3 +53,6 @@ pub async fn sync_s3_prefix_to_tar(
         .map_err(VolumeSyncError::Pull)?;
     Ok(tar_directory(scratch.path())?)
 }
+
+#[cfg(test)]
+mod tests;

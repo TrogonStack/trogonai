@@ -317,11 +317,14 @@ impl BoundedRegistry {
         let mut out = Vec::new();
         for _ in 0..TAGS_MAX_PAGES {
             let response = self.get_scoped(url.clone(), "application/json", false, true).await?;
-            let next = response
-                .headers()
-                .get(reqwest::header::LINK)
-                .and_then(|value| value.to_str().ok())
-                .and_then(next_link_target);
+            let next = match response.headers().get(reqwest::header::LINK) {
+                None => None,
+                Some(value) => next_link_target(
+                    value
+                        .to_str()
+                        .map_err(|_| rejected("invalid registry pagination link"))?,
+                )?,
+            };
             let bytes = bounded_body(response, TAGS_PAGE_LIMIT, "tag list").await?;
             let page: TagList = serde_json::from_slice(&bytes).map_err(|_| rejected("invalid registry tag list"))?;
             out.extend(page.tags.unwrap_or_default());
@@ -415,17 +418,28 @@ impl BoundedRegistry {
     }
 }
 
-/// Target of the `rel="next"` entry of a `Link` header.
-fn next_link_target(header: &str) -> Option<String> {
-    header.split(',').find_map(|entry| {
-        let (target, params) = entry.split_once(';')?;
+/// Target of the `rel="next"` entry of a `Link` header. A next entry that names no `<target>`
+/// is refused: skipping it would end the walk early and pass a partial list off as complete.
+fn next_link_target(header: &str) -> Result<Option<String>, OciError> {
+    for entry in header.split(',') {
+        let Some((target, params)) = entry.split_once(';') else {
+            continue;
+        };
         let is_next = params
             .split(';')
             .filter_map(|p| p.trim().strip_prefix("rel="))
             .any(|rel| rel.trim_matches('"').eq_ignore_ascii_case("next"));
-        let target = target.trim().strip_prefix('<')?.strip_suffix('>')?;
-        is_next.then(|| target.to_string())
-    })
+        if !is_next {
+            continue;
+        }
+        let target = target
+            .trim()
+            .strip_prefix('<')
+            .and_then(|target| target.strip_suffix('>'))
+            .ok_or_else(|| rejected("invalid registry pagination link"))?;
+        return Ok(Some(target.to_string()));
+    }
+    Ok(None)
 }
 
 async fn bounded_body(mut response: reqwest::Response, maximum: u64, kind: &str) -> Result<Vec<u8>, OciError> {

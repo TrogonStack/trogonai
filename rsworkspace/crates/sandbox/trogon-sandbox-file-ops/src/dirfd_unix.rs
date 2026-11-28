@@ -65,7 +65,9 @@ fn walk(root: &Path, relative: &Path, create: bool) -> io::Result<OwnedFd> {
 
 /// Creates the directory at `host`. Returns whether it already existed.
 pub(crate) fn mkdir(root: &Path, host: &Path, parents: bool) -> io::Result<bool> {
-    let relative = host.strip_prefix(root).unwrap_or(Path::new(""));
+    let relative = host
+        .strip_prefix(root)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "directory path is outside the root"))?;
     let Some(name) = relative.file_name() else {
         return Ok(true);
     };

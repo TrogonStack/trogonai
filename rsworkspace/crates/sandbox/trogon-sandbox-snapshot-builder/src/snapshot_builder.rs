@@ -80,7 +80,7 @@ impl SnapshotBuilder {
         );
 
         let (queue, mut releases) = mpsc::channel::<(LeaseReleased, SystemTime)>(RELEASE_CHANNEL_CAPACITY);
-        let semaphore = Arc::new(Semaphore::new(config.max_concurrent.max(1)));
+        let semaphore = Arc::new(Semaphore::new(config.max_concurrent.get()));
         let recovery_cancel = cancel.child_token();
         let mut recovery =
             tokio::spawn(Arc::clone(&self.tag_recovery).run(Arc::clone(&self.tag_store), recovery_cancel.clone()));
@@ -93,7 +93,7 @@ impl SnapshotBuilder {
         ));
 
         info!(
-            max_concurrent = config.max_concurrent,
+            max_concurrent = config.max_concurrent.get(),
             default_registry = %config.default_registry,
             "snapshot builder ready"
         );

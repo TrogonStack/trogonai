@@ -170,13 +170,14 @@ async fn relay_frames(
 }
 
 /// A terminal side from an SSH request: zero means "not given" and takes `default`, and a side beyond what a
-/// terminal supports is capped.
+/// terminal supports is refused.
 fn dimension(value: u32, default: u16) -> Result<TerminalDimension, TerminalDimensionError> {
-    let wanted = u16::try_from(value)
-        .ok()
-        .filter(|side| *side > 0)
-        .unwrap_or(default)
-        .min(TerminalDimension::MAX);
+    if value == 0 {
+        return TerminalDimension::new(default);
+    }
+    let wanted = u16::try_from(value).map_err(|_| TerminalDimensionError::OutOfRange {
+        max: TerminalDimension::MAX,
+    })?;
     TerminalDimension::new(wanted)
 }
 
@@ -284,7 +285,7 @@ impl Handler for SshGatewayHandler {
             pty.rows = rows;
         }
         let frame = SshStreamFrame::control(&session_id, u32::from(channel), SshStreamControl::Resize { cols, rows });
-        let _ = self.state.config.tunnel.publish_frame(&frame).await;
+        self.state.config.tunnel.publish_frame(&frame).await?;
         Ok(())
     }
 
@@ -313,14 +314,14 @@ impl Handler for SshGatewayHandler {
         let session_id = self.session_id()?;
         for chunk in data.chunks(MAX_FRAME_BYTES) {
             let frame = SshStreamFrame::data(session_id, u32::from(channel), chunk.to_vec());
-            let _ = self.state.config.tunnel.publish_frame(&frame).await;
+            self.state.config.tunnel.publish_frame(&frame).await?;
         }
         Ok(())
     }
 
     async fn channel_eof(&mut self, channel: ChannelId, _session: &mut Session) -> Result<(), Self::Error> {
         let frame = SshStreamFrame::eof(self.session_id()?, u32::from(channel));
-        let _ = self.state.config.tunnel.publish_frame(&frame).await;
+        self.state.config.tunnel.publish_frame(&frame).await?;
         Ok(())
     }
 

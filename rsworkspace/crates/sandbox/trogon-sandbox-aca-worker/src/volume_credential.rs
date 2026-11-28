@@ -14,7 +14,7 @@ impl VolumeCredential {
     pub fn parse(token: &ShortLivedToken) -> Result<Self, AcaError> {
         let mut parts = token.expose_secret().split(':');
         match (parts.next(), parts.next()) {
-            (Some(account), Some(key)) => Ok(Self {
+            (Some(account), Some(key)) if !account.is_empty() && !key.is_empty() => Ok(Self {
                 account: account.to_owned(),
                 key: ShortLivedToken::new(key),
             }),

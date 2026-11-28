@@ -141,16 +141,18 @@ pub fn interpret_wfp_verify(run: &VerifyRun, install: &InstallContext) -> Result
             ),
         ));
     }
-    let residuals: Vec<WfpResidual> = raw
-        .residuals
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|r| WfpResidual::parse(r))
-        .collect();
+    let reported = raw.residuals.unwrap_or_default();
+    let residuals: Vec<WfpResidual> = reported.iter().filter_map(|r| WfpResidual::parse(r)).collect();
     let mut warnings: Vec<String> = residuals
         .iter()
         .map(|r| format!("WFP egress fence residual '{}': {}", r.as_str(), r.text()))
         .collect();
+    warnings.extend(
+        reported
+            .iter()
+            .filter(|r| WfpResidual::parse(r).is_none())
+            .map(|r| format!("WFP egress fence residual '{r}' is not one this release knows; treat it as a gap")),
+    );
     if probes.low_integrity == ProbeOutcome::Skipped || probes.untrusted_integrity == ProbeOutcome::Skipped {
         warnings.push(
             "WFP egress fence: the off-loopback lowered-integrity attempts were skipped (no \

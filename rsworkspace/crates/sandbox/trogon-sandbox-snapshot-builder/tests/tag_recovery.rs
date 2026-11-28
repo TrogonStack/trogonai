@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
@@ -90,7 +91,7 @@ fn fixture_config(server: &JetStreamTestServer) -> BuilderConfig {
     BuilderConfig {
         nats_url: url_of(server),
         default_registry: "registry.invalid".to_string(),
-        max_concurrent: 1,
+        max_concurrent: NonZeroUsize::MIN,
         cosign_kms_uri: None,
         scan_cvss_threshold: 7.0,
         require_scan_pass: false,
@@ -644,7 +645,7 @@ async fn duplicate_release_cannot_export_again_while_the_original_receipt_is_pen
     let mut exports = nats.subscribe(worker_snapshot_export(&WorkerId::new(WORKER)?)).await?;
     nats.flush().await?;
     let mut config = fixture_config(&server);
-    config.max_concurrent = 2;
+    config.max_concurrent = NonZeroUsize::MIN.saturating_add(1);
     let mut builder = RunningBuilder::start(SnapshotBuilder::connect(config, fresh_metrics()?).await?);
     let event = fixture_release("duplicate-pending-export", 100, None)?;
     let subject = lease_released(&event.lease_id);

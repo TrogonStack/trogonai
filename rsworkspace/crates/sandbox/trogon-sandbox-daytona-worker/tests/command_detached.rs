@@ -393,3 +393,19 @@ async fn a_capped_result_stays_capped_after_a_receipt_retry_and_from_memory() ->
     assert_eq!(first, second);
     Ok(())
 }
+
+#[tokio::test]
+async fn an_exit_receipt_that_is_not_a_status_is_refused_instead_of_read_as_running() -> TestResult {
+    let guest = Guest::start().await?;
+    let exec = guest.exec()?;
+    let id = start(&guest, &exec, &run_request(&["sleep", "30"], detached(|_| {}))?).await?;
+    let (written, _) = guest
+        .shell(&format!("printf 'garbage' > /tmp/.trogon-exec-{id}.exit"))
+        .await?;
+    assert_eq!(written, 0);
+    assert!(matches!(
+        exec.handle_poll_command(&guest.sandbox(), LEASE, &id).await,
+        PollCommandResponse::Denied(_)
+    ));
+    Ok(())
+}

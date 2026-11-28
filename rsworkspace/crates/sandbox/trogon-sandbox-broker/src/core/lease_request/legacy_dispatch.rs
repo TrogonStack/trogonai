@@ -134,13 +134,21 @@ impl BrokerCore {
         }
 
         let subject = subjects::provider_dispatch(kind);
+        let signed_dispatch = match self.sign_dispatch(dispatch_payload) {
+            Ok(signed) => signed,
+            Err(error) => {
+                // Nothing was sent, so no worker can have launched.
+                self.refund_initial_quota(initial_quota_reserved, &tenant, cpu_seconds, ttl_seconds, ctx)
+                    .await;
+                warn!(%error, provider = ?kind, "lease request denied: dispatch could not be signed");
+                return LeaseResponse::Denied(LeaseError::Backend {
+                    message: format!("dispatch could not be signed: {error}"),
+                });
+            }
+        };
         let provider_reply = match self
             .bus
-            .request_with_timeout(
-                &subject,
-                self.sign_dispatch(dispatch_payload),
-                self.config.provider_dispatch_timeout,
-            )
+            .request_with_timeout(&subject, signed_dispatch, self.config.provider_dispatch_timeout)
             .await
         {
             Ok(r) => r,

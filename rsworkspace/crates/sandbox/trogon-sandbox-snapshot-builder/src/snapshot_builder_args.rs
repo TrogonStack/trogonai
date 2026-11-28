@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -19,8 +20,8 @@ pub struct SnapshotBuilderArgs {
     pub nats_url: String,
 
     /// Most snapshots processed at once.
-    #[arg(long, env = "SANDBOX_SNAPSHOT_BUILDER_MAX_CONCURRENT", default_value_t = 4)]
-    pub max_concurrent: usize,
+    #[arg(long, env = "SANDBOX_SNAPSHOT_BUILDER_MAX_CONCURRENT", default_value = "4")]
+    pub max_concurrent: NonZeroUsize,
 
     #[arg(long, env = "SANDBOX_REGISTRY_URL", default_value = "127.0.0.1:5000")]
     pub registry_url: String,

@@ -88,6 +88,12 @@ impl VercelWorkerProvider {
             Ok(snap) if snap.status == "failed" => SnapshotExportOutcome::Err(SnapshotExportError::Permanent {
                 message: format!("Vercel snapshot {} failed", snap.id),
             }),
+            Ok(snap) if snap.status != "created" => SnapshotExportOutcome::Err(SnapshotExportError::Permanent {
+                message: format!(
+                    "Vercel snapshot {} reported the unrecognized status {:?}",
+                    snap.id, snap.status
+                ),
+            }),
             Ok(snap) => match NativeSnapshotId::new(snap.id) {
                 Ok(id) => SnapshotExportOutcome::Native(NativeSnapshotReceipt {
                     reference: NativeSnapshotRef {

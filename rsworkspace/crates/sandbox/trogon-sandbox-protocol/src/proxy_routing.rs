@@ -1,6 +1,8 @@
 use std::net::IpAddr;
 
-use trogon_sandbox_contract::{Host, NoProxy, NoProxyCidr, NoProxyEntry, ParentProxy, ParentProxyUrl, ProxyScheme};
+use trogon_sandbox_contract::{
+    Host, NoProxy, NoProxyCidr, NoProxyEntry, ParentProxy, ParentProxyUrl, ParentProxyUrlError, ProxyScheme,
+};
 
 use crate::{canonical_ip, is_loopback_host};
 
@@ -77,13 +79,15 @@ pub fn parent_proxy_route_for<'a>(
 /// Resolves explicit settings first and the environment second (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, either
 /// case).
 ///
-/// `https` falls back to `http`. A URL that does not parse is ignored, and with none left there is no parent proxy.
+/// `https` falls back to `http`. A set URL that does not parse is an error, never ignored, because ignoring it would
+/// send traffic directly that the operator meant to route through the proxy. With nothing set there is no parent
+/// proxy.
 pub fn resolve_parent_proxy(
     http: Option<&str>,
     https: Option<&str>,
     no_proxy: Option<&str>,
     env: impl Fn(&str) -> Option<String>,
-) -> Option<ParentProxy> {
+) -> Result<Option<ParentProxy>, ParentProxyUrlError> {
     let lookup = |upper: &str, lower: &str| env(upper).or_else(|| env(lower));
     let http = http.map(str::to_string).or_else(|| lookup("HTTP_PROXY", "http_proxy"));
     let https = https
@@ -96,7 +100,8 @@ pub fn resolve_parent_proxy(
         .unwrap_or_default();
     let parse = |raw: Option<String>| {
         raw.filter(|raw| !raw.is_empty())
-            .and_then(|raw| ParentProxyUrl::new(&raw).ok())
+            .map(|raw| ParentProxyUrl::new(&raw))
+            .transpose()
     };
-    ParentProxy::new(parse(http), parse(https), NoProxy::new(&no_proxy)).ok()
+    Ok(ParentProxy::new(parse(http)?, parse(https)?, NoProxy::new(&no_proxy)).ok())
 }

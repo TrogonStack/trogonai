@@ -60,11 +60,16 @@ impl BrokerCore {
 
     /// Lists all drives owned by `req.tenant`.
     pub async fn handle_list_drives(&self, req: ListDrivesRequest) -> ListDrivesResponse {
-        let drives = self.drive_store.list(&req.tenant).await.unwrap_or_else(|e| {
-            warn!(error = %e, tenant = %req.tenant, "list drives: drive store error, returning empty list");
-            Vec::new()
-        });
-        ListDrivesResponse { denied: None, drives }
+        match self.drive_store.list(&req.tenant).await {
+            Ok(drives) => ListDrivesResponse { denied: None, drives },
+            Err(e) => {
+                warn!(error = %e, tenant = %req.tenant, "list drives denied: drive store error");
+                ListDrivesResponse {
+                    denied: Some(DriveError::StorageBackend { message: e.to_string() }),
+                    drives: Vec::new(),
+                }
+            }
+        }
     }
 
     /// Deletes a drive owned by `req.tenant`. Denied when the drive does not

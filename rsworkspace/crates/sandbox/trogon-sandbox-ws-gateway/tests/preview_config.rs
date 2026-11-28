@@ -11,7 +11,7 @@ use trogon_sandbox_contract::{LeaseId, TenantId};
 use trogon_sandbox_ws_gateway::{
     PreviewClaims, PreviewConfigError, PreviewKeys, PreviewState, PreviewTokenError, preview_from_env,
 };
-use trogon_std::env::InMemoryEnv;
+use trogon_std::env::{InMemoryEnv, ReadEnv};
 
 const KEYS: &str = "SANDBOX_PREVIEW_SIGNING_KEYS";
 const ACTIVE: &str = "SANDBOX_PREVIEW_ACTIVE_KEY_ID";
@@ -169,4 +169,29 @@ fn the_preview_ttl_is_clamped_between_one_second_and_the_session_retention() -> 
         Duration::from_secs(5),
     )?;
     Ok(())
+}
+
+struct NotUnicodeEnv(&'static str);
+
+impl ReadEnv for NotUnicodeEnv {
+    fn var(&self, key: &str) -> Result<String, std::env::VarError> {
+        if key == self.0 {
+            Err(std::env::VarError::NotUnicode(std::ffi::OsString::new()))
+        } else if key == KEYS {
+            Ok(key_spec("a", "ab"))
+        } else {
+            Err(std::env::VarError::NotPresent)
+        }
+    }
+}
+
+#[test]
+fn an_environment_value_that_is_not_unicode_is_refused() {
+    for name in [KEYS, ACTIVE] {
+        let outcome = preview_from_env(&NotUnicodeEnv(name), Some("https://gw.example"), TTL, TTL);
+        assert!(
+            matches!(outcome, Err(PreviewConfigError::NotUnicode { name: found }) if found == name),
+            "{name}"
+        );
+    }
 }

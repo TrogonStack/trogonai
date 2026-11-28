@@ -39,12 +39,31 @@ struct ExecuteResponse {
     properties: Option<ExecuteResponseProperties>,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecuteResponseProperties {
     stdout: Option<String>,
     stderr: Option<String>,
     exit_code: Option<i32>,
+    status: Option<String>,
+}
+
+impl ExecuteResponseProperties {
+    /// The exit code the service reported. Without one, only an explicit `Succeeded` status stands for exit
+    /// code 0; a response that reports neither is refused instead of read as success.
+    fn exit_code(&self) -> Result<i32, AcaError> {
+        match (self.exit_code, self.status.as_deref()) {
+            (Some(code), _) => Ok(code),
+            (None, Some(status)) if status.eq_ignore_ascii_case("succeeded") => Ok(0),
+            (None, status) => Err(AcaError::aca_api(
+                200,
+                format!(
+                    "execution response has no exit code and status {}",
+                    status.unwrap_or("absent")
+                ),
+            )),
+        }
+    }
 }
 
 impl ReqwestAcaClient {
@@ -121,11 +140,16 @@ impl AcaSessionApi for ReqwestAcaClient {
         if !response.status().is_success() {
             return Err(failure(response).await);
         }
-        let properties = response.json::<ExecuteResponse>().await?.properties.unwrap_or_default();
+        let properties = response
+            .json::<ExecuteResponse>()
+            .await?
+            .properties
+            .ok_or_else(|| AcaError::aca_api(200, "execution response has no properties"))?;
+        let exit_code = properties.exit_code()?;
         Ok(ExecuteResult {
             stdout: properties.stdout.unwrap_or_default(),
             stderr: properties.stderr.unwrap_or_default(),
-            exit_code: properties.exit_code.unwrap_or(0),
+            exit_code,
         })
     }
 
