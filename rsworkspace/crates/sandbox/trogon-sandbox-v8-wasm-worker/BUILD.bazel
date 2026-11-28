@@ -4,6 +4,7 @@ workspace_crate(
     compile_data = ["README.md"],
     integration_tests = {
         "binary": {"tags": ["requires-network"]},
+        "conformance": {"tags": ["requires-network"]},
         "serve": {"tags": ["requires-network"]},
         "worker": {"tags": ["requires-network"]},
     },
