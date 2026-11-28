@@ -374,6 +374,10 @@ fn persistent_grant_subcommands_parse() -> Result<(), Box<dyn std::error::Error>
     );
     let plain: AclGrantInput = serde_json::from_str(r#"{"write":["w"]}"#)?;
     assert!(plain.deny_read.is_empty() && plain.deny_write.is_empty());
+    // A misspelled key must not silently drop a deny list.
+    assert!(serde_json::from_str::<AclGrantInput>(r#"{"write":["w"],"denywrite":["dw"]}"#).is_err());
+    assert!(serde_json::from_str::<AclStampInput>(r#"{"deny_write":["dw"]}"#).is_err());
+    assert!(serde_json::from_str::<AclStampInput>(r#"{"denyWrite":["dw"]}"#).is_ok());
     Ok(())
 }
 

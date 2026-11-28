@@ -25,6 +25,7 @@
 //!   mechanism that would close them wholesale breaks Schannel by
 //!   LSASS policy (see RESTRICTINGSIDS-RESULTS.md).
 
+use crate::error::{FenceHelperError, Result};
 use std::path::Path;
 
 /// The fixed world-writable system list, resolved against this
@@ -37,10 +38,25 @@ use std::path::Path;
 /// with zero grants): `%ProgramData%` (`Users:(WD,AD)` + CREATOR
 /// OWNER), `%PUBLIC%`, and the classic `Users`-writable spool/temp
 /// dirs under `%SystemRoot%`.
-pub fn ambient_deny_targets() -> Vec<String> {
-    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into());
-    let public = std::env::var("PUBLIC").unwrap_or_else(|_| r"C:\Users\Public".into());
-    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+///
+/// A missing or non-Unicode variable is an error: guessing the stock
+/// location would leave the real directory unstamped on a machine
+/// that keeps it elsewhere.
+pub fn ambient_deny_targets() -> Result<Vec<String>> {
+    ambient_deny_targets_from(|name| std::env::var(name).ok())
+}
+
+fn ambient_deny_targets_from(env: impl Fn(&str) -> Option<String>) -> Result<Vec<String>> {
+    let need = |name: &str| -> Result<String> {
+        env(name).filter(|v| !v.is_empty()).ok_or_else(|| {
+            FenceHelperError::msg(format!(
+                "%{name}% is not set, so the ambient deny targets cannot be resolved"
+            ))
+        })
+    };
+    let program_data = need("ProgramData")?;
+    let public = need("PUBLIC")?;
+    let system_root = need("SystemRoot")?;
     let sr = |tail: &str| -> String { format!("{system_root}\\{tail}") };
 
     let candidates: Vec<String> = vec![
@@ -58,7 +74,7 @@ pub fn ambient_deny_targets() -> Vec<String> {
         sr(r"SysWOW64\com\dmp"),
         sr(r"SysWOW64\Tasks"),
     ];
-    candidates.into_iter().filter(|p| Path::new(p).is_dir()).collect()
+    Ok(candidates.into_iter().filter(|p| Path::new(p).is_dir()).collect())
 }
 
 #[cfg(test)]

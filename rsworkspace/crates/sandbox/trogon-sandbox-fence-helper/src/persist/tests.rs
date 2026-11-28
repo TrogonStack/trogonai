@@ -412,3 +412,54 @@ fn unreadable_dacl_is_not_an_absent_grant() -> Result<(), Box<dyn std::error::Er
     );
     Ok(())
 }
+
+fn setup(group: &str) -> crate::install::SetupInfo {
+    crate::install::SetupInfo {
+        sandbox_user: "u".to_owned(),
+        sandbox_user_sid: "S-1-5-21-1".to_owned(),
+        sandbox_group_sid: group.to_owned(),
+        marker_version: crate::install::SETUP_VERSION,
+        created_at_unix: 0,
+    }
+}
+
+/// An unreadable marker must not read as an empty one: the groups it
+/// names would be dropped and their entries left on disk.
+#[test]
+fn an_unreadable_marker_fails_the_identities() {
+    let unreadable = Err(FenceHelperError::msg("registry unreadable"));
+    assert!(Ids::from_records(Some(setup("S-1-5-21-2")), unreadable, "S-1-5-21-3".to_owned()).is_err());
+    let marker = Marker {
+        group_sid: Some("S-1-5-21-9".to_owned()),
+        ..Marker::default()
+    };
+    let ids = Ids::from_records(Some(setup("S-1-5-21-2")), Ok(marker), "S-1-5-21-3".to_owned());
+    assert_eq!(
+        ids.map(|i| i.previous_group_sids).ok(),
+        Some(vec!["S-1-5-21-9".to_owned()])
+    );
+}
+
+/// A recorded deny whose file id cannot be read ends the forget with the
+/// rows still there, instead of dropping the path from the strip.
+#[test]
+fn a_deny_with_a_corrupt_file_id_fails_the_forget() -> Result<(), Box<dyn std::error::Error>> {
+    let conn = crate::state_db::open_memory_db_for_tests()?;
+    let (root, target) = (r"\\?\C:\w", r"\\?\C:\w\deny.txt");
+    conn.execute(
+        "INSERT INTO persistent_denies (canonical_path, root, kind, mask, file_id) \
+         VALUES (?1, ?2, 'deny', 'denyWrite', ?3)",
+        params![target, root, [1u8; 5].as_slice()],
+    )?;
+    let ids = Ids {
+        group_sid: None,
+        sandbox_user_sid: None,
+        real_user_sid: crate::sid::current_user_sid()?,
+        previous_group_sids: Vec::new(),
+    };
+    let forgot = forget_one_with(&conn, &ids, root, false, |_| Located::Gone);
+    assert!(forgot.is_err());
+    let left: i64 = conn.query_row("SELECT COUNT(*) FROM persistent_denies", [], |r| r.get(0))?;
+    assert_eq!(left, 1);
+    Ok(())
+}
