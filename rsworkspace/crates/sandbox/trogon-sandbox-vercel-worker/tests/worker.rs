@@ -532,11 +532,12 @@ async fn a_failed_cancel_is_not_retried_until_another_cancel_arrives() -> TestRe
     running.cancel_lease(LEASE).await?;
     let fake = &running.fake;
     until(|| fake.deletes() == 1).await?;
-    running.fake.delete_status(200);
 
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(running.fake.deletes(), 1, "nothing retried the delete");
     assert_eq!(running.provider.active_lease_count().await, 1);
+    // The fake reads the status after it logs the DELETE, so it only recovers once the first delete has long failed.
+    running.fake.delete_status(200);
 
     running.cancel_lease(LEASE).await?;
     let provider = Arc::clone(&running.provider);

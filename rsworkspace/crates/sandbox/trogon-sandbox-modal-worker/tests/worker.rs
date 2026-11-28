@@ -328,5 +328,10 @@ async fn a_failed_cancel_is_not_retried_until_another_cancel_arrives() -> TestRe
     .await?;
     let reply = running.dispatch("lease-stuck", request_json()).await?;
     assert!(reply.get("provider_error").is_none(), "{reply}");
+    assert_eq!(
+        running.env.api.with(|state| state.created.len()),
+        2,
+        "the reused id launched a new sandbox rather than a cached grant"
+    );
     running.stop().await
 }
