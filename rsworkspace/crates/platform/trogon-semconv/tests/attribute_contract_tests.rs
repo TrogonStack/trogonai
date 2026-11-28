@@ -1,9 +1,11 @@
 use std::fmt::Debug;
 
 use trogon_semconv::attribute::{
-    DecisionOutcome, ErrorType, GuestPhase, McpNatsDirection, MessagingOperationName, MessagingOperationType,
-    MessagingSystem, Method, Operation, Outcome, Reason, SnapshotOutcome, TrapClassification, WritePrecondition,
+    DecisionOutcome, ErrorType, GenAiOperationName, GuestPhase, McpNatsDirection, MessagingOperationName,
+    MessagingOperationType, MessagingSystem, Method, Operation, Outcome, Reason, SnapshotOutcome, TrapClassification,
+    WritePrecondition,
 };
+use trogon_semconv::{attribute, metric, span};
 
 fn assert_wire_values<E: Debug>(cases: &[(E, &str)], encode: fn(&E) -> &'static str) {
     for (value, expected) in cases {
@@ -170,4 +172,72 @@ fn guest_lifecycle_and_traps_preserve_registered_phase_labels() {
         ],
         TrapClassification::as_str,
     );
+}
+
+#[test]
+fn gen_ai_operation_names_match_upstream_wire_values() {
+    assert_wire_values(
+        &[
+            (GenAiOperationName::Chat, "chat"),
+            (GenAiOperationName::InvokeAgent, "invoke_agent"),
+            (GenAiOperationName::ExecuteTool, "execute_tool"),
+        ],
+        GenAiOperationName::as_str,
+    );
+}
+
+#[test]
+fn gen_ai_attribute_keys_match_upstream_names() {
+    assert_eq!(attribute::GEN_AI_OPERATION_NAME, "gen_ai.operation.name");
+    assert_eq!(attribute::GEN_AI_PROVIDER_NAME, "gen_ai.provider.name");
+    assert_eq!(attribute::GEN_AI_REQUEST_MODEL, "gen_ai.request.model");
+    assert_eq!(attribute::GEN_AI_USAGE_INPUT_TOKENS, "gen_ai.usage.input_tokens");
+    assert_eq!(attribute::GEN_AI_USAGE_OUTPUT_TOKENS, "gen_ai.usage.output_tokens");
+    assert_eq!(
+        attribute::GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
+        "gen_ai.usage.cache_read.input_tokens"
+    );
+    assert_eq!(
+        attribute::GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS,
+        "gen_ai.usage.cache_write.input_tokens"
+    );
+    assert_eq!(attribute::GEN_AI_TOOL_NAME, "gen_ai.tool.name");
+    assert_eq!(attribute::GEN_AI_AGENT_NAME, "gen_ai.agent.name");
+}
+
+#[test]
+fn gen_ai_span_names_follow_the_upstream_patterns() {
+    assert_eq!(span::gen_ai_client_inference_name(Some("gpt-4")), "chat gpt-4");
+    assert_eq!(span::gen_ai_client_inference_name(None), "chat");
+    assert_eq!(
+        span::gen_ai_invoke_agent_client_name(Some("Math Tutor")),
+        "invoke_agent Math Tutor"
+    );
+    assert_eq!(span::gen_ai_invoke_agent_internal_name(None), "invoke_agent");
+    assert_eq!(
+        span::gen_ai_execute_tool_internal_name(Some("Flights")),
+        "execute_tool Flights"
+    );
+}
+
+#[test]
+fn gen_ai_metric_names_match_upstream_names() {
+    assert_eq!(
+        metric::GEN_AI_CLIENT_OPERATION_DURATION,
+        "gen_ai.client.operation.duration"
+    );
+    assert_eq!(
+        metric::GEN_AI_CLIENT_INFERENCE_DURATION,
+        "gen_ai.client.inference.duration"
+    );
+    assert_eq!(
+        metric::GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS,
+        "gen_ai.client.inference.operation.input_tokens"
+    );
+    assert_eq!(
+        metric::GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS,
+        "gen_ai.client.inference.operation.output_tokens"
+    );
+    assert_eq!(metric::GEN_AI_INVOKE_AGENT_DURATION, "gen_ai.invoke_agent.duration");
+    assert_eq!(metric::GEN_AI_EXECUTE_TOOL_DURATION, "gen_ai.execute_tool.duration");
 }

@@ -165,6 +165,66 @@ pub const DECIDER_WRITE_SNAPSHOT: &str = "decider.write_snapshot";
 /// ACP client method dispatch. Span name is `dispatch_client_method` (no namespace) today
 pub const DISPATCH_CLIENT_METHOD: &str = "dispatch_client_method";
 
+/// A logical client call to a Generative AI model or service that generates a response or requests a tool call based on the input prompt
+///
+/// The wire name is a pattern, `chat {gen_ai.request.model}`. Build it with
+/// [`gen_ai_client_inference_name`].
+pub const GEN_AI_CLIENT_INFERENCE_OPERATION: &str = "chat";
+
+/// Span name for `gen_ai.client.inference`: the operation, followed by the `gen_ai.request.model`
+/// value when it is available.
+pub fn gen_ai_client_inference_name(target: Option<&str>) -> String {
+    match target {
+        Some(target) => format!("{} {}", GEN_AI_CLIENT_INFERENCE_OPERATION, target),
+        None => GEN_AI_CLIENT_INFERENCE_OPERATION.to_string(),
+    }
+}
+
+/// Tool execution
+///
+/// The wire name is a pattern, `execute_tool {gen_ai.tool.name}`. Build it with
+/// [`gen_ai_execute_tool_internal_name`].
+pub const GEN_AI_EXECUTE_TOOL_INTERNAL_OPERATION: &str = "execute_tool";
+
+/// Span name for `gen_ai.execute_tool.internal`: the operation, followed by the `gen_ai.tool.name`
+/// value when it is available.
+pub fn gen_ai_execute_tool_internal_name(target: Option<&str>) -> String {
+    match target {
+        Some(target) => format!("{} {}", GEN_AI_EXECUTE_TOOL_INTERNAL_OPERATION, target),
+        None => GEN_AI_EXECUTE_TOOL_INTERNAL_OPERATION.to_string(),
+    }
+}
+
+/// GenAI agent invocation over a remote service
+///
+/// The wire name is a pattern, `invoke_agent {gen_ai.agent.name}`. Build it with
+/// [`gen_ai_invoke_agent_client_name`].
+pub const GEN_AI_INVOKE_AGENT_CLIENT_OPERATION: &str = "invoke_agent";
+
+/// Span name for `gen_ai.invoke_agent.client`: the operation, followed by the `gen_ai.agent.name`
+/// value when it is available.
+pub fn gen_ai_invoke_agent_client_name(target: Option<&str>) -> String {
+    match target {
+        Some(target) => format!("{} {}", GEN_AI_INVOKE_AGENT_CLIENT_OPERATION, target),
+        None => GEN_AI_INVOKE_AGENT_CLIENT_OPERATION.to_string(),
+    }
+}
+
+/// GenAI agent invocation within the same process
+///
+/// The wire name is a pattern, `invoke_agent {gen_ai.agent.name}`. Build it with
+/// [`gen_ai_invoke_agent_internal_name`].
+pub const GEN_AI_INVOKE_AGENT_INTERNAL_OPERATION: &str = "invoke_agent";
+
+/// Span name for `gen_ai.invoke_agent.internal`: the operation, followed by the `gen_ai.agent.name`
+/// value when it is available.
+pub fn gen_ai_invoke_agent_internal_name(target: Option<&str>) -> String {
+    match target {
+        Some(target) => format!("{} {}", GEN_AI_INVOKE_AGENT_INTERNAL_OPERATION, target),
+        None => GEN_AI_INVOKE_AGENT_INTERNAL_OPERATION.to_string(),
+    }
+}
+
 /// GitHub webhook ingestion
 pub const GITHUB_WEBHOOK: &str = "github.webhook";
 
