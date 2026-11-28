@@ -176,7 +176,13 @@ async fn a_redispatch_after_a_failed_cancel_is_refused_while_the_sandbox_is_held
 
     running.client.publish(cancel_subject("lease-stuck"), "".into()).await?;
     running.client.flush().await?;
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Redispatch only once the terminate has actually failed, so the cancel handler has forgotten the grant.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while running.env.api.with(|state| state.terminated.len()) == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
     let reply = running.dispatch("lease-stuck", request_json()).await?;
 
     assert!(
