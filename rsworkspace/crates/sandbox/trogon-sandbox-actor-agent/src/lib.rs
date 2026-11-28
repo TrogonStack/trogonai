@@ -129,8 +129,7 @@ pub use guest_entropy_reseed_receipt::GuestEntropyReseedReceipt;
 pub use guest_entropy_seed::GuestEntropySeed;
 pub use guest_protocol_error::GuestProtocolError;
 pub use guest_protocol_version::{
-    admit_agent_version, admit_protocol_version, min_protocol_version_from_env, parse_min_protocol_version,
-    parse_protocol_version, try_min_protocol_version_from_env,
+    admit_agent_version, admit_protocol_version, parse_protocol_version, try_min_protocol_version_from_env,
 };
 pub use min_protocol_version_error::MinProtocolVersionError;
 pub use terminal_frame::TerminalFrame;
