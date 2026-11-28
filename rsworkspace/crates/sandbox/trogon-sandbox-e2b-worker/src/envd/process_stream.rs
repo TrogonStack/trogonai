@@ -66,10 +66,10 @@ pub(crate) fn parse_process_stream(body: &[u8]) -> Result<ProcessResult, ApiErro
         };
         if let Some(data) = event.get("data") {
             if let Some(text) = data.get("stdout").and_then(Value::as_str) {
-                result.stdout.extend(decode_b64(text));
+                result.stdout.extend(decode_b64(text)?);
             }
             if let Some(text) = data.get("stderr").and_then(Value::as_str) {
-                result.stderr.extend(decode_b64(text));
+                result.stderr.extend(decode_b64(text)?);
             }
         }
         if let Some(end) = event.get("end") {
