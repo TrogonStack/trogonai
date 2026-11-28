@@ -1,3 +1,11 @@
 load("//.config/bazel:rust.bzl", "workspace_crate")
 
-workspace_crate()
+workspace_crate(
+    integration_tests = {
+        # The golden files are found through the manifest directory, which a test reads from its runfiles.
+        "wire_contract": {
+            "data": ["tests/wire_fixtures/*.json"],
+            "rustc_env": {"CARGO_MANIFEST_DIR": "{package}"},
+        },
+    },
+)

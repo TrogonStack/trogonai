@@ -1,0 +1,79 @@
+{
+  "close": {
+    "lease_id": "lease-1",
+    "op": "close",
+    "terminal_id": "term-1"
+  },
+  "input": {
+    "data": "bHMK",
+    "lease_id": "lease-1",
+    "op": "input",
+    "terminal_id": "term-1"
+  },
+  "open": {
+    "cmd": [
+      "bash",
+      "-l"
+    ],
+    "cols": 80,
+    "cwd": "/work",
+    "env": {
+      "TERM": "xterm"
+    },
+    "lease_id": "lease-1",
+    "op": "open",
+    "rows": 24,
+    "terminal_id": "term-1"
+  },
+  "open_defaults": {
+    "cols": 80,
+    "lease_id": "lease-1",
+    "op": "open",
+    "rows": 24,
+    "terminal_id": "term-1"
+  },
+  "open_resume": {
+    "cols": 80,
+    "lease_id": "lease-1",
+    "op": "open",
+    "resume_from": 41,
+    "rows": 24,
+    "terminal_id": "term-1"
+  },
+  "output_data": {
+    "data": "bHMK",
+    "seq": 3,
+    "type": "data"
+  },
+  "output_exit": {
+    "exit_code": 0,
+    "seq": 4,
+    "type": "exit"
+  },
+  "output_resync": {
+    "from_seq": 7,
+    "type": "resync"
+  },
+  "resize": {
+    "cols": 100,
+    "lease_id": "lease-1",
+    "op": "resize",
+    "rows": 40,
+    "terminal_id": "term-1"
+  },
+  "response_done": {
+    "outcome": "done"
+  },
+  "response_failed_too_many": {
+    "kind": "too_many_terminals",
+    "max": 8,
+    "outcome": "failed"
+  },
+  "response_opened": {
+    "outcome": "opened",
+    "terminal_id": "term-1"
+  },
+  "response_unsupported": {
+    "outcome": "unsupported"
+  }
+}
