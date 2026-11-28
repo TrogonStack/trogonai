@@ -47,21 +47,15 @@ impl Worker {
         })
     }
 
-    /// Sends a signed dispatch, retrying while the worker has not subscribed yet.
+    /// Sends a signed dispatch once, without retrying: a worker that heartbeats must already serve its dispatch subject.
     async fn dispatch(&self) -> Result<Value, Boxed> {
         let body = json!({"lease_id": LEASE, "request": request_json(), "target": self.target(ATTEMPT)});
         let signed = self
             .signer
             .sign_payload(&serde_json::to_vec(&body)?, OP_LEASE_DISPATCH)?;
         let subject = subjects::worker_dispatch(ProviderKind::Vercel, &self.worker_id);
-        for _ in 0..100 {
-            let request = self.client.request(subject.clone(), signed.clone().into());
-            if let Ok(Ok(reply)) = tokio::time::timeout(Duration::from_secs(5), request).await {
-                return Ok(serde_json::from_slice(&reply.payload)?);
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        Err("the worker never answered on its dispatch subject".into())
+        let reply = tokio::time::timeout(WAIT, self.client.request(subject, signed.into())).await??;
+        Ok(serde_json::from_slice(&reply.payload)?)
     }
 
     /// Sends a cleanup for `attempt`, signed for the attempt `signed_for`.

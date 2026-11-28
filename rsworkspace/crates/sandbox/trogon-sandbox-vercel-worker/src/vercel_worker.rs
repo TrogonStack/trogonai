@@ -46,9 +46,10 @@ pub async fn run(
         authority_config,
         worker_id.clone(),
         Arc::new(NatsAuthorityOracle::new(client.clone(), worker_id.clone())),
-        vercel,
+        vercel.clone(),
     );
     tokio::spawn(authority.run(cancel.clone()));
+    vercel.mark_ready();
     info!("worker ready");
     loop {
         tokio::select! {
