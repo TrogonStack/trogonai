@@ -103,6 +103,24 @@ pub(crate) fn literal_entry(path: &str) -> Result<FsPathEntry, LiteralPathError>
     })
 }
 
+/// The write deny for the credential store directory. A directory that cannot
+/// be resolved or named as a literal path fails the launch, because skipping
+/// the deny would leave the store writable from the sandbox.
+pub(crate) fn store_deny_entry(dir: &Path) -> Result<FsPathEntry, crate::error::RuntimeError> {
+    let resolved = dir.canonicalize().map_err(|err| {
+        crate::error::RuntimeError::Invalid(anyhow::anyhow!(
+            "the credential store directory {} cannot be resolved, so it cannot be denied to the sandbox: {err}",
+            dir.display()
+        ))
+    })?;
+    literal_entry(&resolved.to_string_lossy()).map_err(|err| {
+        crate::error::RuntimeError::Invalid(anyhow::anyhow!(
+            "the credential store directory {} is not a valid deny path: {err}",
+            resolved.display()
+        ))
+    })
+}
+
 /// The paths a command may always write: its standard streams and terminal,
 /// the directory handed out as `TMPDIR` and the home directory conveniences.
 pub fn default_write_paths() -> Vec<PathBuf> {

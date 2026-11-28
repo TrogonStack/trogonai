@@ -271,3 +271,20 @@ fn real_path_reads_a_relative_path_from_the_working_directory() -> TestResult {
     assert_eq!(real_path_of(Path::new(".").join("..").join(name).join("."))?, cwd);
     Ok(())
 }
+
+#[test]
+fn store_deny_fails_when_the_directory_cannot_be_resolved() {
+    let missing = std::env::temp_dir().join("trogon-no-such-credential-store-dir");
+    assert!(matches!(
+        store_deny_entry(&missing),
+        Err(crate::error::RuntimeError::Invalid(_))
+    ));
+}
+
+#[test]
+fn store_deny_names_the_resolved_directory() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let entry = store_deny_entry(dir.path())?;
+    assert_eq!(entry, literal(&dir.path().canonicalize()?.to_string_lossy())?);
+    Ok(())
+}

@@ -1057,12 +1057,8 @@ impl PolicyExec {
                 .applied_to(&fs)?,
             );
         }
-        if host_view
-            && let Some(store) = credentials
-                .store_dir()
-                .and_then(|dir| dir.canonicalize().ok())
-                .and_then(|dir| literal_entry(&dir.to_string_lossy()).ok())
-        {
+        if host_view && let Some(dir) = credentials.store_dir() {
+            let store = crate::restrictions::store_deny_entry(dir)?;
             let fs = credential_fs.unwrap_or_default();
             credential_fs = Some(
                 FsAdditions {
