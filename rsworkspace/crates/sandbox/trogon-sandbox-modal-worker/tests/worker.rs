@@ -323,3 +323,49 @@ async fn an_emitter_whose_client_is_gone_only_warns() -> TestResult {
         .await;
     Ok(())
 }
+
+/// Pins today's behaviour: a cancel whose terminate failed is not retried, and the broker forgets a lease once it
+/// has published the cancel, so only another cancel ends the sandbox.
+#[tokio::test]
+async fn a_failed_cancel_is_not_retried_until_another_cancel_arrives() -> TestResult {
+    let mut running = Running::start().await?;
+    running.dispatch("lease-stuck", request_json()).await?;
+    running
+        .env
+        .api
+        .with(|state| state.terminate_failure = Some(Failure::Other));
+    running.client.publish(cancel_subject("lease-stuck"), "".into()).await?;
+    running.client.flush().await?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while running.env.api.with(|state| state.terminated.len()) == 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    running.env.api.with(|state| state.terminate_failure = None);
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        running.env.api.with(|state| state.terminated.len()),
+        1,
+        "nothing retried the terminate"
+    );
+    assert_eq!(running.env.provider.current_leases().await, 1);
+
+    running.client.publish(cancel_subject("lease-stuck"), "".into()).await?;
+    running.client.flush().await?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while running.env.provider.current_leases().await != 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    let reply = running.dispatch("lease-stuck", request_json()).await?;
+    assert!(reply.get("provider_error").is_none(), "{reply}");
+    assert_eq!(
+        running.env.api.with(|state| state.created.len()),
+        2,
+        "the reused id launched a new sandbox rather than a cached grant"
+    );
+    running.stop().await
+}

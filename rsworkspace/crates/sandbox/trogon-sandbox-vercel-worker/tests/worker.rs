@@ -546,3 +546,33 @@ async fn every_worker_error_has_a_message() -> TestResult {
     assert_eq!(errors.len(), 11);
     Ok(())
 }
+
+/// Pins today's behaviour: a cancel whose delete failed is not retried, and the broker forgets a lease once it has
+/// published the cancel, so only another cancel deletes the sandbox.
+#[tokio::test]
+async fn a_failed_cancel_is_not_retried_until_another_cancel_arrives() -> TestResult {
+    let mut running = Running::start().await?;
+    running.dispatch(LEASE).await?;
+    running.fake.delete_status(500);
+    running.cancel_lease(LEASE).await?;
+    let fake = &running.fake;
+    until(|| fake.deletes() == 1).await?;
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(running.fake.deletes(), 1, "nothing retried the delete");
+    assert_eq!(running.provider.active_lease_count().await, 1);
+    // The fake reads the status after it logs the DELETE, so it only recovers once the first delete has long failed.
+    running.fake.delete_status(200);
+
+    running.cancel_lease(LEASE).await?;
+    let provider = Arc::clone(&running.provider);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while provider.active_lease_count().await != 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    running.dispatch(LEASE).await?;
+    assert_eq!(running.fake.creates(), 2);
+    running.stop().await
+}

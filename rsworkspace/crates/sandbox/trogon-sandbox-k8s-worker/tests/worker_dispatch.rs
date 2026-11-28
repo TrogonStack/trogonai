@@ -160,3 +160,39 @@ async fn snapshot_exports_report_receipts_and_failures() -> TestResult {
     );
     running.stop().await
 }
+
+/// Pins today's behaviour: a cancel whose delete failed is not retried, and the broker forgets a lease once it has
+/// published the cancel, so only another cancel releases the job.
+#[tokio::test]
+async fn a_failed_cancel_is_not_retried_until_another_cancel_arrives() -> TestResult {
+    let mut running = Running::start().await?;
+    running
+        .dispatch("lease-stuck", serde_json::to_value(lease_request()?)?)
+        .await?;
+    running.world.cluster.state().fail_deletes = 1;
+    let cancel = subjects::provider_cancel(ProviderKind::K8sMicroVm, &LeaseId::new("lease-stuck"));
+    running.publish(cancel.clone(), &serde_json::json!({})).await?;
+    let cluster = &running.world.cluster;
+    until(|| cluster.state().fail_deletes == 0).await?;
+
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    assert!(running.world.provider.holds_lease(&lease_id("lease-stuck")).await);
+
+    running.publish(cancel, &serde_json::json!({})).await?;
+    let provider = running.world.provider.clone();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while provider.holds_lease(&lease_id("lease-stuck")).await {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    running
+        .dispatch("lease-stuck", serde_json::to_value(lease_request()?)?)
+        .await?;
+    assert_eq!(
+        running.world.cluster.state().jobs_created,
+        2,
+        "the reused id launched a new job"
+    );
+    running.stop().await
+}
