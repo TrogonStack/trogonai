@@ -81,6 +81,35 @@ url = "https://github.com/mikefarah/yq/releases/download/v4.54.3/yq_darwin_amd64
 url_api = "https://api.github.com/repos/mikefarah/yq/releases/assets/726219934"
 provenance = "cosign"
 
+[[tools."aqua:oras-project/oras"]]
+version = "1.3.0"
+backend = "aqua:oras-project/oras"
+specifiers = ["1.3.0"]
+
+[tools."aqua:oras-project/oras"."platforms.linux-arm64"]
+checksum = "sha256:7649738b48fde10542bcc8b0e9b460ba83936c75fb5be01ee6d4443764a14352"
+checksum_source = "mise-versions"
+url = "https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/oras-project/oras/releases/assets/290827345"
+
+[tools."aqua:oras-project/oras"."platforms.linux-x64"]
+checksum = "sha256:6cdc692f929100feb08aa8de584d02f7bcc30ec7d88bc2adc2054d782db57c64"
+checksum_source = "mise-versions"
+url = "https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/oras-project/oras/releases/assets/290827355"
+
+[tools."aqua:oras-project/oras"."platforms.macos-arm64"]
+checksum = "sha256:e10c6552c02d5a7c7eaf7170d3b6f7f094b675a98a1e0edf4d4478a909447245"
+checksum_source = "mise-versions"
+url = "https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/oras-project/oras/releases/assets/290827346"
+
+[tools."aqua:oras-project/oras"."platforms.macos-x64"]
+checksum = "sha256:82c33f7da8430ea7fa7e7bdf7721be0a0d0481e5ccb2472ea438490d5e8641a9"
+checksum_source = "mise-versions"
+url = "https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/oras-project/oras/releases/assets/290827354"
+
 [[tools."aqua:prometheus/prometheus"]]
 version = "3.15.1"
 backend = "aqua:prometheus/prometheus"
