@@ -106,6 +106,7 @@ pub(crate) fn literal_entry(path: &str) -> Result<FsPathEntry, LiteralPathError>
 /// The write deny for the credential store directory. A directory that cannot
 /// be resolved or named as a literal path fails the launch, because skipping
 /// the deny would leave the store writable from the sandbox.
+#[cfg(unix)]
 pub(crate) fn store_deny_entry(dir: &Path) -> Result<FsPathEntry, crate::error::RuntimeError> {
     let resolved = dir.canonicalize().map_err(|err| {
         crate::error::RuntimeError::Invalid(anyhow::anyhow!(
