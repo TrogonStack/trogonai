@@ -8,7 +8,7 @@ use support::{
     MockSandboxBackend, TestResult, WAIT, api_key, call, call_ok, lease_request, open_socket, read_next, test_state,
 };
 use tokio_tungstenite::tungstenite::Message;
-use trogon_sandbox_ws_gateway::router;
+use trogon_sandbox_ws_gateway::{parse_cors_origins, router};
 
 #[tokio::test]
 async fn a_ping_is_answered_with_a_pong_and_binary_frames_are_ignored() -> TestResult {
@@ -99,10 +99,7 @@ async fn configured_cors_origins_are_allowed() -> TestResult {
     let state = test_state(&key, "tenant-test", Arc::new(MockSandboxBackend::new())).await?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
-    let app = router(
-        state,
-        vec!["https://app.example".to_string(), "not an origin\n".to_string()],
-    );
+    let app = router(state, parse_cors_origins(&["https://app.example".to_string()])?);
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -120,4 +117,10 @@ async fn configured_cors_origins_are_allowed() -> TestResult {
         Some("https://app.example".as_bytes())
     );
     Ok(())
+}
+
+#[test]
+fn an_origin_that_is_not_a_header_value_is_refused() {
+    let refused = parse_cors_origins(&["https://app.example".to_string(), "not an origin\n".to_string()]);
+    assert!(refused.is_err_and(|error| error.to_string().contains("not an origin")));
 }

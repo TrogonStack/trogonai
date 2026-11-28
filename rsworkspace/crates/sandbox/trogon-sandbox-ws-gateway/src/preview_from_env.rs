@@ -1,3 +1,4 @@
+use std::env::VarError;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,15 +16,25 @@ pub fn preview_from_env<E: ReadEnv>(
     ttl: Duration,
     max_ttl: Duration,
 ) -> Result<Option<Arc<PreviewState>>, PreviewConfigError> {
-    let Ok(spec) = env.var(PREVIEW_SIGNING_KEYS_ENV) else {
+    let Some(spec) = optional_var(env, PREVIEW_SIGNING_KEYS_ENV)? else {
         tracing::info!(env = PREVIEW_SIGNING_KEYS_ENV, "preview access disabled");
         return Ok(None);
     };
-    let active = env.var(PREVIEW_ACTIVE_KEY_ID_ENV).ok();
+    let active = optional_var(env, PREVIEW_ACTIVE_KEY_ID_ENV)?;
     let keys = PreviewKeys::parse(&spec, active.as_deref())?;
     let public_url = public_url
         .filter(|url| !url.is_empty())
         .ok_or(PreviewConfigError::MissingPublicUrl)?;
     tracing::info!("preview access enabled");
     Ok(Some(Arc::new(PreviewState::new(keys, public_url, ttl, max_ttl)?)))
+}
+
+/// The value of `name`, `None` when it is unset. A value that is not valid Unicode is refused instead of being read as
+/// unset, which would turn previews off or pick another signing key.
+fn optional_var<E: ReadEnv>(env: &E, name: &'static str) -> Result<Option<String>, PreviewConfigError> {
+    match env.var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(VarError::NotUnicode(_)) => Err(PreviewConfigError::NotUnicode { name }),
+    }
 }
