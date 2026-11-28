@@ -151,3 +151,27 @@ async fn readiness_gives_up_at_once_on_a_protocol_mismatch() -> anyhow::Result<(
     assert!(started.elapsed() < std::time::Duration::from_secs(5));
     Ok(())
 }
+
+#[test]
+fn an_unparseable_minimum_override_is_refused() {
+    let endpoint = || {
+        VsockEndpoint::new(
+            std::path::PathBuf::from("/nonexistent/vsock"),
+            crate::config::VsockPort::DEFAULT_AGENT,
+        )
+    };
+    let env = trogon_std::env::InMemoryEnv::new();
+    assert!(GuestAgent::new(endpoint()).with_env(&env).is_ok());
+
+    env.set(MIN_AGENT_PROTOCOL_VERSION_ENV, "not-a-number");
+    let result = GuestAgent::new(endpoint()).with_env(&env);
+    assert_eq!(
+        result.err(),
+        Some(MinProtocolVersionError {
+            name: MIN_AGENT_PROTOCOL_VERSION_ENV.to_string()
+        })
+    );
+
+    env.set(MIN_AGENT_PROTOCOL_VERSION_ENV, " 0 ");
+    assert!(GuestAgent::new(endpoint()).with_env(&env).is_ok());
+}
