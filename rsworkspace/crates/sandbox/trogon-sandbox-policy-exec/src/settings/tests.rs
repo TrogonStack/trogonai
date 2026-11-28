@@ -3339,4 +3339,4 @@ fn several_serde_issues_are_all_reported_in_one_message() -> TestResult {
     Ok(())
 }
 
-mod host_match;
+mod host_match_tests;
