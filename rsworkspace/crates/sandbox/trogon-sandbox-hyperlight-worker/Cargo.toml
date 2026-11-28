@@ -68,3 +68,4 @@ hex = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-conformance = { workspace = true }
