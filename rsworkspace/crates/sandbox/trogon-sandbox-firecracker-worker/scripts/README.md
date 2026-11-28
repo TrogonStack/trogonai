@@ -21,7 +21,7 @@ digest with `--squashfs-sha256 <hex>` (or `SANDBOX_SQUASHFS_SHA256`). The check 
 anything is unpacked, a mismatch fails the build, and the file is left untouched.
 
 The unit writes `/run/ate/actor-id` before the agent starts, from `ate.actor_id=<id>` on the
-kernel command line, falling back to the machine id. The host reaches the agent through the
+kernel command line and fails the boot when the argument is missing. The host reaches the agent through the
 hybrid vsock Unix socket: send `CONNECT 8110\n`, read `OK <port>`, then speak HTTP.
 
 

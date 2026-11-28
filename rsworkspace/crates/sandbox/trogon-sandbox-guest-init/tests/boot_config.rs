@@ -19,8 +19,20 @@ fn reads_actor_and_port() -> TestResult {
 }
 
 #[test]
-fn defaults_when_arguments_are_absent() -> TestResult {
-    let config = GuestBootConfig::from_kernel_command_line("console=ttyS0")?;
+fn a_missing_actor_argument_is_an_error() {
+    assert_eq!(
+        GuestBootConfig::from_kernel_command_line("console=ttyS0"),
+        Err(GuestBootConfigError::Actor(GuestActorIdError::Missing))
+    );
+    assert_eq!(
+        GuestBootConfig::from_kernel_command_line("sandbox.agent_port=9000"),
+        Err(GuestBootConfigError::Actor(GuestActorIdError::Missing))
+    );
+}
+
+#[test]
+fn the_port_defaults_when_the_argument_is_absent() -> TestResult {
+    let config = GuestBootConfig::from_kernel_command_line("ate.actor_id=unbound")?;
     assert_eq!(config.actor(), &GuestActor::Unbound);
     assert_eq!(config.actor().as_str(), "unbound");
     assert_eq!(config.agent_port(), GuestAgentPort::DEFAULT);
@@ -65,7 +77,7 @@ fn actor_id_is_never_empty_or_the_unbound_marker() -> TestResult {
 #[test]
 fn rejects_zero_port() {
     assert_eq!(
-        GuestBootConfig::from_kernel_command_line("sandbox.agent_port=0"),
+        GuestBootConfig::from_kernel_command_line("ate.actor_id=unbound sandbox.agent_port=0"),
         Err(GuestBootConfigError::AgentPort(GuestAgentPortError::Zero))
     );
     assert_eq!(GuestAgentPort::new(0), Err(GuestAgentPortError::Zero));
@@ -74,7 +86,7 @@ fn rejects_zero_port() {
 #[test]
 fn rejects_non_numeric_and_out_of_range_ports() {
     for raw in ["abc", "", "-1", "4294967296", "+"] {
-        let line = format!("sandbox.agent_port={raw}");
+        let line = format!("ate.actor_id=unbound sandbox.agent_port={raw}");
         let error = GuestBootConfig::from_kernel_command_line(&line);
         assert!(
             matches!(

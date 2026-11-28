@@ -165,8 +165,8 @@ $SUDO unsquashfs -no-progress -d "$ROOT" "$SQUASHFS" >/dev/null
 
 $SUDO install -D -m 0755 "$AGENT_BIN" "$ROOT/usr/local/bin/sandbox-actor-agent"
 
-# The identity comes from `ate.actor_id=` on the kernel command line when the worker sets
-# it, and falls back to the machine id so a bare boot still has a stable value.
+# The identity comes from `ate.actor_id=` on the kernel command line, which the worker always
+# sets. A boot without it fails instead of inventing an identity.
 $SUDO tee "$ROOT/usr/local/bin/write-actor-id" >/dev/null <<'SCRIPT'
 #!/bin/sh
 set -eu
@@ -177,10 +177,8 @@ for arg in $(cat /proc/cmdline); do
   esac
 done
 if [ -z "$id" ]; then
-  id="$(cat /etc/machine-id 2>/dev/null || true)"
-fi
-if [ -z "$id" ]; then
-  id="$(cat /proc/sys/kernel/random/uuid)"
+  echo "write-actor-id: no ate.actor_id= argument on the kernel command line" >&2
+  exit 1
 fi
 mkdir -p /run/ate
 printf '%s' "$id" > /run/ate/actor-id
