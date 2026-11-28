@@ -44,13 +44,6 @@ impl FdArg {
         Self::Number(if negative { -magnitude } else { magnitude })
     }
 
-    fn integer(self) -> Option<i64> {
-        match self {
-            Self::Number(number) => Some(number),
-            Self::NotANumber => None,
-        }
-    }
-
     fn descriptor(self) -> Result<RawFd, UsageError> {
         let out_of_range = |got: &str| fail(&format!("fd must be an integer from 0 to 2147483647 (got {got})"));
         match self {
@@ -328,9 +321,9 @@ struct ListenChoice {
 }
 
 fn listen_choice(args: &ProxyArgs) -> Result<ListenChoice, UsageError> {
-    if let Some(fd) = args.listen_fd.and_then(FdArg::integer).filter(|fd| *fd >= 0) {
+    if let Some(fd) = args.listen_fd {
         return Ok(ListenChoice {
-            listen: ProxyOnlyListen::Fd(RawFd::try_from(fd).unwrap_or(-1)),
+            listen: ProxyOnlyListen::Fd(fd.descriptor()?),
             warning: None,
         });
     }
