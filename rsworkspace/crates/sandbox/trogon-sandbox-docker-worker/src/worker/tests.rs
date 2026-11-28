@@ -6,7 +6,6 @@ use trogon_sandbox_protocol::ProviderError;
 use super::*;
 
 mod authority_pause_tests;
-mod counting_provider;
 mod docker_lease;
 mod heartbeat_identity_tests;
 mod lease_request;
