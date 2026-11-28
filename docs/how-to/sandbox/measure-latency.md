@@ -1,11 +1,11 @@
 # Measure sandbox latency
 
-This guide measures how long the sandbox platform takes to serve a lease. Two tools in `trogon-sandbox-conformance` cover different questions:
+This guide measures how long the sandbox platform takes to serve a lease. Three tools cover different questions. Two are in `trogon-sandbox-conformance`:
 
 - The `memory_worker` bench measures the platform's own overhead: NATS round trips, JSON encoding and chunked transfer, with no container or VM behind the lease.
 - The `latency` example times each step of a lease's life against a real worker: create, first exec, file write, file read, snapshot and delete.
 
-Neither includes broker admission. Both report p50 and p95.
+The third is the `admission` bench in `trogon-sandbox-broker`, which measures broker admission alone, with no NATS server behind it. The conformance tools report p50 and p95. The admission bench is a criterion bench and reports a time range per measurement.
 
 ## When to use this
 
@@ -17,7 +17,7 @@ The figures compare two builds or two providers on the same machine. They are no
 
 ## Prerequisites
 
-- Docker, for the NATS server the bench and the default example start in a container.
+- Docker, for the NATS server the `memory_worker` bench and the default example start in a container. The `admission` bench needs no Docker.
 - A Rust toolchain with `cargo`.
 - A clone of the repository. The commands below run from `rsworkspace`.
 
@@ -35,6 +35,53 @@ command output: cat 1024 bytes           p50 <ms> ms  p95 <ms> ms <rate> MiB/s
 ```
 
 Run it once on the base commit and once on your change, on the same machine with nothing else heavy running, and compare the lines.
+
+## Measure broker admission
+
+```sh
+cargo bench -p trogon-sandbox-broker --bench admission
+```
+
+The bench drives the broker's lease handler with in-memory stores and a worker bus that answers at once, so it times only what the broker does between receiving a request and asking a worker for the lease. It has two measurements:
+
+- `grant and delete a lease` admits a lease with a fresh idempotency key and then deletes it. The in-memory quota caps live leases, so the figure covers admission plus release.
+- `replay a lease request by idempotency key` repeats a request whose key the broker has already seen, which is the cost of the replay path.
+
+Criterion prints a time range for each measurement and, on a repeat run, how it changed since the previous run.
+
+## Save a baseline and compare against it
+
+Criterion keeps results under `target/criterion` and can name a run so later runs compare against it. This works for the `admission` bench. The `memory_worker` bench prints its own figures and takes no baseline flags, so compare its printed lines by hand.
+
+1. On the base commit, save a baseline named `main`:
+
+   ```sh
+   cargo bench -p trogon-sandbox-broker --bench admission -- --save-baseline main
+   ```
+
+2. Switch to your change and run against it:
+
+   ```sh
+   cargo bench -p trogon-sandbox-broker --bench admission -- --baseline main
+   ```
+
+   Each measurement reports `change:` with a percentage range and whether criterion found a significant regression or improvement. A range that spans zero, or the words `No change in performance detected`, means the run does not distinguish the two builds.
+
+3. To keep the new figures as the next reference, save them under their own name:
+
+   ```sh
+   cargo bench -p trogon-sandbox-broker --bench admission -- --save-baseline my-change
+   ```
+
+Use the same machine for both runs, with nothing else heavy running. Baselines live in `target`, so a `cargo clean` removes them.
+
+## Check that the benches still build
+
+CI does not run the benches, since their figures depend on the machine. It builds them with `cargo bench --no-run` in the `Sandbox benches build` job of the `CI Sandbox Conformance` workflow, so a change that breaks a bench fails the pull request. To run the same check locally from `rsworkspace`:
+
+```sh
+cargo bench --locked --no-run --package trogon-sandbox-broker --bench admission --package trogon-sandbox-conformance --bench memory_worker
+```
 
 ## Time a lease against a worker
 

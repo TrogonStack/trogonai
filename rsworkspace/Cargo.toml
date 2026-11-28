@@ -237,6 +237,7 @@ moka = { version = "=0.12.16", features = ["future"] }
 object_store = { version = "=0.14.2", default-features = false, features = ["aws", "azure", "fs", "gcp"] }
 
 # Misc
+criterion = { version = "=0.8.2", default-features = false, features = ["async_tokio", "cargo_bench_support"] }
 aes-gcm = "=0.11.0"
 fs2 = "=0.4.3"
 getrandom = "=0.4.3"
