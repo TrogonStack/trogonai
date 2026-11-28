@@ -58,8 +58,7 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// The calling user's profile, from the known folders. `test_profile`,
-    /// which only a `test-hooks` build can pass, stands in for it.
+    /// The profile from the known folders (`test_profile`, `test-hooks` only, stands in); a missing folder is an error.
     pub fn resolve(test_profile: Option<&str>) -> Result<Layout> {
         let canon = |p: &str| -> Result<String> {
             let (c, is_dir) = path_id::canonicalize_path(p)
@@ -71,18 +70,18 @@ impl Layout {
         };
         if let Some(t) = test_profile {
             let profile = canon(t)?;
-            let sub = |rel: &str| canon(&format!("{profile}\\{rel}")).ok();
+            let sub = |rel: &str| canon(&format!("{profile}\\{rel}")).map(Some);
             return Ok(Layout {
-                roaming: sub(r"AppData\Roaming"),
-                local: sub(r"AppData\Local"),
+                roaming: sub(r"AppData\Roaming")?,
+                local: sub(r"AppData\Local")?,
                 profile,
                 own_env: Layout::read_own_env(),
             });
         }
         Ok(Layout {
             profile: canon(&known_folder(&FOLDERID_Profile)?)?,
-            roaming: known_folder(&FOLDERID_RoamingAppData).and_then(|p| canon(&p)).ok(),
-            local: known_folder(&FOLDERID_LocalAppData).and_then(|p| canon(&p)).ok(),
+            roaming: Some(canon(&known_folder(&FOLDERID_RoamingAppData)?)?),
+            local: Some(canon(&known_folder(&FOLDERID_LocalAppData)?)?),
             own_env: Layout::read_own_env(),
         })
     }
@@ -104,8 +103,7 @@ impl Layout {
             .map(|(_, v)| v.clone())
     }
 
-    /// `folder` as components beneath the profile; `None` when it is
-    /// not inside it (a redirected folder).
+    /// `folder` as components beneath the profile, `None` if outside it.
     fn rel(&self, folder: &Option<String>) -> Option<Vec<String>> {
         let f = folder.as_deref()?;
         plan::rel_components(&self.profile, f).ok().filter(|c| !c.is_empty())
@@ -1726,7 +1724,7 @@ pub fn grant(
         .collect();
     let (named_by_env, env_ignored) = plan::env_exclusions(&|var| layout.own(var));
     for named in named_by_env {
-        for x in resolve_extra(profile, &[named]).unwrap_or_default() {
+        for x in resolve_extra(profile, &[named])? {
             if !env_extra.contains(&x) {
                 env_extra.push(x);
             }
@@ -2547,5 +2545,7 @@ pub fn status_json(key: &str, layout: Result<Layout>, with_paths: bool) -> serde
     out
 }
 
+#[cfg(test)]
+mod layout_tests;
 #[cfg(test)]
 mod tests;

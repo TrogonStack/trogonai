@@ -340,7 +340,7 @@ fn an_excluded_name_that_is_a_link_protects_its_target() -> Result<(), Box<dyn s
     let store = Store { conn: &conn, key: &key };
     clear_marker(&key)?;
     let ids = ids()?;
-    let layout = Layout::resolve(Some(prof.to_str().ok_or("missing value")?))?;
+    let layout = super::layout_tests::layout_for(&prof)?;
     let report = grant(&store, &ids, &layout, &[], false, false)?;
     assert!(report.complete, "{report:?}");
     let deny_dir = vec![(true, true, 0x3u8, ALL)];
@@ -428,7 +428,7 @@ fn an_excluded_directory_its_owner_is_denied_reading_of_does_not_stop_the_grant(
     let store = Store { conn: &conn, key: &key };
     clear_marker(&key)?;
     let ids = ids()?;
-    let layout = Layout::resolve(Some(prof.to_str().ok_or("missing value")?))?;
+    let layout = super::layout_tests::layout_for(&prof)?;
     for run in ["first", "refresh"] {
         let report = grant(&store, &ids, &layout, &[], false, false)?;
         assert!(report.complete, "{run}: {report:?}");
@@ -486,7 +486,7 @@ fn a_cargo_home_moved_inside_the_profile_has_its_credentials_protected() -> Resu
     let ids = ids()?;
     let unset = Layout {
         own_env: Vec::new(),
-        ..Layout::resolve(Some(prof.to_str().ok_or("missing value")?))?
+        ..super::layout_tests::layout_for(&prof)?
     };
     let moved_to = path_id::strip_extended_prefix(&canon(&prof.join(r"tools\cargo"))?).to_owned();
     let moved = Layout {
@@ -620,7 +620,7 @@ fn objects_the_caller_may_not_change_are_classed_and_do_not_stop_the_grant() -> 
     let store = Store { conn: &conn, key: &key };
     clear_marker(&key)?;
     let ids = ids()?;
-    let layout = Layout::resolve(Some(prof.to_str().ok_or("missing value")?))?;
+    let layout = super::layout_tests::layout_for(&prof)?;
     for run in ["first", "refresh"] {
         let report = grant(&store, &ids, &layout, &[], false, false)?;
         let paths = |items: &[Item]| items.iter().map(|i| i.path.clone()).collect::<Vec<_>>();
@@ -821,7 +821,7 @@ fn a_link_to_a_missing_target_protects_where_it_leads() -> Result<(), Box<dyn st
     let store = Store { conn: &conn, key: &key };
     clear_marker(&key)?;
     let ids = ids()?;
-    let layout = Layout::resolve(Some(prof.to_str().ok_or("missing value")?))?;
+    let layout = super::layout_tests::layout_for(&prof)?;
     let report = grant(&store, &ids, &layout, &[], false, false)?;
     assert!(report.complete, "{report:?}");
     assert_eq!(group_aces(&prof.join("dotfiles"))?, [(true, false, 0, LIST)]);
@@ -895,7 +895,7 @@ fn grant_refresh_and_forget_on_a_profile_tree() -> Result<(), Box<dyn std::error
     };
     clear_marker(TEST_KEY)?;
     let ids = ids()?;
-    let layout = Layout::resolve(Some(prof.to_str().ok_or("missing value")?))?;
+    let layout = super::layout_tests::layout_for(&prof)?;
     let report = grant(&store, &ids, &layout, &[], false, false)?;
     assert!(report.complete, "{report:?}");
     assert!(report.complete, "{report:?}");
