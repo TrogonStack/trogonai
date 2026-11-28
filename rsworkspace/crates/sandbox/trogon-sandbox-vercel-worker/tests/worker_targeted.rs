@@ -51,39 +51,37 @@ async fn cleanup(running: &Running, lease: &str) -> Result<Value, Boxed> {
 }
 
 #[tokio::test]
-async fn a_targeted_dispatch_and_its_cleanup_are_served_on_the_worker_subjects() -> TestResult {
+async fn a_targeted_dispatch_is_served_on_the_worker_subject_once_per_attempt() -> TestResult {
     let dir = tempfile::tempdir()?;
     let mut running = Running::start_with_ledger(Some(&dir.path().join("ledger.sqlite3"))).await?;
 
     let granted = dispatch(&running, "lease-1").await?;
     let again = dispatch(&running, "lease-1").await?;
+
     assert_eq!(granted, again);
     assert_eq!(granted["attempt_id"], ATTEMPT, "{granted}");
     assert_eq!(granted["worker_id"], running.worker_id.as_str(), "{granted}");
     assert_eq!(running.fake.creates(), 1);
-
-    let cleaned = cleanup(&running, "lease-1").await?;
-    assert_eq!(cleaned["outcome"], "cleaned", "{cleaned}");
-    assert_eq!(running.fake.deletes(), 1);
-    assert_eq!(running.provider.active_lease_count().await, 0);
     running.stop().await
 }
 
+/// A cleanup deletes the sandbox its receipt names, so one that is not signed for exactly its assignment is refused
+/// and deletes nothing. The signed path is covered against the binary in `targeted_process.rs`.
 #[tokio::test]
-async fn a_failed_targeted_cleanup_is_reported_so_the_broker_retries_it() -> TestResult {
+async fn an_unsigned_targeted_cleanup_is_refused_and_deletes_nothing() -> TestResult {
     let dir = tempfile::tempdir()?;
     let mut running = Running::start_with_ledger(Some(&dir.path().join("ledger.sqlite3"))).await?;
     dispatch(&running, "lease-1").await?;
-    running.fake.delete_status(500);
 
-    let failed = cleanup(&running, "lease-1").await?;
-    assert_eq!(failed["outcome"], "failed", "{failed}");
+    let refused = cleanup(&running, "lease-1").await?;
+
+    assert_eq!(refused["outcome"], "failed", "{refused}");
+    assert_eq!(
+        refused["message"], "targeted cleanup requires exact verified assignment authority",
+        "{refused}"
+    );
+    assert_eq!(running.fake.deletes(), 0);
     assert_eq!(running.provider.active_lease_count().await, 1);
-
-    running.fake.delete_status(200);
-    let cleaned = cleanup(&running, "lease-1").await?;
-    assert_eq!(cleaned["outcome"], "cleaned", "{cleaned}");
-    assert_eq!(running.provider.active_lease_count().await, 0);
     running.stop().await
 }
 
