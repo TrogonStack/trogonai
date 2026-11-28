@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde_json::json;
 use support::{FakeTransport, TestResult, doc, server_for, server_with};
 use tokio::time::Instant;
+use trogon_sandbox_contract::LeaseError;
 use trogon_sandbox_lsp::{ExitState, LspError, LspServerOptions, Signal};
 
 fn down() -> Result<ExitState, LspError> {
@@ -196,5 +197,25 @@ async fn an_output_error_after_the_server_exited_does_not_kill_again() -> TestRe
         tokio::task::yield_now().await;
     }
     assert!(transport.kills().is_empty());
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_denied_exit_poll_carries_the_reason_into_the_error() -> TestResult {
+    let transport = FakeTransport::new();
+    transport.respond_to_lifecycle();
+    let (server, _) = server_for(&transport)?;
+    server.start().await?;
+    let reason = LeaseError::Unauthorized {
+        reason: "lease revoked".into(),
+    };
+    transport.script_exit_polls(vec![Ok(ExitState::Denied(Box::new(reason.clone())))]);
+    let err = server
+        .request("slow", None, None)
+        .await
+        .err()
+        .ok_or("request succeeded")?;
+    assert!(matches!(&err, LspError::ServerDenied(r) if **r == reason));
+    assert!(err.to_string().contains("lease revoked"));
     Ok(())
 }

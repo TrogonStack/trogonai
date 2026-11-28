@@ -258,6 +258,12 @@ impl Inner {
                     }
                     return;
                 }
+                Ok(ExitState::Denied(reason)) => {
+                    if this.deactivate() {
+                        connection.close(LspError::ServerDenied(reason));
+                    }
+                    return;
+                }
             }
         }
     }
@@ -303,7 +309,7 @@ async fn wait_for_exit(transport: &dyn LspTransport, timeout: Duration) -> bool 
     let deadline = Instant::now() + timeout;
     loop {
         match transport.poll_exit().await {
-            Ok(ExitState::Exited(_)) => return true,
+            Ok(ExitState::Exited(_) | ExitState::Denied(_)) => return true,
             Ok(ExitState::Running) => {}
             Err(_) => return false,
         }

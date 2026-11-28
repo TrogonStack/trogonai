@@ -115,7 +115,10 @@ impl LspServer {
         let connection = self.inner.running()?;
         let version = {
             let mut documents = self.inner.documents.locked();
-            let version = documents.get(&uri).copied().unwrap_or(0) + 1;
+            let Some(current) = documents.get(&uri).copied() else {
+                return Err(LspError::NotOpen { uri });
+            };
+            let version = current + 1;
             documents.insert(uri.clone(), version);
             version
         };

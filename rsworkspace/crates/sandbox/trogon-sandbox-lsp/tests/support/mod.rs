@@ -207,7 +207,7 @@ impl LspTransport for FakeTransport {
         if let Some(scripted) = state.exit_script.pop_front() {
             return scripted;
         }
-        Ok(state.exit.unwrap_or(ExitState::Running))
+        Ok(state.exit.clone().unwrap_or(ExitState::Running))
     }
 
     async fn kill(&self, signal: Signal) -> Result<(), LspError> {

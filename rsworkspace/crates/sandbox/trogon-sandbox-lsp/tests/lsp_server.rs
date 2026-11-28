@@ -138,7 +138,6 @@ async fn document_calls_use_project_relative_uris_and_versions() -> TestResult {
     server.did_change(&main, "let b").await?;
     server.did_change(&main, "let c").await?;
     server.did_close(&main).await?;
-    server.did_change(&main, "let d").await?;
     server.did_open(&doc("notes.txt")?, "x", Some("markdown")).await?;
 
     let written = transport.written();
@@ -156,8 +155,7 @@ async fn document_calls_use_project_relative_uris_and_versions() -> TestResult {
         written[5]["params"]["textDocument"]["uri"],
         "file:///workspace/project/main.ts"
     );
-    assert_eq!(written[6]["params"]["textDocument"]["version"], 1);
-    assert_eq!(written[7]["params"]["textDocument"]["languageId"], "markdown");
+    assert_eq!(written[6]["params"]["textDocument"]["languageId"], "markdown");
     server.stop().await;
     Ok(())
 }
@@ -515,6 +513,29 @@ async fn non_object_capabilities_replace_the_defaults() -> TestResult {
     transport.exit_on_eof();
     server.start().await?;
     assert_eq!(transport.written()[0]["params"]["capabilities"], "none");
+    server.stop().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn did_change_on_a_document_that_was_never_opened_is_not_open() -> TestResult {
+    let transport = FakeTransport::new();
+    transport.respond_to_lifecycle();
+    let (server, _) = server_for(&transport)?;
+    server.start().await?;
+    let main = doc("main.ts")?;
+    let before = transport.written().len();
+    assert!(matches!(
+        server.did_change(&main, "x").await,
+        Err(LspError::NotOpen { uri }) if uri == "file:///workspace/project/main.ts"
+    ));
+    server.did_open(&main, "a", None).await?;
+    server.did_close(&main).await?;
+    assert!(matches!(
+        server.did_change(&main, "b").await,
+        Err(LspError::NotOpen { .. })
+    ));
+    assert_eq!(transport.written().len(), before + 2);
     server.stop().await;
     Ok(())
 }
