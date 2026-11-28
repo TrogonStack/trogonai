@@ -145,6 +145,10 @@ verdict field names its own author.
   run-history read the judge received, so a score is read against what the
   judge did not see. Findings stay in the evaluation stream like scores: they
   reach a proposal only as cited `EvaluationResultRef`s, never as content.
+  A judge that runs as an agent session records its own `SessionPositionRef`
+  as `judge_session_ref`; its model spend is read from that session's usage
+  events, so the result links to spend without copying it, and the judge's
+  budget and model ceiling apply through the ordinary agent policies.
   Recurrence across runs, by category and target, is a projection over these
   results, not stored state.
 - `evaluation/comparisons`: `OpenComparison` fixes a base revision and a task by
