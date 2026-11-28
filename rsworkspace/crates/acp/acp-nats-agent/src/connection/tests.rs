@@ -1590,3 +1590,89 @@ async fn serve_js_recreates_a_lost_consumer() {
         })
         .await;
 }
+
+/// One request of every session-scoped kind, each naming session `s2` in its body.
+fn requests_naming_another_session() -> Vec<(&'static str, serde_json::Value)> {
+    fn body<T: serde::Serialize>(request: T) -> serde_json::Value {
+        serde_json::to_value(request).unwrap()
+    }
+    vec![
+        ("load", body(LoadSessionRequest::new("s2", "/tmp"))),
+        ("prompt", body(PromptRequest::new("s2", vec![]))),
+        ("set_mode", body(SetSessionModeRequest::new("s2", "code"))),
+        (
+            "set_config_option",
+            body(SetSessionConfigOptionRequest::new("s2", "key", "val")),
+        ),
+        ("fork", body(ForkSessionRequest::new("s2", "/tmp"))),
+        ("resume", body(ResumeSessionRequest::new("s2", "/tmp"))),
+        ("close", body(CloseSessionRequest::new("s2"))),
+        ("archive", body(ArchiveSessionRequest::new("s2"))),
+        ("unarchive", body(UnarchiveSessionRequest::new("s2"))),
+        ("status", body(SessionStatusRequest::new("s2"))),
+        ("set_title", body(SetSessionTitleRequest::new("s2", "Renamed"))),
+        ("delete", body(DeleteSessionRequest::new("s2"))),
+    ]
+}
+
+fn assert_session_mismatch_error(nats: &MockNatsClient, terminal: &str) {
+    let error = published_wire_error(nats);
+    assert_eq!(error.code, ErrorCode::INVALID_PARAMS, "{terminal}");
+    assert!(
+        error.message.contains("does not match subject session id"),
+        "{terminal}"
+    );
+}
+
+#[tokio::test]
+async fn dispatch_rejects_request_whose_body_names_another_session() {
+    for (terminal, params) in requests_naming_another_session() {
+        let subject = format!("acp.v1.session.s1.agent.{terminal}");
+        let (nats, agent) = dispatch(&subject, &params, Some("_INBOX.mismatch")).await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.mismatch"], "{terminal}");
+        assert_session_mismatch_error(&nats, terminal);
+        assert!(agent.schema_calls.lock().unwrap().is_empty(), "{terminal}");
+    }
+}
+
+#[tokio::test]
+async fn dispatch_drops_cancel_whose_body_names_another_session() {
+    let (nats, agent) = dispatch("acp.v1.session.s1.agent.cancel", &CancelNotification::new("s2"), None).await;
+
+    assert!(agent.cancelled.lock().unwrap().is_empty());
+    assert!(nats.published_messages().is_empty());
+}
+
+#[tokio::test]
+async fn dispatch_js_message_rejects_request_whose_body_names_another_session() {
+    for (terminal, params) in requests_naming_another_session() {
+        let nats = MockNatsClient::new();
+        let agent = MockAgent::new();
+        let js_msg = make_js_msg(&format!("acp.v1.session.s1.agent.{terminal}"), &params, None);
+
+        dispatch_js_message(js_msg.clone(), &agent, &nats, &test_prefix()).await;
+
+        assert_eq!(
+            nats.published_messages(),
+            vec!["acp.v1.session.s1.agent.response"],
+            "{terminal}"
+        );
+        assert_session_mismatch_error(&nats, terminal);
+        assert!(agent.schema_calls.lock().unwrap().is_empty(), "{terminal}");
+        assert_eq!(js_msg.signals(), vec![AckKindSnapshot::Ack], "{terminal}");
+    }
+}
+
+#[tokio::test]
+async fn dispatch_js_message_drops_cancel_whose_body_names_another_session() {
+    let nats = MockNatsClient::new();
+    let agent = MockAgent::new();
+    let js_msg = make_js_msg("acp.v1.session.s1.agent.cancel", &CancelNotification::new("s2"), None);
+
+    dispatch_js_message(js_msg.clone(), &agent, &nats, &test_prefix()).await;
+
+    assert!(agent.cancelled.lock().unwrap().is_empty());
+    assert!(nats.published_messages().is_empty());
+    assert_eq!(js_msg.signals(), vec![AckKindSnapshot::Ack]);
+}

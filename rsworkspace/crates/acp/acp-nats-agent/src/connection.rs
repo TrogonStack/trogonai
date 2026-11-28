@@ -10,7 +10,7 @@ use agent_client_protocol::v1::schema::{
     ArchiveSessionRequest, AuthStatusRequest, AuthenticateRequest, CancelNotification, CloseSessionRequest,
     DeleteSessionRequest, DisableProviderRequest, ExtNotification, ExtRequest, ForkSessionRequest, InitializeRequest,
     ListProvidersRequest, ListSessionsRequest, LoadSessionRequest, LogoutRequest, NewSessionRequest, PromptRequest,
-    ResumeSessionRequest, SessionStatusRequest, SetProviderRequest, SetSessionConfigOptionRequest,
+    ResumeSessionRequest, SessionId, SessionStatusRequest, SetProviderRequest, SetSessionConfigOptionRequest,
     SetSessionModeRequest, SetSessionTitleRequest, UnarchiveSessionRequest,
 };
 use async_nats::Message;
@@ -19,7 +19,7 @@ use async_nats::jetstream::context::GetStreamError;
 #[cfg(test)]
 use bytes::Bytes;
 use futures::StreamExt;
-use futures::future::LocalBoxFuture;
+use futures::future::{Either, LocalBoxFuture, Ready, ready};
 use serde::de::Error;
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -243,7 +243,7 @@ async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync
             (r, None)
         }
         ParsedAgentSubject::Session { session_id, method } => {
-            let r = dispatch_session(method, &msg, agent, nats).await;
+            let r = dispatch_session(method, &session_id, &msg, agent, nats).await;
             (r, Some(session_id))
         }
     };
@@ -359,33 +359,45 @@ async fn dispatch_global<N: PublishClient + FlushClient, A: AgentHandler + Sync>
 
 async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync>(
     method: SessionAgentMethod,
+    session_id: &AcpSessionId,
     msg: &Message,
     agent: &A,
     nats: &N,
 ) -> Result<(), DispatchError> {
     match method {
         SessionAgentMethod::Load => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: LoadSessionRequest| {
-                agent.load_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: LoadSessionRequest| agent.load_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Prompt => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: PromptRequest| {
-                agent.prompt(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: PromptRequest| agent.prompt(req)),
+            )
             .await
         }
         SessionAgentMethod::Cancel => {
-            handle_wire_notification(msg, method.protocol_method(), |req: CancelNotification| {
-                agent.cancel(req)
-            })
+            handle_wire_notification(
+                msg,
+                method.protocol_method(),
+                in_session(session_id, |req: CancelNotification| agent.cancel(req)),
+            )
             .await
         }
         SessionAgentMethod::SetMode => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: SetSessionModeRequest| {
-                agent.set_session_mode(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: SetSessionModeRequest| agent.set_session_mode(req)),
+            )
             .await
         }
         SessionAgentMethod::SetConfigOption => {
@@ -393,58 +405,143 @@ async fn dispatch_session<N: PublishClient + FlushClient, A: AgentHandler + Sync
                 msg,
                 method.protocol_method(),
                 nats,
-                |req: SetSessionConfigOptionRequest| agent.set_session_config_option(req),
+                in_session(session_id, |req: SetSessionConfigOptionRequest| {
+                    agent.set_session_config_option(req)
+                }),
             )
             .await
         }
         SessionAgentMethod::Fork => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: ForkSessionRequest| {
-                agent.fork_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: ForkSessionRequest| agent.fork_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Resume => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: ResumeSessionRequest| {
-                agent.resume_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: ResumeSessionRequest| agent.resume_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Close => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: CloseSessionRequest| {
-                agent.close_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: CloseSessionRequest| agent.close_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Archive => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: ArchiveSessionRequest| {
-                agent.archive_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: ArchiveSessionRequest| agent.archive_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Unarchive => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: UnarchiveSessionRequest| {
-                agent.unarchive_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: UnarchiveSessionRequest| agent.unarchive_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Status => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: SessionStatusRequest| {
-                agent.session_status(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: SessionStatusRequest| agent.session_status(req)),
+            )
             .await
         }
         SessionAgentMethod::SetTitle => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: SetSessionTitleRequest| {
-                agent.set_session_title(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: SetSessionTitleRequest| agent.set_session_title(req)),
+            )
             .await
         }
         SessionAgentMethod::Delete => {
-            handle_jsonrpc_request(msg, method.protocol_method(), nats, |req: DeleteSessionRequest| {
-                agent.delete_session(req)
-            })
+            handle_jsonrpc_request(
+                msg,
+                method.protocol_method(),
+                nats,
+                in_session(session_id, |req: DeleteSessionRequest| agent.delete_session(req)),
+            )
             .await
         }
+    }
+}
+
+/// Requests and notifications that name the session they act on in their body.
+trait SessionScoped {
+    fn session_id(&self) -> &SessionId;
+}
+
+macro_rules! session_scoped {
+    ($($request:ty),+ $(,)?) => {
+        $(impl SessionScoped for $request {
+            fn session_id(&self) -> &SessionId {
+                &self.session_id
+            }
+        })+
+    };
+}
+
+session_scoped!(
+    LoadSessionRequest,
+    PromptRequest,
+    CancelNotification,
+    SetSessionModeRequest,
+    SetSessionConfigOptionRequest,
+    ForkSessionRequest,
+    ResumeSessionRequest,
+    CloseSessionRequest,
+    ArchiveSessionRequest,
+    UnarchiveSessionRequest,
+    SessionStatusRequest,
+    SetSessionTitleRequest,
+    DeleteSessionRequest,
+);
+
+/// Runs `handler` only when the body's `sessionId` is the session the subject
+/// names. The subject is what NATS permissions authorize, so a body naming
+/// another session is refused with invalid params instead of acting on it.
+fn in_session<'a, ReqT, Resp, F>(
+    subject_session: &'a AcpSessionId,
+    handler: impl FnOnce(ReqT) -> F + 'a,
+) -> impl FnOnce(ReqT) -> Either<F, Ready<agent_client_protocol::Result<Resp>>> + 'a
+where
+    ReqT: SessionScoped,
+    F: std::future::Future<Output = agent_client_protocol::Result<Resp>>,
+{
+    move |request| {
+        let body_session = request.session_id();
+        if body_session.0.as_ref() == subject_session.as_str() {
+            return Either::Left(handler(request));
+        }
+        warn!(
+            subject_session_id = subject_session.as_str(),
+            body_session_id = %body_session,
+            "Rejecting session request whose body names another session"
+        );
+        Either::Right(ready(Err(agent_client_protocol::Error::new(
+            agent_client_protocol::ErrorCode::INVALID_PARAMS,
+            format!("params.sessionId ({body_session}) does not match subject session id ({subject_session})"),
+        ))))
     }
 }
 
@@ -827,9 +924,12 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
 
     let result = match method {
         SessionAgentMethod::Load => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: LoadSessionRequest| {
-                agent.load_session(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: LoadSessionRequest| agent.load_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Prompt => {
@@ -838,20 +938,25 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
                 method.protocol_method(),
                 nats,
                 &js_msg,
-                |req: PromptRequest| agent.prompt(req),
+                in_session(&session_id, |req: PromptRequest| agent.prompt(req)),
             )
             .await
         }
         SessionAgentMethod::Cancel => {
-            handle_wire_notification(&msg, method.protocol_method(), |req: CancelNotification| {
-                agent.cancel(req)
-            })
+            handle_wire_notification(
+                &msg,
+                method.protocol_method(),
+                in_session(&session_id, |req: CancelNotification| agent.cancel(req)),
+            )
             .await
         }
         SessionAgentMethod::SetMode => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: SetSessionModeRequest| {
-                agent.set_session_mode(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: SetSessionModeRequest| agent.set_session_mode(req)),
+            )
             .await
         }
         SessionAgentMethod::SetConfigOption => {
@@ -859,56 +964,82 @@ async fn dispatch_js_message<N: PublishClient + FlushClient, A: AgentHandler + S
                 &msg,
                 method.protocol_method(),
                 nats,
-                |req: SetSessionConfigOptionRequest| agent.set_session_config_option(req),
+                in_session(&session_id, |req: SetSessionConfigOptionRequest| {
+                    agent.set_session_config_option(req)
+                }),
             )
             .await
         }
         SessionAgentMethod::Fork => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: ForkSessionRequest| {
-                agent.fork_session(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: ForkSessionRequest| agent.fork_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Resume => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: ResumeSessionRequest| {
-                agent.resume_session(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: ResumeSessionRequest| agent.resume_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Close => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: CloseSessionRequest| {
-                agent.close_session(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: CloseSessionRequest| agent.close_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Archive => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: ArchiveSessionRequest| {
-                agent.archive_session(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: ArchiveSessionRequest| agent.archive_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Unarchive => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: UnarchiveSessionRequest| {
-                agent.unarchive_session(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: UnarchiveSessionRequest| agent.unarchive_session(req)),
+            )
             .await
         }
         SessionAgentMethod::Status => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: SessionStatusRequest| {
-                agent.session_status(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: SessionStatusRequest| agent.session_status(req)),
+            )
             .await
         }
         SessionAgentMethod::SetTitle => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: SetSessionTitleRequest| {
-                agent.set_session_title(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: SetSessionTitleRequest| agent.set_session_title(req)),
+            )
             .await
         }
         SessionAgentMethod::Delete => {
-            handle_jsonrpc_request(&msg, method.protocol_method(), nats, |req: DeleteSessionRequest| {
-                agent.delete_session(req)
-            })
+            handle_jsonrpc_request(
+                &msg,
+                method.protocol_method(),
+                nats,
+                in_session(&session_id, |req: DeleteSessionRequest| agent.delete_session(req)),
+            )
             .await
         }
     };
