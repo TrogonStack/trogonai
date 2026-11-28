@@ -12,11 +12,16 @@ impl BrokerCore {
         worker_id: &WorkerId,
         payload: Bytes,
     ) -> Result<ProviderLease, DispatchReplyError> {
+        let signed = self
+            .sign_dispatch(payload)
+            .map_err(|error| DispatchReplyError::Transport {
+                message: format!("dispatch could not be signed: {error}"),
+            })?;
         let reply = self
             .bus
             .request_with_timeout(
                 &subjects::worker_dispatch(provider, worker_id),
-                self.sign_dispatch(payload),
+                signed,
                 self.config.provider_dispatch_timeout,
             )
             .await

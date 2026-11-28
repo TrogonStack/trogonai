@@ -808,6 +808,11 @@ mod snapshot_tree;
     dylint_lib = "trogon_dylint_lints",
     expect(test_module_naming, reason = "the test module is named for the behavior it covers")
 )]
+mod store_failures;
+#[cfg_attr(
+    dylint_lib = "trogon_dylint_lints",
+    expect(test_module_naming, reason = "the test module is named for the behavior it covers")
+)]
 mod substrate_admission;
 #[cfg_attr(
     dylint_lib = "trogon_dylint_lints",

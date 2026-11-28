@@ -82,32 +82,46 @@ impl SigningBus {
             .cloned()
     }
 
-    async fn scope_for(&self, kind: &SignedSubject, payload: &[u8]) -> Option<VerbScope> {
-        let lease = match kind {
-            SignedSubject::LeaseVerb { lease } => lease.clone(),
-            SignedSubject::Cleanup => {
-                let body = serde_json::from_slice::<serde_json::Value>(payload).ok()?;
-                LeaseId::new(body.pointer("/identity/lease_id")?.as_str()?)
-            }
+    /// The lease whose record the request is bound to, or the final answer
+    /// (`Err`) when the subject needs no lookup or its body names no lease.
+    fn lease_to_look_up(&self, kind: &SignedSubject, payload: &[u8]) -> Result<LeaseId, Option<VerbScope>> {
+        match kind {
+            SignedSubject::LeaseVerb { lease } => Ok(lease.clone()),
+            SignedSubject::Cleanup => serde_json::from_slice::<serde_json::Value>(payload)
+                .ok()
+                .and_then(|body| Some(LeaseId::new(body.pointer("/identity/lease_id")?.as_str()?)))
+                .ok_or(None),
             SignedSubject::SshSession { .. }
             | SignedSubject::SnapshotExport
-            | SignedSubject::WorkerCommandReadiness { .. } => return None,
+            | SignedSubject::WorkerCommandReadiness { .. } => Err(None),
             SignedSubject::NativeSnapshotDelete { provider } => {
-                let request: NativeSnapshotDeleteRequest = serde_json::from_slice(payload).ok()?;
-                if trogon_sandbox_protocol::subjects::provider_token(request.reference.provider) != provider {
-                    return None;
-                }
-                return Some(tenant_scope(request.tenant, LeaseId::new("")));
+                Err(serde_json::from_slice::<NativeSnapshotDeleteRequest>(payload)
+                    .ok()
+                    .filter(|request| {
+                        trogon_sandbox_protocol::subjects::provider_token(request.reference.provider) == *provider
+                    })
+                    .map(|request| tenant_scope(request.tenant, LeaseId::new(""))))
             }
-            SignedSubject::PurgeNamed => {
-                let request: PurgeNamedRequest = serde_json::from_slice(payload).ok()?;
-                return Some(tenant_scope(request.tenant, LeaseId::new("")));
-            }
+            SignedSubject::PurgeNamed => Err(serde_json::from_slice::<PurgeNamedRequest>(payload)
+                .ok()
+                .map(|request| tenant_scope(request.tenant, LeaseId::new("")))),
+        }
+    }
+
+    /// The scope to sign for, `None` when there is no lease to bind to, and an
+    /// error when the lease store could not be read, since a request sent
+    /// unsigned then would be indistinguishable from a forged one.
+    async fn scope_for(&self, kind: &SignedSubject, payload: &[u8]) -> anyhow::Result<Option<VerbScope>> {
+        let lease = match self.lease_to_look_up(kind, payload) {
+            Ok(lease) => lease,
+            Err(done) => return Ok(done),
         };
         let record = match self.leases.get(&lease).await {
             Ok(Some(record)) => record,
             Ok(None) => {
-                let tenant = self.remembered(&lease)?;
+                let Some(tenant) = self.remembered(&lease) else {
+                    return Ok(None);
+                };
                 let attempt_id = match kind {
                     SignedSubject::Cleanup => {
                         serde_json::from_slice::<serde_json::Value>(payload)
@@ -118,57 +132,60 @@ impl SigningBus {
                     }
                     _ => None,
                 };
-                return Some(VerbScope {
+                return Ok(Some(VerbScope {
                     tenant,
                     lease_id: lease,
                     worker_id: None,
                     attempt_id,
                     epoch: None,
-                });
+                }));
             }
             Err(error) => {
-                warn!(%error, %lease, "lease lookup failed; request is sent unsigned");
-                return None;
+                return Err(anyhow::anyhow!(
+                    "lease {lease} lookup failed, refusing to send the request unsigned: {error}"
+                ));
             }
         };
         self.remember(&lease, &record.tenant);
-        Some(VerbScope {
+        Ok(Some(VerbScope {
             tenant: record.tenant,
             lease_id: lease,
             worker_id: record.worker_id,
             attempt_id: record.dispatch_attempt.as_ref().map(|attempt| attempt.id.clone()),
             epoch: record.dispatch_attempt.as_ref().and_then(|attempt| attempt.epoch),
-        })
+        }))
     }
 
-    /// The envelope for a send to `subject`, or `None` to send it unsigned.
-    async fn header(&self, subject: &str, payload: &[u8]) -> Option<String> {
-        let kind = classify_subject(subject)?;
+    /// The envelope for a send to `subject`, `None` to send it unsigned because
+    /// the subject is not signed or there is no lease to bind it to, and an
+    /// error when it should be signed but cannot be.
+    async fn header(&self, subject: &str, payload: &[u8]) -> anyhow::Result<Option<String>> {
+        let Some(kind) = classify_subject(subject) else {
+            return Ok(None);
+        };
         if let SignedSubject::LeaseVerb { lease } = &kind
             && subject.split('.').nth(3) == Some("cancel_owned")
         {
-            let request: CancelOwnedLeaseRequest = serde_json::from_slice(payload).ok()?;
+            let Ok(request) = serde_json::from_slice::<CancelOwnedLeaseRequest>(payload) else {
+                return Ok(None);
+            };
             if request.lease_id != *lease {
-                return None;
+                return Ok(None);
             }
             let scope = tenant_scope(request.tenant, lease.clone());
-            return self.sign(subject, payload, &scope);
+            return self.sign(subject, payload, &scope).map(Some);
         }
-        let Some(scope) = self.scope_for(&kind, payload).await else {
+        let Some(scope) = self.scope_for(&kind, payload).await? else {
             warn!(subject, "no lease to bind the request to; sending it unsigned");
-            return None;
+            return Ok(None);
         };
-        self.sign(subject, payload, &scope)
+        self.sign(subject, payload, &scope).map(Some)
     }
 
-    fn sign(&self, subject: &str, payload: &[u8], scope: &VerbScope) -> Option<String> {
-        match self.signer.sign_verb(subject, payload, scope) {
-            Ok(envelope) => Some(envelope),
-            Err(error) => {
-                warn!(%error, subject, "request could not be signed; sending it unsigned");
-                None
-            }
-        }
+    fn sign(&self, subject: &str, payload: &[u8], scope: &VerbScope) -> anyhow::Result<String> {
+        self.signer.sign_verb(subject, payload, scope).map_err(|error| {
+            anyhow::anyhow!("request to {subject} could not be signed, refusing to send it unsigned: {error}")
+        })
     }
 }
 
@@ -185,14 +202,14 @@ fn tenant_scope(tenant: TenantId, lease_id: LeaseId) -> VerbScope {
 #[async_trait]
 impl BrokerBus for SigningBus {
     async fn request(&self, subject: &str, payload: Bytes) -> anyhow::Result<Bytes> {
-        match self.header(subject, &payload).await {
+        match self.header(subject, &payload).await? {
             Some(auth) => self.inner.request_with_auth(subject, &auth, payload, None).await,
             None => self.inner.request(subject, payload).await,
         }
     }
 
     async fn publish(&self, subject: &str, payload: Bytes) -> anyhow::Result<()> {
-        match self.header(subject, &payload).await {
+        match self.header(subject, &payload).await? {
             Some(auth) => self.inner.publish_with_auth(subject, &auth, payload).await,
             None => self.inner.publish(subject, payload).await,
         }
@@ -203,7 +220,7 @@ impl BrokerBus for SigningBus {
     }
 
     async fn request_with_timeout(&self, subject: &str, payload: Bytes, timeout: Duration) -> anyhow::Result<Bytes> {
-        match self.header(subject, &payload).await {
+        match self.header(subject, &payload).await? {
             Some(auth) => {
                 self.inner
                     .request_with_auth(subject, &auth, payload, Some(timeout))
