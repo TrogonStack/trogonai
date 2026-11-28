@@ -100,6 +100,17 @@ cargo test -p trogon-sandbox-modal-worker
 The tests run against an in-process `ModalSandboxApi` mock and need no Modal
 credentials.
 
+One test creates and cancels a real Modal sandbox. It is ignored by default:
+
+```sh
+cargo test -p trogon-sandbox-modal-worker --test live_modal -- --ignored
+```
+
+It needs `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, plus a Python with the
+`modal` package (`TROGON_SANDBOX_MODAL_PYTHON`, default `python3`). It also
+honors `TROGON_SANDBOX_MODAL_APP_NAME` and `TROGON_SANDBOX_MODAL_ENVIRONMENT`.
+The sandbox is cancelled before the test ends and lives at most 300 seconds.
+
 ## Related
 
 - [Provider option matrix](../../reference/sandbox/provider-option-matrix.md)
