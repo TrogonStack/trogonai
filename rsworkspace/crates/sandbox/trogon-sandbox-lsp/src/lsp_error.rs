@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 use trogon_sandbox_client::ClientError;
-use trogon_sandbox_contract::StdinChunkError;
+use trogon_sandbox_contract::{LeaseError, StdinChunkError};
 
 /// Why a language server call failed.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -15,6 +15,10 @@ pub enum LspError {
     NotRunning(String),
     #[error("language server exited{}", display_exit_code(*.0))]
     ServerExited(Option<i32>),
+    #[error("language server command was denied: {0}")]
+    ServerDenied(Box<LeaseError>),
+    #[error("document is not open: {uri}")]
+    NotOpen { uri: String },
     #[error("LSP response error {code}: {message}")]
     Response {
         code: i64,

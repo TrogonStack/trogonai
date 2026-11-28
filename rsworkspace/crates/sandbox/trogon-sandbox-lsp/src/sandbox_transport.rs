@@ -56,11 +56,7 @@ impl LspTransport for SandboxTransport {
 
     async fn poll_exit(&self) -> Result<ExitState, LspError> {
         let response = self.client.poll_command(&self.lease_id, &self.execution_id).await?;
-        Ok(match response {
-            PollCommandResponse::Running => ExitState::Running,
-            PollCommandResponse::Completed(output) => ExitState::Exited(Some(output.exit_code)),
-            PollCommandResponse::NotFound | PollCommandResponse::Denied(_) => ExitState::Exited(None),
-        })
+        Ok(exit_state(response))
     }
 
     async fn kill(&self, signal: Signal) -> Result<(), LspError> {
@@ -72,5 +68,32 @@ impl LspTransport for SandboxTransport {
             .kill_command(&self.lease_id, &self.execution_id, signal)
             .await?;
         Ok(())
+    }
+}
+
+pub(crate) fn exit_state(response: PollCommandResponse) -> ExitState {
+    match response {
+        PollCommandResponse::Running => ExitState::Running,
+        PollCommandResponse::Completed(output) => ExitState::Exited(Some(output.exit_code)),
+        PollCommandResponse::NotFound => ExitState::Exited(None),
+        PollCommandResponse::Denied(reason) => ExitState::Denied(Box::new(reason)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use trogon_sandbox_contract::LeaseError;
+
+    use super::*;
+
+    #[test]
+    fn a_denied_poll_keeps_its_reason() {
+        let reason = LeaseError::Unauthorized { reason: "nope".into() };
+        assert_eq!(
+            exit_state(PollCommandResponse::Denied(reason.clone())),
+            ExitState::Denied(Box::new(reason))
+        );
+        assert_eq!(exit_state(PollCommandResponse::NotFound), ExitState::Exited(None));
+        assert_eq!(exit_state(PollCommandResponse::Running), ExitState::Running);
     }
 }
