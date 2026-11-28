@@ -8,6 +8,14 @@ for unit tests it cannot run. Reading that list from the BUILD files instead of
 keeping a copy here means a test that Bazel stops running is picked up here the
 day its tag lands. A `manual` this parser does not understand fails the task, so
 a new form cannot drop a test silently.
+
+A manual target whose tests are all `#[ignore]`d because they need a live stack
+(a broker and a worker CI does not start) opts in by carrying the `live-stack`
+tag next to `manual`. Such a target must build, exit 0, report at least one
+ignored test and pass none; if it passes a test the tag is wrong and the task
+fails naming the target. Every other manual target must pass at least one test.
+A `live-stack` tag anywhere but beside `manual` in integration_tests fails the
+task.
 """
 
 import re
@@ -19,8 +27,8 @@ from pathlib import Path
 ROOT = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
 WORKSPACE = ROOT / "rsworkspace"
 
-# `"name": {"tags": ["manual"]}` inside integration_tests.
-MANUAL_TEST = re.compile(r'"([\w-]+)":\s*\{[^{}]*"tags":\s*\[[^\]]*"manual"[^\]]*\][^{}]*\}')
+# `"name": {"tags": ["manual", ...]}` inside integration_tests; group 2 is the tag list.
+MANUAL_TEST = re.compile(r'"([\w-]+)":\s*\{[^{}]*"tags":\s*\[([^\]]*"manual"[^\]]*)\][^{}]*\}')
 UNIT_TEST_ARGS = re.compile(r"unit_test_args\s*=\s*\[(.*?)\]", re.S)
 STRING = re.compile(r'"([^"]*)"')
 PASSED = re.compile(r"test result: ok\. (\d+) passed")
@@ -49,7 +57,7 @@ def skipped_unit_tests(text):
     return names
 
 
-def cargo_test(*arguments, expect=None, allow_ignored_only=False):
+def cargo_test(*arguments, expect=None, live_stack=False):
     command = ["cargo", "test", *arguments]
     print("+ " + " ".join(command), flush=True)
     completed = subprocess.run(command, cwd=WORKSPACE, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -57,10 +65,12 @@ def cargo_test(*arguments, expect=None, allow_ignored_only=False):
     if completed.returncode != 0:
         sys.exit(f"{' '.join(command)} exited {completed.returncode}")
     passed = sum(int(count) for count in PASSED.findall(completed.stdout))
-    # A live-stack target ignores every test because it needs a broker and a worker
-    # CI does not start. It still has to build and report its ignored tests, so a
-    # target that matched nothing keeps failing.
-    if allow_ignored_only and passed == 0 and sum(int(count) for count in IGNORED.findall(completed.stdout)) > 0:
+    ignored = sum(int(count) for count in IGNORED.findall(completed.stdout))
+    if live_stack:
+        if passed != 0:
+            sys.exit(f"{' '.join(command)} passed {passed} tests, so its live-stack tag is wrong")
+        if ignored == 0:
+            sys.exit(f"{' '.join(command)} reported no ignored tests, expected at least one for a live-stack target")
         return
     if passed == 0 or (expect is not None and passed != expect):
         sys.exit(f"{' '.join(command)} passed {passed} tests, expected {expect or 'at least one'}")
@@ -73,20 +83,23 @@ def main():
         manual = MANUAL_TEST.findall(text)
         if text.count('"manual"') != len(manual):
             sys.exit(f"{build.relative_to(ROOT)}: a manual tag outside integration_tests that this task cannot run")
+        live = [name for name, tags in manual if "live-stack" in STRING.findall(tags)]
+        if text.count('"live-stack"') != len(live):
+            sys.exit(f"{build.relative_to(ROOT)}: a live-stack tag outside a manual integration test")
         skipped = skipped_unit_tests(text)
         if not manual and not skipped:
             continue
         crate = crate_name(build.parent)
-        runs += [("--test", crate, test, None) for test in manual]
+        runs += [("--test", crate, name, name in live) for name, _ in manual]
         if skipped:
             runs.append(("--lib", crate, skipped, len(skipped)))
     if not runs:
         sys.exit("no Bazel manual or skipped tests found; the parser no longer matches the BUILD files")
-    for kind, crate, target, expect in runs:
+    for kind, crate, target, extra in runs:
         if kind == "--test":
-            cargo_test("-p", crate, "--all-features", "--test", target, allow_ignored_only=True)
+            cargo_test("-p", crate, "--all-features", "--test", target, live_stack=extra)
         else:
-            cargo_test("-p", crate, "--all-features", "--lib", "--", "--exact", *target, expect=expect)
+            cargo_test("-p", crate, "--all-features", "--lib", "--", "--exact", *target, expect=extra)
 
 
 if __name__ == "__main__":
