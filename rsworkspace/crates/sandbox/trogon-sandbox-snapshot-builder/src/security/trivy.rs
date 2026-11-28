@@ -62,6 +62,9 @@ async fn run_trivy(scan_input: &Path) -> Result<Vec<u8>, TrivyError> {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct TrivyReport {
+    /// Trivy stamps every report with its schema version; a document without one is not a report.
+    #[serde(rename = "SchemaVersion")]
+    _schema_version: u32,
     #[serde(default)]
     results: Vec<TrivyResult>,
 }
