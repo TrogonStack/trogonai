@@ -80,24 +80,23 @@ impl ActiveLeaseStore for NatsKvActiveLeaseStore {
     }
 
     async fn all(&self) -> Result<Vec<LeaseRecord>, ActiveLeaseStoreError> {
-        let keys: Vec<String> = self
-            .kv
-            .keys()
-            .await
-            .map_err(ActiveLeaseStoreError::nats)?
-            .filter_map(|r| async move { r.ok() })
-            .collect()
-            .await;
+        let mut listed = self.kv.keys().await.map_err(ActiveLeaseStoreError::nats)?;
+        let mut keys = Vec::new();
+        while let Some(key) = listed.next().await {
+            keys.push(key.map_err(ActiveLeaseStoreError::nats)?);
+        }
 
         let mut records = Vec::with_capacity(keys.len());
         for key in keys {
-            let entry = match self.kv.entry(&key).await.map_err(ActiveLeaseStoreError::nats)? {
-                Some(e) => e,
-                None => continue,
+            let Some(entry) = self.kv.entry(&key).await.map_err(ActiveLeaseStoreError::nats)? else {
+                continue;
             };
-            if let Ok(record) = serde_json::from_slice::<LeaseRecord>(&entry.value) {
-                records.push(record);
+            if entry.operation != kv::Operation::Put {
+                continue;
             }
+            let record = serde_json::from_slice::<LeaseRecord>(&entry.value)
+                .map_err(|source| ActiveLeaseStoreError::Undecodable { key, source })?;
+            records.push(record);
         }
         Ok(records)
     }
