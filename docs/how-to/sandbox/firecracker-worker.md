@@ -22,7 +22,7 @@ The worker dials a fresh vsock stream per call. A worker that does not hold a le
 - An ext4 root filesystem with `trogon-sandbox-actor-agent` installed and started at boot, listening on the vsock port (`SANDBOX_ACTOR_AGENT_VSOCK_PORT`, default `8110`).
 - NATS reachable from the worker.
 
-The guest agent learns its identity from `ate.actor_id=<lease id>` on the kernel command line. The worker appends it to the boot arguments for every lease, so the root filesystem does not need to be customised per VM.
+The guest agent learns its identity from `ate.actor_id=<lease id>` on the kernel command line. The worker appends it to the boot arguments for every lease, so the root filesystem does not need to be customised per VM. The guest init refuses to boot a command line that has no `ate.actor_id=`; an unbound guest must pass `ate.actor_id=unbound`.
 
 The crate ships helper scripts in `rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker/scripts`: `build-guest-rootfs.sh` builds a root filesystem that starts the agent at boot, `build-guest-kernel.sh` builds a guest kernel with container networking support, and `build-oci-rootfs.sh` converts an OCI image. Run `build-guest-rootfs.sh --agent-bin <path> --out <path>` on a Linux host with a statically linked musl build of the agent.
 

@@ -13,7 +13,7 @@ refuses to run.
 
 The library exposes `GuestBootConfig`, built from the kernel command line with
 `ate.actor_id=<id>` and `sandbox.agent_port=<port>`; `GuestBootConfigError` says which
-argument was rejected. `GuestActor` is either `Unbound` (no actor argument, or the `unbound`
+argument was rejected. The actor argument is required: a command line without it is `GuestActorIdError::Missing`. `GuestActor` is either `Unbound` (only the explicit `unbound`
 marker) or `Bound` to a `GuestActorId`, which is never empty and never the marker.
 `GuestAgentPort` is a nonzero 32-bit vsock port, defaulting to 8110, and `GuestAgentPortError`
 separates a non-numeric value (keeping the integer parse error as its source) from zero. The

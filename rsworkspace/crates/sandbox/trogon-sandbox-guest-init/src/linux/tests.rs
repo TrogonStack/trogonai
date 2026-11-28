@@ -189,7 +189,14 @@ fn stops_at_the_first_failing_step() {
 #[test]
 fn rejects_an_unbootable_command_line() {
     let mut host = FakeHost::init();
-    host.cmdline = "sandbox.agent_port=0".to_owned();
+    host.cmdline = "ate.actor_id=unbound sandbox.agent_port=0".to_owned();
+    assert!(matches!(run_with(&mut host), Err(GuestInitError::BootConfig(_))));
+}
+
+#[test]
+fn rejects_a_command_line_without_an_actor() {
+    let mut host = FakeHost::init();
+    host.cmdline = "console=ttyS0 sandbox.agent_port=9000".to_owned();
     assert!(matches!(run_with(&mut host), Err(GuestInitError::BootConfig(_))));
 }
 
