@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use trogon_sandbox_oci::RegistryHost;
@@ -8,7 +9,7 @@ use trogon_sandbox_protocol::DispatchSigner;
 pub struct BuilderConfig {
     pub nats_url: String,
     pub default_registry: String,
-    pub max_concurrent: usize,
+    pub max_concurrent: NonZeroUsize,
     pub cosign_kms_uri: Option<String>,
     pub scan_cvss_threshold: f64,
     pub require_scan_pass: bool,
