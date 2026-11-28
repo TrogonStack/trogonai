@@ -66,6 +66,12 @@ cmd_probe() {
   probe "bash: stdout, stderr, exit 3" hluk run --runtime bash --exec 'echo out; echo err >&2; exit 3'
   probe "bash: unknown command" hluk run --runtime bash --exec 'definitely-not-a-command-xyz'
   probe "bash: sh -c 'exit 42'" hluk run --runtime bash --exec "'sh' '-c' 'exit 42'"
+  probe "bash: child status in \$?" hluk run --runtime bash --exec "sh -c 'exit 42'; echo \$?; false; echo \$?"
+  probe "bash: subshell (exit 42)" hluk run --runtime bash --exec '(exit 42); echo $?'
+  probe "bash: exec sh -c 'exit 42'" hluk run --runtime bash --exec "exec sh -c 'exit 42'"
+  probe "bash: exec unknown command" hluk run --runtime bash --exec 'exec definitely-not-a-command-xyz'
+  probe "bash: command -v unknown" hluk run --runtime bash --exec 'command -v definitely-not-a-command-xyz; echo $?'
+  probe "bash: wait status" hluk run --runtime bash --exec "sh -c 'exit 42' & wait \$!; echo \$?"
   probe "bash: applets" hluk run --runtime bash --exec 'busybox --list | tr "\n" " "'
   probe "bash: --env" hluk run --runtime bash --env 'FOO=per call value' --exec 'printenv FOO'
   probe "bash: cat of closed stdin" hluk run --runtime bash --exec cat
@@ -79,6 +85,13 @@ echo ran"
     --exec 'echo x > /workspace/ro-out && echo WROTE || echo REFUSED'
   probe "bash: /tmp write" hluk run --runtime bash --exec 'echo kept > /tmp/state && cat /tmp/state'
   probe "bash: /tmp after a new run" hluk run --runtime bash --exec 'cat /tmp/state'
+  mkdir -p "$work/tmp"
+  probe "bash: two mounts, /tmp write" hluk run --runtime bash --mount "$work/ws:/workspace" --mount "$work/tmp:/tmp" \
+    --exec 'echo kept > /tmp/state && ls /workspace'
+  probe "bash: mounted /tmp after a new run" hluk run --runtime bash --mount "$work/tmp:/tmp" --exec 'cat /tmp/state'
+  probe "host sees mounted /tmp" cat "$work/tmp/state"
+  probe "python: mounted /tmp tempfile" hluk run --runtime python --mount "$work/tmp:/tmp" \
+    --exec 'import tempfile; print(tempfile.mkstemp()[1])'
   probe "bash: connect without --net" hluk run --runtime bash \
     --exec 'nc -w 3 1.1.1.1 443 </dev/null && echo CONNECTED || echo DENIED'
   probe "bash: connect with --net" hluk run --runtime bash --net \
