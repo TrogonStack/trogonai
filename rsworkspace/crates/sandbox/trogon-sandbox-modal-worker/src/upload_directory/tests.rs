@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use super::*;
 
@@ -22,8 +24,6 @@ fn every_regular_file_is_listed() -> TestResult {
 #[cfg(unix)]
 #[test]
 fn an_unreadable_directory_fails_the_walk_instead_of_being_skipped() -> TestResult {
-    use std::os::unix::fs::PermissionsExt;
-
     let root = tempfile::tempdir()?;
     let locked = root.path().join("locked");
     fs::create_dir(&locked)?;

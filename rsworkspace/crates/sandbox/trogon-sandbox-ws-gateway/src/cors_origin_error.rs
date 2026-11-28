@@ -4,3 +4,10 @@
 pub struct CorsOriginError {
     pub(crate) origin: String,
 }
+
+impl CorsOriginError {
+    /// The refused origin, with control characters escaped.
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+}

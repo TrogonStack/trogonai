@@ -122,5 +122,5 @@ async fn configured_cors_origins_are_allowed() -> TestResult {
 #[test]
 fn an_origin_that_is_not_a_header_value_is_refused() {
     let refused = parse_cors_origins(&["https://app.example".to_string(), "not an origin\n".to_string()]);
-    assert!(refused.is_err_and(|error| error.to_string().contains("not an origin")));
+    assert!(refused.is_err_and(|error| error.origin() == "not an origin\\n"));
 }
