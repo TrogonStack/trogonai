@@ -163,6 +163,7 @@ async-compat = "=0.2.6"
 async-nats = { version = "=0.51.0", default-features = false, features = ["aws-lc-rs"] }
 async-trait = "=0.1.92"
 axum = { version = "=0.8.9", features = ["ws"] }
+axum-server = { version = "=0.8.0", default-features = false, features = ["tls-rustls"] }
 bollard = { version = "=0.20.2", default-features = false, features = ["pipe"] }
 bytes = "=1.12.1"
 base64 = "=0.23.1"

@@ -11,7 +11,7 @@ use trogon_std::env::SystemEnv;
 
 use crate::{
     AppState, CapabilityRegistry, GatewayArgs, GatewayError, NatsKvSessionStore, NatsObservability, NatsSandboxBackend,
-    ObservabilityConfig, SandboxBackend, preview_from_env, router, serve_with_shutdown,
+    ObservabilityConfig, SandboxBackend, preview_from_env, router, serve_tls_with_shutdown, serve_with_shutdown,
 };
 
 /// Connects to NATS, starts observability and serves the gateway until `shutdown` resolves.
@@ -68,7 +68,10 @@ where
         stopping.begin_shutdown();
         outcome
     };
-    let served = serve_with_shutdown(listener, app, shutdown).await;
+    let served = match args.tls.files() {
+        Some(tls) => serve_tls_with_shutdown(listener, &tls, app, shutdown).await,
+        None => serve_with_shutdown(listener, app, shutdown).await,
+    };
     cancel.cancel();
     served
 }

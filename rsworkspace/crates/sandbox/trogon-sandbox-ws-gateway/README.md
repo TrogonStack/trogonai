@@ -4,7 +4,8 @@ WebSocket gateway that bridges browser-friendly clients to the sandbox NATS serv
 
 ## Main types
 
-- `GatewayArgs`: command line flags of the binary (`--listen`, `--nats-url`, `--api-key-bucket`, `--cors-origin`, `--session-ttl-seconds`, the preview flags, plus the shared observability flags).
+- `GatewayArgs`: command line flags of the binary (`--listen`, `--tls-cert`, `--tls-key`, `--nats-url`, `--api-key-bucket`, `--cors-origin`, `--session-ttl-seconds`, the preview flags, plus the shared observability flags).
+- `TlsArgs`, `TlsFiles`: the paired TLS flags and the certificate and key they form. `serve_tls_with_shutdown` serves over them.
 - `run`, `serve_with_shutdown`, `shutdown_signal`: the entry point used by the binary, the server loop, and the signal future that stops it. Failures are reported as `GatewayError`.
 - `router`, `AppState`: the axum router (`POST /v1/sessions`, `GET /v1/ws`, the preview proxy) and the state it shares.
 - `SandboxBackend`: the tool surface behind the socket. `NatsSandboxBackend` talks to the broker over NATS; tests plug in their own implementation.
@@ -54,7 +55,21 @@ cargo run -p trogon-sandbox-ws-gateway -- \
 - `--cors-origin https://app.example.com` (repeatable; the default is same-origin only).
 - `--session-ttl-seconds 3600`
 
-The gateway serves plain HTTP. Terminate TLS in front of it, because session tokens must not cross untrusted networks in the clear.
+## TLS
+
+By default the gateway serves plain HTTP, so terminate TLS in front of it or serve TLS directly. Session tokens must not cross untrusted networks in the clear.
+
+- `--tls-cert <path>` (`SANDBOX_WS_TLS_CERT`): PEM certificate chain.
+- `--tls-key <path>` (`SANDBOX_WS_TLS_KEY`): PEM private key.
+
+The two flags come as a pair. Giving only one of them is a parse error. With both, the listener speaks TLS (rustls) for the API, the WebSocket and the preview proxy.
+
+```bash
+cargo run -p trogon-sandbox-ws-gateway -- \
+  --nats-url nats://127.0.0.1:4222 \
+  --tls-cert /etc/sandbox/tls/cert.pem \
+  --tls-key /etc/sandbox/tls/key.pem
+```
 
 ## Preview access control
 

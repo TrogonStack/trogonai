@@ -4,6 +4,8 @@ use clap::Parser;
 use trogon_sandbox_auth::{ApiKeyBucket, DEFAULT_BUCKET};
 use trogon_sandbox_observability::ObservabilityArgs;
 
+use crate::TlsArgs;
+
 /// Command line flags of the gateway binary.
 #[derive(Parser, Debug)]
 #[command(name = "trogon-sandbox-ws-gateway")]
@@ -38,6 +40,10 @@ pub struct GatewayArgs {
 
     #[arg(long, env = "SANDBOX_PREVIEW_TTL_SECONDS", default_value_t = 900)]
     pub preview_ttl_seconds: u64,
+
+    /// Serve over TLS when both `--tls-cert` and `--tls-key` are given; plain HTTP otherwise.
+    #[command(flatten)]
+    pub tls: TlsArgs,
 
     #[command(flatten)]
     pub observability: ObservabilityArgs,
