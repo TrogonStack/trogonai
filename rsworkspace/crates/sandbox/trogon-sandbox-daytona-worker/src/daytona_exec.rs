@@ -293,7 +293,14 @@ impl DaytonaExec {
                 .map(|completion| completion.root_exit().code()));
         }
         match self.api.download(&execution.sandbox_id, &execution.files.exit).await {
-            Ok(bytes) => Ok(String::from_utf8_lossy(&bytes).trim().parse().ok()),
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                let text = text.trim();
+                if text.is_empty() {
+                    return Ok(None);
+                }
+                text.parse().map(Some).map_err(|_| DaytonaExecError::ReceiptInvalid)
+            }
             Err(DaytonaApiError::NotFound(_)) => Ok(None),
             Err(error) => Err(error.into()),
         }

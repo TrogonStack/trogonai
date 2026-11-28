@@ -344,3 +344,22 @@ fn a_key_and_an_endpoint_describe_themselves_safely() -> TestResult {
     assert!(DaytonaEndpoint::parse("https://example.com/api?x=1").is_err());
     Ok(())
 }
+
+#[tokio::test]
+async fn an_execute_reply_without_an_exit_code_is_refused() -> TestResult {
+    let fake = Fake::with_sandbox().await?;
+    fake.json("POST", &box_route("process/execute"), 200, json!({"result": "out"}));
+    let refused = fake
+        .api()?
+        .execute(
+            SANDBOX,
+            &ExecuteRequest {
+                command: "true".to_owned(),
+                cwd: None,
+                timeout: None,
+            },
+        )
+        .await;
+    assert!(refused.is_err());
+    Ok(())
+}
