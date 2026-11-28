@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use trogon_sandbox_contract::{
     LeaseError, LeaseId, NativeHandle, NativeHandleResponse, NativeSnapshotId, NativeSnapshotReceipt,
     NativeSnapshotRef, ProviderKind, SandboxFreezeResponse, SnapshotExportError, SnapshotExportOutcome, WorkerId,
@@ -22,6 +22,7 @@ pub struct VercelWorkerProvider {
     gates: std::sync::Mutex<HashMap<LeaseId, Weak<Mutex<()>>>>,
     pub(crate) worker_id: std::sync::OnceLock<WorkerId>,
     pub(crate) ledger: std::sync::OnceLock<Arc<AttemptLedger>>,
+    ready: watch::Sender<bool>,
 }
 
 impl VercelWorkerProvider {
@@ -42,6 +43,7 @@ impl VercelWorkerProvider {
             gates: std::sync::Mutex::new(HashMap::new()),
             worker_id: std::sync::OnceLock::new(),
             ledger: std::sync::OnceLock::new(),
+            ready: watch::channel(false).0,
         }
     }
 
@@ -51,6 +53,17 @@ impl VercelWorkerProvider {
             return Err(VercelProviderError::BoundToAnotherWorker);
         }
         Ok(())
+    }
+
+    /// Marks the worker as serving every subject it announces, so heartbeats may start.
+    pub(crate) fn mark_ready(&self) {
+        self.ready.send_replace(true);
+    }
+
+    /// Waits until the worker serves every subject it announces.
+    pub async fn wait_ready(&self) {
+        let mut ready = self.ready.subscribe();
+        let _ = ready.wait_for(|ready| *ready).await;
     }
 
     pub fn exec(&self) -> &Arc<VercelExec> {

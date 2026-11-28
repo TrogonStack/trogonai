@@ -66,29 +66,35 @@ pub async fn launch(
     let (regions, plan, heartbeat_provider, heartbeat_id) =
         (args.regions.clone(), args.plan, Arc::clone(&vercel), worker_id.clone());
     let max_concurrent_leases = args.max_concurrent_leases;
-    spawn_heartbeat_loop(
-        nats.clone(),
-        ProviderKind::Vercel,
-        worker_id.clone(),
-        DEFAULT_HEARTBEAT_INTERVAL,
-        cancel.clone(),
-        move || {
-            let (regions, provider, worker_id) =
-                (regions.clone(), Arc::clone(&heartbeat_provider), heartbeat_id.clone());
-            async move {
-                let current = u32::try_from(provider.active_lease_count().await).unwrap_or(u32::MAX);
-                build_heartbeat(
-                    &worker_id,
-                    max_concurrent_leases,
-                    current,
-                    &regions,
-                    max_vcpus,
-                    plan,
-                    dispatch_protocol,
-                )
-            }
-        },
-    );
+    // Heartbeat only once every subject is served, so the broker never targets a worker that cannot yet listen.
+    let (heartbeat_nats, ready_provider) = (nats.clone(), Arc::clone(&vercel));
+    let (beat_worker, beat_cancel) = (worker_id.clone(), cancel.clone());
+    tokio::spawn(async move {
+        ready_provider.wait_ready().await;
+        spawn_heartbeat_loop(
+            heartbeat_nats,
+            ProviderKind::Vercel,
+            beat_worker,
+            DEFAULT_HEARTBEAT_INTERVAL,
+            beat_cancel,
+            move || {
+                let (regions, provider, worker_id) =
+                    (regions.clone(), Arc::clone(&heartbeat_provider), heartbeat_id.clone());
+                async move {
+                    let current = u32::try_from(provider.active_lease_count().await).unwrap_or(u32::MAX);
+                    build_heartbeat(
+                        &worker_id,
+                        max_concurrent_leases,
+                        current,
+                        &regions,
+                        max_vcpus,
+                        plan,
+                        dispatch_protocol,
+                    )
+                }
+            },
+        );
+    });
     info!("trogon-sandbox-vercel-worker starting");
     run(nats, js, vercel, &worker_id, cancel).await
 }
