@@ -34,7 +34,7 @@
     "rsworkspace/crates/sandbox/trogon-sandbox-fly-worker/tests/provider_lifecycle.rs": 1247,
     "rsworkspace/crates/sandbox/trogon-sandbox-k8s-worker/tests/support/mod.rs": 1193,
     "rsworkspace/crates/sandbox/trogon-sandbox-kubevirt-worker/tests/fake_cluster/mod.rs": 1593,
-    "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/runtime.rs": 1440,
+    "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/runtime.rs": 1361,
     "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/settings/mod.rs": 1581,
     "rsworkspace/crates/sandbox/trogon-sandbox-policy-exec/src/settings/tests.rs": 3359,
     "rsworkspace/crates/sandbox/trogon-sandbox-protocol/tests/attempt_ledger.rs": 1392,
