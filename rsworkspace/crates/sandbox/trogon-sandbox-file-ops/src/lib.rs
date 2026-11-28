@@ -39,6 +39,8 @@ mod manifest_diff;
 mod manifest_entry;
 mod manifest_source;
 mod payload;
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod race_tests;
 mod sandbox_prefix;
 mod sandbox_prefix_error;
 mod stream_hasher;
