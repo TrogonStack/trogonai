@@ -3338,5 +3338,5 @@ fn several_serde_issues_are_all_reported_in_one_message() -> TestResult {
     assert_eq!(text.matches("; ").count(), 2, "{text}");
     Ok(())
 }
-
 mod host_match;
+mod parent_proxy_env;
