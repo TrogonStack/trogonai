@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::{ProxyUidWorkloadError, VolumeCacheError};
+use crate::{EgressRulesFailure, ProxyUidWorkloadError, VolumeCacheError};
 
 /// Failures of the Docker engine adapter and the local Docker provider.
 #[derive(Debug, thiserror::Error)]
@@ -56,6 +56,19 @@ pub enum DockerError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+    #[error("egress sidecar readiness marker {path:?}")]
+    EgressReadyMarker {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// The sidecar never confirmed its firewall, so the sandbox was torn down rather than left with open egress.
+    #[error("egress sidecar {sidecar_id} did not install its firewall")]
+    EgressRulesNotInstalled {
+        sidecar_id: String,
+        #[source]
+        cause: EgressRulesFailure,
     },
     #[error("serialize network policy to json")]
     PolicySerialize(#[source] serde_json::Error),

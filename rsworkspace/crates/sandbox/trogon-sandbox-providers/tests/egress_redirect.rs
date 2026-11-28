@@ -1,8 +1,9 @@
 use trogon_sandbox_contract::LeaseId;
 use trogon_sandbox_providers::{
     EGRESS_PROXY_EXEMPT_UID_ENV, EGRESS_PROXY_LEASE_ID_ENV, EGRESS_PROXY_VIOLATION_NATS_URL_ENV, EgressViolationEvents,
-    SinkHost, UID_CHANGE_CAPABILITIES, ViolationSinkEndpoint, ViolationSinkEndpointError, egress_redirect_command,
-    exempt_uid_env_pair, reject_proxy_uid_workload, rewrite_loopback_host,
+    SinkHost, UID_CHANGE_CAPABILITIES, ViolationSinkEndpoint, ViolationSinkEndpointError, egress_lockdown_command,
+    egress_lockdown_rules, egress_redirect_command, exempt_uid_env_pair, reject_proxy_uid_workload,
+    rewrite_loopback_host,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -13,6 +14,85 @@ fn redirect_command_exempts_only_the_proxy_uid_ahead_of_the_redirect() {
         egress_redirect_command(3128),
         "iptables -t nat -A OUTPUT -p tcp -m owner --uid-owner 65531 -j RETURN && iptables -t nat -A OUTPUT -p tcp ! -d 127.0.0.1 -j REDIRECT --to-port 3128"
     );
+}
+
+#[test]
+fn lockdown_redirects_tcp_and_rejects_everything_else_on_ipv4() {
+    assert_eq!(
+        egress_lockdown_rules(3128).ipv4,
+        [
+            "iptables -t nat -A OUTPUT -p tcp -m owner --uid-owner 65531 -j RETURN",
+            "iptables -t nat -A OUTPUT -p tcp ! -d 127.0.0.1 -j REDIRECT --to-port 3128",
+            "iptables -A OUTPUT -p tcp -m owner --uid-owner 65531 -j ACCEPT",
+            "iptables -A OUTPUT -p udp --dport 53 -m owner --uid-owner 65531 -j ACCEPT",
+            "iptables -A OUTPUT -o lo -d 127.0.0.1 -j ACCEPT",
+            "iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j ACCEPT",
+            "iptables -A OUTPUT -j REJECT",
+        ]
+    );
+}
+
+#[test]
+fn lockdown_rejects_all_ipv6_egress_but_loopback_and_the_proxy() {
+    assert_eq!(
+        egress_lockdown_rules(3128).ipv6,
+        [
+            "ip6tables -A OUTPUT -p tcp -m owner --uid-owner 65531 -j ACCEPT",
+            "ip6tables -A OUTPUT -p udp --dport 53 -m owner --uid-owner 65531 -j ACCEPT",
+            "ip6tables -A OUTPUT -o lo -d ::1 -j ACCEPT",
+            "ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED --ctdir REPLY -j ACCEPT",
+            "ip6tables -A OUTPUT -j REJECT",
+        ]
+    );
+}
+
+#[test]
+fn only_the_proxy_uid_may_send_udp_and_only_to_dns() {
+    let rules = egress_lockdown_rules(3128);
+    for rule in rules.ipv4.iter().chain(&rules.ipv6) {
+        if rule.contains("-p udp") {
+            assert!(
+                rule.contains("--dport 53 -m owner --uid-owner 65531 -j ACCEPT"),
+                "{rule}"
+            );
+        }
+        if rule.ends_with("-j ACCEPT") && !rule.contains("--uid-owner") {
+            assert!(
+                rule.contains("-o lo -d 127.0.0.1 ")
+                    || rule.contains("-o lo -d ::1 ")
+                    || rule.contains("--ctdir REPLY"),
+                "a workload ACCEPT outside loopback and replies: {rule}"
+            );
+        }
+    }
+}
+
+#[test]
+fn lockdown_ends_each_family_with_a_catch_all_reject() {
+    let rules = egress_lockdown_rules(3128);
+    assert_eq!(
+        rules.ipv4.last().map(String::as_str),
+        Some("iptables -A OUTPUT -j REJECT")
+    );
+    assert_eq!(
+        rules.ipv6.last().map(String::as_str),
+        Some("ip6tables -A OUTPUT -j REJECT")
+    );
+}
+
+#[test]
+fn lockdown_command_stops_at_the_first_failing_rule() {
+    let rules = egress_lockdown_rules(3128);
+    let command = egress_lockdown_command(3128);
+    assert_eq!(
+        command,
+        format!(
+            "{} && {{ [ ! -e /proc/net/if_inet6 ] || {{ {}; }}; }}",
+            rules.ipv4.join(" && "),
+            rules.ipv6.join(" && ")
+        )
+    );
+    assert!(command.starts_with(&egress_redirect_command(3128)));
 }
 
 #[test]

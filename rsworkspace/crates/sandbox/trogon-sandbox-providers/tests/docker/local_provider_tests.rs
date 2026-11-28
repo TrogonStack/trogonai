@@ -363,6 +363,128 @@ async fn sidecar_failure_with_a_failing_kill_still_reports_the_launch_error() ->
     .await?
 }
 
+fn sidecar_script(sidecar: &Value) -> String {
+    strings(&sidecar["Cmd"]).last().cloned().unwrap_or_default()
+}
+
+fn env_value(body: &Value, name: &str) -> Option<String> {
+    env_of(body)
+        .iter()
+        .rev()
+        .find_map(|entry| entry.strip_prefix(&format!("{name}=")).map(str::to_string))
+}
+
+#[tokio::test]
+async fn the_sidecar_rejects_non_tcp_egress_on_both_families_before_the_proxy_starts() -> TestResult {
+    tokio::time::timeout(TIMEOUT, async {
+        let (daemon, provider) = provider().await?;
+        let mut spec = sample::spec();
+        spec.network_policy = Some(sample::passthrough_policy()?);
+        let handle = provider.launch(spec).await?;
+        let script = sidecar_script(&daemon.create_requests()[1].1);
+        let proxy_start = script
+            .find("exec setpriv")
+            .ok_or("the sidecar never starts the proxy")?;
+        for rule in [
+            "iptables -t nat -A OUTPUT -p tcp ! -d 127.0.0.1 -j REDIRECT --to-port 3128",
+            "iptables -A OUTPUT -p udp --dport 53 -m owner --uid-owner 65531 -j ACCEPT",
+            "iptables -A OUTPUT -j REJECT",
+            "ip6tables -A OUTPUT -j REJECT",
+        ] {
+            let at = script
+                .find(rule)
+                .ok_or_else(|| format!("missing {rule:?} in {script}"))?;
+            assert!(at < proxy_start, "{rule:?} must be installed before the proxy starts");
+        }
+        if let Some(path) = handle.policy_file_path() {
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
+    })
+    .await?
+}
+
+#[tokio::test]
+async fn the_workload_reaches_names_through_the_proxy_it_is_pointed_at() -> TestResult {
+    tokio::time::timeout(TIMEOUT, async {
+        let (daemon, provider) = provider().await?;
+        let mut spec = sample::spec();
+        spec.network_policy = Some(sample::passthrough_policy()?);
+        let handle = provider.launch(spec).await?;
+        let creates = daemon.create_requests();
+        let (workload, sidecar) = (&creates[0].1, &creates[1].1);
+
+        assert_eq!(
+            env_value(sidecar, "EGRESS_PROXY_MUX_LISTEN_ADDR").as_deref(),
+            Some("127.0.0.1:3129")
+        );
+        let token = env_value(sidecar, "EGRESS_PROXY_MUX_TOKEN").ok_or("the sidecar has no explicit proxy token")?;
+        assert!(token.len() >= 32, "the token is too short to be a secret");
+        let proxy_url = format!("http://sandbox:{token}@127.0.0.1:3129");
+        for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"] {
+            assert_eq!(env_value(workload, name).as_deref(), Some(proxy_url.as_str()), "{name}");
+        }
+        for name in ["NO_PROXY", "no_proxy"] {
+            assert_eq!(
+                env_value(workload, name).as_deref(),
+                Some("localhost,127.0.0.1,::1"),
+                "{name}"
+            );
+        }
+        if let Some(path) = handle.policy_file_path() {
+            std::fs::remove_file(path)?;
+        }
+        Ok(())
+    })
+    .await?
+}
+
+#[tokio::test]
+async fn each_lease_gets_its_own_proxy_token() -> TestResult {
+    tokio::time::timeout(TIMEOUT, async {
+        let (daemon, provider) = provider().await?;
+        for _ in 0..2 {
+            let mut spec = sample::spec();
+            spec.network_policy = Some(sample::passthrough_policy()?);
+            let handle = provider.launch(spec).await?;
+            if let Some(path) = handle.policy_file_path() {
+                std::fs::remove_file(path)?;
+            }
+        }
+        let creates = daemon.create_requests();
+        let first = env_value(&creates[1].1, "EGRESS_PROXY_MUX_TOKEN");
+        let second = env_value(&creates[3].1, "EGRESS_PROXY_MUX_TOKEN");
+        assert!(first.is_some());
+        assert_ne!(first, second);
+        Ok(())
+    })
+    .await?
+}
+
+#[tokio::test]
+async fn a_sidecar_that_cannot_install_its_rules_fails_the_launch_closed() -> TestResult {
+    tokio::time::timeout(TIMEOUT, async {
+        let (daemon, provider) = provider().await?;
+        daemon.fail_sidecar_rules();
+        let mut spec = sample::spec();
+        spec.network_policy = Some(sample::passthrough_policy()?);
+        let result = provider.launch(spec).await;
+        assert!(
+            is_docker_error(&result),
+            "the launch must fail when the rules are not installed"
+        );
+        let killed: Vec<String> = daemon
+            .requests_matching("/kill")
+            .into_iter()
+            .map(|request| request.target)
+            .collect();
+        assert_eq!(killed.len(), 2, "both containers must be killed: {killed:?}");
+        assert!(killed.iter().any(|target| target.contains("-egress-proxy")));
+        Ok(())
+    })
+    .await?
+}
+
 #[tokio::test]
 async fn handle_status_maps_the_engine_state() -> TestResult {
     tokio::time::timeout(TIMEOUT, async {

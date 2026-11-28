@@ -6,12 +6,12 @@ use trogon_sandbox_contract::{BootMode, LeaseId, NetworkPolicy, SandboxPhase};
 use trogon_sandbox_protocol::{ca_trust_env, run_phase};
 
 use crate::docker::constants::{SANDBOX_CA_PATH, WORKSPACE_MOUNT_PATH};
-use crate::local_docker_egress::utf8_path;
+use crate::local_docker_egress::{utf8_path, workload_proxy_env};
 use crate::local_docker_policy::{network_mode, requires_tls_intercept};
 use crate::local_docker_workspace::clone_workspace;
 use crate::{
-    ContainerRunSpec, DockerError, LocalDockerHandle, LocalDockerProvider, SandboxError, SandboxHandle,
-    SandboxProvider, SandboxSpec, UID_CHANGE_CAPABILITIES, reject_proxy_uid_workload,
+    ContainerRunSpec, DockerError, EgressProxyToken, LocalDockerHandle, LocalDockerProvider, SandboxError,
+    SandboxHandle, SandboxProvider, SandboxSpec, UID_CHANGE_CAPABILITIES, reject_proxy_uid_workload,
 };
 
 /// Entrypoint and command for a boot mode: `Bare` keeps the container alive with nothing else running.
@@ -99,6 +99,10 @@ impl LocalDockerProvider {
         let mut env: Vec<String> = spec.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
         env.push(format!("SANDBOX_REPO={}", spec.repo));
         env.push(format!("SANDBOX_TIMEOUT_SECS={}", spec.timeout.as_secs()));
+        let proxy_token = uses_egress_sidecar.then(EgressProxyToken::generate);
+        if let Some(token) = &proxy_token {
+            env.extend(workload_proxy_env(token));
+        }
 
         let ca_host_path = if spec.network_policy.as_ref().is_some_and(requires_tls_intercept) {
             let path = create_ca_file(&std::env::temp_dir()).await?;
@@ -150,8 +154,8 @@ impl LocalDockerProvider {
         .await?;
         let container_id = start_result.container_id;
 
-        let (sidecar_id, policy_file_path) = match spec.network_policy.as_ref() {
-            Some(policy @ NetworkPolicy::UserDefined { .. }) => {
+        let (sidecar_id, policy_file_path) = match (spec.network_policy.as_ref(), proxy_token.as_ref()) {
+            (Some(policy @ NetworkPolicy::UserDefined { .. }), Some(proxy_token)) => {
                 let launch = match self
                     .launch_egress_sidecar(
                         &container_name,
@@ -159,13 +163,15 @@ impl LocalDockerProvider {
                         policy,
                         ca_host_path.as_deref(),
                         spec.lease_id.as_ref(),
+                        proxy_token,
                     )
                     .await
                 {
                     Ok(launch) => launch,
                     Err(error) => {
-                        // Without its sidecar the workload has no egress policy
-                        // and nobody holds its id, so it would run unreachable.
+                        // Without its sidecar (or its firewall) the workload has no
+                        // egress policy and nobody holds its id, so it would run
+                        // unreachable, or worse, unconfined.
                         if let Err(kill_error) = self.engine.kill(&container_id).await {
                             tracing::warn!(error = %kill_error, "failed to kill workload after sidecar launch failure");
                         }

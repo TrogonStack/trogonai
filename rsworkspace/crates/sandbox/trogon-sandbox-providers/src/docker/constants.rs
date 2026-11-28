@@ -34,6 +34,27 @@ pub const SIDECAR_LISTEN_ADDR: &str = "127.0.0.1:3128";
 /// Port part of [`SIDECAR_LISTEN_ADDR`].
 pub const SIDECAR_LISTEN_PORT: &str = "3128";
 
+/// Address of the sidecar's explicit proxy listener (HTTP CONNECT, absolute-form HTTP and SOCKS5). The workload
+/// has no DNS of its own, so it hands names to this listener and the proxy resolves them.
+pub const SIDECAR_MUX_LISTEN_ADDR: &str = "127.0.0.1:3129";
+
+/// User name in the proxy URL the workload is given; the proxy checks only the password.
+pub const WORKLOAD_PROXY_USER: &str = "sandbox";
+
+/// Variables HTTP clients read for their proxy, all set to the sidecar's explicit listener.
+pub const WORKLOAD_PROXY_ENV: [&str; 4] = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"];
+
+/// Variables listing destinations clients reach without the proxy, and their value: loopback only.
+pub const WORKLOAD_NO_PROXY_ENV: [&str; 2] = ["NO_PROXY", "no_proxy"];
+pub const WORKLOAD_NO_PROXY: &str = "localhost,127.0.0.1,::1";
+
+/// Where the sidecar writes its nonce once its firewall is installed, just before it starts the proxy.
+pub const SIDECAR_READY_PATH: &str = "/etc/sandbox-egress-proxy-ready";
+
+/// How long a launch waits for the sidecar's firewall before tearing the sandbox down, and how often it looks.
+pub const SIDECAR_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+pub const SIDECAR_READY_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// Host name the sidecar resolves to reach a loopback NATS server on the Docker host.
 pub const DOCKER_HOST_ALIAS: &str = "host.docker.internal";
 
@@ -47,6 +68,8 @@ pub const DEFAULT_DOCKER_SOCKET: &str = "/var/run/docker.sock";
 pub const PROXY_LISTEN_ADDR_ENV: &str = "EGRESS_PROXY_LISTEN_ADDR";
 pub const PROXY_POLICY_FILE_ENV: &str = "EGRESS_PROXY_POLICY_FILE";
 pub const PROXY_CA_OUT_FILE_ENV: &str = "EGRESS_PROXY_CA_OUT_FILE";
+pub const PROXY_MUX_LISTEN_ADDR_ENV: &str = "EGRESS_PROXY_MUX_LISTEN_ADDR";
+pub const PROXY_MUX_TOKEN_ENV: &str = "EGRESS_PROXY_MUX_TOKEN";
 
 /// Where the CA bundle appears inside the egress sidecar (writable there, read-only in the sandbox).
 pub const SIDECAR_CA_PATH: &str = "/etc/sandbox-egress-proxy-ca/ca.pem";
