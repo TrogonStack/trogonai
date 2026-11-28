@@ -11,6 +11,7 @@ workspace_crate(
         # they run only through Cargo with --ignored.
         "docker_stack_smoke": {"tags": ["manual", "requires-network"]},
         "firecracker_credential_smoke": {"tags": ["manual", "requires-network"]},
+        "firecracker_dagger_demo": {"tags": ["manual", "requires-network"]},
         "firecracker_network_smoke": {"tags": ["manual", "requires-network"]},
         "firecracker_stack_failures": {"tags": ["manual", "requires-network"]},
         "firecracker_stack_smoke": {"tags": ["manual", "requires-network"]},
