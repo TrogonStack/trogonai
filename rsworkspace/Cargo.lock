@@ -12970,6 +12970,7 @@ dependencies = [
  "tracing-subscriber",
  "trogon-nats",
  "trogon-sandbox-actor-agent",
+ "trogon-sandbox-conformance",
  "trogon-sandbox-contract",
  "trogon-sandbox-observability",
  "trogon-sandbox-protocol",

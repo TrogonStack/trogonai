@@ -1,15 +1,21 @@
+use std::convert::Infallible;
 use std::sync::Mutex;
 
 use async_nats::{Message, Subject};
 use async_trait::async_trait;
+use futures::FutureExt;
+use futures::future::BoxFuture;
 use tokio_util::sync::CancellationToken;
 use trogon_nats::test_support::JetStreamTestServer;
+use trogon_sandbox_conformance::{CountingProvider, ensure_launches_once, ensure_relaunches_after_cancel};
 use trogon_sandbox_contract::TerminalDimension;
 use trogon_sandbox_contract::{LeaseRequest, ProviderKind, ProviderLease};
 use trogon_sandbox_protocol::{ProviderError, SnapshotError};
 use trogon_sandbox_ssh_gateway::{GuestChannel, GuestError, GuestShell};
 
+use crate::E2bWorkerError;
 use crate::terminal::E2bTerminals;
+use crate::worker::lease_dispatch::handle_lease_msg;
 
 use super::*;
 
@@ -161,5 +167,68 @@ async fn a_cancel_the_provider_refuses_is_still_handled() -> TestResult {
     )
     .await;
     assert_eq!(provider.cancelled.lock().map(|held| held.len()).unwrap_or_default(), 1);
+    Ok(())
+}
+
+/// The worker's own lease handler over `provider`, as the redispatch checks drive it.
+fn lease_handler(
+    client: &async_nats::Client,
+    provider: Arc<dyn Provider>,
+    active: ActiveLeases,
+    grants: Arc<RedispatchGuard>,
+) -> impl Fn(Message) -> BoxFuture<'static, Result<(), E2bWorkerError>> {
+    let client = client.clone();
+    let js = async_nats::jetstream::new(client.clone());
+    move |msg| {
+        handle_lease_msg(
+            msg,
+            client.clone(),
+            js.clone(),
+            Arc::clone(&provider),
+            Arc::clone(&active),
+            Arc::clone(&grants),
+        )
+        .boxed()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_redispatched_lease_launches_once() -> TestResult {
+    let server = JetStreamTestServer::start().await;
+    let client = server.client().await;
+    let counting = CountingProvider::new(ProviderKind::E2b);
+    let handle = lease_handler(
+        &client,
+        counting.clone(),
+        ActiveLeases::default(),
+        Arc::new(RedispatchGuard::new()),
+    );
+
+    ensure_launches_once(&client, &counting, &LeaseId::new("redispatch-lease"), handle).await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_lease_id_launches_afresh_when_dispatched_again() -> TestResult {
+    let server = JetStreamTestServer::start().await;
+    let client = server.client().await;
+    let counting = CountingProvider::new(ProviderKind::E2b);
+    let provider: Arc<dyn Provider> = counting.clone();
+    let active = ActiveLeases::default();
+    let grants = Arc::new(RedispatchGuard::new());
+    let terminals = idle_terminals(&client);
+    let handle = lease_handler(&client, Arc::clone(&provider), Arc::clone(&active), Arc::clone(&grants));
+    let cancel = move |msg| {
+        handle_cancel_msg(
+            msg,
+            Arc::clone(&provider),
+            Arc::clone(&active),
+            Arc::clone(&grants),
+            Arc::clone(&terminals),
+        )
+        .map(Ok::<(), Infallible>)
+    };
+
+    ensure_relaunches_after_cancel(&client, &counting, &LeaseId::new("redispatch-cancel"), handle, cancel).await?;
     Ok(())
 }
