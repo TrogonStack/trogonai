@@ -6,14 +6,15 @@ use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::util::SubscriberInitExt as _;
 use trogon_std::env::{ReadEnv, SystemEnv};
 
-use crate::constants::{OTLP_ENDPOINT_ENV, SERVICE_VERSION_KEY};
+use crate::constants::{LOG_FILTER_ENV, OTLP_ENDPOINT_ENV, SERVICE_VERSION_KEY};
 use crate::{ObservabilityError, TracingGuard};
 
 /// Initialize `tracing` with optional OTLP export.
 ///
 /// The endpoint comes from `otlp_endpoint`, falling back to `SANDBOX_OTLP_ENDPOINT`,
 /// and is the full OTLP/HTTP traces URL (for example `http://collector:4318/v1/traces`),
-/// used as given. Blank values count as unset. Installing the global subscriber is
+/// used as given. Blank values count as unset. `RUST_LOG` unset means `info`; a set but invalid
+/// value is an error rather than a silent fall back to `info`. Installing the global subscriber is
 /// best effort: when one already exists it is left in place and the returned guard
 /// exports nothing.
 pub fn init_tracing(service_name: &str, otlp_endpoint: Option<&str>) -> Result<TracingGuard, ObservabilityError> {
@@ -26,8 +27,12 @@ pub fn init_tracing_with_env(
     otlp_endpoint: Option<&str>,
     env: &impl ReadEnv,
 ) -> Result<TracingGuard, ObservabilityError> {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let env_filter = match env.var(LOG_FILTER_ENV) {
+        Ok(directives) => tracing_subscriber::EnvFilter::try_new(&directives)
+            .map_err(|error| ObservabilityError::LogFilter(error.to_string()))?,
+        Err(std::env::VarError::NotPresent) => tracing_subscriber::EnvFilter::new("info"),
+        Err(error) => return Err(ObservabilityError::LogFilter(error.to_string())),
+    };
     let fmt_layer = tracing_subscriber::fmt::layer();
 
     let endpoint = non_blank(otlp_endpoint.map(str::to_owned)).or_else(|| non_blank(env.var(OTLP_ENDPOINT_ENV).ok()));
