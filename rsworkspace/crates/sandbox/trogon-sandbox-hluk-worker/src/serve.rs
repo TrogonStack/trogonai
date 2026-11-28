@@ -18,7 +18,7 @@ use trogon_sandbox_protocol::{
 };
 
 use crate::constants::LEASE_QUEUE_GROUP;
-use crate::{HlukProvider, workspace_files};
+use crate::{HlukProvider, lease_files};
 
 type HandlerResult = Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -99,9 +99,9 @@ impl Worker {
         let body = nats_transfer::receive(&self.client, &message).await?;
         let out = match verb {
             "run_command" => answer(&body, |request| self.provider.run_command(&lease, request)).await?,
-            "write_files" => answer(&body, |request| workspace_files::write_files(&lease, request)).await?,
-            "read_file" => answer(&body, |request| workspace_files::read_file(&lease, request)).await?,
-            "file_op" => answer(&body, |request| workspace_files::file_op(&lease, request)).await?,
+            "write_files" => answer(&body, |request| lease_files::write_files(&lease, request)).await?,
+            "read_file" => answer(&body, |request| lease_files::read_file(&lease, request)).await?,
+            "file_op" => answer(&body, |request| lease_files::file_op(&lease, request)).await?,
             // No command outlives its request, so there is never one to poll or kill.
             "poll_command" => serde_json::to_vec(&PollCommandResponse::NotFound)?,
             "kill_command" => serde_json::to_vec(&KillCommandResponse::NotFound)?,

@@ -1,9 +1,10 @@
 use std::sync::LazyLock;
 
 use trogon_sandbox_contract::{
-    CapabilitySupport::{Supported, Unsupported}, DormancyCapability, EgressCapability, EgressEnforcementLevel, IsolationCapability,
-    IsolationTier, LifecycleCapability, PerformanceProfile, ProviderCapabilityProfile, ProviderKind,
-    ResourceLimitMechanism, SnapshotCapability, VolumeCapability, VolumeMode,
+    CapabilitySupport::{Supported, Unsupported},
+    DormancyCapability, EgressCapability, EgressEnforcementLevel, IsolationCapability, IsolationTier,
+    LifecycleCapability, PerformanceProfile, ProviderCapabilityProfile, ProviderKind, ResourceLimitMechanism,
+    SnapshotCapability, VolumeCapability, VolumeMode,
 };
 
 /// What this worker can and cannot do, as advertised in its heartbeat.

@@ -52,7 +52,10 @@ impl HlukRuntime {
             (_, []) => Err("the command is empty".to_owned()),
             (Self::Shell, argv) => {
                 let line: Vec<String> = argv.iter().map(|arg| sh_quote(arg)).collect();
-                Ok(format!("cd {} || exit 1\n{}", sh_quote(cwd), line.join(" ")))
+                // hluk reports exit 1 for any failing command the shell runs last, but the exact code when the
+                // shell itself exits, so the command replaces the shell: `sh -c 'exit 42'` exits 42 and an unknown
+                // command 127.
+                Ok(format!("cd {} || exit 1\nexec {}", sh_quote(cwd), line.join(" ")))
             }
             (Self::Python, [bin, flag, code]) if matches!(bin.as_str(), "python" | "python3") && flag == "-c" => {
                 Ok(format!("__import__('os').chdir({literal})\n{code}"))
@@ -80,11 +83,11 @@ mod tests {
     }
 
     #[test]
-    fn a_shell_command_is_quoted_word_by_word_after_a_cd() {
+    fn a_shell_command_is_quoted_word_by_word_and_execed_after_a_cd() {
         let code = HlukRuntime::Shell.workload(&argv(&["sh", "-c", "echo 'hi'"]), "/workspace");
         assert_eq!(
             code,
-            Ok("cd '/workspace' || exit 1\n'sh' '-c' 'echo '\\''hi'\\'''".to_owned())
+            Ok("cd '/workspace' || exit 1\nexec 'sh' '-c' 'echo '\\''hi'\\'''".to_owned())
         );
     }
 

@@ -188,10 +188,12 @@ async fn hluk_worker_conforms() -> Result<(), Box<dyn Error>> {
     // The first lease pulls the runtime image and saves its warm snapshot.
     target.timeout = Duration::from_secs(120);
     target.strict_unknown_command_exit = true;
+    // Every command restores a fresh guest, so none stays running to poll or kill.
+    target.detached_commands = false;
     target.checkpoint_running_unsupported = true;
     target.redispatch_idempotent = true;
     target.denied_connect_fails = true;
-    // Served from the host side of /workspace, the only guest directory that outlives a command.
+    // Served from the host side of /workspace and /tmp, the only guest directories that outlive a command.
     target.file_ops = true;
     target.file_search = true;
     target.file_archive = true;

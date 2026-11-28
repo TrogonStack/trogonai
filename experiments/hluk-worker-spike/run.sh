@@ -107,9 +107,9 @@ echo ran"
   echo "| command | n | p50 | p99 | mean |"
   echo "|---|---|---|---|---|"
   series "hluk run --runtime bash --exec true" hluk run --runtime bash --exec true
-  series "… with --mount (what the worker runs)" hluk run --runtime bash --mount "$work/ws:/workspace" \
-    --exec "cd '/workspace' || exit 1
-'true'"
+  series "… with both mounts and exec (what the worker runs)" hluk run --runtime bash \
+    --mount "$work/ws:/workspace" --mount "$work/tmp:/tmp" --exec "cd '/workspace' || exit 1
+exec 'true'"
   series "hluk run --runtime python --exec pass" hluk run --runtime python --exec pass
 }
 

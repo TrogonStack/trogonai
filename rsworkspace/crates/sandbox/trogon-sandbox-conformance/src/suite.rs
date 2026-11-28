@@ -66,8 +66,8 @@ fn table() -> Vec<TableEntry> {
         leased!(closed_stdin_reads_end_of_file, SHELL, always),
         leased!(timeout_is_reported_with_the_shared_exit_code, SHELL, always),
         leased!(files_round_trip_and_commands_see_them, SHELL, always),
-        leased!(detached_command_is_pollable, SHELL, always),
-        leased!(kill_stops_a_running_command, SHELL, always),
+        leased!(detached_command_is_pollable, SHELL, |t: &Target| t.detached_commands),
+        leased!(kill_stops_a_running_command, SHELL, |t: &Target| t.detached_commands),
         leased!(missing_things_are_not_found, STATEFUL, always),
         leased!(pause_keeps_state_and_resume_restores_it, SHELL, |t: &Target| t
             .supports_pause_resume),

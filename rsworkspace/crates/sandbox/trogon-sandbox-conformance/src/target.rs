@@ -42,6 +42,9 @@ pub struct Target {
     pub timeout: Duration,
     /// Require exactly exit 127 for an unknown command instead of any failure.
     pub strict_unknown_command_exit: bool,
+    /// Runs detached commands that can be polled and killed; enables those checks. A worker that starts a fresh
+    /// guest per command keeps none running, so it refuses them.
+    pub detached_commands: bool,
     /// The worker declares `lifecycle.supports_pause_resume`; enables the pause and resume check.
     pub supports_pause_resume: bool,
     /// The worker declares `supports_graceful_stop`; enables the stop check.
@@ -103,6 +106,7 @@ impl Target {
             spec: None,
             timeout: Duration::from_secs(30),
             strict_unknown_command_exit: false,
+            detached_commands: true,
             supports_pause_resume: false,
             graceful_stop: false,
             command_restart: false,

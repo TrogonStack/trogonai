@@ -1,5 +1,5 @@
-//! The file verbs, served from the host side of a lease's workspace through [`FsRoot`], which confines every path
-//! to it (symlinks included, since the guest writes there too).
+//! The file verbs, served from the host side of a lease's `/workspace` or `/tmp` through [`FsRoot`], which confines
+//! every path to the directory it names (symlinks included, since the guest writes there too).
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -9,8 +9,8 @@ use trogon_sandbox_contract::{
 };
 use trogon_sandbox_file_ops::{FsRoot, SandboxPrefix};
 
-use crate::constants::{ONE_USER, WORKSPACE_GUEST_DIR};
-use crate::{HlukLease, LeaseWorkspace};
+use crate::constants::ONE_USER;
+use crate::{GuestDir, HlukLease};
 
 fn denied(message: impl Into<String>) -> LeaseError {
     LeaseError::Backend {
@@ -30,24 +30,30 @@ fn mutates(op: &FileOp) -> bool {
     )
 }
 
-/// Runs `op` on `lease`'s workspace.
+/// Runs `op` on the lease directory its paths name.
 async fn execute(lease: &HlukLease, op: FileOp) -> FileOpResponse {
-    if lease.kind == LeaseWorkspace::CallerReadOnly && mutates(&op) {
+    let Some(dir) = GuestDir::of_op(&op) else {
+        return FileOpResponse::Failed {
+            kind: FileOpErrorKind::InvalidPath,
+            message: "an operation cannot span /workspace and /tmp".to_owned(),
+        };
+    };
+    if lease.read_only(dir) && mutates(&op) {
         return FileOpResponse::Failed {
             kind: FileOpErrorKind::PermissionDenied,
             message: "the workspace is a read-only host mount".to_owned(),
         };
     }
-    let root = lease.workspace.clone();
+    let root = lease.host_dir(dir);
     let outcome = tokio::task::spawn_blocking(move || {
-        let fs = SandboxPrefix::new(WORKSPACE_GUEST_DIR)
+        let fs = SandboxPrefix::new(dir.guest_path())
             .map_err(|error| error.to_string())
             .and_then(|prefix| FsRoot::new(&root, Some(prefix)).map_err(|error| error.to_string()));
         match fs {
             Ok(fs) => fs.execute(&op),
             Err(message) => FileOpResponse::Failed {
                 kind: FileOpErrorKind::Io,
-                message: format!("workspace is unavailable: {message}"),
+                message: format!("{} is unavailable: {message}", dir.guest_path()),
             },
         }
     })

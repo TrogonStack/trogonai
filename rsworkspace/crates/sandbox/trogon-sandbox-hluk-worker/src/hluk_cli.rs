@@ -6,8 +6,8 @@ use std::time::Duration;
 use tokio::process::Command;
 use trogon_sandbox_contract::{CommandOutput, CommandTimeoutStatus};
 
-use crate::constants::{KILLED_EXIT_CODE, WORKSPACE_GUEST_DIR};
-use crate::{GuestNetwork, HlukCliError, HlukLease, HlukRuntime, LeaseWorkspace};
+use crate::constants::KILLED_EXIT_CODE;
+use crate::{GuestDir, GuestNetwork, HlukCliError, HlukLease, HlukRuntime};
 
 /// The `hluk` binary, driven one process per command.
 #[derive(Debug, Clone)]
@@ -38,8 +38,8 @@ impl HlukCli {
         })
     }
 
-    /// Runs `code` in a guest restored from `lease`'s runtime snapshot with its workspace mounted, killing it at
-    /// `timeout`.
+    /// Runs `code` in a guest restored from `lease`'s runtime snapshot with its workspace and `/tmp` mounted, killing
+    /// it at `timeout`.
     pub async fn run(
         &self,
         lease: &HlukLease,
@@ -48,14 +48,14 @@ impl HlukCli {
         timeout: Duration,
     ) -> Result<CommandOutput, HlukCliError> {
         let mut command = self.command(lease.runtime);
-        let read_only = match lease.kind {
-            LeaseWorkspace::Scratch => "",
-            LeaseWorkspace::CallerReadOnly => ":ro",
-        };
-        command.arg("--mount").arg(format!(
-            "{}:{WORKSPACE_GUEST_DIR}{read_only}",
-            lease.workspace.display()
-        ));
+        for dir in GuestDir::ALL {
+            let read_only = if lease.read_only(dir) { ":ro" } else { "" };
+            command.arg("--mount").arg(format!(
+                "{}:{}{read_only}",
+                lease.host_dir(dir).display(),
+                dir.guest_path()
+            ));
+        }
         for (key, value) in env {
             command.arg("--env").arg(format!("{key}={value}"));
         }

@@ -16,7 +16,7 @@ use trogon_sandbox_protocol::{
 };
 
 use crate::constants::{ONE_USER, WORKSPACE_GUEST_DIR};
-use crate::{HlukCli, HlukLease, LeaseWorkspace, PROFILE};
+use crate::{HlukCli, HlukLease, PROFILE};
 
 fn denied(message: impl Into<String>) -> RunCommandResponse {
     RunCommandResponse::Denied(LeaseError::Backend {
@@ -24,9 +24,10 @@ fn denied(message: impl Into<String>) -> RunCommandResponse {
     })
 }
 
-/// Serves leases with `hluk`: a lease is a runtime whose warm snapshot exists plus a workspace directory, and each
+/// Serves leases with `hluk`: a lease is a runtime whose warm snapshot exists plus host directories for its
+/// `/workspace` and `/tmp`, and each
 /// command is one `hluk run` restored from that snapshot. Nothing in the guest outlives a command except the
-/// workspace.
+/// workspace and `/tmp`.
 pub struct HlukProvider {
     cli: HlukCli,
     work_root: PathBuf,
@@ -36,7 +37,7 @@ pub struct HlukProvider {
 }
 
 impl HlukProvider {
-    /// A provider running `cli`, creating lease workspaces under `work_root`.
+    /// A provider running `cli`, keeping each lease's directories under `work_root`.
     pub fn new(cli: HlukCli, work_root: PathBuf) -> Self {
         Self {
             cli,
@@ -128,11 +129,7 @@ impl Provider for HlukProvider {
             .get_or_try_init(|| self.cli.warm(lease.runtime))
             .await
             .map_err(ProviderError::backend)?;
-        if lease.kind == LeaseWorkspace::Scratch {
-            tokio::fs::create_dir_all(&lease.workspace)
-                .await
-                .map_err(ProviderError::backend)?;
-        }
+        lease.create_dirs().await.map_err(ProviderError::backend)?;
         self.held().insert(lease_id.clone(), Arc::new(lease));
         Ok(grant)
     }
@@ -141,8 +138,8 @@ impl Provider for HlukProvider {
         let Some(lease) = self.held().remove(lease_id) else {
             return Ok(());
         };
-        if lease.kind == LeaseWorkspace::Scratch
-            && let Err(error) = tokio::fs::remove_dir_all(&lease.workspace).await
+        // A caller's read-only workspace lives elsewhere, so this never removes it.
+        if let Err(error) = tokio::fs::remove_dir_all(&lease.dir).await
             && error.kind() != std::io::ErrorKind::NotFound
         {
             return Err(ProviderError::backend(error));

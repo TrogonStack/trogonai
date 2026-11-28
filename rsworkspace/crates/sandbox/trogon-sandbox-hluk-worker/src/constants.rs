@@ -1,6 +1,9 @@
 /// Where a lease's workspace appears in the guest, and the directory a command runs in when it names none.
 pub const WORKSPACE_GUEST_DIR: &str = "/workspace";
 
+/// Where a lease's scratch directory appears in the guest, over the image's own `/tmp`.
+pub const TMP_GUEST_DIR: &str = "/tmp";
+
 /// Queue group the workers share, so one of them takes each lease dispatch.
 pub const LEASE_QUEUE_GROUP: &str = "sandbox-provider-hluk";
 
