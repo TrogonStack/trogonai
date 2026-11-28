@@ -21,7 +21,7 @@ mod egress_lockdown_rules;
 mod egress_policy;
 mod egress_proxy_token;
 mod egress_redirect;
-mod egress_rules_failure;
+mod egress_rules_error;
 mod egress_violation_events;
 mod git_command;
 mod git_provider;
@@ -119,7 +119,7 @@ pub use egress_redirect::{
     UID_CHANGE_CAPABILITIES, egress_lockdown_command, egress_lockdown_rules, egress_redirect_command,
     exempt_uid_env_pair, reject_proxy_uid_workload, rewrite_loopback_host,
 };
-pub use egress_rules_failure::EgressRulesFailure;
+pub use egress_rules_error::EgressRulesError;
 pub use egress_violation_events::EgressViolationEvents;
 pub use git_provider::GitProvider;
 pub use git_step::GitStep;

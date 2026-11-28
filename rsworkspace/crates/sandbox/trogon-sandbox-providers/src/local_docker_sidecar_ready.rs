@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::DockerError;
@@ -24,7 +26,6 @@ impl SidecarReadyMarker {
             .map_err(|source| marker.error(source))?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
             tokio::fs::set_permissions(&marker.path, std::fs::Permissions::from_mode(0o666))
                 .await
                 .map_err(|source| marker.error(source))?;

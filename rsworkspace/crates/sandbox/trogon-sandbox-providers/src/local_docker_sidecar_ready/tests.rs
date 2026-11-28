@@ -1,4 +1,6 @@
 use std::error::Error;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use super::SidecarReadyMarker;
 use crate::DockerError;
@@ -21,7 +23,6 @@ async fn only_the_nonce_marks_the_sidecar_ready() -> Result<(), Box<dyn Error>> 
 #[cfg(unix)]
 #[tokio::test]
 async fn the_marker_is_writable_by_a_root_without_dac_override() -> Result<(), Box<dyn Error>> {
-    use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir()?;
     let marker = SidecarReadyMarker::create(dir.path()).await?;
     assert_eq!(std::fs::metadata(marker.path())?.permissions().mode() & 0o777, 0o666);

@@ -497,8 +497,8 @@ fn parse_client_subject_rejects_agent_subjects() {
 fn client_notifications_are_the_methods_that_expect_no_answer() {
     assert!(ClientMethod::SessionUpdate.is_notification(false));
     assert!(ClientMethod::ElicitationComplete.is_notification(false));
-    assert!(ClientMethod::Ext("my_tool".to_string()).is_notification(false));
-    assert!(!ClientMethod::Ext("my_tool".to_string()).is_notification(true));
+    assert!(ClientMethod::Ext(ExtMethodName::new("my_tool").unwrap()).is_notification(false));
+    assert!(!ClientMethod::Ext(ExtMethodName::new("my_tool").unwrap()).is_notification(true));
     assert!(!ClientMethod::SessionRequestPermission.is_notification(false));
     assert!(!ClientMethod::FsReadTextFile.is_notification(true));
 }

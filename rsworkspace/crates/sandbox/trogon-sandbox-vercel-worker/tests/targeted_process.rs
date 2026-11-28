@@ -20,6 +20,7 @@ use trogon_sandbox_contract::{
     DispatchAttemptId, LeaseEpoch, LeaseId, ProviderKind, TenantId, WorkerDispatchProtocol, WorkerHeartbeat, WorkerId,
 };
 use trogon_sandbox_protocol::{AUTH_HEADER, DispatchSigner, OP_LEASE_DISPATCH, VerbScope, subjects};
+use trogon_std::env::{ReadEnv, SystemEnv};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_trogon-sandbox-vercel-worker");
 const LEASE: &str = "lease-signed";
@@ -89,7 +90,7 @@ async fn a_signed_targeted_lease_is_dispatched_once_and_cleaned_up_only_when_exa
     client.flush().await?;
     let _child = Command::new(BINARY)
         .env_clear()
-        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("PATH", SystemEnv.var("PATH").unwrap_or_default())
         .env("VERCEL_TOKEN", "test-token")
         .env("VERCEL_TEAM_ID", "team_1")
         .env("VERCEL_PROJECT_ID", "prj_1")

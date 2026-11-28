@@ -14,7 +14,7 @@ use crate::docker::constants::{
 use crate::local_docker_sidecar_launch::EgressSidecarLaunch;
 use crate::local_docker_sidecar_ready::SidecarReadyMarker;
 use crate::{
-    ContainerHardening, ContainerRunSpec, DockerError, EgressProxyToken, EgressRulesFailure, EgressViolationEvents,
+    ContainerHardening, ContainerRunSpec, DockerError, EgressProxyToken, EgressRulesError, EgressViolationEvents,
     InspectStatus, LocalDockerProvider, egress_lockdown_command, exempt_uid_env_pair, rewrite_loopback_host,
 };
 
@@ -187,8 +187,8 @@ impl LocalDockerProvider {
                 .map_err(|error| error.during("inspect egress sidecar"))?
             {
                 InspectStatus::Running | InspectStatus::Pending => None,
-                InspectStatus::Exited(code) => Some(EgressRulesFailure::SidecarExited { code }),
-                InspectStatus::Failed(state) => Some(EgressRulesFailure::SidecarFailed { state }),
+                InspectStatus::Exited(code) => Some(EgressRulesError::SidecarExited { code }),
+                InspectStatus::Failed(state) => Some(EgressRulesError::SidecarFailed { state }),
             };
             // The shell writes the nonce and then execs the proxy, so a sidecar seen stopping may still have
             // written it just before; only a stop with no nonce is a failure.
@@ -204,7 +204,7 @@ impl LocalDockerProvider {
             if tokio::time::Instant::now() >= deadline {
                 return Err(DockerError::EgressRulesNotInstalled {
                     sidecar_id: sidecar_id.to_string(),
-                    cause: EgressRulesFailure::TimedOut {
+                    cause: EgressRulesError::TimedOut {
                         waited: SIDECAR_READY_TIMEOUT,
                     },
                 });

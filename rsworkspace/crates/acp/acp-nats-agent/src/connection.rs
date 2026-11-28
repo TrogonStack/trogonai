@@ -1,4 +1,4 @@
-use acp_nats::jetstream::consumers::{COMMANDS_ACK_WAIT, agent_commands_consumer};
+use acp_nats::jetstream::consumers::agent_commands_consumer;
 use acp_nats::jetstream::streams::commands_stream_name;
 use acp_nats::nats::subscriptions::{AllAgentExtSubject, AllAgentSubject, GlobalAllSubject};
 use acp_nats::nats::{GlobalAgentMethod, ParsedAgentSubject, SessionAgentMethod, parse_agent_subject};
@@ -60,7 +60,9 @@ enum DispatchError {
     Wire(#[from] acp_nats::wire::WireError),
 }
 
-use crate::constants::{DEFAULT_OPERATION_TIMEOUT, KEEPALIVE_INTERVAL};
+use crate::constants::{
+    DEFAULT_OPERATION_TIMEOUT, KEEPALIVE_INTERVAL, RESUBSCRIBE_DEADLINE, RESUBSCRIBE_MAX_DELAY, RESUBSCRIBE_MIN_DELAY,
+};
 
 pub struct AgentSideNatsConnection<N> {
     nats: N,
@@ -847,13 +849,6 @@ where
         }
     }
 }
-
-/// How long to keep retrying to recreate a lost consumer. Tied to
-/// [`COMMANDS_ACK_WAIT`]: past it, JetStream has redelivered every command this
-/// host held, so staying up buys nothing over a restart.
-const RESUBSCRIBE_DEADLINE: Duration = COMMANDS_ACK_WAIT;
-const RESUBSCRIBE_MIN_DELAY: Duration = Duration::from_millis(250);
-const RESUBSCRIBE_MAX_DELAY: Duration = Duration::from_secs(10);
 
 /// Requests this host is running from COMMANDS, keyed by subject and
 /// `Jsonrpc-Id`, so a redelivery of one is not run a second time.
