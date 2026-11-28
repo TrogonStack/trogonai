@@ -26,8 +26,41 @@ pub enum PeerMcpError {
     InvalidConfig(#[source] trogon_peer::PeerValueError),
     #[error("Peer tool arguments are invalid.")]
     InvalidHostIdentity(#[source] trogon_peer::PeerValueError),
-    #[error("Peer tool arguments are invalid.")]
-    InvalidModelInput(#[source] trogon_peer::PeerValueError),
+    #[error("{0}")]
+    InvalidToolArguments(crate::ToolArgumentError),
+    #[error("{0}")]
+    InvalidModelInput(crate::ToolArgumentError),
+    #[error(
+        "recipient_peer_id {} is your own peerId; a message to yourself never reaches another peer. To answer a \
+         delivered message, use its sender_peer_id. {recipients}",
+        .own.as_str()
+    )]
+    OwnRecipient {
+        own: trogon_peer::PeerId,
+        recipients: crate::RecipientList,
+    },
+    #[error(
+        "No peer you can message has recipient_peer_id {}; check that all 64 characters were copied exactly. \
+         {recipients}",
+        .recipient.as_str()
+    )]
+    UnknownRecipient {
+        recipient: trogon_peer::PeerId,
+        recipients: crate::RecipientList,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error(
+        "No delivered peer messages have batch_id {}; do not retry it. {}",
+        crate::model_text::quoted(.requested.as_str()),
+        crate::waiting_batch::WaitingBatch(.waiting.as_ref())
+    )]
+    UnknownBatch {
+        requested: trogon_peer::BatchId,
+        waiting: Option<trogon_peer::BatchId>,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("Peer service returned invalid operation metadata.")]
     InvalidMetadata,
     #[error("Peer service returned invalid operation metadata.")]
@@ -77,7 +110,11 @@ impl PeerMcpError {
             Self::InvalidBatch(_) => PeerMcpErrorCode::InvalidBatch,
             Self::InvalidConfig(_) => PeerMcpErrorCode::InvalidConfig,
             Self::InvalidHostIdentity(_) => PeerMcpErrorCode::InvalidHostIdentity,
+            Self::InvalidToolArguments(_) => PeerMcpErrorCode::InvalidArguments,
             Self::InvalidModelInput(_) => PeerMcpErrorCode::InvalidModelInput,
+            Self::OwnRecipient { .. } => PeerMcpErrorCode::OwnRecipient,
+            Self::UnknownRecipient { .. } => PeerMcpErrorCode::UnknownRecipient,
+            Self::UnknownBatch { .. } => PeerMcpErrorCode::UnknownBatch,
             Self::InvalidMetadata => PeerMcpErrorCode::InvalidMetadata,
             Self::MetadataEncoding(_) => PeerMcpErrorCode::MetadataEncoding,
             Self::InvalidEnrollment => PeerMcpErrorCode::InvalidEnrollment,

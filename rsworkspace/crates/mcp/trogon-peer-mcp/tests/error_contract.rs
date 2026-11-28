@@ -343,7 +343,7 @@ async fn served_codes_distinguish_model_and_detach_failures_without_source_conte
     assert_eq!(results[1]["content"], results[2]["content"]);
     for (result, code) in results[1..]
         .iter()
-        .zip(["roster", "status", "send", "acknowledge", "detach", "detached"])
+        .zip(["roster", "status", "send", "unknown_batch", "detach", "detached"])
     {
         assert_code(result, code);
     }
@@ -460,9 +460,30 @@ fn typed_error_codes_have_distinct_stable_wire_names_without_serializing_sources
             "detach_deadline",
         ),
         (
-            PeerMcpError::InvalidModelInput(trogon_peer::PeerValueError::Empty),
-            PeerMcpErrorCode::InvalidModelInput,
-            "invalid_model_input",
+            PeerMcpError::OwnRecipient {
+                own: trogon_peer::PeerId::parse("a".repeat(64)).expect("peer id"),
+                recipients: trogon_peer_mcp::RecipientList::default(),
+            },
+            PeerMcpErrorCode::OwnRecipient,
+            "own_recipient",
+        ),
+        (
+            PeerMcpError::UnknownRecipient {
+                recipient: trogon_peer::PeerId::parse("a".repeat(64)).expect("peer id"),
+                recipients: trogon_peer_mcp::RecipientList::default(),
+                source: Box::new(BackendError),
+            },
+            PeerMcpErrorCode::UnknownRecipient,
+            "unknown_recipient",
+        ),
+        (
+            PeerMcpError::UnknownBatch {
+                requested: trogon_peer::BatchId::new("batch_1").expect("batch id"),
+                waiting: None,
+                source: Box::new(BackendError),
+            },
+            PeerMcpErrorCode::UnknownBatch,
+            "unknown_batch",
         ),
         (
             PeerMcpError::InvalidMetadata,

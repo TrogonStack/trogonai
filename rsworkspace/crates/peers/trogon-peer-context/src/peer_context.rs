@@ -6,6 +6,7 @@ use trogonai_proto::peers::v1alpha1::{PeerBatch, PreparedMessage};
 use crate::constants::NOTICE;
 use crate::context_message::{ContextMessage, parse_identifier};
 use crate::context_timestamp::ContextTimestamp;
+use crate::escape_context_json::escape_context_json;
 use crate::peer_context_presentation::PeerContextPresentation;
 use crate::{MAX_CONTEXT_BYTES, MAX_MESSAGES, PeerContextError};
 
@@ -53,12 +54,7 @@ impl PeerContext {
         };
         let value = serde_json::to_value(presentation).map_err(PeerContextError::Encode)?;
         let json = serde_json::to_string(&value).map_err(PeerContextError::Encode)?;
-        let escaped = json
-            .replace('&', "\\u0026")
-            .replace('<', "\\u003c")
-            .replace('>', "\\u003e")
-            .replace('\u{2028}', "\\u2028")
-            .replace('\u{2029}', "\\u2029");
+        let escaped = escape_context_json(&json);
         let context = format!("{NOTICE}\n{escaped}");
         if context.len() > MAX_CONTEXT_BYTES {
             return Err(PeerContextError::ContractViolation);
