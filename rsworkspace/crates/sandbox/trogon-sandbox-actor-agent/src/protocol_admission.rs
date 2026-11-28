@@ -7,8 +7,9 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 use crate::{
-    AGENT_MIN_PROTOCOL_VERSION_HEADER, AGENT_PROTOCOL_VERSION_HEADER, AgentState, GUEST_PROTOCOL_VERSION, READYZ_PATH,
-    RESERVED_PATH_PREFIX, WORKER_PROTOCOL_VERSION_HEADER, admit_protocol_version, parse_protocol_version,
+    AGENT_MIN_PROTOCOL_VERSION_HEADER, AGENT_PROTOCOL_VERSION_HEADER, AgentState, GUEST_PROTOCOL_VERSION,
+    GuestProtocolError, READYZ_PATH, RESERVED_PATH_PREFIX, WORKER_PROTOCOL_VERSION_HEADER, admit_protocol_version,
+    parse_protocol_version,
 };
 
 /// Version admission for the agent's own paths.
@@ -26,8 +27,14 @@ pub(crate) async fn admit_protocol(State(state): State<Arc<AgentState>>, request
     let header = request
         .headers()
         .get(WORKER_PROTOCOL_VERSION_HEADER)
-        .and_then(|value| value.to_str().ok());
-    let admitted = parse_protocol_version(header).and_then(|peer| admit_protocol_version(peer, minimum));
+        .map(|value| value.to_str());
+    let admitted = match header {
+        // A header that is not text is malformed, never a missing header.
+        Some(Err(_)) => Err(GuestProtocolError::VersionMalformed),
+        Some(Ok(raw)) => parse_protocol_version(Some(raw)),
+        None => parse_protocol_version(None),
+    }
+    .and_then(|peer| admit_protocol_version(peer, minimum));
     // The readiness probe stays unconditional: the runtime's own probe sends no version and must keep gating resume.
     let refusal = admitted.err().filter(|_| !readiness);
     let mut response = match refusal {

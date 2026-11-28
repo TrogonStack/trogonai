@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use trogon_sandbox_actor_agent::{
     ACTOR_ID_PATH, ActorIdentitySource, AgentState, MIN_SUPPORTED_WORKER_PROTOCOL_VERSION,
-    MIN_WORKER_PROTOCOL_VERSION_ENV, min_protocol_version_from_env, router, serve, serve_vsock,
+    MIN_WORKER_PROTOCOL_VERSION_ENV, router, serve, serve_vsock, try_min_protocol_version_from_env,
 };
 use trogon_std::env::SystemEnv;
 
@@ -46,11 +46,11 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let minimum = min_protocol_version_from_env(
+    let minimum = try_min_protocol_version_from_env(
         &SystemEnv,
         MIN_WORKER_PROTOCOL_VERSION_ENV,
         MIN_SUPPORTED_WORKER_PROTOCOL_VERSION,
-    );
+    )?;
     let state = Arc::new(
         AgentState::new(ActorIdentitySource::new(args.actor_id_path)).with_min_worker_protocol_version(minimum),
     );
