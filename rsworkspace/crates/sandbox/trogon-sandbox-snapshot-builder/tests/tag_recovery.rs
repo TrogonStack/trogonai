@@ -336,6 +336,8 @@ async fn recovery_scenario() -> TestResult {
     .await?;
     first.stop().await?;
     assert_eq!(exporter.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(metrics.pushed_total.with_label_values(&["sandbox_rootfs_v1"]).get(), 1);
+    assert_eq!(metrics.inflight.get(), 0);
     js.update_stream(&original_tag_config).await?;
 
     let tags = tag_store(&js).await?;
