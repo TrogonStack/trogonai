@@ -59,6 +59,7 @@ pub enum RunnerCmd {
 
 /// Inputs to a single [`RunnerCmd::Exec`].
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunnerSpec {
     /// `argv[0]` = target executable; `argv[1..]` = its arguments.
     pub argv: Vec<String>,
@@ -70,7 +71,8 @@ pub struct RunnerSpec {
     /// `TEMP` stay isolated. The proxy var set rides here too.
     pub env_overlay: Vec<(String, String)>,
     /// Build the child token write-restricted (see [`crate::token`]).
-    #[serde(default)]
+    /// Required on the wire: a spec that omits it is refused, never run
+    /// with the ordinary token.
     pub write_restricted_token: bool,
     /// Capability SIDs of the session's write roots (`crate::persist`),
     /// added to the child token's restricting SIDs. Only with

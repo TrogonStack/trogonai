@@ -736,7 +736,7 @@ enum AclCmd {
 }
 
 #[derive(serde::Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AclStampInput {
     #[serde(default)]
     deny_read: Vec<String>,
@@ -745,7 +745,7 @@ struct AclStampInput {
 }
 
 #[derive(serde::Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AclGrantInput {
     #[serde(default)]
     read: Vec<String>,
@@ -1335,7 +1335,7 @@ fn run(cli: Cli, args: &[OsString]) -> Result<()> {
             let existing = install::read_setup().ok().flatten();
             // Shared by the early-out completeness check and the
             // stamping step below (env reads + a stat per entry).
-            let ambient_targets = crate::ambient::ambient_deny_targets();
+            let ambient_targets = crate::ambient::ambient_deny_targets().context("resolve the ambient deny targets")?;
             let name_changed = existing.as_ref().is_some_and(|s| s.sandbox_user != name);
             if !force
                 && let Some(why) = existing

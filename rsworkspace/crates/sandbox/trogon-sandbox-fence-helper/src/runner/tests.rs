@@ -20,9 +20,16 @@ fn cmd_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => return Err("wrong variant".into()),
     }
-    // A spec without the field is the ordinary token.
-    let legacy = br#"{"Exec":{"argv":["cmd.exe"],"env_overlay":[]}}"#;
-    match serde_json::from_slice::<RunnerCmd>(legacy)? {
+    // A spec that leaves the token mode out is refused, not run with the
+    // ordinary token.
+    let no_mode = br#"{"Exec":{"argv":["cmd.exe"],"env_overlay":[]}}"#;
+    assert!(serde_json::from_slice::<RunnerCmd>(no_mode).is_err());
+    // So is a misspelled field, which would otherwise be dropped.
+    let typo =
+        br#"{"Exec":{"argv":["cmd.exe"],"env_overlay":[],"write_restricted_token":true,"capabilty_sids":["x"]}}"#;
+    assert!(serde_json::from_slice::<RunnerCmd>(typo).is_err());
+    let explicit = br#"{"Exec":{"argv":["cmd.exe"],"env_overlay":[],"write_restricted_token":false}}"#;
+    match serde_json::from_slice::<RunnerCmd>(explicit)? {
         RunnerCmd::Exec(r) => {
             assert!(!r.write_restricted_token);
             assert!(r.capability_sids.is_empty());

@@ -21,7 +21,7 @@
     "rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/src/acl.rs": 1577,
     "rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/src/acl/tests.rs": 1232,
     "rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/src/cli.rs": 3208,
-    "rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/src/persist.rs": 1510,
+    "rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/src/persist.rs": 1452,
     "rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/src/profile.rs": 2551,
     "rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/src/profile/tests.rs": 1112,
     "rsworkspace/crates/sandbox/trogon-sandbox-fence-helper/src/profile_plan.rs": 1465,

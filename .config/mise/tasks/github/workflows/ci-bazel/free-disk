@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#MISE description="Free the disk a hosted runner spends on toolchains Bazel never uses"
+set -euo pipefail
+
+# A hosted runner starts with about 14 GB free, and the sandbox crates (v8
+# among them) grew the build and test outputs past that, so verify died with
+# "No space left on device" before Bazel could report a single result. The
+# image ships SDKs this workflow never touches; deleting them gives Bazel the
+# room back. Self-hosted runners keep their disks, since those directories may
+# belong to other jobs.
+if [[ ${RUNNER_ENVIRONMENT:-} != "github-hosted" ]]; then
+  echo "Not a GitHub-hosted runner, so nothing is removed."
+  exit 0
+fi
+
+df -h /
+
+unused=(
+  /opt/ghc
+  /opt/hostedtoolcache/CodeQL
+  /usr/local/.ghcup
+  /usr/local/lib/android
+  /usr/local/share/boost
+  /usr/local/share/powershell
+  /usr/share/dotnet
+  /usr/share/swift
+)
+
+pids=()
+for path in "${unused[@]}"; do
+  sudo rm -rf "$path" &
+  pids+=("$!")
+done
+# Under set -e a bare failing wait would exit while the other deletions are
+# still running, so every one is waited on before the step reports a failure.
+failed=0
+for pid in "${pids[@]}"; do
+  wait "$pid" || failed=1
+done
+if ((failed)); then
+  echo "::error::Could not remove every unused toolchain directory."
+  exit 1
+fi
+
+sudo docker image prune --all --force >/dev/null
+
+# Freeing the root disk was not enough: coverage still filled it partway
+# through the tests. Hosted Linux runners also carry a separate temporary disk
+# at /mnt with several times the room, so Bazel's output tree goes there.
+# cache-config turns BAZEL_OUTPUT_USER_ROOT into a startup flag.
+if [[ -d /mnt && -n ${GITHUB_ENV:-} ]]; then
+  sudo mkdir -p /mnt/bazel
+  sudo chown "$(id -u):$(id -g)" /mnt/bazel
+  echo "BAZEL_OUTPUT_USER_ROOT=/mnt/bazel" >>"$GITHUB_ENV"
+fi
+
+df -h / /mnt 2>/dev/null || df -h /
