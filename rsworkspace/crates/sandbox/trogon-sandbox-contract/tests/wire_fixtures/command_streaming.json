@@ -1,0 +1,66 @@
+{
+  "command_exit_marker": {
+    "execution_id": "exec-1",
+    "exit_code": 3
+  },
+  "command_exit_marker_without_code": {
+    "execution_id": "exec-1"
+  },
+  "command_output_chunk": {
+    "data": [
+      104,
+      105
+    ],
+    "execution_id": "exec-1",
+    "seq": 7,
+    "stream": "stderr"
+  },
+  "kill_command_already_completed": {
+    "outcome": "already_completed"
+  },
+  "kill_command_not_found": {
+    "outcome": "not_found"
+  },
+  "kill_command_request": {
+    "execution_id": "exec-1",
+    "lease_id": "lease-1",
+    "signal": "kill"
+  },
+  "kill_command_signaled": {
+    "outcome": "signaled"
+  },
+  "poll_command_completed": {
+    "exit_code": 0,
+    "outcome": "completed",
+    "stderr": [],
+    "stdout": [
+      111,
+      117,
+      116
+    ],
+    "truncated": true
+  },
+  "poll_command_denied": {
+    "kind": "no_provider_available",
+    "outcome": "denied"
+  },
+  "poll_command_not_found": {
+    "outcome": "not_found"
+  },
+  "poll_command_request": {
+    "execution_id": "exec-1",
+    "lease_id": "lease-1"
+  },
+  "poll_command_running": {
+    "outcome": "running"
+  },
+  "write_stdin_request": {
+    "data": [
+      120
+    ],
+    "eof": true,
+    "execution_id": "exec-1",
+    "lease_id": "lease-1",
+    "seq": 0
+  }
+}

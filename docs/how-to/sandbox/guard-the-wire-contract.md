@@ -23,6 +23,31 @@ messages that lack it. Do this for every change you can.
    client in `tsworkspace/packages/sandbox-ws-client`.
 3. Describe the rollout order in the commit body.
 
+## Read the golden files
+
+`rsworkspace/crates/sandbox/trogon-sandbox-contract/tests/wire_contract.rs` serializes the public command,
+log and terminal messages and compares them with the JSON files in
+`rsworkspace/crates/sandbox/trogon-sandbox-contract/tests/wire_fixtures/`. A renamed field, a removed
+variant, a changed tag or a new always-serialized field changes the JSON and fails the test. Each case also
+reads its own JSON back into the type.
+
+When the test fails on a change you did not intend, revert the change. When the change is intended and
+backward compatible, regenerate the files:
+
+```sh
+UPDATE_WIRE_FIXTURES=1 cargo test -p trogon-sandbox-contract --test wire_contract
+```
+
+Review the diff of `tests/wire_fixtures/*.json` in the same commit. An additive field with a default leaves
+the files untouched. A diff that is not purely additive needs the rollout described above.
+
+## Cover a new type
+
+Add a case with `f.case("name", value)` to the matching test in `tests/wire_contract.rs`, or a new test with
+its own `Fixture::new("file.json")`, and run the regeneration command once. List a new fixture file in the
+`data` entry of the `wire_contract` test in the crate's `BUILD.bazel` only when it is outside
+`tests/wire_fixtures/`.
+
 ## Check the change
 
 Run the tests of both crates, which cover serialization and the subject

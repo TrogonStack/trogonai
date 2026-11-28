@@ -1,0 +1,46 @@
+{
+  "read_logs_denied": {
+    "kind": "no_provider_available",
+    "outcome": "denied"
+  },
+  "read_logs_logs": {
+    "chunks": [
+      {
+        "data": [
+          97
+        ],
+        "log_seq": 5,
+        "seq": 0,
+        "stream": "stdout"
+      }
+    ],
+    "exited": true,
+    "has_more": true,
+    "next_seq": 5,
+    "outcome": "logs",
+    "truncated": true
+  },
+  "read_logs_logs_complete": {
+    "chunks": [],
+    "exited": false,
+    "has_more": false,
+    "next_seq": 0,
+    "outcome": "logs",
+    "truncated": false
+  },
+  "read_logs_request": {
+    "after_seq": 12,
+    "execution_id": "exec-1",
+    "lease_id": "lease-1",
+    "max_bytes": 4096,
+    "wait_ms": 1000
+  },
+  "read_logs_request_defaults": {
+    "after_seq": 0,
+    "execution_id": "exec-1",
+    "lease_id": "lease-1"
+  },
+  "read_logs_unsupported": {
+    "outcome": "unsupported"
+  }
+}
