@@ -1,4 +1,4 @@
-use crate::constants::{ENV_PUBLIC_KEYS_FILE, ENV_VERIFY_MODE};
+use crate::constants::{ENV_FENCE_FILE, ENV_PUBLIC_KEYS_FILE, ENV_VERIFY_MODE};
 use crate::{DispatchPublicKeyError, EnforcementModeError, EpochModeError};
 
 /// Why the dispatch verifier could not be built from its configuration.
@@ -27,4 +27,12 @@ pub enum DispatchVerifierConfigError {
     /// Verification is required but no public key is configured.
     #[error("{ENV_VERIFY_MODE}=require needs at least one public key")]
     RequireWithoutKeys,
+    /// The fence journal the operator named could not be opened.
+    #[error("{ENV_FENCE_FILE}: cannot open {path}: {source}")]
+    FenceFile {
+        /// The journal that could not be opened.
+        path: String,
+        /// The open failure.
+        source: std::io::Error,
+    },
 }
