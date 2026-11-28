@@ -145,3 +145,48 @@ async fn pulls_reject_a_manifest_served_under_a_different_digest() -> TestResult
     assert!(error.is_some(), "{error:?}");
     Ok(())
 }
+
+#[tokio::test]
+async fn pulls_and_heads_refuse_a_manifest_of_another_or_unknown_type() -> TestResult {
+    let registry = FakeRegistry::start().await?;
+    let client = registry.client()?;
+    let other = ArtifactType::SbomV1.media_type();
+    for declared in [None, Some("application/vnd.example.unknown.v1")] {
+        let raw = manifest(declared, vec![])?;
+        registry.put_manifest("repo", &sha256(&raw), support::OCI_MANIFEST, &raw);
+        let target = artifact_ref(&registry.address, "repo", digest_of(&raw)?, ArtifactType::SbomV1);
+        let head = client.head_manifest(&target).await.err();
+        assert!(
+            matches!(head, Some(OciError::UnsupportedMediaType(_))),
+            "{declared:?} {head:?}"
+        );
+        let pull = client.pull_artifact(&target).await.err();
+        assert!(pull.is_some(), "{declared:?}");
+    }
+    let raw = manifest(Some(other), vec![])?;
+    registry.put_manifest("repo", &sha256(&raw), support::OCI_MANIFEST, &raw);
+    let mismatched = artifact_ref(
+        &registry.address,
+        "repo",
+        digest_of(&raw)?,
+        ArtifactType::FirecrackerSnapshotV1,
+    );
+    let error = client.head_manifest(&mismatched).await.err();
+    assert!(matches!(error, Some(OciError::UnsupportedMediaType(_))), "{error:?}");
+    let matched = artifact_ref(&registry.address, "repo", digest_of(&raw)?, ArtifactType::SbomV1);
+    client.head_manifest(&matched).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn head_refuses_a_negative_config_size() -> TestResult {
+    let registry = FakeRegistry::start().await?;
+    let mut value: Value = serde_json::from_slice(&manifest(Some(ArtifactType::SbomV1.media_type()), vec![])?)?;
+    value["config"]["size"] = json!(-1);
+    let raw = serde_json::to_vec(&value)?;
+    registry.put_manifest("repo", &sha256(&raw), support::OCI_MANIFEST, &raw);
+    let target = artifact_ref(&registry.address, "repo", digest_of(&raw)?, ArtifactType::SbomV1);
+    let error = registry.client()?.head_manifest(&target).await.err();
+    assert!(matches!(error, Some(OciError::Layout(_))), "{error:?}");
+    Ok(())
+}

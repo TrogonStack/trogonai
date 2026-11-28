@@ -80,6 +80,7 @@ async fn pagination_links_must_stay_on_the_tag_list() -> TestResult {
         "<http://other.invalid/v2/acme/app/tags/list?last=a>; rel=\"next\"",
         "</v2/acme/other/tags/list?last=a>; rel=\"next\"",
         "<http://[bad>; rel=\"next\"",
+        "/v2/acme/app/tags/list?last=a; rel=\"next\"",
     ] {
         let server = MockServer::start().await;
         mount_page(&server, None, serde_json::json!({"tags": ["a"]}), Some(link.into())).await;

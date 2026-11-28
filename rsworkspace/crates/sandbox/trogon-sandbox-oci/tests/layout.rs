@@ -85,9 +85,12 @@ async fn an_exported_layout_imports_into_another_registry() -> TestResult {
     let mut index = read_index(dir.path())?;
     index["annotations"] = Value::Null;
     write_index(dir.path(), &index)?;
-    let fallback = FakeRegistry::start().await?;
-    let pushed = import_from_directory(&fallback.client()?, &fallback.host()?, dir.path()).await?;
-    assert_eq!(pushed[0].repository, "imported");
+    let unnamed = FakeRegistry::start().await?;
+    let error = import_from_directory(&unnamed.client()?, &unnamed.host()?, dir.path())
+        .await
+        .err()
+        .ok_or("accepted a layout with no repository")?;
+    assert!(matches!(error, OciError::Layout(_)), "{error}");
     Ok(())
 }
 
