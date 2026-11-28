@@ -45,4 +45,5 @@ walkdir = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
 trogon-nats = { workspace = true, features = ["test-support"] }
+trogon-sandbox-conformance = { workspace = true }
 wiremock = { workspace = true }

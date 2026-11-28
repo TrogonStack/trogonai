@@ -1,5 +1,5 @@
 use trogon_sandbox_aca_worker::{AcaError, image_env_vars, resolve_registry_image};
-use trogon_sandbox_contract::{Digest, OciImageRef, SandboxImage};
+use trogon_sandbox_contract::{ArtifactType, Digest, OciArtifactRef, OciImageRef, SandboxImage};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -56,4 +56,24 @@ fn env_vars_of_a_bare_image_name_only_the_image() {
     let vars = image_env_vars(&OciImageRef::parse_unqualified("registry.example/app"));
 
     assert_eq!(vars.len(), 1);
+}
+
+#[test]
+fn a_hyperlight_module_is_refused_as_an_unsupported_snapshot() -> TestResult {
+    let image = SandboxImage::HyperlightModule {
+        reference: OciArtifactRef {
+            registry: "registry.example".to_owned(),
+            repository: "modules/wasm".to_owned(),
+            digest: Digest::new(format!("sha256:{}", "b".repeat(64)))?,
+            artifact_type: ArtifactType::HyperlightSnapshotV1,
+        },
+    };
+
+    let result = resolve_registry_image(
+        &image,
+        Some(&OciImageRef::parse_unqualified("registry.example/default:2")),
+    );
+
+    assert!(matches!(result, Err(AcaError::SnapshotUnsupported(_))));
+    Ok(())
 }

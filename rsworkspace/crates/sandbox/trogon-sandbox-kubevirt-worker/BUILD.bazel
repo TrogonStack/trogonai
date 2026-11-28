@@ -8,5 +8,7 @@ workspace_crate(
         "ssh_handlers": {"tags": ["requires-network"]},
         "terminal_ssh": {"tags": ["requires-network"]},
         "kube_virt_worker": {"tags": ["requires-network"]},
+        # Reads the stack chart outside the package, so it runs only under Cargo.
+        "chart_guest_policy": {"tags": ["manual"]},
     },
 )

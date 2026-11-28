@@ -6,5 +6,7 @@ workspace_crate(
         # These start a NATS server in a container through Docker.
         "launch": {"tags": ["requires-network"]},
         "worker": {"tags": ["requires-network"]},
+        # Reads the worker chart outside the package, so it runs only under Cargo.
+        "chart_egress": {"tags": ["manual"]},
     },
 )
