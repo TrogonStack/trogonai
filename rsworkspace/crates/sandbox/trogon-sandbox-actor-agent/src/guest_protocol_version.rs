@@ -5,12 +5,6 @@ use trogon_std::env::ReadEnv;
 use crate::constants::GUEST_PROTOCOL_VERSION;
 use crate::{GuestProtocolError, MinProtocolVersionError};
 
-/// Reads a minimum version override from the environment variable `name`, falling back to `default` when it is unset
-/// or unreadable. Prefer [`try_min_protocol_version_from_env`], which refuses an override it cannot read.
-pub fn min_protocol_version_from_env(env: &impl ReadEnv, name: &str, default: u32) -> u32 {
-    parse_min_protocol_version(env.var(name).ok().as_deref(), default)
-}
-
 /// Reads a minimum version override from the environment variable `name`.
 ///
 /// An unset variable is `default`. A variable that is set but is not an unsigned integer is an error, so a mistyped
@@ -28,11 +22,6 @@ pub fn try_min_protocol_version_from_env(
             .parse()
             .map_err(|_| MinProtocolVersionError { name: name.to_string() }),
     }
-}
-
-/// The pure half of [`min_protocol_version_from_env`].
-pub fn parse_min_protocol_version(raw: Option<&str>, default: u32) -> u32 {
-    raw.and_then(|value| value.trim().parse().ok()).unwrap_or(default)
 }
 
 /// Worker-side check of the agent's answer.
