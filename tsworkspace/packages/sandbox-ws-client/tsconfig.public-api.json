@@ -2,8 +2,18 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": ".",
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@trogonai/sandbox-ws-client": ["./src/index.ts"]
+    }
   },
-  "include": ["src", "tests/types/**/*.ts", "tests/gateway/**/*.ts", "scripts/**/*.ts", "vitest.config.ts"],
+  "include": [
+    "src",
+    "tests/types/**/*.ts",
+    "tests/gateway/**/*.ts",
+    "acceptance/**/*.ts",
+    "scripts/**/*.ts",
+    "vitest.config.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

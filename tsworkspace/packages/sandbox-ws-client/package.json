@@ -32,6 +32,10 @@
     "test:coverage": "vitest run --coverage",
     "test:built": "pnpm build && node --test tests/build-smoke.mjs",
     "test:gateway": "pnpm build && node --test tests/gateway/*.gateway.ts",
+    "acceptance:docker-named-cancellation": "pnpm build && node acceptance/docker-named-cancellation.ts",
+    "acceptance:docker-named-cleanup": "pnpm build && node acceptance/docker-named-cleanup.ts",
+    "acceptance:e2b-command-launch": "pnpm build && node acceptance/e2b-command-launch.ts",
+    "acceptance:hosted-provider": "pnpm build && node acceptance/hosted-provider.ts",
     "lint": "oxlint --deny-warnings ."
   },
   "dependencies": {
