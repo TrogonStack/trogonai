@@ -5,7 +5,9 @@ workspace_crate(
     integration_tests = {
         # Start a NATS server in a container through Docker.
         "binary": {"tags": ["requires-network"]},
+        "credential_commands": {"tags": ["requires-network"]},
         "nats_commands": {"tags": ["requires-network"]},
+        "operator_commands": {"tags": ["requires-network"]},
         "validation": {},
     },
 )

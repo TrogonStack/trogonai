@@ -947,7 +947,7 @@
           "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-observability/Cargo.toml d0319121bfd78eebcfb730f391d9a216b2394819f8214371635e1f4bc6ef9ed8",
           "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-volumes/Cargo.toml 472da1e4a7b917a438dfcc222ac2aff7efc3fec9ad239e4800f73cc378e67ce7",
           "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-actor-agent/Cargo.toml 7d95fef107abbde1a2b1a4184cc86a62d9a3e78c417f9357daeb919be6829313",
-          "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-admin/Cargo.toml 6240b29058967721dc9bbd992541688f76e93e7c09525e123eb406dd569de731",
+          "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-admin/Cargo.toml 532fd99a9cfb9869e4ec9d730e5c34309373b5ee8d91f459e9fb0cf1b7f20b3b",
           "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-auth/Cargo.toml 7667cf53d5d922bd5284fa334158b4d38d486f19bf5cb713b8cb588cbd4fc684",
           "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-broker/Cargo.toml cc2acac80dbeddd63367fac0004170eec96ac5b83f3482a858e19ecf60d11147",
           "FILE:@@//rsworkspace/crates/sandbox/trogon-sandbox-credential-broker/Cargo.toml bc6822877c8a6b747df5f05b025b2d4d6deb2d681c313eb72b1b9a4afd8b21a4",
