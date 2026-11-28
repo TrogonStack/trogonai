@@ -48,6 +48,7 @@ use crate::tunnel_deadlines::{
     DeadlineStream, GRACE_AFTER_FLUSH, SharedQueueBudget, StalledWrites, TunnelDeadlines, close_after_flush,
 };
 use crate::upstream_leg::{AfterDiscard, UpstreamLeg};
+use trogon_sandbox_contract::HostMatch;
 
 mod constants;
 use constants::{MAX_CLIENT_HELLO_RECORD, TLS_HANDSHAKE_RECORD, TLS_RECORD_HEADER_LEN};
@@ -284,7 +285,9 @@ where
         .with_keep_alive(deadlines.keep_alive);
     let mut guard = match network_options {
         Some(options) => {
-            let guard = guard.with_ambiguous_targets(options.ambiguous_targets);
+            let guard = guard
+                .with_ambiguous_targets(options.ambiguous_targets)
+                .with_host_match(options.host_match);
             match options.request_body_cap {
                 Some(cap) => guard.with_body_limit(BodyLimit::new(cap.bytes())),
                 None => guard,
@@ -305,7 +308,10 @@ where
         .map_err(TlsInterceptError::ClientHandshake)?;
     let hello_at = tokio::time::Instant::now();
     let server_name = ClientServerName::of_client_hello(&hello);
-    let leaf_name = sni_host.to_owned();
+    let leaf_name = match (&server_name, guard.host_match) {
+        (ClientServerName::Name(name), HostMatch::NotRequired) => name.clone(),
+        _ => sni_host.to_owned(),
+    };
     guard = guard.with_client_server_name(server_name);
     let client_stream = PrefixedStream::new(client_stream, hello);
 

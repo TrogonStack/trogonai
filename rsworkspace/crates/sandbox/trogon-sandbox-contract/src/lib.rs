@@ -968,7 +968,7 @@ pub use native_snapshot_ref::NativeSnapshotRef;
 pub use native_volume_binding::NativeVolumeBinding;
 pub use nested_sandbox_mode::NestedSandboxMode;
 pub use nested_user_namespace_access::NestedUserNamespaceAccess;
-pub use network_options::NetworkOptions;
+pub use network_options::{HostMatch, NetworkOptions};
 pub use network_policy::NetworkPolicy;
 pub use network_policy_update_request::NetworkPolicyUpdateRequest;
 pub use network_policy_update_response::NetworkPolicyUpdateResponse;
