@@ -51,3 +51,27 @@ pub const RELAUNCH_COALESCE_LIMIT: std::time::Duration = std::time::Duration::fr
 /// Handing them back is a nack each, so this only bounds a run that is stuck
 /// launching or initializing its child.
 pub const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Sets how long, in whole seconds, a request the child sends to the client
+/// waits for the host's NATS connection, and then keeps being sent again while
+/// the server says nobody is subscribed; `0` turns both off. See
+/// [`crate::outage_tolerant_nats`].
+pub const ENV_CLIENT_RETRY_WINDOW_SECS: &str = "ACP_HOST_CLIENT_RETRY_WINDOW_SECS";
+
+/// The default for [`ENV_CLIENT_RETRY_WINDOW_SECS`]. After a short outage the
+/// client bridge can reconnect up to 8 seconds after the host does
+/// (`trogon_nats` backs off 4s, then 8s); this covers that, and both waits
+/// together stay inside the default 30 second operation timeout the whole call
+/// runs under.
+pub const DEFAULT_CLIENT_RETRY_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The first wait before sending a request again after "no responders"; it
+/// doubles up to [`RETRY_BACKOFF_MAX`].
+pub const RETRY_BACKOFF_START: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The longest wait between two sends of the same request.
+pub const RETRY_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How often a request waiting for the host's NATS connection to come back
+/// checks it.
+pub const CONNECTED_POLL: std::time::Duration = std::time::Duration::from_millis(50);

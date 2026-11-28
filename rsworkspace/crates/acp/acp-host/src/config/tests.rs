@@ -38,3 +38,28 @@ fn an_unusable_prefix_is_reported_as_such() {
 
     assert!(matches!(HostConfig::from_env(&env), Err(HostConfigError::Prefix(_))));
 }
+
+#[test]
+fn the_client_retry_window_defaults_and_can_be_set_or_turned_off() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_AGENT, "gemini --acp");
+    let window = || HostConfig::from_env(&env).expect("config").client_retry_window;
+
+    assert_eq!(window(), DEFAULT_CLIENT_RETRY_WINDOW);
+    env.set(ENV_CLIENT_RETRY_WINDOW_SECS, "3");
+    assert_eq!(window(), Duration::from_secs(3));
+    env.set(ENV_CLIENT_RETRY_WINDOW_SECS, "0");
+    assert_eq!(window(), Duration::ZERO);
+}
+
+#[test]
+fn a_client_retry_window_that_is_not_whole_seconds_is_refused() {
+    let env = InMemoryEnv::new();
+    env.set(ENV_AGENT, "gemini --acp");
+    env.set(ENV_CLIENT_RETRY_WINDOW_SECS, "1.5");
+
+    assert!(matches!(
+        HostConfig::from_env(&env),
+        Err(HostConfigError::ClientRetryWindow(raw)) if raw == "1.5"
+    ));
+}

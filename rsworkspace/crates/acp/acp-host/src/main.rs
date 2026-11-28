@@ -17,6 +17,7 @@ mod client_handshake;
 mod config;
 mod constants;
 mod initialized_agent;
+mod outage_tolerant_nats;
 mod restart_policy;
 mod serving;
 mod session_routed_client;
@@ -29,6 +30,7 @@ use client_claim::ClientClaim;
 use config::HostConfig;
 use constants::SHUTDOWN_GRACE;
 use initialized_agent::InitializedAgent;
+use outage_tolerant_nats::OutageTolerantNats;
 use restart_policy::RestartPolicy;
 use session_routed_client::SessionRoutedClient;
 use std::sync::Arc;
@@ -61,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
     streams::provision(&js_client, acp.acp_prefix_ref()).await?;
 
     let client = Arc::new(SessionRoutedClient::new(
-        nats_client.clone(),
+        OutageTolerantNats::new(nats_client.clone(), config.client_retry_window),
         acp.acp_prefix_ref().clone(),
         acp.operation_timeout(),
     ));

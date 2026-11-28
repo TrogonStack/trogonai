@@ -156,6 +156,16 @@ than in the spec. `Debug` output of the spec prints env names, never values.
   `acp-nats-agent` ends serving when its `COMMANDS` consumer or stream is lost
   (#1375), a host whose streams vanish while it runs only logs `JetStream
   consumer error` warnings and does not notice.
+- A request the child sends to the client (`session/request_permission`,
+  `fs/*`, `terminal/*`, extension calls) rides out a short NATS outage. When
+  the server restarts, the host and the client bridge reconnect on their own
+  schedules, and a request sent before the bridge has resubscribed is answered
+  "no responders". It reached no one, so the host sends it again with backoff
+  for up to `ACP_HOST_CLIENT_RETRY_WINDOW_SECS` (default 10s); a request made
+  while the host itself is disconnected first waits up to as long for the
+  connection. A timeout is never retried, since the client may have the
+  request. Notifications (`session/update`) published while either side is
+  disconnected are still lost: core NATS does not keep them.
 
 ## Configuration
 
@@ -164,6 +174,7 @@ than in the spec. `Debug` output of the spec prints env names, never values.
 | `ACP_HOST_AGENT` | Required. The agent to launch. |
 | `ACP_PREFIX` | ACP subject prefix (default `acp`). Give each host, and the one client it serves, its own. |
 | `NATS_URL`, `NATS_*` | NATS connection, as for the other ACP binaries. |
+| `ACP_HOST_CLIENT_RETRY_WINDOW_SECS` | How long a request the child sends to the client waits for the host's connection and is sent again while nobody is subscribed (default `10`, `0` turns it off). |
 
 ## Running locally
 
