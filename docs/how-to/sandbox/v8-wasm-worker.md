@@ -16,7 +16,8 @@ Per-lease verbs such as `run_command` reply with a typed unsupported error.
 ## Keep a JavaScript runtime alive
 
 Set `V8_WASM_PERSISTENT_RUNTIME=true` (or `1`) in the lease `spec.env` to keep
-the JavaScript runtime alive after `index.js` finishes. The broker reads that
+the JavaScript runtime alive after `index.js` finishes. `false` and `0` mean
+the same as leaving it unset; any other value refuses the lease. The broker reads that
 key as the `needs_persistent_runtime` requirement, so only a worker that
 declares `supports_persistent_runtime` is given such a lease. Every other
 worker is refused before it is asked.
