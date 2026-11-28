@@ -21,13 +21,13 @@ use bytes::Bytes;
 use futures::StreamExt;
 use futures::future::{Either, LocalBoxFuture, Ready, ready};
 use serde::de::Error;
+use serde_json::value::RawValue;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use serde_json::value::RawValue;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use trogon_nats::jetstream::{
     ConsumerLoss, JetStreamConsumer, JetStreamCreateConsumer, JetStreamGetStream, JsAckWith, JsDispatchMessage,
     JsMessageRef, is_get_stream_not_found,
@@ -232,9 +232,9 @@ where
 async fn dispatch_message<N: PublishClient + FlushClient, A: AgentHandler + Sync>(msg: Message, agent: &A, nats: &N) {
     let subject = msg.subject.as_str();
 
-    let parsed = match parse_agent_subject(subject) {
-        Some(p) => p,
-        None => return,
+    let Some(parsed) = parse_agent_subject(subject) else {
+        reply_method_not_found(&msg, nats).await;
+        return;
     };
 
     let (result, session_id) = match parsed {
@@ -545,6 +545,39 @@ where
     }
 }
 
+/// Answers a request on a subject that names no method this agent serves, so
+/// the caller gets `-32601` instead of waiting out its timeout. Notifications
+/// (no reply subject) are dropped.
+async fn reply_method_not_found<N: PublishClient + FlushClient>(msg: &Message, nats: &N) {
+    let subject = msg.subject.as_str();
+    let Some(reply_to) = msg.reply.as_deref() else {
+        debug!(subject, "Ignoring notification on unrecognized agent subject");
+        return;
+    };
+    let id = msg
+        .headers
+        .as_ref()
+        .map_or(jsonrpc_nats::ResponseId::Null, response_id_from_request_headers);
+    let encoded = encode_agent_error(id, &agent_client_protocol::Error::method_not_found());
+    let _ = reply_wire(nats, reply_to, encoded)
+        .await
+        .inspect_err(|error| warn!(subject, %error, "Failed to reply to unrecognized agent subject"));
+}
+
+/// Maps a request decode failure to its JSON-RPC error: a body that is not
+/// JSON at all is `-32700` Parse error; anything else is `-32602` Invalid params.
+fn request_decode_error(error: &acp_nats::wire::WireError) -> agent_client_protocol::Error {
+    let code = match error {
+        acp_nats::wire::WireError::Codec(jsonrpc_nats::CodecError::Deserialize(json))
+            if json.is_syntax() || json.is_eof() =>
+        {
+            agent_client_protocol::ErrorCode::PARSE_ERROR
+        }
+        _ => agent_client_protocol::ErrorCode::INVALID_PARAMS,
+    };
+    agent_client_protocol::Error::new(code, format!("Failed to deserialize request: {error}"))
+}
+
 async fn reply_wire<N: PublishClient + FlushClient>(
     nats: &N,
     reply_to: &str,
@@ -580,12 +613,8 @@ where
     let request: ReqT = match acp_nats::wire::decode_request_params(method, &headers, &msg.payload) {
         Ok(req) => req,
         Err(e) => {
-            let error = agent_client_protocol::Error::new(
-                agent_client_protocol::ErrorCode::INVALID_PARAMS,
-                format!("Failed to deserialize request: {e}"),
-            );
             let id = response_id_from_request_headers(&headers);
-            let encoded = encode_agent_error(id, &error);
+            let encoded = encode_agent_error(id, &request_decode_error(&e));
             let _ = reply_wire(nats, reply_to, encoded).await;
             return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
                 "{e}"
@@ -652,12 +681,8 @@ where
     let request: ReqT = match acp_nats::wire::decode_request_params(method, &headers, &msg.payload) {
         Ok(req) => req,
         Err(e) => {
-            let error = agent_client_protocol::Error::new(
-                agent_client_protocol::ErrorCode::INVALID_PARAMS,
-                format!("Failed to deserialize request: {e}"),
-            );
             let id = response_id_from_request_headers(&headers);
-            let encoded = encode_agent_error(id, &error);
+            let encoded = encode_agent_error(id, &request_decode_error(&e));
             let _ = reply_wire(nats, reply_to, encoded).await;
             return Err(DispatchError::DeserializeRequest(serde_json::Error::custom(format!(
                 "{e}"

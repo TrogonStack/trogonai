@@ -280,6 +280,20 @@ async fn dispatch_invalid_payload_publishes_error_reply() {
 
     assert!(!*agent.initialized.lock().unwrap());
     let error = published_wire_error(&nats);
+    assert_eq!(error.code, ErrorCode::PARSE_ERROR);
+}
+
+#[tokio::test]
+async fn dispatch_well_formed_json_with_bad_params_publishes_invalid_params() {
+    let (nats, agent) = dispatch(
+        "acp.v1.global.agent.initialize",
+        &serde_json::json!({"protocolVersion": "not a version"}),
+        Some("_INBOX.err"),
+    )
+    .await;
+
+    assert!(!*agent.initialized.lock().unwrap());
+    let error = published_wire_error(&nats);
     assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
 }
 
@@ -290,8 +304,28 @@ async fn dispatch_request_without_reply_subject_does_not_publish() {
 }
 
 #[tokio::test]
-async fn dispatch_unknown_subject_is_silently_ignored() {
-    let (nats, _) = dispatch_raw("acp.something.else", b"{}", Some("_INBOX.1")).await;
+async fn dispatch_unrecognized_subject_with_reply_publishes_method_not_found() {
+    let too_long_ext_name = "x".repeat(129);
+    for subject in [
+        "acp.something.else".to_owned(),
+        "acp.v1.global.agent.no_such_method".to_owned(),
+        format!("acp.v1.global.agent.ext.{too_long_ext_name}"),
+        format!("acp.v1.session.s1.agent.ext.{too_long_ext_name}"),
+    ] {
+        let (nats, _) = dispatch_raw(&subject, b"{}", Some("_INBOX.1")).await;
+
+        assert_eq!(nats.published_messages(), vec!["_INBOX.1"], "{subject}");
+        assert_eq!(
+            published_wire_error(&nats).code,
+            ErrorCode::METHOD_NOT_FOUND,
+            "{subject}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn dispatch_unrecognized_subject_without_reply_publishes_nothing() {
+    let (nats, _) = dispatch_raw("acp.v1.global.agent.no_such_method", b"{}", None).await;
     assert!(nats.published_messages().is_empty());
 }
 
@@ -791,7 +825,7 @@ async fn dispatch_js_message_bad_payload_terms() {
 
     assert_eq!(nats.published_messages(), vec!["acp.v1.session.s1.agent.response"]);
     let error = published_wire_error(&nats);
-    assert_eq!(error.code, ErrorCode::INVALID_PARAMS);
+    assert_eq!(error.code, ErrorCode::PARSE_ERROR);
 }
 
 #[tokio::test]
