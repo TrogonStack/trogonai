@@ -2126,25 +2126,6 @@ fn a_document_without_the_network_key_is_refused_so_no_restriction_is_silently_s
 }
 
 #[test]
-fn require_host_match_false_turns_matching_off_without_a_warning() -> TestResult {
-    let settings = accepted(&with_network_extra("requireHostMatch", "false"))?;
-    assert!(settings.warnings().is_empty(), "{:?}", settings.warnings());
-    assert_eq!(
-        accepted(&with_network_extra_pairs(r#""requireHostMatch": false"#))?.host_match(),
-        Some(HostMatch::NotRequired)
-    );
-    assert_eq!(
-        accepted(&with_network_extra_pairs(r#""requireHostMatch": true"#))?.host_match(),
-        Some(HostMatch::Required)
-    );
-    assert_eq!(
-        accepted(&with_network_extra_pairs(r#""allowPlaintextHeaderSet": false"#))?.host_match(),
-        None
-    );
-    Ok(())
-}
-
-#[test]
 fn the_mandatory_deny_search_depth_reaches_the_linux_options_only() -> TestResult {
     let settings = accepted(&with_extra("mandatoryDenySearchDepth", "2"))?;
     let depth = |options: PlatformOptions| options.filesystem.mandatory_deny_search_depth;
@@ -3357,3 +3338,5 @@ fn several_serde_issues_are_all_reported_in_one_message() -> TestResult {
     assert_eq!(text.matches("; ").count(), 2, "{text}");
     Ok(())
 }
+
+mod host_match;

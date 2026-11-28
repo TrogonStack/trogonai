@@ -1006,6 +1006,7 @@ impl SandboxSettings {
         if let Some(mode) = &network.ambiguous_request_target {
             options.ambiguous_targets = mode.0;
         }
+        options.host_match = self.host_match().unwrap_or(options.host_match);
         if !network.strip_response_headers.is_empty() {
             options.strip_response_headers = ResponseHeaderStrip::new(network.strip_response_headers.iter().cloned());
         }
@@ -1128,9 +1129,8 @@ impl SandboxSettings {
         self.network.allow_local_binding
     }
 
-    /// The explicit `network.requireHostMatch`, when the settings give one. The
-    /// network options cannot carry it, so the caller applies it to the proxy's
-    /// request guard and picks its own default when this is `None`.
+    /// The explicit `network.requireHostMatch`, or `None` when the settings leave it
+    /// unset; the network options carry it too, defaulting to requiring the match.
     pub fn host_match(&self) -> Option<HostMatch> {
         self.network.require_host_match.as_ref().map(|host_match| host_match.0)
     }
@@ -1184,8 +1184,8 @@ impl SandboxSettings {
     /// key reaches, and the Linux scan for protected names three levels deep
     /// when the settings leave that unset. The filesystem is the host's when
     /// the settings were loaded for a host. Whether the Host header must match
-    /// the TLS server name is not a network option; read it with
-    /// [`Self::host_match`]. Pair the config with
+    /// the TLS server name is carried by the network options' `host_match`.
+    /// Pair the config with
     /// [`PolicyExecBuilder::tool_proxy_env_from`](crate::PolicyExecBuilder::tool_proxy_env_from)
     /// for the tool proxy variables, or use
     /// [`PolicyExec::standard_builder`](crate::PolicyExec::standard_builder).
