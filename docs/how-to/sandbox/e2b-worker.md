@@ -207,6 +207,26 @@ The default suite uses local provider protocol fixtures, owned filesystem
 helpers and throwaway NATS servers. Hosted tests need a real `E2B_API_KEY` and
 `nats-server` on `PATH`, and run only when explicitly enabled.
 
+### Run the live suites
+
+The live suites create real sandboxes, so each is ignored and opts in with its own
+variable. Each deletes the sandboxes it creates and proves they are gone.
+
+| Test binary | Opt-in variable | What it needs |
+| --- | --- | --- |
+| `hosted_conformance` | `SANDBOX_E2B_HOSTED_TEST=1` | `E2B_API_KEY`, a same-account worker on `SANDBOX_CONFORMANCE_NATS_URL`, and `SANDBOX_CONFORMANCE_WORKER_ID`. `SANDBOX_CONFORMANCE_IMAGE` defaults to `base`. |
+| `hosted_live_provider` | `SANDBOX_E2B_HOSTED_TEST=1` | `E2B_API_KEY`. |
+| `hosted_file_events` | `SANDBOX_E2B_HOSTED_TEST=1` | `E2B_API_KEY`. |
+| `hosted_native_snapshot` | `SANDBOX_E2B_HOSTED_SNAPSHOT_TEST=1` | `E2B_API_KEY` and `nats-server` on `PATH`. It serves its own worker and creates one persistent snapshot. |
+| `hosted_egress_diagnostic` | `SANDBOX_E2B_EGRESS_DIAGNOSTIC_TEST=1` | `E2B_API_KEY`. |
+
+`SANDBOX_E2B_TEMPLATE` selects the template the suites boot, `base` by default, and
+`E2B_API_URL` and `E2B_DOMAIN` point them at a self-hosted endpoint. Run one suite with:
+
+```sh
+SANDBOX_E2B_HOSTED_TEST=1 cargo test -p trogon-sandbox-e2b-worker --test hosted_file_events -- --ignored
+```
+
 ## Related
 
 - [E2B runtime reference](../../reference/sandbox/e2b-runtime.md)

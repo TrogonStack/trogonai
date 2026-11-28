@@ -33,5 +33,11 @@ workspace_crate(
         "watch_envd": {"tags": ["requires-network"]},
         "watch_snapshot_envd": {"tags": ["requires-network"]},
         "worker_nats": {"tags": ["requires-network"]},
+        # These reach a real E2B account and skip unless opted in.
+        "hosted_conformance": {"tags": ["requires-network"]},
+        "hosted_egress_diagnostic": {"tags": ["requires-network"]},
+        "hosted_file_events": {"tags": ["requires-network"]},
+        "hosted_live_provider": {"tags": ["requires-network"]},
+        "hosted_native_snapshot": {"tags": ["requires-network"]},
     },
 )

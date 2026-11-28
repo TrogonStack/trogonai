@@ -12220,6 +12220,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "trogon-nats",
+ "trogon-sandbox-conformance",
  "trogon-sandbox-contract",
  "trogon-sandbox-file-ops",
  "trogon-sandbox-observability",
