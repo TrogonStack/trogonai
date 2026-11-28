@@ -73,6 +73,13 @@ impl LocalDockerProvider {
     }
 }
 
+/// Splits `repo[:tag]`. A colon before the last `/` is a registry port, not a tag separator.
 fn split_image_ref(image_ref: &str) -> (&str, &str) {
-    image_ref.rsplit_once(':').unwrap_or((image_ref, "latest"))
+    match image_ref.rsplit_once(':') {
+        Some((repo, tag)) if !tag.contains('/') => (repo, tag),
+        _ => (image_ref, "latest"),
+    }
 }
+
+#[cfg(test)]
+mod tests;
