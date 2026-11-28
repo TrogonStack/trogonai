@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use clap::Parser;
 use trogon_sandbox_observability::ObservabilityArgs;
 
+use crate::constants::{DEFAULT_GUEST_HEAP_BYTES, DEFAULT_GUEST_INPUT_BUFFER_BYTES, DEFAULT_GUEST_OUTPUT_BUFFER_BYTES};
+
 /// The command line and environment of the Hyperlight worker.
 #[derive(Debug, Parser)]
 #[command(
@@ -39,6 +41,18 @@ pub struct WorkerArgs {
         default_value = ""
     )]
     pub insecure_registries: Vec<String>,
+    /// Bytes of input buffer each guest gets: what the worker hands a guest per call. Hyperlight
+    /// raises a smaller value to its own minimum.
+    #[arg(long, env = "SANDBOX_HYPERLIGHT_GUEST_INPUT_BUFFER_BYTES", default_value_t = DEFAULT_GUEST_INPUT_BUFFER_BYTES)]
+    pub guest_input_buffer_bytes: usize,
+    /// Bytes of output buffer each guest gets: the most it can hand back in one return value or
+    /// host-call argument.
+    #[arg(long, env = "SANDBOX_HYPERLIGHT_GUEST_OUTPUT_BUFFER_BYTES", default_value_t = DEFAULT_GUEST_OUTPUT_BUFFER_BYTES)]
+    pub guest_output_buffer_bytes: usize,
+    /// Bytes of heap each guest gets; its Wasm linear memory lives there. Hyperlight raises a
+    /// smaller value to its own minimum.
+    #[arg(long, env = "SANDBOX_HYPERLIGHT_GUEST_HEAP_BYTES", default_value_t = DEFAULT_GUEST_HEAP_BYTES)]
+    pub guest_heap_bytes: u64,
     #[command(flatten)]
     pub observability: ObservabilityArgs,
 }

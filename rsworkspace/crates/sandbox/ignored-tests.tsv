@@ -106,9 +106,11 @@ rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker/src/release_tests/p
 rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker/tests/oci_rootfs.rs	bounded_scratch_rejects_expansion_and_cache_budget_without_leaving_artifacts	requires root, umoci, e2fsprogs and mount/PID namespace privileges
 rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker/tests/oci_rootfs.rs	cache_rejects_symlink_injection_mutation_and_a_second_owner	requires root, umoci, e2fsprogs and mount/PID namespace privileges
 rsworkspace/crates/sandbox/trogon-sandbox-firecracker-worker/tests/oci_rootfs.rs	real_umoci_ext4_preserves_whiteouts_hardlinks_modes_and_private_copy	requires root, umoci, e2fsprogs and mount/PID namespace privileges
+rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.rs	a_guest_returns_more_than_hyperlights_default_output_buffer	needs a hypervisor and HYPERLIGHT_TEST_MODULE
 rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.rs	a_layout_that_is_not_a_snapshot_is_refused	needs a hypervisor and HYPERLIGHT_TEST_MODULE
 rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.rs	a_lease_snapshot_restores_through_the_registry	needs a hypervisor and HYPERLIGHT_TEST_MODULE
 rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.rs	a_loaded_module_runs_and_hands_its_runtime_back	needs a hypervisor and HYPERLIGHT_TEST_MODULE
+rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.rs	a_result_larger_than_the_output_buffer_fails_and_the_guest_resets	needs a hypervisor and HYPERLIGHT_TEST_MODULE
 rsworkspace/crates/sandbox/trogon-sandbox-hyperlight-worker/tests/wasm_backend.rs	a_saved_layout_restores_on_a_new_runtime	needs a hypervisor and HYPERLIGHT_TEST_MODULE
 rsworkspace/crates/sandbox/trogon-sandbox-kubevirt-worker/tests/live_cluster.rs	a_live_checkpoint_keeps_the_vm_running	requires a KubeVirt cluster with CDI and an OCI registry; set SANDBOX_KUBEVIRT_LIVE_TEST=1 and use --ignored
 rsworkspace/crates/sandbox/trogon-sandbox-kubevirt-worker/tests/live_cluster.rs	a_snapshot_exported_from_a_lease_restores_into_a_new_one	requires a KubeVirt cluster with CDI and an OCI registry; set SANDBOX_KUBEVIRT_LIVE_TEST=1 and use --ignored
