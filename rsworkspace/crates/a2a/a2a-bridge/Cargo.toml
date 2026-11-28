@@ -32,7 +32,7 @@ bytes = { workspace = true }
 futures-util = { workspace = true }
 # Has to stay the version trogon-aauth-verify links, since the static JWKS
 # file is parsed into its JwkSet.
-jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
+jsonwebtoken = { version = "=10.4.0", features = ["aws_lc_rs"] }
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

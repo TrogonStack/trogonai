@@ -17,7 +17,7 @@ workspace = true
 async-trait = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
-jsonwebtoken = { version = "=10.4.0", features = ["rust_crypto"] }
+jsonwebtoken = { version = "=10.4.0", features = ["aws_lc_rs"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
